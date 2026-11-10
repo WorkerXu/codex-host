@@ -413,6 +413,12 @@ export function createAccountsSettingsPage(
             state.status = "error";
             state.error = errorMessage(error, messages.accountLoadFailed);
           }
+          if (!current()) return;
+          // Codex rows and failures settle independently of slower Harness checks.
+          state.visible = hostVisible(state);
+          if (!state.visible && selectedHostId === state.hostId) selectedHostId = "local";
+          render();
+          if (!accountsFailed) loadUsage(state);
         })();
         const pluginsRequest = loadPlugins(state, client);
         const harnessRequest = state.harness.refresh(options.refresh ?? false);
