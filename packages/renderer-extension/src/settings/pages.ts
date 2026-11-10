@@ -703,7 +703,7 @@ export function createDefaultRendererSettingsPages(
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
     createRemoteConnectionsPage(messages, getRemoteConnections),
-    createAccountsSettingsPage(messages, getAccountClient),
+    createAccountsSettingsPage(messages, getAccountClient, getDiagnostics, getRemoteConnections),
     ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
     createSessionImportSettingsPage(
       messages,

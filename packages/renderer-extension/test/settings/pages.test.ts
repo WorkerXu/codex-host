@@ -2423,6 +2423,222 @@ describe("Renderer Codex Accounts page", () => {
   });
 });
 
+describe("Renderer Codex Accounts page Hosts", () => {
+  const hostSnapshot = (hostId: string, label: string, revision = 1): CodexAccountListResult => ({
+    version: 2,
+    currentAccountId: "default",
+    phase: "ready",
+    revision,
+    instanceId: hostId,
+    accounts: [{ accountId: "default", label }],
+  });
+  const emptySnapshot = (hostId: string): CodexAccountListResult => ({
+    version: 2,
+    currentAccountId: null,
+    phase: "unavailable",
+    revision: 1,
+    instanceId: hostId,
+    accounts: [],
+  });
+  const diagnosticsFor = (hostIds: string[]): RendererConnectionDiagnostics => ({
+    snapshot: () => ({
+      adapter: { state: "ready", reason: "ready", modelUpdates: 1, hook: "request-bridge" },
+      hosts: hostIds.map((hostId) => ({ hostId, active: hostId === "local", agents: [] })),
+    }),
+    refresh: async () => undefined,
+    subscribe: () => () => undefined,
+  });
+  const remoteConnections = (
+    connections: { hostId: string; displayName: string }[],
+  ): RemoteConnectionsControl =>
+    ({
+      ssh: { list: async () => connections },
+    }) as unknown as RemoteConnectionsControl;
+  const harnessClient = () => ({
+    listHarnessAccountSources: vi.fn(async () => ({ sources: [] })),
+  });
+  const mountAccounts = (
+    client: unknown,
+    options: {
+      diagnostics?: RendererConnectionDiagnostics | null;
+      connections?: RemoteConnectionsControl | null;
+    } = {},
+  ) => {
+    const page = createDefaultRendererSettingsPages(
+      rendererSettingsMessages("en"),
+      () => null,
+      () => options.diagnostics ?? null,
+      () => client as never,
+      undefined,
+      undefined,
+      undefined,
+      () => options.connections ?? null,
+    ).find(({ id }) => id === "accounts");
+    if (!page) throw new Error("Accounts page is not registered");
+    const document = new FakeDocument();
+    const content = document.createElement("main");
+    const scope = new RendererSettingsPageScope();
+    const cleanup = page.mount({
+      content: content as unknown as HTMLElement,
+      signal: scope.signal,
+      runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
+    });
+    return { content, scope, cleanup };
+  };
+  const hostTab = (content: FakeElement, hostId: string) =>
+    descendants(content).find(({ dataset }) => dataset.accountHostTab === hostId);
+  const panelText = (content: FakeElement): string =>
+    visibleText(elementWithClass(content, "settings-account-list"));
+
+  it("routes each Host independently and keeps a failing Host retryable", async () => {
+    const local = {
+      listCodexAccounts: vi.fn(async () => hostSnapshot("local", "Local")),
+      ...harnessClient(),
+    };
+    const alpha = {
+      listCodexAccounts: vi.fn(async () => hostSnapshot("alpha", "Alpha")),
+      ...harnessClient(),
+    };
+    const beta = {
+      listCodexAccounts: vi
+        .fn<() => Promise<CodexAccountListResult>>()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce(hostSnapshot("beta", "Beta")),
+      ...harnessClient(),
+    };
+    const clients: Record<string, unknown> = {
+      "remote-ssh-codex-managed:alpha": alpha,
+      "remote-ssh-codex-managed:beta": beta,
+    };
+    const client = {
+      listCodexAccounts: local.listCodexAccounts,
+      clientForHost: (hostId: string) => (hostId === "local" ? local : clients[hostId]) ?? null,
+    };
+    const { content, scope, cleanup } = mountAccounts(client, {
+      diagnostics: diagnosticsFor([
+        "local",
+        "remote-ssh-codex-managed:alpha",
+        "remote-ssh-codex-managed:beta",
+      ]),
+      connections: remoteConnections([
+        { hostId: "remote-ssh-codex-managed:alpha", displayName: "Oracle SG" },
+        { hostId: "remote-ssh-codex-managed:beta", displayName: "JD Cloud" },
+      ]),
+    });
+
+    await vi.waitFor(() => expect(panelText(content)).toContain("Local"));
+    expect(panelText(content)).not.toContain("Alpha");
+    await vi.waitFor(() =>
+      expect(hostTab(content, "remote-ssh-codex-managed:alpha")?.textContent).toBe("Oracle SG"),
+    );
+    await vi.waitFor(() =>
+      expect(hostTab(content, "remote-ssh-codex-managed:beta")?.dataset.accountHostError).toBe(
+        "true",
+      ),
+    );
+    expect(hostTab(content, "remote-ssh-codex-managed:beta")?.textContent).toBe("JD Cloud");
+    expect(alpha.listCodexAccounts).toHaveBeenCalledOnce();
+    expect(beta.listCodexAccounts).toHaveBeenCalledOnce();
+
+    hostTab(content, "remote-ssh-codex-managed:alpha")?.dispatch("click");
+    await vi.waitFor(() => expect(panelText(content)).toContain("Alpha"));
+    expect(panelText(content)).not.toContain("Local");
+
+    hostTab(content, "remote-ssh-codex-managed:beta")?.dispatch("click");
+    await vi.waitFor(() =>
+      expect(visibleText(elementWithClass(content, "settings-account-status"))).toContain(
+        "offline",
+      ),
+    );
+    const retry = descendants(content).find(
+      ({ className }) =>
+        className ===
+        "settings-command-button settings-command-button--secondary settings-account-status-retry",
+    );
+    if (!retry) throw new Error("Missing account retry button");
+    retry.dispatch("click");
+    await vi.waitFor(() => expect(panelText(content)).toContain("Beta"));
+    expect(beta.listCodexAccounts).toHaveBeenCalledTimes(2);
+
+    cleanup?.();
+    scope.dispose();
+  });
+
+  it("hides a Host without accounts while loading and after an empty result", async () => {
+    const alphaAccounts = deferred<CodexAccountListResult>();
+    const local = {
+      listCodexAccounts: vi.fn(async () => hostSnapshot("local", "Local")),
+      ...harnessClient(),
+    };
+    const alpha = {
+      listCodexAccounts: vi.fn(() => alphaAccounts.promise),
+      ...harnessClient(),
+    };
+    const gamma = {
+      listCodexAccounts: vi.fn(async () => emptySnapshot("gamma")),
+      ...harnessClient(),
+    };
+    const clients: Record<string, unknown> = {
+      "remote-ssh-codex-managed:alpha": alpha,
+      "remote-ssh-codex-managed:gamma": gamma,
+    };
+    const client = {
+      listCodexAccounts: local.listCodexAccounts,
+      clientForHost: (hostId: string) => (hostId === "local" ? local : clients[hostId]) ?? null,
+    };
+    const { content, scope, cleanup } = mountAccounts(client, {
+      diagnostics: diagnosticsFor([
+        "local",
+        "remote-ssh-codex-managed:alpha",
+        "remote-ssh-codex-managed:gamma",
+      ]),
+    });
+
+    await vi.waitFor(() => expect(panelText(content)).toContain("Local"));
+    await vi.waitFor(() => expect(gamma.listCodexAccounts).toHaveBeenCalledOnce());
+    expect(hostTab(content, "remote-ssh-codex-managed:alpha")).toBeUndefined();
+    expect(hostTab(content, "remote-ssh-codex-managed:gamma")).toBeUndefined();
+    expect(elementWithClass(content, "settings-account-hosts").hidden).toBe(true);
+
+    alphaAccounts.resolve(hostSnapshot("alpha", "Alpha"));
+    await vi.waitFor(() =>
+      expect(hostTab(content, "remote-ssh-codex-managed:alpha")).toBeDefined(),
+    );
+    expect(elementWithClass(content, "settings-account-hosts").hidden).toBe(false);
+
+    cleanup?.();
+    scope.dispose();
+  });
+
+  it("does not mount Hosts that the connection catalog no longer reports", async () => {
+    const local = {
+      listCodexAccounts: vi.fn(async () => hostSnapshot("local", "Local")),
+      ...harnessClient(),
+    };
+    const stale = {
+      listCodexAccounts: vi.fn(async () => hostSnapshot("stale", "Stale")),
+      ...harnessClient(),
+    };
+    const client = {
+      listCodexAccounts: local.listCodexAccounts,
+      clientForHost: (hostId: string) =>
+        hostId === "local" ? local : hostId === "remote-ssh-codex-managed:stale" ? stale : null,
+      knownHostIds: () => ["local", "remote-ssh-codex-managed:stale"],
+    };
+    const { content, scope, cleanup } = mountAccounts(client, {
+      diagnostics: diagnosticsFor(["local"]),
+    });
+
+    await vi.waitFor(() => expect(panelText(content)).toContain("Local"));
+    expect(hostTab(content, "remote-ssh-codex-managed:stale")).toBeUndefined();
+    expect(stale.listCodexAccounts).not.toHaveBeenCalled();
+    expect(elementWithClass(content, "settings-account-hosts").hidden).toBe(true);
+
+    cleanup?.();
+    scope.dispose();
+  });
+});
+
 describe("Renderer Updates page", () => {
   it.each(["succeeded", "failed"] as const)(
     "keeps polling after start/status timeouts until the Host reports %s",

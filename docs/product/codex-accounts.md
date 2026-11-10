@@ -2,11 +2,23 @@
 
 在 codexhost 的「设置 → 账号」查看当前 Codex 身份与额度，以及其他 Harness 的 `inspectAccount()` 快照。CodexHost 不管理多个原生 Codex 登录：不提供添加/登录/切换/退出/删除/恢复，也不消耗重置卡。官方 Desktop 登录与退出仍由官方后端处理。用户可以显式确认，将兼容的本地授权一次性复制到 Pi 的独立 Provider 配置；这是对原先全页只读边界的有限扩展，不建立 Host 凭据库，也不改变原生登录。
 
+账号页可以按 Host 查看：顶部标签条与「设置 → 连接」使用同一份 Host 列表和样式，选中某个 Host 后显示该 Host 自己的 Codex 身份、额度与已加载 Harness 的账号额度。默认选中本机；详细规则见「按 Host 查看」。
+
 本地 `.codexhost-native-accounts` 文件若仍存在，启动和刷新都不会读取、改写或回收。
+
+## 按 Host 查看
+
+账号页的 Host 标签条复用「设置 → 连接」的 Host 列表来源和标签条样式：本机、当前连接诊断中的其他 Host，名称优先取连接配置里的显示名。每个 Host 使用自己路由的 Renderer 客户端查询，不共享请求或在途状态；一个 Host 离线或超时时只影响它自己的标签内容。
+
+- 默认选中本机，页面打开时不会因为当前 Composer 在远程 Host 而改变落点。本机的账号查询、后台刷新、通知订阅和显示行为与未按 Host 查看时一致。
+- 每个 Host 的 Codex 身份与 Harness 账号独立并行查询。Host 按 Harness 的 15 秒缓存仍在 Host 侧隔离；搜索、已用/剩余切换和「账号」数量只作用于当前选中的 Host；工具栏刷新会重新查询所有已发现 Host，并保持各自失败互不影响。
+- 只显示确实有账号的 Host：某个远程 Host 查询完成后没有任何可显示的账号行（Codex 身份和 Harness 账号都没有）时，不显示它的标签。查询中的远程 Host 先不显示，等到完成且有账号后再出现，避免标签先出现再消失；本机标签始终显示，哪怕本机也没有账号。
+- 查询失败的 Host 不算「没有账号」：保留标签、标记失败，并在选中时显示错误和「重试」。已经残留的已删除连接由 Host 协调清理，不会以原始 ID 留在标签条里。只剩本机一个标签时隐藏整条标签条。
+- 只查询该 Host 已加载的插件；账号快照仍不包含凭据、原生路径或原始 SDK 对象。不在 Host 之间搬运凭据：「Pi 中的账号」专区和「导入到 Pi」入口只在本机显示，SSH 维持远端原生单账号。
 
 ## 账号列表
 
-页面使用「账号 / 剩余额度（或已用额度）」表格，两个表头居中，额度区域保留两列并共用不绑定周期的表头；下方是「Pi 中的账号」专区。导入 Pi 的入口放在账号信息下方的次级行（与「重置卡」同一行），不再单独占用「用于 Harness」列。全局刷新在工具栏，原生管理边界以身份的悬停提示保留。窄窗口下每个账号独立排列，两个额度窗口并排，单个额度横跨整个额度区域，最窄布局再纵向堆叠。视觉沿用原设置外壳：无边框搜索、全局额度刷新。所有账号行统一使用各自的产品 Logo。工具栏的「账号」数量包含当前 Codex 账号和实际返回的其他 Harness 账号，不随搜索筛选改变。
+页面使用「账号 / 剩余额度（或已用额度）」表格，两个表头居中，额度区域保留两列并共用不绑定周期的表头；下方是「Pi 中的账号」专区。导入 Pi 的入口放在账号信息下方的次级行（与「重置卡」同一行），不再单独占用「用于 Harness」列。全局刷新在工具栏，原生管理边界以身份的悬停提示保留。窄窗口下每个账号独立排列，两个额度窗口并排，单个额度横跨整个额度区域，最窄布局再纵向堆叠。视觉沿用原设置外壳：无边框搜索、全局额度刷新。所有账号行统一使用各自的产品 Logo。工具栏的「账号」数量包含当前选中 Host 的 Codex 账号和实际返回的其他 Harness 账号，不随搜索筛选改变。
 
 - 工具栏「已用/剩余」与刷新之间有眼睛图标按钮，默认显示完整邮箱；点击后整页（账号表、「Pi 中的账号」专区、导入对话框，以及悬停提示和辅助技术名称）把邮箱本地部分的中间替换为固定 4 个 `*`，保留前后各两位与完整域名（如 `zh****ng@163.com`；本地部分 4 位及以下只保留首尾各一位），非邮箱名称不变。这只是显示层处理，不改变搜索（仍按真实邮箱匹配）、导入请求或任何存储数据；状态仅在当前页面保持，重新打开设置页恢复显示。
 - 主标题显示完整邮箱或账号名称，单行省略并可悬停查看完整身份；Agent 名称、真实套餐与「Codex 当前」标记作为次级信息，不显示本地 `CODEX_HOME` 路径。
@@ -41,7 +53,7 @@ ChatGPT 登录的 Codex 订阅额度耗尽时，Desktop 在 Renderer 中用两�
 - Claude Code 使用 Agent SDK 0.3.220 的 `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()` 主动查询，并通过 `accountInfo()` 读取身份。仅投影 `rate_limits_available` 为真且有效的套餐窗口，包括原生返回的模型独立窗口；不将 session Token、会话花费或额外用量金额混为额度百分比。当前不展示 `extra_usage` 金额。旧 SDK/CLI 不支持该实验性操作时不展示。
 - 查询不需要已有 Thread，不发起 Model Turn；Claude SDK 检查使用空输入流、无工具且不持久化 Session，并在成功、失败、超时后关闭检查进程。Broker 路径转发同一个只读能力。
 
-公共数据链路是 `HarnessAdapter.inspectAccount()` / `inspectAccounts()` → `codexhost/harness/accounts/sources` / `codexhost/harness/accounts/inspect` → 设置页；旧 Host 仍可回退到聚合的 `codexhost/harness/accounts/list`。`inspectAccounts()` 只用于一个 Harness 同时报告多个 Billing Source，兼容字段 `account` 始终保留第一项。渐进式与聚合路由共享同一份按 Harness 的 15 秒缓存和在途请求。账号快照只有可展示身份、套餐、额度或余额，无凭据、原生路径或原始 SDK 对象；Host 不直接依赖具体 Adapter。仅查询当前 Host 已加载插件，单插件失败或超时不会阻断其他账号的返回与展示。
+公共数据链路是 `HarnessAdapter.inspectAccount()` / `inspectAccounts()` → `codexhost/harness/accounts/sources` / `codexhost/harness/accounts/inspect` → 设置页；旧 Host 仍可回退到聚合的 `codexhost/harness/accounts/list`。账号页按选中的 Host 选择对应的 Renderer 客户端，Codex Host 列表来自连接诊断，连接名称来自 Codex 的 SSH 连接配置；已删除的连接会在 Host 侧协调时从诊断中移除。`inspectAccounts()` 只用于一个 Harness 同时报告多个 Billing Source，兼容字段 `account` 始终保留第一项。渐进式与聚合路由在单个 Host 内共享同一份按 Harness 的 15 秒缓存和在途请求，不同 Host 之间不共享。账号快照只有可展示身份、套餐、额度或余额，无凭据、原生路径或原始 SDK 对象；Host 不直接依赖具体 Adapter。仅查询当前 Host 已加载插件，单插件失败或超时不会阻断其他账号的返回与展示。
 
 ## 手动导入到 Pi
 
@@ -79,7 +91,9 @@ SSH 维持远端原生单账号，不传输本地凭据。
 - `packages/host-runtime/src/account/codex-account-control.ts`：当前官方身份的只读投影。
 - `packages/host-runtime/src/native-account-host.ts`：本地当前身份读取。
 - `packages/host-runtime/src/native-account-observer.ts`：原生认证后更新显示身份，不收藏凭据。
-- `packages/renderer-extension/src/settings/accounts-page.ts`：身份、额度与导入入口挂载。
+- `packages/renderer-extension/src/settings/accounts-page.ts`：身份、额度、Host 标签切换与导入入口挂载。
+- `packages/renderer-extension/src/settings/connection-host-strip.ts`：账号页与连接页共用的 Host 标签条滚动控件。
+- `packages/renderer-extension/src/renderer-connection-catalog.ts`：已删除 SSH 连接与渲染进程 Host 状态的协调。
 - `packages/renderer-extension/src/settings/credential-imports.ts`：Pi 导入标签、来源选择对话框与「Pi 中的账号」专区。
 - `packages/adapters/pi/src/pi-credential-imports.ts`：Pi 原生存储和导入配置所有权管理。
 - `packages/host-runtime/src/credential-imports.ts`：通过公共 Adapter 契约路由后端凭证转移。

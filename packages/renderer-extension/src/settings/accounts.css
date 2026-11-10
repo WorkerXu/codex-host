@@ -47,6 +47,25 @@
 .settings-account-status:empty {
   display: none;
 }
+.settings-account-status-retry {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.settings-account-hosts {
+  display: flex;
+  min-width: 0;
+  margin: 0 0 10px;
+}
+.settings-account-hosts[hidden] {
+  display: none;
+}
+.settings-account-host-tab-error {
+  margin-left: 6px;
+  color: var(--settings-danger);
+  font-weight: 700;
+}
 
 .settings-account-toolbar {
   margin-top: 27px;

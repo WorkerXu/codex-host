@@ -41,6 +41,7 @@ export function createHarnessAccounts(
 ) {
   let accounts: HarnessAccount[] = [];
   let refreshing = false;
+  let status: "idle" | "loading" | "ready" | "error" = "idle";
 
   const loadProgressively = async (
     client: Required<
@@ -99,13 +100,18 @@ export function createHarnessAccounts(
     get refreshing() {
       return refreshing;
     },
+    get status() {
+      return status;
+    },
     async refresh(force = false): Promise<void> {
       if (refreshing || signal.aborted) return;
       const client = getClient();
       if (!client) return;
       refreshing = true;
+      status = "loading";
       accounts = [];
       onChange();
+      let failed = false;
       try {
         const progressive =
           client.listHarnessAccountSources && client.inspectHarnessAccount
@@ -122,11 +128,15 @@ export function createHarnessAccounts(
         const result = await client.listHarnessAccounts(force ? { refresh: true } : {});
         if (!signal.aborted) accounts = sortedAccounts(result.accounts);
       } catch {
+        failed = true;
         // Do not keep stale identities after authentication changes or a failed query.
         if (!signal.aborted) accounts = [];
       } finally {
         refreshing = false;
-        if (!signal.aborted) onChange();
+        if (!signal.aborted) {
+          status = failed ? "error" : "ready";
+          onChange();
+        }
       }
     },
   };
