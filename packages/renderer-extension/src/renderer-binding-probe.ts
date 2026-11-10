@@ -959,7 +959,7 @@ export function installRendererBindingProbe(
   let sshConnectionHostIds: ReadonlySet<string> | null = null;
   let sshConnectionHostsRequest: Promise<void> | null = null;
   let sshConnectionHostsCheckedAt = 0;
-  const SSH_CONNECTION_CATALOG_TTL_MS = 2_000;
+  const SSH_CONNECTION_CATALOG_TTL_MS = 30_000;
   const isRetiredSshHost = (hostId: string): boolean =>
     isSshHostId(hostId) && sshConnectionHostIds !== null && !sshConnectionHostIds.has(hostId);
   const releaseHostAvailability = (hostId: string): void => {

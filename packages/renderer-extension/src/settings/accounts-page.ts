@@ -708,6 +708,7 @@ export function createAccountsSettingsPage(
           hostNames = new Map(
             list.map((connection) => [connection.hostId, connection.displayName.trim()]),
           );
+          diagnostics?.reconcileConnections?.(list);
           render();
         },
         () => {
