@@ -2512,7 +2512,9 @@ describe("Renderer Codex Accounts page Hosts", () => {
     };
     const client = {
       listCodexAccounts: local.listCodexAccounts,
-      clientForHost: (hostId: string) => (hostId === "local" ? local : clients[hostId]) ?? null,
+      clientForHost: vi.fn(
+        (hostId: string) => (hostId === "local" ? local : clients[hostId]) ?? null,
+      ),
     };
     const { content, scope, cleanup } = mountAccounts(client, {
       diagnostics: diagnosticsFor([
@@ -2539,6 +2541,9 @@ describe("Renderer Codex Accounts page Hosts", () => {
     expect(hostTab(content, "remote-ssh-codex-managed:beta")?.textContent).toBe("JD Cloud");
     expect(alpha.listCodexAccounts).toHaveBeenCalledOnce();
     expect(beta.listCodexAccounts).toHaveBeenCalledOnce();
+    expect(client.clientForHost).toHaveBeenCalledWith("local");
+    expect(client.clientForHost).toHaveBeenCalledWith("remote-ssh-codex-managed:alpha");
+    expect(client.clientForHost).toHaveBeenCalledWith("remote-ssh-codex-managed:beta");
 
     hostTab(content, "remote-ssh-codex-managed:alpha")?.dispatch("click");
     await vi.waitFor(() => expect(panelText(content)).toContain("Alpha"));
