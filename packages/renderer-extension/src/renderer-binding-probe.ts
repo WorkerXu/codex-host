@@ -68,6 +68,7 @@ import {
   TRANSCRIPT_ITEM_SELECTOR,
 } from "./renderer-transcript-dom.js";
 import { RendererCodexAccountState } from "./renderer-codex-account-state.js";
+import { isSshHostId, releaseRetiredSshConnectionHosts } from "./renderer-connection-catalog.js";
 import {
   createRendererCodexUsageGate,
   type RendererCodexUsageGate,
@@ -950,6 +951,63 @@ export function installRendererBindingProbe(
   const connectionListeners = new Set<() => void>();
   const publishConnectionStatus = (): void => {
     for (const listener of connectionListeners) listener();
+  };
+  // Native SSH configuration is the source of truth for SSH Hosts. Desktop can
+  // keep a deleted connection's app-server route until restart, so reconcile our
+  // per-Host inspections against the current connection catalog instead of
+  // trusting the native route indefinitely.
+  let sshConnectionHostIds: ReadonlySet<string> | null = null;
+  let sshConnectionHostsRequest: Promise<void> | null = null;
+  let sshConnectionHostsCheckedAt = 0;
+  const SSH_CONNECTION_CATALOG_TTL_MS = 2_000;
+  const isRetiredSshHost = (hostId: string): boolean =>
+    isSshHostId(hostId) && sshConnectionHostIds !== null && !sshConnectionHostIds.has(hostId);
+  const releaseHostAvailability = (hostId: string): void => {
+    const state = harnessAvailabilityByHost.get(hostId);
+    if (!state) return;
+    state.requestGeneration += 1;
+    state.request = null;
+    state.codexAccounts?.dispose();
+    if (state.retryTimer !== null) window.clearTimeout(state.retryTimer);
+    harnessAvailabilityByHost.delete(hostId);
+    usageSubscriptions.get(hostId)?.dispose();
+    usageSubscriptions.delete(hostId);
+    if (activeAvailabilityHostId === hostId) activeAvailabilityHostId = "local";
+  };
+  const applySshConnectionHosts = (hostIds: Iterable<string>): void => {
+    const next = new Set(hostIds);
+    sshConnectionHostIds = next;
+    sshConnectionHostsCheckedAt = Date.now();
+    const removed = releaseRetiredSshConnectionHosts(
+      harnessAvailabilityByHost.keys(),
+      next,
+      releaseHostAvailability,
+    );
+    if (removed) publishConnectionStatus();
+  };
+  const reconcileSshConnectionHosts = (fresh = false): Promise<void> => {
+    if (disposed) return Promise.resolve();
+    if (
+      !fresh &&
+      sshConnectionHostsRequest === null &&
+      Date.now() - sshConnectionHostsCheckedAt < SSH_CONNECTION_CATALOG_TTL_MS
+    )
+      return Promise.resolve();
+    if (sshConnectionHostsRequest) return sshConnectionHostsRequest;
+    sshConnectionHostsCheckedAt = Date.now();
+    sshConnectionHostsRequest = remoteConnections.ssh.list().then(
+      (connections) => {
+        sshConnectionHostsRequest = null;
+        if (disposed) return;
+        applySshConnectionHosts(connections.map(({ hostId }) => hostId));
+      },
+      () => {
+        sshConnectionHostsRequest = null;
+        // Keep existing Hosts when the native catalog is unavailable; an
+        // offline settings bridge must not erase remote Host state.
+      },
+    );
+    return sshConnectionHostsRequest;
   };
   const availabilityRetryDelays = [500, 1000, 2000, 4000, 8000] as const;
   const usageRefreshTimers = new Map<Element, number>();
@@ -2679,7 +2737,7 @@ export function installRendererBindingProbe(
     // Settings lists observed Hosts even when multiple Composers make the
     // active route ambiguous. Requests still resolve each Host independently.
     for (const hostId of modelControl?.knownHostIds?.() ?? []) {
-      if (hostId !== "durable") hostHarnessAvailabilityState(hostId);
+      if (hostId !== "durable" && !isRetiredSshHost(hostId)) hostHarnessAvailabilityState(hostId);
     }
     // Hidden/native Composers can belong to a different Host. Never rebind
     // every Thread to the globally selected Host when navigating between them.
@@ -2729,6 +2787,7 @@ export function installRendererBindingProbe(
     if (
       !hostId ||
       hostId === "durable" ||
+      isRetiredSshHost(hostId) ||
       (hostId === activeAvailabilityHostId &&
         [...mountedByComposer.values()].every((mounted) => mounted.hostId !== null))
     )
@@ -2749,16 +2808,21 @@ export function installRendererBindingProbe(
       if (mounted.hostId && mounted.hostId !== "durable") hostIds.add(mounted.hostId);
     }
     await Promise.all(
-      [...hostIds].map((hostId) => refreshHarnessAvailabilityForHost(hostId, refresh)),
+      [...hostIds]
+        .filter((hostId) => !isRetiredSshHost(hostId))
+        .map((hostId) => refreshHarnessAvailabilityForHost(hostId, refresh)),
     );
   };
 
   connectionDiagnostics = {
     snapshot(): RendererConnectionSnapshot {
+      void reconcileSshConnectionHosts();
       const hostIds = [
         "local",
         ...[...harnessAvailabilityByHost.keys()]
-          .filter((hostId) => hostId !== "local" && hostId !== "durable")
+          .filter(
+            (hostId) => hostId !== "local" && hostId !== "durable" && !isRetiredSshHost(hostId),
+          )
           .sort(),
       ];
       return {
@@ -2780,9 +2844,10 @@ export function installRendererBindingProbe(
         }),
       };
     },
-    refresh(hostId?: string): Promise<void> {
+    async refresh(hostId?: string): Promise<void> {
+      await reconcileSshConnectionHosts(true);
       if (hostId !== undefined) {
-        if (hostId === "durable") return Promise.resolve();
+        if (hostId === "durable" || isRetiredSshHost(hostId)) return;
         return refreshConnectionHosts(
           [hostId],
           (target) => refreshHarnessAvailabilityForHost(target, true, false, true),
@@ -2791,9 +2856,16 @@ export function installRendererBindingProbe(
       }
       reconcileHarnessAvailabilityHost();
       return refreshConnectionHosts(
-        [...harnessAvailabilityByHost.keys()].filter((target) => target !== "durable"),
+        [...harnessAvailabilityByHost.keys()].filter(
+          (target) => target !== "durable" && !isRetiredSshHost(target),
+        ),
         (target) => refreshHarnessAvailabilityForHost(target, true, false, true),
       );
+    },
+    reconcileConnections(connections) {
+      // Settings already read the native catalog to resolve connection names;
+      // apply that same catalog so a deleted connection cannot linger as a Host.
+      applySshConnectionHosts(connections.map(({ hostId }) => hostId));
     },
     async installation(hostId, agent, action) {
       const client = modelClientForHost(hostId);

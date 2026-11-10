@@ -53,6 +53,8 @@ export interface RendererConnectionDiagnostics {
   snapshot(): RendererConnectionSnapshot;
   /** With a Host, wait for existing diagnostics and start a fresh post-mutation inspection. */
   refresh(hostId?: string): Promise<void>;
+  /** Apply an already-read native connection catalog so deleted Hosts stop being reported. */
+  reconcileConnections?(connections: readonly { readonly hostId: string }[]): void;
   openWebUi?(hostId: string, agent: ExternalRendererAgent): Promise<void>;
   installation?(
     hostId: string,
@@ -1249,6 +1251,7 @@ export function createConnectionsSettingsPage(
             for (const connection of connections) {
               hostNames.set(connection.hostId, connection.displayName.trim());
             }
+            diagnostics?.reconcileConnections?.(connections);
             render(diagnostics?.snapshot() ?? null);
           },
           () => {
