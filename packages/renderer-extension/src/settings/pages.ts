@@ -703,7 +703,7 @@ export function createDefaultRendererSettingsPages(
       const client = getUpdateClient();
       return client?.openWeb?.bind(client);
     }),
-    createAccountsSettingsPage(messages, getAccountClient),
+    createAccountsSettingsPage(messages, getAccountClient, getDiagnostics, getRemoteConnections),
     ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
     createSessionImportSettingsPage(
       messages,
