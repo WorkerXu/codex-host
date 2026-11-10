@@ -823,6 +823,82 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     expect(host.subscribeThreadUsage).toHaveBeenCalledTimes(2);
   });
 
+  it("drops a deleted SSH connection and releases its per-Host inspection state", async () => {
+    installFakeBrowser();
+    const liveHostId = "remote-ssh-codex-managed:live";
+    const deletedHostId = "remote-ssh-codex-managed:fe0a78f9-1580-4217-b1e2-38043382e101";
+    const window_ = window as unknown as {
+      crypto: { randomUUID(): string };
+      electronBridge: { sendMessageFromView(message: { type: string; requestId: string }): void };
+    };
+    let requestId = 0;
+    window_.crypto = { randomUUID: () => `request-${++requestId}` };
+    window_.electronBridge = {
+      sendMessageFromView(message) {
+        if (message.type !== "fetch") return;
+        setTimeout(() => {
+          const event = new Event("message") as Event & { data: unknown };
+          event.data = {
+            type: "fetch-response",
+            requestId: message.requestId,
+            responseType: "success",
+            status: 200,
+            bodyJsonString: JSON.stringify({
+              remoteConnections: [
+                {
+                  hostId: liveHostId,
+                  displayName: "Live",
+                  source: "codex-managed",
+                  sshHost: "live.example",
+                  autoConnect: true,
+                },
+              ],
+            }),
+          };
+          window.dispatchEvent(event);
+        }, 0);
+      },
+    };
+    const host = () => ({
+      listHarnessPlugins,
+      inspectHarness: vi.fn(async () => readyInspection()),
+    });
+    const local = host();
+    const live = host();
+    const deleted = host();
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "pi"],
+      defaultAgent: "codex",
+    });
+    probe.setAdapter(
+      { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+      undefined,
+      undefined,
+      {
+        currentHostId: () => "local",
+        knownHostIds: () => ["local", liveHostId, deletedHostId],
+        clientForHost: (hostId: string) =>
+          hostId === liveHostId ? live : hostId === deletedHostId ? deleted : local,
+      } as never,
+    );
+    try {
+      const diagnostics = testState.getConnectionDiagnostics?.();
+      assert(diagnostics);
+      await diagnostics.refresh();
+      expect(diagnostics.snapshot().hosts.map(({ hostId }) => hostId)).toEqual([
+        "local",
+        liveHostId,
+      ]);
+      expect(live.inspectHarness).toHaveBeenCalled();
+      expect(deleted.inspectHarness).not.toHaveBeenCalled();
+      await diagnostics.refresh(deletedHostId);
+      expect(deleted.inspectHarness).not.toHaveBeenCalled();
+    } finally {
+      probe.dispose();
+    }
+  });
+
   it("does not rediscover the request route for unrelated sidebar rows", async () => {
     installFakeBrowser();
     const host = {

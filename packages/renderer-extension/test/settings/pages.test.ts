@@ -2099,6 +2099,57 @@ describe("Renderer Connections page", () => {
     },
   );
 
+  it("drops a deleted SSH connection once the native catalog reports it gone", async () => {
+    const deletedHostId = "remote-ssh-codex-managed:fe0a78f9-1580-4217-b1e2-38043382e101";
+    let hosts = ["local", deletedHostId];
+    const diagnostics: RendererConnectionDiagnostics = {
+      snapshot: () => ({
+        adapter: { state: "ready", reason: "ready", modelUpdates: 1, hook: "request-bridge" },
+        hosts: hosts.map((hostId) => ({ hostId, active: hostId === "local", agents: [] })),
+      }),
+      refresh: async () => undefined,
+      subscribe: () => () => undefined,
+      reconcileConnections: (connections) => {
+        const live = new Set(connections.map(({ hostId }) => hostId));
+        hosts = hosts.filter((hostId) => hostId === "local" || live.has(hostId));
+      },
+    };
+    const control = {
+      ssh: { list: vi.fn(async () => []) },
+    } as unknown as RemoteConnectionsControl;
+    const page = createDefaultRendererSettingsPages(
+      rendererSettingsMessages("en"),
+      undefined,
+      () => diagnostics,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => control,
+    ).find(({ id }) => id === "connections");
+    assert(page);
+    const document = new FakeDocument();
+    const content = document.createElement("main");
+    const scope = new RendererSettingsPageScope();
+    const cleanup = page.mount({
+      content: content as unknown as HTMLElement,
+      signal: scope.signal,
+      runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
+    });
+    await vi.waitFor(() =>
+      expect(
+        descendants(content).find(({ dataset }) => dataset.connectionHostTab === deletedHostId),
+      ).toBeUndefined(),
+    );
+    expect(
+      descendants(content)
+        .filter(({ dataset }) => dataset.connectionHostTab)
+        .map(({ textContent }) => textContent),
+    ).toEqual(["Local"]);
+    cleanup?.();
+    scope.dispose();
+  });
+
   it("renders Host tabs, install actions, and error details", async () => {
     const refreshRequest = deferred<undefined>();
     const diagnostics: RendererConnectionDiagnostics = {
