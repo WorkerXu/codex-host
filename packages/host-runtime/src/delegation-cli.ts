@@ -5,6 +5,7 @@ import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-h
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
 import { runPeerExec } from "./peer-exec.js";
+import { runPeerCli } from "./peer-cli.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
 
@@ -198,6 +199,13 @@ export async function runDelegationCli(input: {
     // it reads a JSON envelope from stdin instead of command-line options.
     if (input.arguments[0] === "peer-exec") {
       return await runPeerExec({ environment, output });
+    }
+    if (input.arguments[0] === "peer") {
+      return await runPeerCli({
+        arguments: input.arguments.slice(1),
+        environment,
+        output,
+      });
     }
     const [group, command, ...rest] = input.arguments;
     const help = delegationCliHelp(input.arguments);

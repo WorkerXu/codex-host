@@ -137,7 +137,8 @@ const USAGE: &str = "usage:
   codexhost delegate --help
   codexhost harness list|inspect ...
   codexhost delegate start ...
-  codexhost thread send|cancel|read|wait|watch|watches|list ...";
+  codexhost thread send|cancel|read|wait|watch|watches|list ...
+  codexhost peer list|add|remove|test ...";
 
 fn usage() {
     eprintln!("{USAGE}");
@@ -1418,7 +1419,7 @@ fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         }
         Some("open-loopback-url") => Err("open-loopback-url accepts no arguments".into()),
         Some("broker") => run_native_harness_broker_cli(&arguments[1..]),
-        Some("harness") | Some("delegate") | Some("thread") | Some("peer-exec") => {
+        Some("harness") | Some("delegate") | Some("thread") | Some("peer") | Some("peer-exec") => {
             run_delegation_cli(arguments)
         }
         _ => {

@@ -599,6 +599,7 @@ if (userArguments.length === 0) {
   userArguments[0] === "harness" ||
   userArguments[0] === "delegate" ||
   userArguments[0] === "thread" ||
+  userArguments[0] === "peer" ||
   userArguments[0] === "peer-exec"
 ) {
   launchArguments = null;
@@ -619,6 +620,7 @@ if (userArguments.length === 0) {
       "  codexhost harness inspect ...",
       "  codexhost delegate start ...",
       "  codexhost thread send|cancel|read|wait|list ...",
+      "  codexhost peer list|add|remove|test ...",
       "",
       "This npm package uses the current Node.js runtime and the packaged",
       "Rust launcher/shim. Codex Desktop must already be installed.",
