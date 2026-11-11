@@ -17,6 +17,7 @@ export interface ProjectGroupViewHandlers {
   toggleGroup(groupId: string): void;
   openThread(thread: ThreadSnapshot): void;
   openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): void;
+  openNewChat(groupId: string, anchor: HTMLElement): void;
   expandProject(projectId: string): void;
   showAll(projectId: string): void;
 }
@@ -414,6 +415,12 @@ function groupRow(
     flex: "0 1 auto",
   });
   row.append(machines);
+
+  row.append(
+    iconButton(document, "新建对话", "+", (event) =>
+      handlers.openNewChat(view.group.id, event.currentTarget as HTMLElement),
+    ),
+  );
 
   const toggle = (): void => handlers.toggleGroup(view.group.id);
   row.addEventListener("click", toggle);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { hasNativeContextMenu, statusIconState } from "../src/renderer-project-groups-dom.js";
+import {
+  hasNativeContextMenu,
+  newChatButton,
+  statusIconState,
+} from "../src/renderer-project-groups-dom.js";
 
 function fiberRow(withContextMenu: boolean): HTMLElement {
   const row = {} as HTMLElement;
@@ -38,5 +42,26 @@ describe("Project group DOM contract", () => {
     expect(statusIconState({ querySelector: () => null } as unknown as HTMLElement)).toBe(
       "unknown",
     );
+  });
+});
+
+describe("New chat target", () => {
+  it("requires exactly one native new-chat button in a project row", () => {
+    const button = { disabled: false } as HTMLButtonElement;
+    expect(
+      newChatButton({
+        querySelectorAll: () => [button],
+      } as unknown as HTMLElement),
+    ).toBe(button);
+    expect(
+      newChatButton({
+        querySelectorAll: () => [],
+      } as unknown as HTMLElement),
+    ).toBeNull();
+    expect(
+      newChatButton({
+        querySelectorAll: () => [button, button],
+      } as unknown as HTMLElement),
+    ).toBeNull();
   });
 });

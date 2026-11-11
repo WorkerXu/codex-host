@@ -4,6 +4,7 @@ import { readBootstrapCatalog } from "./renderer-project-groups-bootstrap.js";
 import {
   findNativeThreadRow,
   findProjectsSection,
+  newChatButton,
   probeProjectGroupsContract,
   projectListForUnit,
   projectRowForUnit,
@@ -20,11 +21,13 @@ import {
   projectHostKey,
   worseConnectionState,
   type MachineConnectionState,
+  type ProjectGroupProjectView,
   type ProjectGroupView,
   type ThreadSnapshot,
 } from "./renderer-project-groups-model.js";
 import { ProjectGroupHider } from "./renderer-project-groups-hide.js";
 import { ProjectGroupMenuProxy } from "./renderer-project-groups-menu.js";
+import { ProjectGroupNewChatPicker } from "./renderer-project-groups-new-chat.js";
 import { ProjectGroupView as ProjectGroupDomView } from "./renderer-project-groups-view.js";
 import {
   createProjectGroupsRpc,
@@ -97,6 +100,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   readonly #onStatus: ((status: RendererProjectGroupsStatus) => void) | undefined;
   readonly #hider: ProjectGroupHider;
   readonly #menu: ProjectGroupMenuProxy;
+  readonly #picker: ProjectGroupNewChatPicker;
   readonly #view: ProjectGroupDomView;
   #groups: ProjectGroup[] = [];
   #revision = 0;
@@ -141,10 +145,16 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       window: this.#window,
       onUnsupported: (reason) => this.#onMenuUnsupported(reason),
     });
+    this.#picker = new ProjectGroupNewChatPicker({
+      document: this.#document,
+      window: this.#window,
+      onSelect: (project) => this.#startNewChat(project),
+    });
     this.#view = new ProjectGroupDomView(this.#document, {
       toggleGroup: (groupId) => this.#toggleGroup(groupId),
       openThread: (thread) => this.#openThread(thread),
       openThreadMenu: (thread, anchor) => void this.#openThreadMenu(thread, anchor),
+      openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
       expandProject: (projectId) => this.#expandProject(projectId),
       showAll: (projectId) => this.#showAll(projectId),
     });
@@ -243,6 +253,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.removeEventListener("codexhost:renderer-adapter-status", this.#onFocus);
     this.#hider.dispose();
     this.#menu.dispose();
+    this.#picker.dispose();
     this.#view.dispose();
     delete this.#document.documentElement.dataset.codexhostProjectGroupsState;
   }
@@ -471,6 +482,32 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       toast.style.setProperty(property, value);
     this.#document.body.append(toast);
     this.#window.setTimeout(() => toast.remove(), 4_000);
+  }
+
+  #openNewChat(groupId: string, anchor: HTMLElement): void {
+    const view = this.#views.find((candidate) => candidate.group.id === groupId);
+    if (view) this.#picker.open(view, anchor);
+  }
+
+  #startNewChat(project: ProjectGroupProjectView): void {
+    const projectId = project.project.entry?.projectId;
+    if (!projectId) return;
+    const section = findProjectsSection(this.#document);
+    if (!section) return;
+    const unit = projectUnitForId(section, projectId);
+    const row = unit ? projectRowForUnit(unit) : null;
+    const button = row ? newChatButton(row) : null;
+    if (!button) {
+      this.#notify("该项目当前未显示在侧边栏，无法新建对话。");
+      void this.refresh();
+      return;
+    }
+    if ((button as HTMLButtonElement).disabled || button.getAttribute("aria-disabled") === "true") {
+      this.#notify("该项目当前不可用（可能离线或缺少工作目录）。");
+      return;
+    }
+    button.click();
+    this.#scheduleRefresh(200);
   }
 
   #expandProject(projectId: string): void {
