@@ -223,7 +223,7 @@ describe("Renderer project group model", () => {
         { key: "local", label: "本机", state: "connected", projects: [] },
         { key: "remote", label: "colab", state: "connected", projects: [] },
       ]),
-    ).toEqual({ text: "2 台机器", title: "本机 · colab" });
+    ).toEqual({ text: "2 台", title: "本机 · colab" });
   });
 
   it("derives stable machine keys and connection ordering", () => {

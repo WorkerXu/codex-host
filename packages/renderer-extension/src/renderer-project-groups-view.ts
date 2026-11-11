@@ -111,8 +111,8 @@ function iconButton(
     background: "transparent",
     color: MUTED_COLOR,
     cursor: "pointer",
-    width: "22px",
-    height: "22px",
+    width: "20px",
+    height: "20px",
     "border-radius": "5px",
     display: "inline-flex",
     "align-items": "center",
@@ -471,24 +471,49 @@ function groupRow(
   row.setAttribute("aria-expanded", String(!collapsed));
   row.setAttribute("aria-label", `${view.group.name}，项目组`);
   style(row, {
+    position: "relative",
     display: "flex",
     "align-items": "center",
-    gap: "8px",
+    gap: "6px",
     height: ROW_HEIGHT,
     "min-height": ROW_HEIGHT,
-    padding: "0 6px",
+    padding: "0 4px",
     "border-radius": ROW_RADIUS,
     color: TEXT_COLOR,
     cursor: "pointer",
     "font-size": "14px",
     background: "transparent",
   });
+  const actions = document.createElement("div");
+  style(actions, {
+    position: "absolute",
+    right: "4px",
+    top: "50%",
+    transform: "translateY(-50%)",
+    display: "none",
+    "align-items": "center",
+    gap: "2px",
+    "padding-left": "12px",
+    background: "linear-gradient(to right, transparent, var(--color-surface, #111) 22%)",
+    "border-radius": "4px",
+    "z-index": "1",
+  });
+  const showActions = (): void => {
+    actions.style.display = "flex";
+  };
+  const hideActions = (): void => {
+    actions.style.display = "none";
+  };
   row.addEventListener("mouseenter", () => {
     row.style.background = HOVER_BACKGROUND;
+    showActions();
   });
   row.addEventListener("mouseleave", () => {
     row.style.background = "transparent";
+    hideActions();
   });
+  row.addEventListener("focusin", showActions);
+  row.addEventListener("focusout", hideActions);
 
   row.append(groupIcon(document));
   const name = document.createElement("span");
@@ -509,8 +534,8 @@ function groupRow(
   machines.setAttribute("aria-label", summary.title);
   style(machines, {
     color: MUTED_COLOR,
-    "font-size": "11px",
-    "max-width": "30%",
+    "font-size": "10px",
+    "max-width": "34px",
     overflow: "hidden",
     "text-overflow": "ellipsis",
     "white-space": "nowrap",
@@ -518,12 +543,13 @@ function groupRow(
   });
   row.append(machines);
 
-  row.append(
+  actions.append(
     iconButton(document, "新建对话", "+", (event) =>
       handlers.openNewChat(view.group.id, event.currentTarget as HTMLElement),
     ),
     iconButton(document, "管理项目组", "⋯", () => handlers.openManager(view.group.id)),
   );
+  row.append(actions);
 
   const toggle = (): void => handlers.toggleGroup(view.group.id);
   row.addEventListener("click", toggle);

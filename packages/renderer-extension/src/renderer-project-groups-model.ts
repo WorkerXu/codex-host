@@ -112,7 +112,7 @@ export function projectGroupMachineSummary(machines: readonly ProjectGroupMachin
   const title = machines.map((machine) => machine.label).join(" · ");
   if (machines.length === 0) return { text: "", title };
   if (machines.length === 1) return { text: machines[0]?.label ?? "", title };
-  return { text: `${machines.length} 台机器`, title };
+  return { text: `${machines.length} 台`, title };
 }
 
 export function projectHostLabel(
