@@ -182,6 +182,7 @@ function threadRow(
   row.dataset.hostId = thread.hostId;
   row.dataset.projectGroupThreadSelected = thread.selected || thread.active ? "true" : "false";
   style(row, {
+    position: "relative",
     display: "flex",
     "align-items": "center",
     gap: "8px",
