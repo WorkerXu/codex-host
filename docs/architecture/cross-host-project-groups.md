@@ -108,13 +108,10 @@
 ## 对话行与悬停菜单
 
 - 对话行从原生项目列表读取标题、选中/激活、置顶状态，自己渲染；点击时找到同 `thread-id` + `host-id` 的原生行并 `.click()`。
-- 原生项目被 `display:none` 隐藏时，原生对话菜单的锚点会失效。菜单代理先尝试在组内行坐标派发原生 `contextmenu`；如果菜单没有出现在组内行附近，再尝试：
-  1. 临时把项目单元设为不可见、固定定位的 1px 容器；
-  2. 把原生对话行固定到组内行位置、`opacity:0`、`pointer-events:none`；
-  3. 在原生行上再次派发 `contextmenu`；
-  4. 菜单关闭后恢复两处原始 `style.cssText`。
-- 如果原生行没有 `onContextMenu`、两次尝试都失败、或菜单位置不在组内行附近，菜单代理标记 `unsupported`，视图移除菜单按钮；对话行仍可点击打开。原因写入状态 `lastError` 并只提示一次。
-- 菜单动作（置顶/归档等）由 Desktop 原生菜单执行；菜单关闭后触发一次组刷新，保持组内列表与原生状态一致。
+- 原生项目被 `display:none` 隐藏时，原生对话菜单的锚点会失效。右键先尝试在组内行坐标派发原生 `contextmenu`；如果菜单没有出现在组内行附近，再尝试临时 ghost 锚点，仍失败则不再依赖原生弹层。
+- 行尾「⋯」直接打开 codexhost 自己的代理菜单；菜单项来自原生行上真实存在的按钮（置顶/取消置顶、归档及其他带 aria-label 的按钮），点击代理到原生按钮。没有可用动作时不显示入口。
+- 状态 `menu` 区分：`native-context`（原生右键菜单成功）、`proxy-menu`（本地代理菜单可用）、`unavailable`（没有可用动作）。
+- 原生菜单/代理菜单关闭后触发一次组刷新，保持组内列表与原生状态一致。
 
 ## 新对话
 
@@ -133,7 +130,7 @@
 ## 降级与诊断
 
 - `<html data-codexhost-project-groups-state="probing|active|disabled">`。
-- `window.__codexhostProjectGroupsV1.status()` 返回 state/reason/groupCount/projectCount/missingMembers/menu/lastError。
+- `window.__codexhostProjectGroupsV1.status()` 返回 state/reason/groupCount/projectCount/missingMembers/menu/threadActions/lastError。
 - `window.__codexhostProjectGroupsV1.refresh()` 手动刷新；`dispose()` 完全移除。
 - 常见 reason：`projects-section-missing`、`contract-missing:*`、`host-unavailable`、`desktop-catalog-unavailable`、`native-context-menu-*`。
 - 契约审计新增 `project-groups` surface：Projects section 存在时检查项目数、对话行数、缺新对话按钮数、原生菜单能力和整体契约；不满足则 `confirmed-impact`。
@@ -144,7 +141,7 @@
 - `show-all=false` 的项目可能只渲染部分对话；组内显示“查看全部”，点击原生 toggle；完整 `thread/list` 聚合留到第二期。
 - 组固定在 Projects 顶部，不支持排到任意原生项目之间。
 - 同机多项目时，机器小节内再按项目分小组；只有一个项目时直接列对话。
-- 组内对话行不复制原生 hover 菜单的 DOM；菜单是原生 menu 的代理。若 Desktop 版本无法可靠定位，菜单整体降级为隐藏。
+- 组内对话行不复制原生 hover 菜单的 DOM；「⋯」打开 codexhost 的代理菜单，右键优先尝试原生菜单。
 - 多窗口通过 revision 冲突避免静默覆盖；没有实时 BroadcastChannel 同步，另一个窗口在 focus/刷新后看到最新配置。
 
 ## 手动验收
