@@ -12,7 +12,9 @@ import {
   projectUnitForId,
   readNativeProjectSnapshots,
   readThreadSnapshots,
+  restoreSidebarScrollAfterThreadClick,
   sectionCollapsed,
+  sidebarScrollContainer,
   showAllToggle,
   statusIconState,
 } from "./renderer-project-groups-dom.js";
@@ -443,8 +445,20 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #openThread(thread: ThreadSnapshot): void {
     const section = findProjectsSection(this.#document);
     const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
-    if (row) row.click();
-    else void this.refresh();
+    if (!row) {
+      void this.refresh();
+      return;
+    }
+    const scroll = sidebarScrollContainer(this.#document);
+    const top = scroll?.scrollTop ?? null;
+    row.click();
+    if (top !== null)
+      restoreSidebarScrollAfterThreadClick({
+        document: this.#document,
+        window: this.#window,
+        target: row,
+        top,
+      });
   }
 
   #menuEnabled(): boolean {

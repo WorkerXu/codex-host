@@ -5,6 +5,7 @@ import {
   hasNativeContextMenu,
   newChatButton,
   probeProjectGroupsContract,
+  restoreSidebarScrollAfterThreadClick,
   statusIconState,
 } from "../src/renderer-project-groups-dom.js";
 
@@ -154,5 +155,103 @@ describe("Project projects list compaction", () => {
     expect(findProjectsShowMoreButton(section as unknown as HTMLElement)).toBe(
       showMore.children[0],
     );
+  });
+});
+
+class FakeScrollObserver {
+  static last: FakeScrollObserver | null = null;
+  readonly callback: () => void;
+
+  constructor(callback: () => void) {
+    this.callback = callback;
+    FakeScrollObserver.last = this;
+  }
+
+  observe(): void {}
+
+  disconnect(): void {
+    if (FakeScrollObserver.last === this) FakeScrollObserver.last = null;
+  }
+
+  trigger(): void {
+    this.callback();
+  }
+}
+
+describe("Project group sidebar scroll restore", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    FakeScrollObserver.last = null;
+  });
+
+  it("restores the captured scroll when navigation settles", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("MutationObserver", FakeScrollObserver);
+    let scrollTop = 500;
+    const scroll = {
+      get scrollTop() {
+        return scrollTop;
+      },
+      set scrollTop(value: number) {
+        scrollTop = value;
+      },
+    };
+    const document = {
+      body: {},
+      documentElement: {},
+      querySelector: () => scroll,
+    } as unknown as Document;
+    const target = { getAttribute: () => "false" } as unknown as HTMLElement;
+    restoreSidebarScrollAfterThreadClick({
+      document,
+      window: {
+        setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
+        clearTimeout: (timer: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(timer),
+      } as unknown as Window,
+      target,
+      top: 120,
+      timeoutMs: 700,
+    });
+    await vi.advanceTimersByTimeAsync(699);
+    expect(scrollTop).toBe(500);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(scrollTop).toBe(120);
+  });
+
+  it("restores earlier when the target becomes active", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("MutationObserver", FakeScrollObserver);
+    let scrollTop = 500;
+    const scroll = {
+      get scrollTop() {
+        return scrollTop;
+      },
+      set scrollTop(value: number) {
+        scrollTop = value;
+      },
+    };
+    const document = {
+      body: {},
+      documentElement: {},
+      querySelector: () => scroll,
+    } as unknown as Document;
+    let active = false;
+    const target = {
+      getAttribute: (name: string) =>
+        name === "data-app-action-sidebar-thread-active" && active ? "true" : "false",
+    } as unknown as HTMLElement;
+    restoreSidebarScrollAfterThreadClick({
+      document,
+      window: {
+        setTimeout: (...args: Parameters<typeof setTimeout>) => globalThis.setTimeout(...args),
+        clearTimeout: (timer: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(timer),
+      } as unknown as Window,
+      target,
+      top: 120,
+    });
+    active = true;
+    FakeScrollObserver.last?.trigger();
+    expect(scrollTop).toBe(120);
   });
 });

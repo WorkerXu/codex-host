@@ -23,6 +23,7 @@ export const THREAD_SELECTED_ATTRIBUTE = "data-app-action-sidebar-thread-selecte
 export const THREAD_ACTIVE_ATTRIBUTE = "data-app-action-sidebar-thread-active";
 export const THREAD_PINNED_ATTRIBUTE = "data-app-action-sidebar-thread-pinned";
 export const SECTION_COLLAPSED_ATTRIBUTE = "data-app-action-sidebar-section-collapsed";
+export const SIDEBAR_SCROLL_SELECTOR = "[data-app-action-sidebar-scroll]";
 export const NEW_CHAT_BUTTON_SELECTOR = `button:not([aria-haspopup]):not([${PROJECT_SELECT_SELECTOR.slice(
   1,
   -1,
@@ -36,6 +37,54 @@ export interface ProjectGroupsDomContract {
   threadRowCount: number;
   missingNewChatCount: number;
   hasContextMenu: boolean;
+}
+
+export function sidebarScrollContainer(root: ParentNode = document): HTMLElement | null {
+  return root.querySelector<HTMLElement>(SIDEBAR_SCROLL_SELECTOR);
+}
+
+/** Restores the sidebar scroll after Desktop navigates to a native thread row. */
+export function restoreSidebarScrollAfterThreadClick(options: {
+  document: Document;
+  window: Window;
+  target: HTMLElement | null;
+  top: number;
+  timeoutMs?: number;
+}): () => void {
+  const { document, window, target, top } = options;
+  let restored = false;
+  let observer: MutationObserver | null = null;
+  let timer: number | null = null;
+  const cleanup = (): void => {
+    observer?.disconnect();
+    observer = null;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+  };
+  const restore = (): void => {
+    if (restored) return;
+    restored = true;
+    cleanup();
+    const scroll = sidebarScrollContainer(document);
+    if (scroll) scroll.scrollTop = top;
+  };
+  const isActive = (): boolean =>
+    target?.getAttribute(THREAD_ACTIVE_ATTRIBUTE) === "true" ||
+    target?.getAttribute(THREAD_SELECTED_ATTRIBUTE) === "true";
+  if (isActive()) {
+    restore();
+    return cleanup;
+  }
+  observer = new MutationObserver(() => {
+    if (isActive()) restore();
+  });
+  observer.observe(document.body ?? document.documentElement, {
+    attributes: true,
+    subtree: true,
+    attributeFilter: [THREAD_ACTIVE_ATTRIBUTE, THREAD_SELECTED_ATTRIBUTE],
+  });
+  timer = window.setTimeout(restore, options.timeoutMs ?? 700);
+  return cleanup;
 }
 
 export function findProjectsSection(root: ParentNode = document): HTMLElement | null {
