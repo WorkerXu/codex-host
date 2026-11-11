@@ -15,6 +15,7 @@ import { createOwnedUnixBackend } from "./codex-runtime/owned-official-backends.
 import { DelegationControlRegistry } from "./delegation-control-registry.js";
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import { startDelegationControlServer } from "./delegation-control-server.js";
+import { publishRuntimeControl, type RuntimeControlHandle } from "./runtime-control-file.js";
 import { installDelegationSkills } from "./delegation-skill.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
 import { readRemoteDelegationThread } from "./remote-delegation-read.js";
@@ -158,6 +159,18 @@ async function prepareDelegationRuntime(input: {
   });
   const token = randomBytes(32).toString("hex");
   const server = await startDelegationControlServer({ token, api: registry, watchApi: registry });
+  // Peer delegation depends on this file, but local delegation must keep
+  // working when the data directory is not writable.
+  const control: RuntimeControlHandle | undefined = await publishRuntimeControl({
+    environment: input.environment,
+    endpoint: server.endpoint,
+    token,
+  }).catch((error: unknown) => {
+    process.stderr.write(
+      `codexhost delegation: peer control file unavailable: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return undefined;
+  });
   const environment = {
     ...input.environment,
     ...delegationCliEnvironment(input.environment, input.hostRuntimePath),
@@ -182,6 +195,7 @@ async function prepareDelegationRuntime(input: {
   } finally {
     registry.close();
     await server.close();
+    await control?.close();
   }
 }
 
