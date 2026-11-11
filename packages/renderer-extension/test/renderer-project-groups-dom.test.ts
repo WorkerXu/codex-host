@@ -6,6 +6,7 @@ import {
   nativeThreadActionButton,
   newChatButton,
   probeProjectGroupsContract,
+  readThreadSnapshots,
   restoreSidebarScrollAfterThreadClick,
   statusIconState,
 } from "../src/renderer-project-groups-dom.js";
@@ -118,6 +119,25 @@ function projectRow(label: string): FakeElement {
     "data-app-action-sidebar-project-label": label,
   });
 }
+
+describe("Thread snapshots", () => {
+  it("captures the native provider icon for cloning", () => {
+    const icon = {} as Element;
+    const row = {
+      getAttribute: (name: string) =>
+        name === "data-app-action-sidebar-thread-id"
+          ? "local:thread-1"
+          : name === "data-app-action-sidebar-thread-host-id"
+            ? "local"
+            : name === "data-app-action-sidebar-thread-title"
+              ? "Thread"
+              : null,
+      querySelector: (selector: string) => (selector.includes("agent-icon") ? icon : null),
+    } as unknown as HTMLElement;
+    const list = { querySelectorAll: () => [row] } as unknown as HTMLElement;
+    expect(readThreadSnapshots(list)[0]?.providerIcon).toBe(icon);
+  });
+});
 
 describe("Native thread actions", () => {
   it("finds pin and archive buttons by their localized labels", () => {

@@ -174,6 +174,7 @@ export function readThreadSnapshots(list: HTMLElement): ThreadSnapshot[] {
         selected: row.getAttribute(THREAD_SELECTED_ATTRIBUTE) === "true",
         active: row.getAttribute(THREAD_ACTIVE_ATTRIBUTE) === "true",
         pinned: row.getAttribute(THREAD_PINNED_ATTRIBUTE) === "true",
+        providerIcon: row.querySelector("[data-codexhost-sidebar-agent-icon]"),
       },
     ];
   });

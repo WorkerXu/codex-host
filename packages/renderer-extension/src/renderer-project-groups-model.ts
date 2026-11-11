@@ -26,6 +26,7 @@ export interface ThreadSnapshot {
   selected: boolean;
   active: boolean;
   pinned: boolean;
+  providerIcon?: Element | null;
 }
 
 export interface ProjectIndexEntry {

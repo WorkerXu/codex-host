@@ -3,8 +3,8 @@ import type {
   ProjectGroupProjectView,
   ProjectGroupView as ProjectGroupModelView,
   ThreadSnapshot,
-  projectGroupMachineSummary,
 } from "./renderer-project-groups-model.js";
+import { projectGroupMachineSummary } from "./renderer-project-groups-model.js";
 import { findProjectList, findProjectsSection } from "./renderer-project-groups-dom.js";
 
 const ROW_HEIGHT = "var(--height-token-row, 30px)";
@@ -206,6 +206,17 @@ function threadRow(
   });
   row.addEventListener("focusin", showMenu);
   row.addEventListener("focusout", hideMenu);
+
+  const providerIcon = thread.providerIcon?.cloneNode(true);
+  if (providerIcon instanceof HTMLElement) {
+    style(providerIcon, {
+      width: "14px",
+      height: "14px",
+      flex: "0 0 auto",
+      "pointer-events": "none",
+    });
+    row.append(providerIcon);
+  }
 
   const title = document.createElement("span");
   title.textContent = thread.title;
@@ -542,6 +553,7 @@ function signature(
           project.threads.map((thread) => [
             thread.threadId,
             thread.title,
+            thread.providerIcon ? "icon" : "",
             thread.selected,
             thread.active,
             thread.pinned,
