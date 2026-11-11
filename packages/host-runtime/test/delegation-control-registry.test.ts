@@ -509,4 +509,40 @@ describe("DelegationControlRegistry list paging across sessions", () => {
     ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     registry.close();
   });
+
+  it("routes a peer-origin start without inferring a parent Thread", async () => {
+    const input = {
+      harnessId: "pi" as const,
+      task: "peer work",
+      origin: { kind: "peer" as const, hostId: "local" },
+    };
+
+    const single = registration("only");
+    const singleRegistry = new DelegationControlRegistry();
+    singleRegistry.register(single);
+    await expect(singleRegistry.start(input)).resolves.toMatchObject({
+      threadId: "child-only",
+    });
+    expect(single.start).toHaveBeenCalledWith(input);
+
+    const first = registration("first");
+    const second = registration("second");
+    const ambiguous = new DelegationControlRegistry();
+    ambiguous.register(first);
+    ambiguous.register(second);
+    await expect(ambiguous.start(input)).rejects.toMatchObject({ code: "DELEGATION_FAILED" });
+    expect(first.start).not.toHaveBeenCalled();
+    expect(second.start).not.toHaveBeenCalled();
+
+    const session = registration("session");
+    const catalog = registration("catalog");
+    const withCatalog = new DelegationControlRegistry();
+    withCatalog.register(session);
+    withCatalog.register(catalog, { harnessCatalog: true });
+    await expect(withCatalog.start(input)).resolves.toMatchObject({
+      threadId: "child-catalog",
+    });
+    expect(catalog.start).toHaveBeenCalledWith(input);
+    expect(session.start).not.toHaveBeenCalled();
+  });
 });

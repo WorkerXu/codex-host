@@ -56,6 +56,15 @@ export interface DelegationThreadSnapshot {
   nextCursor: string | null;
 }
 
+/** A delegation started by a peer has no local parent Thread. */
+export interface DelegationPeerOrigin {
+  kind: "peer";
+  /** Source Desktop Host identity, recorded as delegation metadata. */
+  hostId: string;
+  /** Source Thread identity, when the caller has one. */
+  threadId?: string;
+}
+
 export interface DelegationStartInput {
   harnessId: RoutedHarnessId;
   task: string;
@@ -63,6 +72,8 @@ export interface DelegationStartInput {
   taskName?: string;
   cwd?: string;
   parentThreadId?: string;
+  /** Present only for a start forwarded by peer-exec. */
+  origin?: DelegationPeerOrigin;
   requestId?: string;
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;

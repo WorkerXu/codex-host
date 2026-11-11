@@ -139,6 +139,46 @@ describe("peer-exec proxy", () => {
     }
   });
 
+  it("forwards a peer-origin start body verbatim", async () => {
+    const root = await dataDirectory();
+    const environment = { CODEXHOST_USER_DIR: root };
+    const start = vi.fn(async () => ({
+      delegationId: "delegation",
+      threadId: "child",
+      turnId: "turn",
+      harnessId: "pi" as const,
+      deepLink: "codex://threads/child",
+      status: "running" as const,
+      next: { read: "read", wait: "wait" },
+    }));
+    const server = await startDelegationControlServer({ token, api: api({ start }) });
+    const control = await publishRuntimeControl({
+      environment,
+      endpoint: server.endpoint,
+      token,
+      pid: process.pid,
+    });
+    const body = {
+      harnessId: "pi",
+      task: "peer work",
+      origin: { kind: "peer", hostId: "local", threadId: "source-thread" },
+    };
+    try {
+      const output = new PassThrough();
+      await expect(
+        runPeerExec({
+          stream: requestStream({ route: "/v1/delegate/start", body }),
+          output,
+          environment,
+        }),
+      ).resolves.toBe(0);
+      expect(start).toHaveBeenCalledWith(body);
+    } finally {
+      await control.close();
+      await server.close();
+    }
+  });
+
   it("reports a missing local Runtime without contacting anything", async () => {
     const root = await dataDirectory();
     const output = new PassThrough();

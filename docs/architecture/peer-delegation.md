@@ -145,8 +145,11 @@ ssh \
 
 跨机 `delegate start` 时，远端没有本机父 Thread：
 
-- 不发送 `parentThreadId`；调用方环境里的 `CODEXHOST_THREAD_ID` / `CODEX_THREAD_ID` 也不会被使用。
-- 显式 `--parent-thread` 会被拒绝，避免产生一个远端不存在的父引用。
+- CLI 在 peer 请求体中加上 `origin: {kind: "peer", hostId, threadId?}`；`hostId` 取本机 `self.hostIds` 的第一个 ID，未配置时用 `local`，`threadId` 是源机器上调用方 Thread（如果已知）。
+- 目标 Runtime 的 Registry 看到 `origin` 时不再按父 Thread 匹配会话：优先交给带 Harness catalog 的注册，其次交给唯一的注册；0 个、1 个或多个活跃 Thread 都走同一条路径。
+- Coordinator 看到 `origin` 时完全不调用父推断，使用 `peer-origin:<encoded-hostId>[:<encoded-threadId>]` 作为 delegation 记录的 `parentHostThreadId`。这个值是持久化的来源元数据，不会解析成真实 Thread；子 Thread 实际是顶层对话，返回结果不含 `parentThreadId`。
+- 本机 CLI 的正常路径不发送 `origin`，原有 `CODEXHOST_THREAD_ID` / 唯一活跃 Thread 推断保持不变。
+- 显式 `--parent-thread` 与 peer 目标同时出现会被拒绝，避免产生一个远端不存在的父引用。
 - `--watch true` 会被拒绝，并提示改用在 start 之后执行 `thread wait <thread> --host <peer>`。
 - 响应中的 `deepLink` 改写为 `thread://<id>?hostId=<encoded>`；`next.read` / `next.wait` 自动追加 `--host <peer>`。
 - `thread send` / `cancel` 的完整 JSON 增加 `hostId` 字段，compact 输出的链接使用该 Host ID，保证后续命令能路由回同一 peer。
@@ -181,5 +184,6 @@ ssh \
 - `peers.json` 的解析、校验、Host ID 唯一性、peer 名/Host ID/`local` 解析。
 - SSH 传输的参数数组、stdin、超时、非零退出、超大输出、token 不出现在 SSH environment。
 - CLI 的 `--host` 路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
+- 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
 
 测试通过注入的 spawn 模拟 SSH，不会建立真实连接。真实跨机连通性、主机密钥、远端 `PATH` 和远端 Host Runtime 状态需要在部署环境中另行验证。

@@ -164,6 +164,7 @@ describe("delegation CLI", () => {
     expect(body).not.toHaveProperty("cwd");
     expect(body).not.toHaveProperty("model");
     expect(body).not.toHaveProperty("thinkingOptionId");
+    expect(body).not.toHaveProperty("origin");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

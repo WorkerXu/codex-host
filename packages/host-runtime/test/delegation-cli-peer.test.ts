@@ -183,7 +183,15 @@ describe("delegation CLI peer routing", () => {
     });
     expect(inputs[0]).toEqual({
       route: "/v1/delegate/start",
-      body: { harnessId: "pi", task: "review" },
+      body: {
+        harnessId: "pi",
+        task: "review",
+        origin: {
+          kind: "peer",
+          hostId: "local",
+          threadId: "local-parent",
+        },
+      },
     });
 
     const full = await run(

@@ -87,6 +87,22 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
   }
 
   async start(input: DelegationStartInput) {
+    // A peer-origin start has no local parent, so parent-based session matching
+    // cannot choose a Runtime. The Harness catalog is the shared backend that
+    // serves detached starts; a single session is the unambiguous fallback.
+    if (input.origin?.kind === "peer") {
+      if (this.#harnessCatalog) return this.#harnessCatalog.start(input);
+      const registrations = [...this.#registrations];
+      const onlyRegistration = registrations.length === 1 ? registrations[0] : undefined;
+      if (onlyRegistration) return onlyRegistration.start(input);
+      throw new DelegationControlError(
+        "DELEGATION_FAILED",
+        registrations.length === 0
+          ? "No active Host Runtime session can accept the peer start"
+          : "Peer start is ambiguous because multiple Host Runtime sessions are active",
+        { matchingRuntimeCount: registrations.length },
+      );
+    }
     return (await this.#registrationForStart(input)).start(input);
   }
 

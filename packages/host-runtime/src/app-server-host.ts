@@ -870,8 +870,10 @@ export class AppServerHost {
         maintenanceOperation(async () => {
           if (options.sharedDelegation && input.harnessId !== "codex") {
             const active = [...this.#activeOfficialTurns.keys()];
-            const parentThreadId =
-              input.parentThreadId ?? (active.length === 1 ? active[0] : undefined);
+            // A peer-origin start is detached; never attach it to an active local Thread.
+            const parentThreadId = input.origin
+              ? undefined
+              : (input.parentThreadId ?? (active.length === 1 ? active[0] : undefined));
             return options.sharedDelegation.start({
               ...input,
               ...(parentThreadId ? { parentThreadId } : {}),

@@ -27,6 +27,7 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
   type DelegationConfigurationResult,
+  type DelegationPeerOrigin,
   type DelegationStartInput,
   type DelegationStartResult,
   type DelegationThreadListResult,
@@ -59,14 +60,35 @@ function truncateTitle(value: string, length: number): string {
   return value.slice(0, length).replace(/[\uD800-\uDBFF]$/u, "");
 }
 
-function delegationTitle(parentTitle: string | undefined, input: DelegationStartInput): string {
+function delegationTitle(
+  parentTitle: string | undefined,
+  input: DelegationStartInput,
+  detached = false,
+): string {
   const taskName = (input.taskName ?? input.task.trim().split(/\r?\n/u)[0] ?? input.task)
     .replace(/\s+/gu, " ")
     .trim();
   const subtask = truncateTitle(taskName, 120);
+  if (detached) return subtask;
   const parent = (parentTitle?.trim() || "Untitled Thread").replace(/\s+/gu, " ");
   // 子任务名在前：侧边栏从末尾截断，同一父会话的子任务仍能区分；父标题过长时截断父标题。
   return `${subtask} · ${truncateTitle(parent, 200 - subtask.length - 3)}`;
+}
+
+/**
+ * A peer-origin delegation has no local parent. The sentinel parent keeps the
+ * existing delegation record shape while recording the source as metadata; it
+ * is never resolved to a Thread and never appears as a real parent.
+ */
+function peerOriginParent(origin: DelegationPeerOrigin): string {
+  const host = encodeURIComponent(origin.hostId);
+  return origin.threadId
+    ? `peer-origin:${host}:${encodeURIComponent(origin.threadId)}`
+    : `peer-origin:${host}`;
+}
+
+function peerOrigin(input: DelegationStartInput): DelegationPeerOrigin | undefined {
+  return input.origin?.kind === "peer" ? input.origin : undefined;
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -122,6 +144,40 @@ function validateStart(input: DelegationStartInput): void {
     (typeof input.requestId !== "string" || !input.requestId.trim())
   ) {
     throw new DelegationControlError("INVALID_ARGUMENT", "Request ID must not be empty");
+  }
+  if (input.origin !== undefined) {
+    const origin = input.origin as unknown as Record<string, unknown>;
+    if (
+      typeof origin !== "object" ||
+      origin === null ||
+      Array.isArray(origin) ||
+      origin.kind !== "peer"
+    ) {
+      throw new DelegationControlError("INVALID_ARGUMENT", "Peer origin is invalid");
+    }
+    if (typeof origin.hostId !== "string" || !origin.hostId.trim() || origin.hostId.length > 256) {
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "Peer origin hostId must contain 1 to 256 characters",
+      );
+    }
+    if (
+      origin.threadId !== undefined &&
+      (typeof origin.threadId !== "string" ||
+        !origin.threadId.trim() ||
+        origin.threadId.length > 512)
+    ) {
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "Peer origin threadId must contain 1 to 512 characters",
+      );
+    }
+    if (input.parentThreadId) {
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "Peer origin starts must not include a parent Thread",
+      );
+    }
   }
 }
 
@@ -230,10 +286,16 @@ export class HarnessDelegationCoordinator {
 
   async start(input: DelegationStartInput): Promise<DelegationStartResult> {
     validateStart(input);
-    const parentThreadId = await this.#resolveParent(input.parentThreadId);
-    const parent = await this.#parentMetadata(parentThreadId);
+    const origin = peerOrigin(input);
+    // A peer-origin start has no local parent; never infer one from active Turns.
+    const parentThreadId = origin
+      ? peerOriginParent(origin)
+      : await this.#resolveParent(input.parentThreadId);
+    const parent = origin
+      ? { harnessId: "codex" as RoutedHarnessId }
+      : await this.#parentMetadata(parentThreadId);
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
-    const title = delegationTitle(parent.title, input);
+    const title = delegationTitle(parent.title, input, origin !== undefined);
     if (input.harnessId === "codex") {
       const result = await this.#startOfficial({
         ...input,
@@ -241,7 +303,11 @@ export class HarnessDelegationCoordinator {
         cwd: selectedCwd,
         title,
       });
-      return { ...result, parentThreadId, cwd: result.cwd ?? selectedCwd };
+      return {
+        ...result,
+        ...(origin ? {} : { parentThreadId }),
+        cwd: result.cwd ?? selectedCwd,
+      };
     }
     const startInput = { ...input, parentThreadId, cwd: path.resolve(selectedCwd) };
     if (!this.#adapters.has(input.harnessId)) {
@@ -271,7 +337,7 @@ export class HarnessDelegationCoordinator {
         "Request ID is already associated with another Delegation configuration",
       );
     }
-    if (duplicate) return this.#existingResult(duplicate);
+    if (duplicate) return this.#existingResult(duplicate, origin !== undefined);
 
     const adapter = this.#adapters.get(targetHarnessId);
     if (!adapter) {
@@ -417,7 +483,7 @@ export class HarnessDelegationCoordinator {
             },
           }),
           cwd: record.cwd,
-          parentThreadId,
+          ...(origin ? {} : { parentThreadId }),
         };
       } catch (error) {
         if (session) await session.close().catch(() => undefined);
@@ -718,7 +784,10 @@ export class HarnessDelegationCoordinator {
     return { harnessId: "codex", ...metadata };
   }
 
-  async #existingResult(delegation: StoredDelegationRecordV1): Promise<DelegationStartResult> {
+  async #existingResult(
+    delegation: StoredDelegationRecordV1,
+    detached = false,
+  ): Promise<DelegationStartResult> {
     const record = await this.#repository.find(delegation.childHostThreadId);
     const turnId = record?.turnMappings.at(-1)?.hostTurnId ?? "pending";
     return {
@@ -730,7 +799,7 @@ export class HarnessDelegationCoordinator {
         delegation.status,
       ),
       ...(record ? { cwd: record.cwd } : {}),
-      parentThreadId: delegation.parentHostThreadId,
+      ...(detached ? {} : { parentThreadId: delegation.parentHostThreadId }),
     };
   }
 

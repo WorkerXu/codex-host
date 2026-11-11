@@ -432,9 +432,15 @@ export async function runDelegationCli(input: {
         );
       // A remote Runtime has no local parent Thread; the caller environment is
       // intentionally ignored so the child is not attached to a foreign ID.
-      const parentThread = peer
-        ? undefined
-        : (value(parsed, "--parent-thread") ?? callerThreadId(environment));
+      const caller = callerThreadId(environment);
+      const parentThread = peer ? undefined : (value(parsed, "--parent-thread") ?? caller);
+      const origin = peer
+        ? {
+            kind: "peer" as const,
+            hostId: "local",
+            ...(caller ? { threadId: normalizeThreadId(caller) } : {}),
+          }
+        : undefined;
       const watch = value(parsed, "--watch");
       if (watch !== undefined && watch !== "true" && watch !== "false")
         throw new DelegationControlError("INVALID_ARGUMENT", "--watch must be true or false");
@@ -463,6 +469,7 @@ export async function runDelegationCli(input: {
           ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
           ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
+          ...(origin ? { origin } : {}),
           ...(value(parsed, "--request-id") ? { requestId: value(parsed, "--request-id") } : {}),
           ...(watch === "true"
             ? {

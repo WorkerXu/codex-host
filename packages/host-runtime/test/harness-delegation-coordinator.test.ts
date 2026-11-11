@@ -18,6 +18,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { runDelegationCli } from "../src/delegation-cli.js";
 import { startDelegationControlServer } from "../src/delegation-control-server.js";
+import { DelegationControlRegistry } from "../src/delegation-control-registry.js";
+import type { DelegationControlRegistration } from "../src/delegation-types.js";
 import { HarnessDelegationCoordinator } from "../src/harness-delegation-coordinator.js";
 import { ExternalThreadRepository } from "../src/external-thread-repository.js";
 import { ExternalThreadRuntime, type ExternalThread } from "../src/external-thread-runtime.js";
@@ -29,6 +31,7 @@ async function fixture(
   ) => Promise<string | undefined | { cwd?: string; title?: string }> = async () => undefined,
   environment: NodeJS.ProcessEnv = {},
   externalThreadBusy: (thread: ExternalThread) => boolean = (thread) => thread.running,
+  activeOfficialParents: () => string[] = () => [],
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-delegation-coordinator-"));
   const store = new MappingStore({ directory });
@@ -81,7 +84,7 @@ async function fixture(
       const metadata = await officialThreadCwd(threadId);
       return typeof metadata === "string" ? { cwd: metadata } : (metadata ?? {});
     },
-    activeOfficialParents: () => [],
+    activeOfficialParents,
     externalThreadBusy,
   });
   return {
@@ -99,6 +102,22 @@ async function fixture(
       await repository.close();
       await rm(directory, { recursive: true, force: true });
     },
+  };
+}
+
+function registrationFor(coordinator: HarnessDelegationCoordinator): DelegationControlRegistration {
+  return {
+    listHarnesses: () => coordinator.listHarnesses(),
+    inspect: (input) => coordinator.inspect(input),
+    start: (input) => coordinator.start(input),
+    send: (input) => coordinator.send(input),
+    cancel: (input) => coordinator.cancel(input),
+    read: (input) => coordinator.read(input),
+    wait: (input) => coordinator.wait(input),
+    list: (input) => coordinator.list(input),
+    // Origin starts bypass this predicate; it stays false to prove that.
+    canHandleStart: () => false,
+    ownsThread: () => true,
   };
 }
 
@@ -127,6 +146,117 @@ class FailingTurnAdapter extends FakeHarnessAdapter {
 }
 
 describe("HarnessDelegationCoordinator", () => {
+  describe("peer-origin starts", () => {
+    it.each([
+      ["no active Threads", []],
+      ["one active Thread", ["active-1"]],
+      ["several active Threads", ["active-1", "active-2"]],
+    ])("creates a detached child with %s", async (_name, active) => {
+      const value = await fixture(undefined, undefined, {}, undefined, () => active);
+      try {
+        const result = await value.coordinator.start({
+          harnessId: "pi",
+          task: "peer work",
+          origin: { kind: "peer", hostId: "local", threadId: "source-thread" },
+        });
+        expect(result).not.toHaveProperty("parentThreadId");
+        const delegation = await value.repository.getDelegationByChild(
+          hostThreadIdSchema.parse(result.threadId),
+        );
+        expect(delegation?.parentHostThreadId).toBe("peer-origin:local:source-thread");
+        for (const activeThread of active) {
+          expect(delegation?.parentHostThreadId).not.toBe(activeThread);
+        }
+        expect(value.delivered).toEqual(["peer work"]);
+        expect(value.notifications).toHaveLength(1);
+      } finally {
+        await value.close();
+      }
+    });
+
+    it.each([
+      ["no active Threads", []],
+      ["one active Thread", ["active-1"]],
+      ["several active Threads", ["active-1", "active-2"]],
+    ])("accepts a peer-origin start over HTTP with %s", async (_name, active) => {
+      const value = await fixture(undefined, undefined, {}, undefined, () => active);
+      const registry = new DelegationControlRegistry();
+      registry.register(registrationFor(value.coordinator));
+      const server = await startDelegationControlServer({ token: "test-token", api: registry });
+      try {
+        const response = await fetch(`${server.endpoint}/v1/delegate/start`, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer test-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            harnessId: "pi",
+            task: "peer work",
+            origin: { kind: "peer", hostId: "local", threadId: "source-thread" },
+          }),
+        });
+        expect(response.status).toBe(200);
+        const result = (await response.json()) as { threadId: string; parentThreadId?: string };
+        expect(result.parentThreadId).toBeUndefined();
+        const delegation = await value.repository.getDelegationByChild(
+          hostThreadIdSchema.parse(result.threadId),
+        );
+        expect(delegation?.parentHostThreadId).toBe("peer-origin:local:source-thread");
+      } finally {
+        await server.close();
+        await value.close();
+      }
+    });
+
+    it("keeps local parent inference unchanged", async () => {
+      const none = await fixture();
+      try {
+        await expect(
+          none.coordinator.start({ harnessId: "pi", task: "work" }),
+        ).rejects.toMatchObject({ code: "PARENT_THREAD_AMBIGUOUS" });
+      } finally {
+        await none.close();
+      }
+
+      const one = await fixture(undefined, undefined, {}, undefined, () => ["active-1"]);
+      try {
+        const result = await one.coordinator.start({ harnessId: "pi", task: "work" });
+        expect(result.parentThreadId).toBe("active-1");
+      } finally {
+        await one.close();
+      }
+
+      const many = await fixture(undefined, undefined, {}, undefined, () => [
+        "active-1",
+        "active-2",
+      ]);
+      try {
+        await expect(
+          many.coordinator.start({ harnessId: "pi", task: "work" }),
+        ).rejects.toMatchObject({ code: "PARENT_THREAD_AMBIGUOUS" });
+      } finally {
+        await many.close();
+      }
+    });
+
+    it("rejects an explicit parent together with a peer origin", async () => {
+      const value = await fixture();
+      try {
+        await expect(
+          value.coordinator.start({
+            harnessId: "pi",
+            task: "work",
+            parentThreadId: "parent",
+            origin: { kind: "peer", hostId: "local" },
+          }),
+        ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+      } finally {
+        await value.close();
+      }
+    });
+  });
+
   it("carries the display name through the real CLI HTTP endpoint and persists it separately from the task", async () => {
     const value = await fixture(undefined, async () => ({ title: "Main project" }));
     const server = await startDelegationControlServer({
