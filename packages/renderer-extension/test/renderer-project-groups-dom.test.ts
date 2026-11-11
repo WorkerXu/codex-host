@@ -122,7 +122,9 @@ function projectRow(label: string): FakeElement {
 
 describe("Thread snapshots", () => {
   it("captures the native provider icon and thread action icons for cloning", () => {
-    const icon = {} as Element;
+    const icon = {
+      querySelector: (selector: string) => (selector.includes("svg") ? {} : null),
+    } as unknown as Element;
     const pinIcon = {} as Element;
     const archiveIcon = {} as Element;
     const pin = {
@@ -150,6 +152,38 @@ describe("Thread snapshots", () => {
     expect(snapshot?.providerIcon).toBe(icon);
     expect(snapshot?.pinIcon).toBe(pinIcon);
     expect(snapshot?.archiveIcon).toBe(archiveIcon);
+  });
+
+  it("skips an icon image that has not loaded yet and watches for its load", () => {
+    const image = {
+      complete: false,
+      naturalWidth: 0,
+      hasAttribute: () => false,
+      setAttribute: vi.fn(),
+      removeAttribute: vi.fn(),
+      addEventListener: vi.fn(),
+      ownerDocument: { defaultView: { dispatchEvent: vi.fn() } },
+    };
+    const icon = {
+      querySelector: (selector: string) => (selector === "img" ? image : null),
+    } as unknown as Element;
+    const row = {
+      getAttribute: (name: string) =>
+        name === "data-app-action-sidebar-thread-id"
+          ? "local:thread-1"
+          : name === "data-app-action-sidebar-thread-host-id"
+            ? "local"
+            : name === "data-app-action-sidebar-thread-title"
+              ? "Thread"
+              : null,
+      querySelector: (selector: string) => (selector.includes("agent-icon") ? icon : null),
+      querySelectorAll: () => [],
+    } as unknown as HTMLElement;
+    const list = { querySelectorAll: () => [row] } as unknown as HTMLElement;
+    expect(readThreadSnapshots(list)[0]?.providerIcon).toBeNull();
+    expect(image.addEventListener).toHaveBeenCalledWith("load", expect.any(Function), {
+      once: true,
+    });
   });
 });
 

@@ -14,6 +14,7 @@ import {
   readNativeProjectSnapshots,
   readThreadSnapshots,
   restoreSidebarScrollAfterThreadClick,
+  PROVIDER_ICON_LOADED_EVENT,
   sectionCollapsed,
   sidebarScrollContainer,
   showAllToggle,
@@ -291,6 +292,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.removeEventListener("focus", this.#onFocus);
     this.#document.removeEventListener("visibilitychange", this.#onFocus);
     this.#window.removeEventListener("codexhost:renderer-adapter-status", this.#onFocus);
+    this.#window.removeEventListener(PROVIDER_ICON_LOADED_EVENT, this.#onFocus);
     this.#hider.dispose();
     this.#menu.dispose();
     const target = this.#window as Window & {
@@ -312,6 +314,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.addEventListener("focus", this.#onFocus);
     this.#document.addEventListener("visibilitychange", this.#onFocus);
     this.#window.addEventListener("codexhost:renderer-adapter-status", this.#onFocus);
+    this.#window.addEventListener(PROVIDER_ICON_LOADED_EVENT, this.#onFocus);
   }
 
   readonly #onWindowMessage = (event: MessageEvent): void => {

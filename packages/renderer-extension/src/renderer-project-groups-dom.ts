@@ -24,6 +24,8 @@ export const THREAD_ACTIVE_ATTRIBUTE = "data-app-action-sidebar-thread-active";
 export const THREAD_PINNED_ATTRIBUTE = "data-app-action-sidebar-thread-pinned";
 export const SECTION_COLLAPSED_ATTRIBUTE = "data-app-action-sidebar-section-collapsed";
 export const SIDEBAR_SCROLL_SELECTOR = "[data-app-action-sidebar-scroll]";
+export const PROVIDER_ICON_LOADED_EVENT = "codexhost:project-groups-icon-loaded";
+const PROVIDER_ICON_WATCH_ATTRIBUTE = "data-codexhost-project-groups-icon-watch";
 export const NEW_CHAT_BUTTON_SELECTOR = `button:not([aria-haspopup]):not([${PROJECT_SELECT_SELECTOR.slice(
   1,
   -1,
@@ -163,6 +165,33 @@ export function readNativeProjectSnapshots(section: HTMLElement): NativeProjectS
   return snapshots;
 }
 
+function providerIconForRow(row: HTMLElement): Element | null {
+  const icon = row.querySelector("[data-codexhost-sidebar-agent-icon]");
+  if (!icon) return null;
+  const image = icon.querySelector("img") as HTMLImageElement | null;
+  if (image) {
+    if (image.complete && image.naturalWidth > 0) return icon;
+    if (
+      !image.hasAttribute(PROVIDER_ICON_WATCH_ATTRIBUTE) &&
+      typeof image.addEventListener === "function"
+    ) {
+      image.setAttribute(PROVIDER_ICON_WATCH_ATTRIBUTE, "");
+      image.addEventListener(
+        "load",
+        () => {
+          image.removeAttribute(PROVIDER_ICON_WATCH_ATTRIBUTE);
+          image.ownerDocument.defaultView?.dispatchEvent(
+            new CustomEvent(PROVIDER_ICON_LOADED_EVENT),
+          );
+        },
+        { once: true },
+      );
+    }
+    return null;
+  }
+  return icon.querySelector("svg, picture, canvas") ? icon : null;
+}
+
 export function readThreadSnapshots(list: HTMLElement): ThreadSnapshot[] {
   return [...list.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)].flatMap((row) => {
     const threadId = row.getAttribute(THREAD_ID_ATTRIBUTE);
@@ -177,7 +206,7 @@ export function readThreadSnapshots(list: HTMLElement): ThreadSnapshot[] {
         selected: row.getAttribute(THREAD_SELECTED_ATTRIBUTE) === "true",
         active: row.getAttribute(THREAD_ACTIVE_ATTRIBUTE) === "true",
         pinned: row.getAttribute(THREAD_PINNED_ATTRIBUTE) === "true",
-        providerIcon: row.querySelector("[data-codexhost-sidebar-agent-icon]"),
+        providerIcon: providerIconForRow(row),
         pinIcon: pinButton?.querySelector("svg") ?? null,
         archiveIcon: archiveButton?.querySelector("svg") ?? null,
       },
