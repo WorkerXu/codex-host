@@ -51,6 +51,7 @@ import { consoleEntrypoint, createHostConsoleOpener } from "./console-opener.js"
 import { createHostUpdateCoordinator, type HostUpdateCoordinator } from "./update-coordinator.js";
 import { ModelPriceCatalog, defaultModelPriceDirectory } from "./model-prices.js";
 import { UsageStatistics } from "./usage-statistics.js";
+import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-groups-service.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -314,6 +315,10 @@ export async function runHostRuntime(input: {
               stockCodexPath,
               arguments: input.arguments,
               environment: delegationEnvironment,
+              projectGroups: new ProjectGroupsService({
+                directory: defaultProjectGroupsDirectory(delegationEnvironment),
+                environment: delegationEnvironment,
+              }),
               ...shared,
               ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
               onDelegationApi,
@@ -340,6 +345,10 @@ export async function runHostRuntime(input: {
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
             closeMappingStoreOnExit: false,
+            projectGroups: new ProjectGroupsService({
+              directory: defaultProjectGroupsDirectory(delegationEnvironment),
+              environment: delegationEnvironment,
+            }),
             ...(updateCoordinator ? { updateCoordinator } : {}),
             ...(consoleOpener ? { consoleOpener } : {}),
           };

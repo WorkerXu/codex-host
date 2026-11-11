@@ -14,9 +14,17 @@ import {
   RUNTIME_STATUS_METHOD,
   REMOTE_UPDATE_METHOD,
   remoteUpdateParamsSchema,
+  DESKTOP_PROJECTS_CATALOG_METHOD,
+  PROJECT_GROUPS_LIST_METHOD,
+  PROJECT_GROUPS_REPLACE_METHOD,
+  projectGroupsReplaceParamsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
+import {
+  ProjectGroupRevisionConflictError,
+  type ProjectGroupsService,
+} from "./project-groups-service.js";
 import { ExternalThreadPrewarms } from "./external-thread-prewarms.js";
 import { externalTurnInputText } from "./external-turn-input.js";
 import { HarnessLaunchSettingsStore } from "@codexhost/harness-plugin-files";
@@ -372,6 +380,8 @@ export interface AppServerHostOptions {
   runtimeMaintenance?: RuntimeMaintenance;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
+  /** Local-only project-group configuration and Desktop project catalog reads. */
+  projectGroups?: ProjectGroupsService;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Shared by all Hosts of one runtime; defaults to the bundled snapshot only. */
   modelPrices?: ModelPriceCatalog;
@@ -1365,6 +1375,20 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (
+      request.method === PROJECT_GROUPS_LIST_METHOD ||
+      request.method === PROJECT_GROUPS_REPLACE_METHOD ||
+      request.method === DESKTOP_PROJECTS_CATALOG_METHOD
+    ) {
+      if (this.#options.externalOnly || !this.#options.projectGroups) {
+        await this.#writer.json(
+          rpcError(request, -32601, "Project groups are available on the local Host only"),
+        );
+        return;
+      }
+      this.#dispatchDesktopReply(request, () => this.#handleProjectGroupsRequest(request));
       return;
     }
     if (this.#options.externalOnly && request.method === "codexhost/shared-threads/placements") {
@@ -3303,6 +3327,42 @@ export class AppServerHost {
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
     } catch (error) {
       await this.#writer.json(rpcError(request, -32091, errorMessage(error).slice(0, 500)));
+    }
+  }
+
+  async #handleProjectGroupsRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.projectGroups;
+    if (!service) {
+      await this.#writer.json(
+        rpcError(request, -32601, "Project groups are available on the local Host only"),
+      );
+      return;
+    }
+    try {
+      if (request.method === PROJECT_GROUPS_LIST_METHOD) {
+        const result = await service.list();
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        return;
+      }
+      if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
+        const result = await service.readDesktopCatalog();
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        return;
+      }
+      const parsed = projectGroupsReplaceParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        await this.#writer.json(rpcError(request, -32602, "Invalid project group configuration"));
+        return;
+      }
+      const result = await service.replace(parsed.data);
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof ProjectGroupRevisionConflictError) {
+        await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
+        return;
+      }
+      await this.#writer.json(rpcError(request, -32083, "Project groups request failed"));
+      this.#diagnose(error);
     }
   }
 

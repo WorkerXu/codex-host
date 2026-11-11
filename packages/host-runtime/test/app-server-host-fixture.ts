@@ -23,6 +23,7 @@ import type { OfficialRuntimeScope } from "../src/codex-runtime/official-runtime
 import type { OfficialAppServerConnection } from "../src/official-app-server-connection.js";
 import type { HostUpdateCoordinator } from "../src/update-coordinator.js";
 import type { HostConsoleOpener } from "../src/console-opener.js";
+import type { ProjectGroupsService } from "../src/project-groups-service.js";
 
 export class FakeOfficialProcess extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -289,6 +290,8 @@ export function createFixture(
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
+    projectGroups?: ProjectGroupsService;
+    externalOnly?: boolean;
   } = {},
 ) {
   const adapter =
@@ -326,6 +329,7 @@ export function createFixture(
   if (options.officialRuntimeScope) startup.resolve(undefined);
   const host = new AppServerHost({
     ...(options.sharedThreads ? { sharedThreads: options.sharedThreads } : {}),
+    ...(options.externalOnly ? { externalOnly: true } : {}),
     stockCodexPath: "/synthetic/codex",
     arguments: ["app-server"],
     desktopInput,
@@ -356,6 +360,7 @@ export function createFixture(
     ...(options.updateCoordinator ? { updateCoordinator: options.updateCoordinator } : {}),
     ...(options.runtimeMaintenance ? { runtimeMaintenance: options.runtimeMaintenance } : {}),
     ...(options.consoleOpener ? { consoleOpener: options.consoleOpener } : {}),
+    ...(options.projectGroups ? { projectGroups: options.projectGroups } : {}),
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.usageStatistics ? { usageStatistics: options.usageStatistics } : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
