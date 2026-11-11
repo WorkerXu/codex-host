@@ -18,6 +18,8 @@ export interface ProjectGroupViewHandlers {
   toggleGroup(groupId: string): void;
   openThread(thread: ThreadSnapshot): void;
   openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): void;
+  toggleThreadPin(thread: ThreadSnapshot): void;
+  archiveThread(thread: ThreadSnapshot): void;
   openNewChat(groupId: string, anchor: HTMLElement): void;
   openManager(groupId?: string): void;
   expandProject(projectId: string): void;
@@ -28,6 +30,7 @@ export interface ProjectGroupViewHandlers {
 export interface ProjectGroupViewOptions {
   collapsedGroups: ReadonlySet<string>;
   menuAvailable: boolean;
+  threadActionsAvailable: boolean;
 }
 
 function style(element: HTMLElement, values: Record<string, string>): void {
@@ -125,11 +128,39 @@ function iconButton(
   return button;
 }
 
+function actionButton(document: Document, label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  style(button, {
+    border: "0",
+    background: "transparent",
+    color: MUTED_COLOR,
+    cursor: "pointer",
+    height: "20px",
+    "border-radius": "5px",
+    display: "inline-flex",
+    "align-items": "center",
+    "justify-content": "center",
+    flex: "0 0 auto",
+    "font-size": "10px",
+    padding: "0 4px",
+  });
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return button;
+}
+
 function threadRow(
   document: Document,
   thread: ThreadSnapshot,
   handlers: ProjectGroupViewHandlers,
   menuAvailable: boolean,
+  threadActionsAvailable: boolean,
 ): HTMLElement {
   const row = document.createElement("div");
   row.setAttribute("role", "button");
@@ -152,15 +183,18 @@ function threadRow(
     background: thread.selected || thread.active ? SELECTED_BACKGROUND : "transparent",
   });
   let menuButton: HTMLButtonElement | null = null;
+  const hoverButtons: HTMLButtonElement[] = [];
   const showMenu = (): void => {
-    if (!menuButton) return;
-    menuButton.style.opacity = "1";
-    menuButton.style.pointerEvents = "auto";
+    for (const button of hoverButtons) {
+      button.style.opacity = "1";
+      button.style.pointerEvents = "auto";
+    }
   };
   const hideMenu = (): void => {
-    if (!menuButton) return;
-    menuButton.style.opacity = "0";
-    menuButton.style.pointerEvents = "none";
+    for (const button of hoverButtons) {
+      button.style.opacity = "0";
+      button.style.pointerEvents = "none";
+    }
   };
   row.addEventListener("mouseenter", () => {
     if (!thread.selected && !thread.active) row.style.background = HOVER_BACKGROUND;
@@ -196,11 +230,22 @@ function threadRow(
     row.append(pinned);
   }
 
+  if (threadActionsAvailable) {
+    hoverButtons.push(
+      actionButton(document, thread.pinned ? "取消置顶" : "置顶", () =>
+        handlers.toggleThreadPin(thread),
+      ),
+      actionButton(document, "归档", () => handlers.archiveThread(thread)),
+    );
+  }
   if (menuAvailable) {
     menuButton = iconButton(document, "对话操作", "⋯", () => handlers.openThreadMenu(thread, row));
-    menuButton.style.opacity = "0";
-    menuButton.style.pointerEvents = "none";
-    row.append(menuButton);
+    hoverButtons.push(menuButton);
+  }
+  for (const button of hoverButtons) {
+    button.style.opacity = "0";
+    button.style.pointerEvents = "none";
+    row.append(button);
   }
 
   const activate = (): void => handlers.openThread(thread);
@@ -258,6 +303,7 @@ function projectContent(
   projectView: ProjectGroupProjectView,
   handlers: ProjectGroupViewHandlers,
   menuAvailable: boolean,
+  threadActionsAvailable: boolean,
 ): HTMLElement {
   const container = document.createElement("div");
   container.dataset.codexhostProjectGroupProject = projectView.project.entry?.projectId ?? "";
@@ -318,7 +364,9 @@ function projectContent(
     container.append(empty);
   } else {
     for (const thread of projectView.threads)
-      container.append(threadRow(document, thread, handlers, menuAvailable));
+      container.append(
+        threadRow(document, thread, handlers, menuAvailable, threadActionsAvailable),
+      );
   }
   const entry = resolved.entry;
   if (projectView.canShowAll && entry) {
@@ -334,6 +382,7 @@ function machineSection(
   machine: ProjectGroupModelView["machines"][number],
   handlers: ProjectGroupViewHandlers,
   menuAvailable: boolean,
+  threadActionsAvailable: boolean,
 ): HTMLElement {
   const section = document.createElement("div");
   section.dataset.codexhostProjectGroupMachine = machine.key;
@@ -375,11 +424,16 @@ function machineSection(
         "font-size": "11px",
         "font-weight": "500",
       });
-      section.append(projectHeader, projectContent(document, project, handlers, menuAvailable));
+      section.append(
+        projectHeader,
+        projectContent(document, project, handlers, menuAvailable, threadActionsAvailable),
+      );
     }
   } else {
     for (const project of machine.projects)
-      section.append(projectContent(document, project, handlers, menuAvailable));
+      section.append(
+        projectContent(document, project, handlers, menuAvailable, threadActionsAvailable),
+      );
   }
   return section;
 }
@@ -428,17 +482,19 @@ function groupRow(
   });
   row.append(name);
 
+  const summary = projectGroupMachineSummary(view.machines);
   const machines = document.createElement("span");
-  machines.textContent = view.machines.map((machine) => machine.label).join(" · ");
-  machines.title = machines.textContent;
+  machines.textContent = summary.text;
+  machines.title = summary.title;
+  machines.setAttribute("aria-label", summary.title);
   style(machines, {
     color: MUTED_COLOR,
     "font-size": "11px",
-    "max-width": "45%",
+    "max-width": "30%",
     overflow: "hidden",
     "text-overflow": "ellipsis",
     "white-space": "nowrap",
-    flex: "0 1 auto",
+    flex: "0 0 auto",
   });
   row.append(machines);
 
@@ -467,6 +523,7 @@ function signature(
   return JSON.stringify([
     [...options.collapsedGroups].sort(),
     options.menuAvailable,
+    options.threadActionsAvailable,
     views.map((view) => [
       view.group.id,
       view.group.name,
@@ -557,7 +614,13 @@ export class ProjectGroupView {
       });
       for (const machine of view.machines)
         content.append(
-          machineSection(this.#document, machine, this.#handlers, options.menuAvailable),
+          machineSection(
+            this.#document,
+            machine,
+            this.#handlers,
+            options.menuAvailable,
+            options.threadActionsAvailable,
+          ),
         );
       if (view.unresolved.length > 0) {
         const warning = this.#document.createElement("div");

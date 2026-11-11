@@ -177,6 +177,7 @@ describe("Renderer project group model", () => {
 
   it("only exposes Show all when the native project has a Show all control", () => {
     const local = snapshots[0];
+    if (!local) throw new Error("Missing snapshot fixture");
     const without = buildProjectGroupViews({
       groups: [group()],
       catalog,
