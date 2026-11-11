@@ -18,8 +18,8 @@ import {
 import {
   buildProjectGroupViews,
   buildProjectIndex,
+  mergeMachineState,
   projectHostKey,
-  worseConnectionState,
   type MachineConnectionState,
   type ProjectGroupProjectView,
   type ProjectGroupView,
@@ -391,7 +391,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       const key = projectHostKey(entry);
       const state =
         entry.kind === "local" ? "connected" : (projectStatus.get(snapshot.projectId) ?? "unknown");
-      machineState.set(key, worseConnectionState(machineState.get(key) ?? "unknown", state));
+      machineState.set(key, mergeMachineState(machineState.get(key), state));
     }
     this.#views = buildProjectGroupViews({
       groups: this.#groups,

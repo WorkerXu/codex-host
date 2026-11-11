@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildProjectGroupViews,
   buildProjectIndex,
+  mergeMachineState,
   projectHostKey,
   worseConnectionState,
   type NativeProjectSnapshot,
@@ -179,5 +180,10 @@ describe("Renderer project group model", () => {
     expect(remote ? projectHostKey(remote) : null).toBe("remote-ssh-discovered:beta");
     expect(worseConnectionState("connected", "error")).toBe("error");
     expect(worseConnectionState("disconnected", "connecting")).toBe("disconnected");
+    expect(mergeMachineState(undefined, "connected")).toBe("connected");
+    expect(mergeMachineState("connected", "unknown")).toBe("connected");
+    expect(mergeMachineState("unknown", "error")).toBe("error");
+    expect(mergeMachineState("connected", "disconnected")).toBe("disconnected");
+    expect(mergeMachineState("disconnected", "error")).toBe("error");
   });
 });

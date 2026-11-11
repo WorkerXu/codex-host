@@ -82,6 +82,16 @@ export function worseConnectionState(
   return CONNECTION_RANK[left] >= CONNECTION_RANK[right] ? left : right;
 }
 
+/** An unknown status must not erase a known one; otherwise every machine starts gray. */
+export function mergeMachineState(
+  current: MachineConnectionState | undefined,
+  next: MachineConnectionState,
+): MachineConnectionState {
+  if (current === undefined || current === "unknown") return next;
+  if (next === "unknown") return current;
+  return worseConnectionState(current, next);
+}
+
 export function projectHostKey(entry: ProjectIndexEntry): string {
   return entry.kind === "local"
     ? "local"
@@ -246,10 +256,7 @@ export function buildProjectGroupViews(input: {
           machines.set(key, machine);
         }
         machine.projects.push(project);
-        machine.state = worseConnectionState(
-          machine.state,
-          input.machineState.get(key) ?? "unknown",
-        );
+        machine.state = mergeMachineState(machine.state, input.machineState.get(key) ?? "unknown");
       }
       return {
         group,
