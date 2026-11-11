@@ -121,8 +121,18 @@ function projectRow(label: string): FakeElement {
 }
 
 describe("Thread snapshots", () => {
-  it("captures the native provider icon for cloning", () => {
+  it("captures the native provider icon and thread action icons for cloning", () => {
     const icon = {} as Element;
+    const pinIcon = {} as Element;
+    const archiveIcon = {} as Element;
+    const pin = {
+      getAttribute: () => "置顶聊天",
+      querySelector: () => pinIcon,
+    } as unknown as HTMLElement;
+    const archive = {
+      getAttribute: () => "归档聊天",
+      querySelector: () => archiveIcon,
+    } as unknown as HTMLElement;
     const row = {
       getAttribute: (name: string) =>
         name === "data-app-action-sidebar-thread-id"
@@ -133,9 +143,13 @@ describe("Thread snapshots", () => {
               ? "Thread"
               : null,
       querySelector: (selector: string) => (selector.includes("agent-icon") ? icon : null),
+      querySelectorAll: () => [pin, archive],
     } as unknown as HTMLElement;
     const list = { querySelectorAll: () => [row] } as unknown as HTMLElement;
-    expect(readThreadSnapshots(list)[0]?.providerIcon).toBe(icon);
+    const snapshot = readThreadSnapshots(list)[0];
+    expect(snapshot?.providerIcon).toBe(icon);
+    expect(snapshot?.pinIcon).toBe(pinIcon);
+    expect(snapshot?.archiveIcon).toBe(archiveIcon);
   });
 });
 

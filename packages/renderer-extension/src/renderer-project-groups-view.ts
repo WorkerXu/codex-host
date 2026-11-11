@@ -17,7 +17,7 @@ const SELECTED_BACKGROUND = "var(--color-primary-ghost-selected, rgba(127, 127, 
 export interface ProjectGroupViewHandlers {
   toggleGroup(groupId: string): void;
   openThread(thread: ThreadSnapshot): void;
-  openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): void;
+  openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement, nativeFirst?: boolean): void;
   toggleThreadPin(thread: ThreadSnapshot): void;
   archiveThread(thread: ThreadSnapshot): void;
   openNewChat(groupId: string, anchor: HTMLElement): void;
@@ -128,17 +128,29 @@ function iconButton(
   return button;
 }
 
-function actionButton(document: Document, label: string, onClick: () => void): HTMLButtonElement {
+function actionButton(
+  document: Document,
+  label: string,
+  icon: Element | null | undefined,
+  onClick: () => void,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = label;
   button.setAttribute("aria-label", label);
   button.title = label;
+  const clone = icon?.cloneNode(true);
+  if (clone instanceof Element) {
+    style(clone as HTMLElement, { width: "14px", height: "14px", "pointer-events": "none" });
+    button.append(clone);
+  } else {
+    button.textContent = label;
+  }
   style(button, {
     border: "0",
     background: "transparent",
     color: MUTED_COLOR,
     cursor: "pointer",
+    width: "20px",
     height: "20px",
     "border-radius": "5px",
     display: "inline-flex",
@@ -146,7 +158,7 @@ function actionButton(document: Document, label: string, onClick: () => void): H
     "justify-content": "center",
     flex: "0 0 auto",
     "font-size": "10px",
-    padding: "0 4px",
+    padding: "0",
   });
   button.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -184,17 +196,25 @@ function threadRow(
   });
   let menuButton: HTMLButtonElement | null = null;
   const hoverButtons: HTMLButtonElement[] = [];
+  const actions = document.createElement("div");
+  style(actions, {
+    position: "absolute",
+    right: "4px",
+    top: "50%",
+    transform: "translateY(-50%)",
+    display: "none",
+    "align-items": "center",
+    gap: "2px",
+    "padding-left": "12px",
+    background: "linear-gradient(to right, transparent, var(--color-surface, #111) 22%)",
+    "border-radius": "4px",
+    "z-index": "1",
+  });
   const showMenu = (): void => {
-    for (const button of hoverButtons) {
-      button.style.opacity = "1";
-      button.style.pointerEvents = "auto";
-    }
+    actions.style.display = "flex";
   };
   const hideMenu = (): void => {
-    for (const button of hoverButtons) {
-      button.style.opacity = "0";
-      button.style.pointerEvents = "none";
-    }
+    actions.style.display = "none";
   };
   row.addEventListener("mouseenter", () => {
     if (!thread.selected && !thread.active) row.style.background = HOVER_BACKGROUND;
@@ -229,36 +249,25 @@ function threadRow(
   });
   row.append(title);
 
-  if (thread.pinned) {
-    const pinned = document.createElement("span");
-    pinned.textContent = "置顶";
-    pinned.title = "置顶";
-    style(pinned, {
-      color: MUTED_COLOR,
-      "font-size": "10px",
-      flex: "0 0 auto",
-    });
-    row.append(pinned);
-  }
-
   if (threadActionsAvailable) {
     hoverButtons.push(
-      actionButton(document, thread.pinned ? "取消置顶" : "置顶", () =>
+      actionButton(document, thread.pinned ? "取消置顶" : "置顶", thread.pinIcon, () =>
         handlers.toggleThreadPin(thread),
       ),
-      actionButton(document, "归档", () => handlers.archiveThread(thread)),
+      actionButton(document, "归档", thread.archiveIcon, () => handlers.archiveThread(thread)),
     );
   }
   if (menuAvailable) {
     menuButton = iconButton(document, "对话操作", "⋯", () => handlers.openThreadMenu(thread, row));
     hoverButtons.push(menuButton);
   }
-  for (const button of hoverButtons) {
-    button.style.opacity = "0";
-    button.style.pointerEvents = "none";
-    row.append(button);
-  }
+  for (const button of hoverButtons) actions.append(button);
+  row.append(actions);
 
+  row.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    handlers.openThreadMenu(thread, row, true);
+  });
   const activate = (): void => handlers.openThread(thread);
   row.addEventListener("click", activate);
   row.addEventListener("keydown", (event) => {

@@ -167,6 +167,8 @@ export function readThreadSnapshots(list: HTMLElement): ThreadSnapshot[] {
   return [...list.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)].flatMap((row) => {
     const threadId = row.getAttribute(THREAD_ID_ATTRIBUTE);
     if (!threadId) return [];
+    const pinButton = nativeThreadActionButton(row, "pin");
+    const archiveButton = nativeThreadActionButton(row, "archive");
     return [
       {
         threadId,
@@ -176,6 +178,8 @@ export function readThreadSnapshots(list: HTMLElement): ThreadSnapshot[] {
         active: row.getAttribute(THREAD_ACTIVE_ATTRIBUTE) === "true",
         pinned: row.getAttribute(THREAD_PINNED_ATTRIBUTE) === "true",
         providerIcon: row.querySelector("[data-codexhost-sidebar-agent-icon]"),
+        pinIcon: pinButton?.querySelector("svg") ?? null,
+        archiveIcon: archiveButton?.querySelector("svg") ?? null,
       },
     ];
   });

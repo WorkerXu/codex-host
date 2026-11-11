@@ -28,6 +28,8 @@ export interface ThreadSnapshot {
   active: boolean;
   pinned: boolean;
   providerIcon?: Element | null;
+  pinIcon?: Element | null;
+  archiveIcon?: Element | null;
 }
 
 export interface ProjectIndexEntry {
