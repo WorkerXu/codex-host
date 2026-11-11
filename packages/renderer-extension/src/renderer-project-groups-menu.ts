@@ -147,7 +147,11 @@ export class ProjectGroupMenuProxy {
     this.#lastError = null;
   }
 
-  async open(nativeRow: HTMLElement, anchor: HTMLElement): Promise<boolean> {
+  async open(
+    nativeRow: HTMLElement,
+    anchor: HTMLElement,
+    timeoutMs = MENU_OPEN_TIMEOUT_MS,
+  ): Promise<boolean> {
     if (this.#state === "unsupported" || this.#openMenu) return false;
     if (!hasNativeContextMenu(nativeRow)) {
       this.#markUnsupported("native-context-menu-missing");
@@ -155,12 +159,12 @@ export class ProjectGroupMenuProxy {
     }
     const rect = anchor.getBoundingClientRect();
     const existing = new Set(this.#menus());
-    const first = await this.#tryOpen(nativeRow, rect, existing, null);
+    const first = await this.#tryOpen(nativeRow, rect, existing, null, timeoutMs);
     if (first) return true;
 
     const ghost = this.#positionGhost(nativeRow, rect);
     if (ghost) {
-      const second = await this.#tryOpen(nativeRow, rect, new Set(this.#menus()), ghost);
+      const second = await this.#tryOpen(nativeRow, rect, new Set(this.#menus()), ghost, timeoutMs);
       if (second) return true;
       ghost();
     }
@@ -183,6 +187,7 @@ export class ProjectGroupMenuProxy {
     rect: DOMRect,
     existing: ReadonlySet<HTMLElement>,
     ghost: (() => void) | null,
+    timeoutMs: number,
   ): Promise<boolean> {
     nativeRow.dispatchEvent(
       new MouseEvent("contextmenu", {
@@ -196,7 +201,7 @@ export class ProjectGroupMenuProxy {
         clientY: rect.top + rect.height / 2,
       }),
     );
-    const candidate = await this.#waitForMenu(existing, rect);
+    const candidate = await this.#waitForMenu(existing, rect, timeoutMs);
     if (!candidate || !candidate.nearAnchor) {
       if (candidate) this.#closeForeignMenu();
       return false;
@@ -216,7 +221,11 @@ export class ProjectGroupMenuProxy {
     );
   }
 
-  #waitForMenu(existing: ReadonlySet<HTMLElement>, anchor: DOMRect): Promise<MenuCandidate | null> {
+  #waitForMenu(
+    existing: ReadonlySet<HTMLElement>,
+    anchor: DOMRect,
+    timeoutMs: number,
+  ): Promise<MenuCandidate | null> {
     const found = this.#menus().filter(
       (element) => !existing.has(element) && visibleRect(element) !== null,
     );
@@ -239,7 +248,7 @@ export class ProjectGroupMenuProxy {
           return;
         }
       });
-      const timer = this.#window.setTimeout(() => finish(null), MENU_OPEN_TIMEOUT_MS);
+      const timer = this.#window.setTimeout(() => finish(null), timeoutMs);
       const finish = (value: MenuCandidate | null): void => {
         this.#window.clearTimeout(timer);
         observer.disconnect();

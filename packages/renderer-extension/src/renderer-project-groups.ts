@@ -534,7 +534,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     if (nativeFirst && !this.#nativeContextUnsupported) {
       this.#menuPending = true;
       try {
-        if (await this.#menu.open(row, anchor)) {
+        if (await this.#menu.open(row, anchor, 600)) {
           this.#setMenuMode("native-context");
           return;
         }

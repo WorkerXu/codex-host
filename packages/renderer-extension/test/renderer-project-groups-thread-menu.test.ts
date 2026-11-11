@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { collectNativeThreadMenuActions } from "../src/renderer-project-groups-thread-menu.js";
 
-function button(label: string, options: { menu?: boolean; icon?: Element } = {}) {
+function button(
+  label: string,
+  options: { menu?: boolean; icon?: Element; disabled?: boolean } = {},
+) {
   return {
+    disabled: options.disabled ?? false,
     getAttribute: (name: string) => {
       if (name === "aria-label") return label;
       if (name === "aria-haspopup" && options.menu) return "menu";

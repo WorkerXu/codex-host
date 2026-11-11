@@ -13,6 +13,8 @@ export function collectNativeThreadMenuActions(row: HTMLElement): NativeThreadMe
     const label = button.getAttribute("aria-label")?.trim();
     if (!label || seen.has(label)) continue;
     if (button.getAttribute("aria-haspopup") === "menu") continue;
+    if ((button as HTMLButtonElement).disabled || button.getAttribute("aria-disabled") === "true")
+      continue;
     seen.add(label);
     actions.push({ id: label, label, icon: button.querySelector("svg"), button });
   }
