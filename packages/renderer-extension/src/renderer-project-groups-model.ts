@@ -16,6 +16,7 @@ export interface NativeProjectSnapshot {
   collapsed: boolean;
   hasList: boolean;
   hasShowAllToggle: boolean;
+  hasNewChatButton: boolean;
   showAll: boolean | null;
 }
 
@@ -52,6 +53,7 @@ export interface ProjectGroupProjectView {
   collapsed: boolean;
   hasList: boolean;
   hasShowAllToggle: boolean;
+  newChatAvailable: boolean;
   showAll: boolean | null;
   canShowAll: boolean;
 }
@@ -228,6 +230,7 @@ function projectView(
     collapsed: native?.collapsed ?? true,
     hasList: native?.hasList ?? false,
     hasShowAllToggle: native?.hasShowAllToggle ?? false,
+    newChatAvailable: native?.hasNewChatButton ?? false,
     showAll: native?.showAll ?? null,
     canShowAll: native?.hasList === true && native.showAll === false && native.hasShowAllToggle,
   };

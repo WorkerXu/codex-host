@@ -85,6 +85,7 @@ const snapshots: NativeProjectSnapshot[] = [
     collapsed: false,
     hasList: true,
     hasShowAllToggle: false,
+    hasNewChatButton: true,
     showAll: false,
   },
   {
@@ -95,6 +96,7 @@ const snapshots: NativeProjectSnapshot[] = [
     collapsed: false,
     hasList: true,
     hasShowAllToggle: false,
+    hasNewChatButton: true,
     showAll: true,
   },
 ];
@@ -194,6 +196,19 @@ describe("Renderer project group model", () => {
       machineState: new Map(),
     });
     expect(withToggle[0]?.projects[0]?.canShowAll).toBe(true);
+  });
+
+  it("marks a member without a native new-chat button unavailable", () => {
+    const local = snapshots[0];
+    if (!local) throw new Error("Missing snapshot fixture");
+    const views = buildProjectGroupViews({
+      groups: [group()],
+      catalog,
+      snapshots: [{ ...local, hasNewChatButton: false }],
+      threadsByProject: new Map(),
+      machineState: new Map(),
+    });
+    expect(views[0]?.projects[0]?.newChatAvailable).toBe(false);
   });
 
   it("shortens the group row machine summary while keeping the full title", () => {

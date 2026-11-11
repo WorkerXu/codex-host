@@ -178,6 +178,24 @@ describe("Project projects list compaction", () => {
     expect(contract.projectCount).toBe(1);
   });
 
+  it("keeps the group contract active when one project has no new-chat button", () => {
+    vi.stubGlobal("HTMLElement", FakeElement);
+    const row = new FakeElement({
+      "data-app-action-sidebar-project-row": "",
+      "data-app-action-sidebar-project-id": "remote-offline",
+      "data-app-action-sidebar-project-label": "offline",
+    });
+    const projectUnit = new FakeElement({ role: "listitem" }, "", [row]);
+    const list = new FakeElement({ role: "list" }, "", [projectUnit]);
+    const section = new FakeElement({}, "", [list]);
+    section.querySelectorAll = (selector: string) =>
+      selector.includes("thread-row") ? [] : [list];
+    const contract = probeProjectGroupsContract(section as unknown as HTMLElement);
+    expect(contract.ok).toBe(true);
+    expect(contract.missingNewChatCount).toBe(1);
+    expect(contract.missing).not.toContain("new-chat-button");
+  });
+
   it("finds the native Projects Show more button", () => {
     vi.stubGlobal("HTMLElement", FakeElement);
     const row = projectRow("alpha");

@@ -156,6 +156,7 @@ export function readNativeProjectSnapshots(section: HTMLElement): NativeProjectS
       collapsed: row.getAttribute(PROJECT_COLLAPSED_ATTRIBUTE) === "true",
       hasList: projectList !== null,
       hasShowAllToggle: unit.querySelector(PROJECT_SHOW_ALL_TOGGLE_SELECTOR) !== null,
+      hasNewChatButton: newChatButton(row) !== null,
       showAll: showAll === null || showAll === undefined ? null : showAll === "true",
     });
   }
@@ -310,7 +311,8 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
     const threadList = projectListForUnit(unit);
     if (threadList) threadRowCount += threadList.querySelectorAll(THREAD_ROW_SELECTOR).length;
   }
-  if (missingNewChatCount > 0) missing.push("new-chat-button");
+  // A missing new-chat button is a per-project state (for example an offline
+  // remote), not a Desktop contract break. Keep the count for diagnostics only.
   const threadRows = section ? [...section.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)] : [];
   const firstThreadRow = threadRows[0] ?? null;
   if (firstThreadRow && !firstThreadRow.getAttribute(THREAD_ID_ATTRIBUTE))

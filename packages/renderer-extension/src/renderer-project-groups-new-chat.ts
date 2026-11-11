@@ -28,7 +28,12 @@ export function newChatProjectDisabled(
   project: ProjectGroupProjectView,
   state: MachineConnectionState,
 ): boolean {
-  return project.project.missing !== null || state === "disconnected" || state === "error";
+  return (
+    project.project.missing !== null ||
+    !project.newChatAvailable ||
+    state === "disconnected" ||
+    state === "error"
+  );
 }
 
 export interface ProjectGroupNewChatPickerOptions {
