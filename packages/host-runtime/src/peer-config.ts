@@ -27,9 +27,15 @@ export interface PeerEntry {
   command?: string;
 }
 
+export interface PeerSelf {
+  /** Desktop Host IDs that identify this machine; links using them stay local. */
+  hostIds: string[];
+}
+
 export interface PeerConfig {
   formatVersion: 1;
   peers: Record<string, PeerEntry>;
+  self?: PeerSelf;
 }
 
 export interface ResolvedPeer extends PeerEntry {
@@ -109,20 +115,38 @@ function parseEntry(name: string, value: unknown): PeerEntry {
   return { ssh, hostIds, ...(command ? { command } : {}) };
 }
 
-/** Rejects duplicate Host IDs so every link resolves to exactly one peer. */
+/** Rejects duplicate Host IDs so every link resolves to exactly one target. */
 function assertUniqueHostIds(config: PeerConfig): void {
   const owner = new Map<string, string>();
-  for (const [name, entry] of Object.entries(config.peers)) {
-    for (const hostId of entry.hostIds) {
-      const existing = owner.get(hostId);
-      if (existing !== undefined && existing !== name) {
-        throw invalid(
-          `Host ID '${hostId}' is configured for both peer '${existing}' and '${name}'`,
-        );
-      }
-      owner.set(hostId, name);
+  const claim = (hostId: string, name: string): void => {
+    const existing = owner.get(hostId);
+    if (existing !== undefined && existing !== name) {
+      throw invalid(
+        `Host ID '${hostId}' is configured for both ${existing === "self" ? "self" : `peer '${existing}'`} and ${name === "self" ? "self" : `peer '${name}'`}`,
+      );
     }
+    owner.set(hostId, name);
+  };
+  for (const hostId of config.self?.hostIds ?? []) claim(hostId, "self");
+  for (const [name, entry] of Object.entries(config.peers)) {
+    for (const hostId of entry.hostIds) claim(hostId, name);
   }
+}
+
+function parseSelf(value: unknown): PeerSelf | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalid("Peer self must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.hostIds)) throw invalid("Peer self hostIds must be an array");
+  const hostIds: string[] = [];
+  for (const hostId of raw.hostIds) {
+    if (typeof hostId !== "string") throw invalid("Peer self hostIds must be strings");
+    validateHostId(hostId);
+    if (!hostIds.includes(hostId)) hostIds.push(hostId);
+  }
+  return hostIds.length > 0 ? { hostIds } : undefined;
 }
 
 export function parsePeerConfig(value: unknown): PeerConfig {
@@ -140,7 +164,12 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   for (const [name, entry] of Object.entries(raw.peers as Record<string, unknown>)) {
     peers[name] = parseEntry(name, entry);
   }
-  const config: PeerConfig = { formatVersion: PEER_CONFIG_FORMAT_VERSION, peers };
+  const self = parseSelf(raw.self);
+  const config: PeerConfig = {
+    formatVersion: PEER_CONFIG_FORMAT_VERSION,
+    peers,
+    ...(self ? { self } : {}),
+  };
   assertUniqueHostIds(config);
   return config;
 }
@@ -199,8 +228,8 @@ export async function writePeerConfig(
 
 /**
  * Resolves a `--host` value or Thread hostId. Peer names win over the special
- * `local` value, and configured Host IDs win over `local`, so a peer can
- * explicitly claim links that use that placeholder on its own Desktop.
+ * `local` value; configured self IDs and Host IDs win over `local`, so a peer
+ * can explicitly claim links that use that placeholder on its own Desktop.
  */
 export function resolvePeerTarget(
   config: PeerConfig,
@@ -211,6 +240,7 @@ export function resolvePeerTarget(
     const [name, entry] = byName;
     return { ...entry, name, linkHostId: entry.hostIds[0] ?? name };
   }
+  if (config.self?.hostIds.includes(target)) return "local";
   for (const [name, entry] of Object.entries(config.peers)) {
     if (entry.hostIds.includes(target)) return { ...entry, name, linkHostId: target };
   }

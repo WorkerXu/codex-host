@@ -25,6 +25,7 @@ async function environment(): Promise<NodeJS.ProcessEnv> {
     peers: {
       mac: { ssh: "mac", hostIds: ["remote-ssh-discovered:mac"] },
     },
+    self: { hostIds: ["remote-ssh-discovered:self"] },
   });
   return environment;
 }
@@ -188,7 +189,7 @@ describe("delegation CLI peer routing", () => {
         task: "review",
         origin: {
           kind: "peer",
-          hostId: "local",
+          hostId: "remote-ssh-discovered:self",
           threadId: "local-parent",
         },
       },
@@ -344,6 +345,38 @@ describe("delegation CLI peer routing", () => {
       harnessId: "pi",
       cancelRequested: true,
     });
+  });
+
+  it("keeps configured self Host IDs local", async () => {
+    const env = {
+      ...(await environment()),
+      [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+      [DELEGATION_RUNTIME_TOKEN_ENV]: "token",
+    };
+    const fetchImpl = vi.fn(
+      async (url: unknown) =>
+        new Response(
+          JSON.stringify(String(url).endsWith("/v1/thread/watches") ? { watches: [] } : snapshot()),
+          { status: 200 },
+        ),
+    ) as unknown as typeof fetch;
+
+    const read = await run(["thread", "read", "thread://t?hostId=remote-ssh-discovered%3Aself"], {
+      environment: env,
+      fetchImpl,
+    });
+    expect(read.code).toBe(0);
+    const readCall = vi.mocked(fetchImpl).mock.calls[0];
+    if (!readCall) throw new Error("Runtime fetch was not called");
+    expect(String(readCall[0])).toContain("/v1/thread/read");
+    expect(JSON.parse(String(readCall[1]?.body))).toEqual({ threadId: "t", view: "result" });
+
+    const watches = await run(["thread", "watches", "--host", "remote-ssh-discovered:self"], {
+      environment: env,
+      fetchImpl,
+    });
+    expect(watches.code).toBe(0);
+    expect(String(vi.mocked(fetchImpl).mock.calls[1]?.[0])).toContain("/v1/thread/watches");
   });
 
   it("keeps Desktop remote reads as the fallback when no peer matches", async () => {

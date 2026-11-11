@@ -151,12 +151,70 @@ describe("peer CLI", () => {
     });
   });
 
-  it("rejects duplicate option values and shell syntax", async () => {
+  it("manages Host IDs that identify this machine", async () => {
+    const root = await dataDirectory();
+    const environment = { CODEXHOST_USER_DIR: root };
+    const added = new PassThrough();
+    await expect(
+      runPeerCli({
+        arguments: ["self", "add", "remote-ssh-discovered:oracle-main"],
+        environment,
+        output: added,
+      }),
+    ).resolves.toBe(0);
+    expect(JSON.parse(outputText(added))).toEqual({
+      self: { hostIds: ["remote-ssh-discovered:oracle-main"] },
+    });
+
+    const listed = new PassThrough();
+    await expect(runPeerCli({ arguments: ["list"], environment, output: listed })).resolves.toBe(0);
+    expect(JSON.parse(outputText(listed))).toEqual({
+      peers: [],
+      self: { hostIds: ["remote-ssh-discovered:oracle-main"] },
+    });
+
+    await expect(
+      runPeerCli({
+        arguments: [
+          "add",
+          "--name",
+          "mac",
+          "--ssh",
+          "mac",
+          "--host-id",
+          "remote-ssh-discovered:oracle-main",
+        ],
+        environment,
+        output: new PassThrough(),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+
+    const removed = new PassThrough();
+    await expect(
+      runPeerCli({
+        arguments: ["self", "remove", "remote-ssh-discovered:oracle-main"],
+        environment,
+        output: removed,
+      }),
+    ).resolves.toBe(0);
+    expect(JSON.parse(outputText(removed))).toEqual({ self: { hostIds: [] } });
+    await expect(
+      runPeerCli({
+        arguments: ["self", "remove", "remote-ssh-discovered:oracle-main"],
+        environment,
+        output: new PassThrough(),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+  });
+
+  it("rejects duplicate values, shell syntax, and option-like aliases", async () => {
     const root = await dataDirectory();
     const environment = { CODEXHOST_USER_DIR: root };
     for (const arguments_ of [
       ["add", "--name", "mac", "--name", "other", "--ssh", "mac"],
       ["add", "--name", "mac", "--ssh", "mac", "--command", "codexhost; rm -rf /"],
+      ["add", "--name", "mac", "--ssh", "-o"],
+      ["add", "--name", "mac", "--ssh", "mac", "--command", "-c"],
       ["add", "--name", "local", "--ssh", "mac"],
       ["add", "--name", "mac"],
     ]) {

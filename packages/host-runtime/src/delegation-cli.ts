@@ -437,7 +437,7 @@ export async function runDelegationCli(input: {
       const origin = peer
         ? {
             kind: "peer" as const,
-            hostId: "local",
+            hostId: (await readPeerConfig(environment)).self?.hostIds[0] ?? "local",
             ...(caller ? { threadId: normalizeThreadId(caller) } : {}),
           }
         : undefined;
@@ -583,8 +583,9 @@ export async function runDelegationCli(input: {
       const caller = command === "read" ? callerThreadId(environment) : undefined;
       const body = {
         threadId: reference.threadId,
-        // Remote Host context is meaningful only for reads; wait stays local or peer-routed.
-        ...(command === "read" && host ? { hostId: host } : {}),
+        // Only an unresolved non-local Host needs Desktop read context; local
+        // self IDs and peers must not leak a remote hostId into the local read.
+        ...(command === "read" && host && target === "unknown" ? { hostId: host } : {}),
         ...(caller ? { callerThreadId: normalizeThreadId(caller) } : {}),
         view,
         ...(value(parsed, "--cursor") ? { cursor: value(parsed, "--cursor") } : {}),
@@ -673,7 +674,8 @@ export async function runDelegationCli(input: {
           "thread watches accepts no positional arguments",
         );
       const host = value(parsed, "--host");
-      if (host && host !== "local")
+      const target = await resolveHostTarget(environment, host);
+      if (target === "unknown" || typeof target === "object")
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
           "thread watches is local-only; --host is not supported",

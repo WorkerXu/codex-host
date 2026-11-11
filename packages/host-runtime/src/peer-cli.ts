@@ -108,6 +108,7 @@ function peerOutput(config: PeerConfig): unknown {
     peers: Object.entries(config.peers)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, entry]) => ({ name, ...entry })),
+    ...(config.self ? { self: { hostIds: config.self.hostIds } } : {}),
   };
 }
 
@@ -149,6 +150,13 @@ export async function runPeerCli(input: {
         `Peer '${added.name}' already exists; remove it before adding it again`,
       );
     }
+    const selfConflict = added.hostIds.find((hostId) => config.self?.hostIds.includes(hostId));
+    if (selfConflict) {
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        `Host ID '${selfConflict}' is configured for this machine`,
+      );
+    }
     const entry: PeerEntry = {
       ssh: added.ssh,
       hostIds: added.hostIds,
@@ -177,6 +185,73 @@ export async function runPeerCli(input: {
     await writePeerConfig(environment, { ...config, peers });
     writeJson(output, { removed: name });
     return 0;
+  }
+  if (command === "self") {
+    const [subcommand, ...selfArguments] = rest;
+    if (!subcommand || subcommand === "list" || subcommand === "show") {
+      const parsed = parseDelegationArguments(selfArguments);
+      rejectOptions(parsed, []);
+      formatOption(parsed);
+      if (parsed.positionals.length > 0) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "peer self accepts no positional arguments",
+        );
+      }
+      const config = await readPeerConfig(environment);
+      writeJson(output, { self: { hostIds: config.self?.hostIds ?? [] } });
+      return 0;
+    }
+    if (subcommand === "add" || subcommand === "remove") {
+      const parsed = parseDelegationArguments(selfArguments);
+      rejectOptions(parsed, []);
+      formatOption(parsed);
+      if (parsed.positionals.length !== 1) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `peer self ${subcommand} requires one Host ID`,
+        );
+      }
+      const hostId = validateHostId(parsed.positionals[0] as string);
+      const config = await readPeerConfig(environment);
+      const existing = config.self?.hostIds ?? [];
+      const peerOwner = Object.entries(config.peers).find(([, entry]) =>
+        entry.hostIds.includes(hostId),
+      );
+      if (peerOwner) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `Host ID '${hostId}' is configured for peer '${peerOwner[0]}'`,
+        );
+      }
+      if (subcommand === "add" && existing.includes(hostId)) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `Host ID '${hostId}' is already configured for this machine`,
+        );
+      }
+      if (subcommand === "remove" && !existing.includes(hostId)) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `Host ID '${hostId}' is not configured for this machine`,
+        );
+      }
+      const hostIds =
+        subcommand === "add"
+          ? [...existing, hostId]
+          : existing.filter((candidate) => candidate !== hostId);
+      await writePeerConfig(environment, {
+        formatVersion: config.formatVersion,
+        peers: config.peers,
+        ...(hostIds.length > 0 ? { self: { hostIds } } : {}),
+      });
+      writeJson(output, { self: { hostIds } });
+      return 0;
+    }
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "Unknown peer self command. Run 'codexhost peer self --help'.",
+    );
   }
   if (command === "test") {
     const parsed = parseDelegationArguments(rest);

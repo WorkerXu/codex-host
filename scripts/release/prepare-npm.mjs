@@ -620,7 +620,7 @@ if (userArguments.length === 0) {
       "  codexhost harness inspect ...",
       "  codexhost delegate start ...",
       "  codexhost thread send|cancel|read|wait|list ...",
-      "  codexhost peer list|add|remove|test ...",
+      "  codexhost peer list|add|remove|test|self ...",
       "",
       "This npm package uses the current Node.js runtime and the packaged",
       "Rust launcher/shim. Codex Desktop must already be installed.",

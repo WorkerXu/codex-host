@@ -92,18 +92,23 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
       "hostIds": ["remote-ssh-discovered:oracle-main"],
       "command": "/opt/codexhost/bin/codexhost"
     }
+  },
+  "self": {
+    "hostIds": ["remote-ssh-discovered:mac"]
   }
 }
 ```
 
 - 文件位于 `~/.codexhost/peers.json`，权限 `0600`。`CODEXHOST_USER_DIR` 可以移动这个固定用户目录；`CODEXHOST_DATA_DIR` 不影响它。
 - `ssh` 必须是本机 `~/.ssh/config` 里的别名，且能非交互认证（连接参数强制 `BatchMode=yes`）。SSH ControlPath 也位于 `~/.codexhost/ssh/%C`，与 peers.json 使用同一个固定用户目录，因此 Desktop 托管远端和普通 SSH 会话看到的是同一份配置。
-- `hostIds` 是 Desktop 视角的 Host ID。解析优先级：peer 名 → 配置中的 Host ID → 特殊值 `local`。
+- `hostIds` 是 Desktop 视角的 Host ID。解析优先级：peer 名 → `self.hostIds` → peer 的 `hostIds` → 特殊值 `local`。
+- `self.hostIds` 是**本机自己**在 Desktop 视角下的 ID。命中时按本机处理，不会走 SSH。用 `codexhost peer self add|remove <hostId>` 维护，`codexhost peer self` 查看。
+- 同一个 Host ID 同时出现在 `self` 和某个 peer 中会被视为配置错误，避免同一链接有两个目标。
 - `thread://<id>?hostId=<x>` 与 `--host <x>` 使用同一套解析。若某个 peer 显式配置了 `hostIds: ["local"]`，该 peer 会接管 `local` 链接；否则 `local` 保持本机行为。
 - 第一个 Host ID 用作输出链接里的 `hostId`；没有配置 Host ID 时退回 peer 名。
 - `command` 可选。远端非交互 shell 的 `PATH` 通常不包含 `codexhost`，此时用绝对路径覆盖；该值必须是单个路径或命令词，不允许空白或 shell 元字符。
 
-`codexhost peer add` 会拒绝重复的 peer 名、保留名（`local`、`__proto__` 等）以及被其他 peer 占用的 Host ID。
+`codexhost peer add` 会拒绝重复的 peer 名、保留名（`local`、`__proto__` 等）以及被其他 peer 或 `self` 占用的 Host ID。
 
 ## SSH 传输
 
@@ -181,9 +186,9 @@ ssh \
 
 - 控制文件的原子写入、权限、清理、并发 PID、失效 PID、非法 endpoint 和同路径替换。
 - `peer-exec` 的路由白名单、stdin 解析、原样透传、结构化错误、缺失/不可达 Runtime。
-- `peers.json` 的解析、校验、Host ID 唯一性、peer 名/Host ID/`local` 解析。
+- `peers.json` 的解析、校验、Host ID 唯一性、peer 名/Host ID/`self`/`local` 解析，以及 `peer self add|remove|list`。
 - SSH 传输的参数数组、stdin、超时、非零退出、超大输出、token 不出现在 SSH environment。
-- CLI 的 `--host` 路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
+- CLI 的 `--host` 路由、self Host ID 本地路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
 - 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
 
 测试通过注入的 spawn 模拟 SSH，不会建立真实连接。真实跨机连通性、主机密钥、远端 `PATH` 和远端 Host Runtime 状态需要在部署环境中另行验证。

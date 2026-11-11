@@ -129,6 +129,43 @@ describe("peer configuration", () => {
     expect(resolvePeerTarget(peers, "unknown")).toBeUndefined();
   });
 
+  it("resolves configured self Host IDs locally and rejects overlap", () => {
+    const peers: PeerConfig = {
+      formatVersion: 1,
+      peers: { mac: { ssh: "mac", hostIds: ["remote-ssh-discovered:mac"] } },
+      self: { hostIds: ["remote-ssh-discovered:oracle-main"] },
+    };
+    expect(resolvePeerTarget(peers, "remote-ssh-discovered:oracle-main")).toBe("local");
+    expect(resolvePeerTarget(peers, "remote-ssh-discovered:mac")).toMatchObject({ name: "mac" });
+    expect(() =>
+      parsePeerConfig({
+        ...peers,
+        peers: { mac: { ssh: "mac", hostIds: ["remote-ssh-discovered:oracle-main"] } },
+      }),
+    ).toThrow();
+  });
+
+  it("normalizes self Host IDs and drops an empty self section", () => {
+    expect(
+      parsePeerConfig({
+        formatVersion: 1,
+        peers: {},
+        self: {
+          hostIds: ["remote-ssh-discovered:oracle-main", "remote-ssh-discovered:oracle-main"],
+        },
+      }),
+    ).toEqual({
+      formatVersion: 1,
+      peers: {},
+      self: { hostIds: ["remote-ssh-discovered:oracle-main"] },
+    });
+    expect(parsePeerConfig({ formatVersion: 1, peers: {}, self: { hostIds: [] } })).toEqual({
+      formatVersion: 1,
+      peers: {},
+    });
+    expect(() => parsePeerConfig({ formatVersion: 1, peers: {}, self: {} })).toThrow();
+  });
+
   it("encodes host-qualified Thread links", () => {
     expect(peerThreadReference("thread-1", "remote-ssh-discovered:mac")).toBe(
       "thread://thread-1?hostId=remote-ssh-discovered%3Amac",
