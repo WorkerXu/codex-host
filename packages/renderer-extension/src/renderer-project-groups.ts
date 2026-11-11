@@ -33,6 +33,10 @@ import {
 import { ProjectGroupHider } from "./renderer-project-groups-hide.js";
 import { ProjectGroupMenuProxy } from "./renderer-project-groups-menu.js";
 import { ProjectGroupsDialog } from "./renderer-project-groups-dialog.js";
+import {
+  collectNativeThreadMenuActions,
+  ProjectGroupThreadMenu,
+} from "./renderer-project-groups-thread-menu.js";
 import { ProjectGroupNewChatPicker } from "./renderer-project-groups-new-chat.js";
 import { ProjectGroupView as ProjectGroupDomView } from "./renderer-project-groups-view.js";
 import {
@@ -59,7 +63,7 @@ export interface RendererProjectGroupsStatus {
   groupCount: number;
   projectCount: number;
   missingMembers: number;
-  menu: "native" | "unavailable" | "unknown";
+  menu: "native-context" | "proxy-menu" | "unavailable" | "unknown";
   threadActions: "native" | "unavailable";
   lastError: string | null;
 }
@@ -94,7 +98,7 @@ function insideOwnUi(node: Node | null): boolean {
   const element = node instanceof Element ? node : node?.parentElement;
   return element
     ? element.closest(
-        "[data-codexhost-project-groups-root], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-toast]",
+        "[data-codexhost-project-groups-root], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-thread-menu], [data-codexhost-project-groups-toast]",
       ) !== null
     : false;
 }
@@ -107,6 +111,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   readonly #onStatus: ((status: RendererProjectGroupsStatus) => void) | undefined;
   readonly #hider: ProjectGroupHider;
   readonly #menu: ProjectGroupMenuProxy;
+  readonly #threadMenu: ProjectGroupThreadMenu;
   readonly #picker: ProjectGroupNewChatPicker;
   readonly #dialog: ProjectGroupsDialog;
   readonly #view: ProjectGroupDomView;
@@ -140,9 +145,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #lastHasContextMenu = false;
   #lastSection: HTMLElement | null = null;
   #lastReprobedRevision = -1;
-  #menuUnsupported = false;
+  #nativeContextUnsupported = false;
   #menuPending = false;
-  #lastMenuNotice = false;
+  #lastMenuMode: RendererProjectGroupsStatus["menu"] = "unknown";
 
   constructor(options: RendererProjectGroupsOptions) {
     this.#document = options.document ?? document;
@@ -155,10 +160,11 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#onStatus = options.onStatus;
     this.#bootstrapCatalog = readBootstrapCatalog(this.#window, this.#now);
     this.#hider = new ProjectGroupHider(this.#document);
+    this.#threadMenu = new ProjectGroupThreadMenu(this.#document, this.#window);
     this.#menu = new ProjectGroupMenuProxy({
       document: this.#document,
       window: this.#window,
-      onUnsupported: (reason) => this.#onMenuUnsupported(reason),
+      onUnsupported: (reason) => this.#onNativeContextUnsupported(reason),
       onFailure: (reason) => this.#recordError(new Error(reason)),
       onClosed: () => this.#scheduleRefresh(0),
     });
@@ -177,7 +183,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#view = new ProjectGroupDomView(this.#document, {
       toggleGroup: (groupId) => this.#toggleGroup(groupId),
       openThread: (thread) => this.#openThread(thread),
-      openThreadMenu: (thread, anchor) => void this.#openThreadMenu(thread, anchor),
+      openThreadMenu: (thread, anchor, nativeFirst) =>
+        void this.#openThreadMenu(thread, anchor, nativeFirst),
       toggleThreadPin: (thread) => void this.#proxyThreadAction(thread, "pin"),
       archiveThread: (thread) => void this.#proxyThreadAction(thread, "archive"),
       openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
@@ -255,8 +262,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       const revisionChanged = this.#revision !== this.#lastReprobedRevision;
       if (contract.hasContextMenu && (sectionChanged || menuAppeared || revisionChanged)) {
         this.#menu.reprobe();
-        this.#menuUnsupported = false;
+        this.#nativeContextUnsupported = false;
         this.#threadActionsUnsupported = false;
+        this.#lastMenuMode = "unknown";
         this.#lastReprobedRevision = this.#revision;
       }
       this.#lastSection = section;
@@ -453,7 +461,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         ),
       ).size,
       missingMembers,
-      menu: this.#menuEnabled() ? "native" : "unavailable",
+      menu: this.#lastMenuMode === "unknown" ? this.#defaultMenuMode() : this.#lastMenuMode,
       threadActions: this.#threadActionsEnabled() ? "native" : "unavailable",
     };
     this.#publishStatus();
@@ -489,41 +497,63 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   }
 
   #menuEnabled(): boolean {
-    return !this.#menuUnsupported && this.#hasContextMenu && this.#menu.state() !== "unsupported";
+    return this.#hasThreadActions || this.#hasContextMenu;
   }
 
-  #onMenuUnsupported(reason: string): void {
-    if (this.#menuUnsupported) return;
-    this.#menuUnsupported = true;
-    this.#recordError(new Error(reason));
-    this.#status = { ...this.#status, menu: "unavailable" };
+  #defaultMenuMode(): RendererProjectGroupsStatus["menu"] {
+    if (this.#hasThreadActions) return "proxy-menu";
+    if (this.#hasContextMenu) return "native-context";
+    return "unavailable";
+  }
+
+  #setMenuMode(mode: RendererProjectGroupsStatus["menu"]): void {
+    this.#lastMenuMode = mode;
+    this.#status = { ...this.#status, menu: mode };
     this.#publishStatus();
-    this.#view.render(this.#views, {
-      collapsedGroups: this.#collapsed,
-      menuAvailable: this.#menuEnabled(),
-      threadActionsAvailable: this.#threadActionsEnabled(),
-    });
-    if (!this.#lastMenuNotice) {
-      this.#lastMenuNotice = true;
-      this.#notify("该 Desktop 版本无法可靠显示原生对话菜单，已隐藏菜单；对话仍可点击打开。");
-    }
   }
 
-  async #openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): Promise<void> {
-    if (this.#menu.isOpen()) return;
+  #onNativeContextUnsupported(reason: string): void {
+    if (this.#nativeContextUnsupported) return;
+    this.#nativeContextUnsupported = true;
+    this.#recordError(new Error(reason));
+    this.#setMenuMode(this.#defaultMenuMode());
+  }
+
+  async #openThreadMenu(
+    thread: ThreadSnapshot,
+    anchor: HTMLElement,
+    nativeFirst = false,
+  ): Promise<void> {
+    if (this.#menu.isOpen() || this.#threadMenu.isOpen()) return;
     const section = findProjectsSection(this.#document);
     const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
     if (!row) {
       await this.refresh();
       return;
     }
-    this.#menuPending = true;
-    try {
-      const opened = await this.#menu.open(row, anchor);
-      if (!opened) this.#onMenuUnsupported("native-context-menu-open-failed");
-    } finally {
-      this.#menuPending = false;
+    if (nativeFirst && !this.#nativeContextUnsupported) {
+      this.#menuPending = true;
+      try {
+        if (await this.#menu.open(row, anchor)) {
+          this.#setMenuMode("native-context");
+          return;
+        }
+        this.#nativeContextUnsupported = true;
+      } finally {
+        this.#menuPending = false;
+      }
     }
+    const actions = collectNativeThreadMenuActions(row);
+    if (actions.length === 0) {
+      this.#setMenuMode("unavailable");
+      this.#notify("该对话没有可用的原生操作。");
+      return;
+    }
+    this.#threadMenu.open(anchor, actions, (action) => {
+      action.button.click();
+      this.#scheduleRefresh(200);
+    });
+    this.#setMenuMode("proxy-menu");
   }
 
   #threadActionsEnabled(): boolean {

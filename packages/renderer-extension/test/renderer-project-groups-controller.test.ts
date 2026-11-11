@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     collapsed: false,
     hasList: true,
     hasShowAllToggle: false,
+    hasNewChatButton: true,
     showAll: false,
   };
   const contract = {
@@ -63,6 +64,7 @@ const mocks = vi.hoisted(() => {
     contract,
     calls: {
       menuOpen: 0,
+      proxyMenuOpen: 0,
       pinClicks: 0,
       archiveClicks: 0,
     },
@@ -74,6 +76,7 @@ vi.mock("../src/renderer-project-groups-bootstrap.js", () => ({
 }));
 
 vi.mock("../src/renderer-project-groups-dom.js", () => ({
+  PROVIDER_ICON_LOADED_EVENT: "codexhost:project-groups-icon-loaded",
   findNativeThreadRow: () => ({ click: () => undefined }),
   findProjectList: () => null,
   findProjectsSection: () => ({}),
@@ -132,6 +135,24 @@ vi.mock("../src/renderer-project-groups-menu.js", () => ({
   },
 }));
 
+vi.mock("../src/renderer-project-groups-thread-menu.js", () => ({
+  collectNativeThreadMenuActions: () => [
+    { id: "pin", label: "置顶聊天", icon: null, button: { click: () => undefined } },
+  ],
+  ProjectGroupThreadMenu: class {
+    isOpen(): boolean {
+      return false;
+    }
+
+    open(): void {
+      mocks.calls.proxyMenuOpen += 1;
+    }
+
+    close(): void {}
+    dispose(): void {}
+  },
+}));
+
 vi.mock("../src/renderer-project-groups-view.js", () => {
   class FakeView {
     static last: FakeView | null = null;
@@ -176,7 +197,11 @@ import { installRendererProjectGroups } from "../src/renderer-project-groups.js"
 import { ProjectGroupView } from "../src/renderer-project-groups-view.js";
 
 interface ViewHandlers {
-  openThreadMenu(thread: typeof mocks.thread, anchor: unknown): void | Promise<void>;
+  openThreadMenu(
+    thread: typeof mocks.thread,
+    anchor: unknown,
+    nativeFirst?: boolean,
+  ): void | Promise<void>;
   toggleThreadPin(thread: typeof mocks.thread): void;
   archiveThread(thread: typeof mocks.thread): void;
 }
@@ -203,6 +228,7 @@ function fakeWindow(): Window {
 describe("project group controller menu wiring", () => {
   beforeEach(() => {
     mocks.calls.menuOpen = 0;
+    mocks.calls.proxyMenuOpen = 0;
     mocks.calls.pinClicks = 0;
     mocks.calls.archiveClicks = 0;
     vi.stubGlobal(
@@ -227,13 +253,17 @@ describe("project group controller menu wiring", () => {
     await vi.waitFor(() => expect(handle.status().state).toBe("active"));
     expect(handle.status()).toMatchObject({
       state: "active",
-      menu: "native",
+      menu: "proxy-menu",
       threadActions: "native",
     });
     const view = (ProjectGroupView as unknown as { last: { handlers: ViewHandlers } }).last;
     expect(view).toBeDefined();
-    await view.handlers.openThreadMenu(mocks.thread, {});
+    view.handlers.openThreadMenu(mocks.thread, {}, true);
+    await vi.waitFor(() => expect(handle.status().menu).toBe("native-context"));
     expect(mocks.calls.menuOpen).toBe(1);
+    view.handlers.openThreadMenu(mocks.thread, {});
+    await vi.waitFor(() => expect(handle.status().menu).toBe("proxy-menu"));
+    expect(mocks.calls.proxyMenuOpen).toBe(1);
     view.handlers.toggleThreadPin(mocks.thread);
     expect(mocks.calls.pinClicks).toBe(1);
     view.handlers.archiveThread(mocks.thread);
