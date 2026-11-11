@@ -149,12 +149,27 @@ function threadRow(
     "font-size": "13px",
     background: thread.selected || thread.active ? SELECTED_BACKGROUND : "transparent",
   });
+  let menuButton: HTMLButtonElement | null = null;
+  const showMenu = (): void => {
+    if (!menuButton) return;
+    menuButton.style.opacity = "1";
+    menuButton.style.pointerEvents = "auto";
+  };
+  const hideMenu = (): void => {
+    if (!menuButton) return;
+    menuButton.style.opacity = "0";
+    menuButton.style.pointerEvents = "none";
+  };
   row.addEventListener("mouseenter", () => {
     if (!thread.selected && !thread.active) row.style.background = HOVER_BACKGROUND;
+    showMenu();
   });
   row.addEventListener("mouseleave", () => {
     row.style.background = thread.selected || thread.active ? SELECTED_BACKGROUND : "transparent";
+    hideMenu();
   });
+  row.addEventListener("focusin", showMenu);
+  row.addEventListener("focusout", hideMenu);
 
   const title = document.createElement("span");
   title.textContent = thread.title;
@@ -180,7 +195,10 @@ function threadRow(
   }
 
   if (menuAvailable) {
-    row.append(iconButton(document, "对话操作", "⋯", () => handlers.openThreadMenu(thread, row)));
+    menuButton = iconButton(document, "对话操作", "⋯", () => handlers.openThreadMenu(thread, row));
+    menuButton.style.opacity = "0";
+    menuButton.style.pointerEvents = "none";
+    row.append(menuButton);
   }
 
   const activate = (): void => handlers.openThread(thread);
@@ -300,11 +318,10 @@ function projectContent(
     for (const thread of projectView.threads)
       container.append(threadRow(document, thread, handlers, menuAvailable));
   }
-  if (projectView.canShowAll && resolved.entry) {
+  const entry = resolved.entry;
+  if (projectView.canShowAll && entry) {
     container.append(
-      actionRow(document, "仅显示部分对话", "查看全部", () =>
-        handlers.showAll(resolved.entry!.projectId),
-      ),
+      actionRow(document, "仅显示部分对话", "查看全部", () => handlers.showAll(entry.projectId)),
     );
   }
   return container;

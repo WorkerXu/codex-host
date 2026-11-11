@@ -221,7 +221,7 @@ export class ProjectGroupsDialog {
         background: "var(--color-surface-secondary, rgba(127,127,127,0.08))",
       });
       const label = this.#document.createElement("span");
-      label.textContent = `${member.label} · ${member.projectKind === "local" ? "本机" : member.hostId}`;
+      label.textContent = `${member.label} · ${catalog ? projectGroupProjectHost(member.projectId, catalog) : member.projectKind === "local" ? "本机" : member.hostId}`;
       style(label, { flex: "1 1 auto", "min-width": "0" });
       const remove = button(this.#document, "移除");
       remove.addEventListener("click", () => {

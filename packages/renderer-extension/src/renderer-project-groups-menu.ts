@@ -53,6 +53,7 @@ export class ProjectGroupMenuProxy {
   readonly #document: Document;
   readonly #window: Window;
   readonly #onUnsupported: ((reason: string) => void) | undefined;
+  readonly #onClosed: (() => void) | undefined;
   #state: ProjectGroupMenuState = "unknown";
   #openMenu: HTMLElement | null = null;
   #restoreGhost: (() => void) | null = null;
@@ -62,10 +63,12 @@ export class ProjectGroupMenuProxy {
     document: Document;
     window: Window;
     onUnsupported?: (reason: string) => void;
+    onClosed?: () => void;
   }) {
     this.#document = options.document;
     this.#window = options.window;
     this.#onUnsupported = options.onUnsupported;
+    this.#onClosed = options.onClosed;
   }
 
   state(): ProjectGroupMenuState {
@@ -224,12 +227,16 @@ export class ProjectGroupMenuProxy {
 
   #watchClose(menu: HTMLElement): void {
     this.#closeWatcher?.();
+    let finished = false;
     const finish = (): void => {
+      if (finished) return;
+      finished = true;
       this.#closeWatcher?.();
       this.#closeWatcher = null;
       if (this.#openMenu === menu) this.#openMenu = null;
       this.#restoreGhost?.();
       this.#restoreGhost = null;
+      this.#onClosed?.();
     };
     const observer = new MutationObserver(() => {
       if (!menu.isConnected || menu.getAttribute("data-state") === "closed") finish();

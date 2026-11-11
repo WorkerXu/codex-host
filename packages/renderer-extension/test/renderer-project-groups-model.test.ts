@@ -173,8 +173,10 @@ describe("Renderer project group model", () => {
 
   it("derives stable machine keys and connection ordering", () => {
     const index = buildProjectIndex(catalog, snapshots);
-    expect(projectHostKey(index.get("local-alpha")!)).toBe("local");
-    expect(projectHostKey(index.get("project-beta")!)).toBe("remote-ssh-discovered:beta");
+    const local = index.get("local-alpha");
+    const remote = index.get("project-beta");
+    expect(local ? projectHostKey(local) : null).toBe("local");
+    expect(remote ? projectHostKey(remote) : null).toBe("remote-ssh-discovered:beta");
     expect(worseConnectionState("connected", "error")).toBe("error");
     expect(worseConnectionState("disconnected", "connecting")).toBe("disconnected");
   });

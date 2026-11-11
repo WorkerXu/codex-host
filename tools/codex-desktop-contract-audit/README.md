@@ -75,6 +75,16 @@ whether a derived Item id renders at all, and whether the Reasoning summary lane
 produces its ephemeral preview are behavioral properties that need a submitted Turn, so
 they stay outside this read-only tool.
 
+## Project groups surface
+
+The `project-groups` surface covers the Renderer sidebar contract used by cross-host project
+groups. It records the number of Projects sections, project rows, rendered thread rows, project
+rows without a unique native new-chat button, whether any thread row publishes a native context
+menu, and whether the overall contract probe passes. An absent Projects section is `unverified`;
+an active section with a failed contract is `confirmed-impact`. The probe only reads
+`data-app-action-sidebar-*` attributes and React fiber `onContextMenu` presence; it does not hide
+rows, open menus, or change group configuration.
+
 ## Evidence
 
 Reports are written under ignored `.codexhost/update-impact/<desktop-version>/` as:

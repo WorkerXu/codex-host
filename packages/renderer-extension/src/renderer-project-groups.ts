@@ -88,7 +88,7 @@ function insideOwnUi(node: Node | null): boolean {
   const element = node instanceof Element ? node : node?.parentElement;
   return element
     ? element.closest(
-        "[data-codexhost-project-groups-root], [data-codexhost-project-groups-toast]",
+        "[data-codexhost-project-groups-root], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-toast]",
       ) !== null
     : false;
 }
@@ -146,6 +146,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       document: this.#document,
       window: this.#window,
       onUnsupported: (reason) => this.#onMenuUnsupported(reason),
+      onClosed: () => this.#scheduleRefresh(0),
     });
     this.#picker = new ProjectGroupNewChatPicker({
       document: this.#document,
@@ -263,6 +264,10 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.removeEventListener("codexhost:renderer-adapter-status", this.#onFocus);
     this.#hider.dispose();
     this.#menu.dispose();
+    const target = this.#window as Window & {
+      __codexhostProjectGroupsV1?: RendererProjectGroupsHandle;
+    };
+    if (target.__codexhostProjectGroupsV1 === this) delete target.__codexhostProjectGroupsV1;
     this.#picker.dispose();
     this.#dialog.close();
     this.#view.dispose();
@@ -362,6 +367,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   }
 
   #renderActive(section: HTMLElement): void {
+    const catalog = this.#catalog;
+    if (!catalog) return;
     const snapshots = readNativeProjectSnapshots(section);
     const threadsByProject = new Map<string, readonly ThreadSnapshot[]>();
     const projectStatus = new Map<string, MachineConnectionState>();
@@ -372,7 +379,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       if (list) threadsByProject.set(snapshot.projectId, readThreadSnapshots(list));
       if (row) projectStatus.set(snapshot.projectId, statusIconState(row));
     }
-    const index = buildProjectIndex(this.#catalog!, snapshots);
+    const index = buildProjectIndex(catalog, snapshots);
     const machineState = new Map<string, MachineConnectionState>();
     for (const snapshot of snapshots) {
       const entry = index.get(snapshot.projectId);
@@ -384,7 +391,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     }
     this.#views = buildProjectGroupViews({
       groups: this.#groups,
-      catalog: this.#catalog!,
+      catalog,
       snapshots,
       threadsByProject,
       machineState,
@@ -455,6 +462,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   }
 
   async #openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): Promise<void> {
+    if (this.#menu.isOpen()) return;
     const section = findProjectsSection(this.#document);
     const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
     if (!row) {
@@ -599,6 +607,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   }
 
   #failOpen(reason: string): void {
+    this.#dialog.close();
+    this.#picker.close();
     this.#hider.clear();
     this.#view.dispose();
     this.#views = [];

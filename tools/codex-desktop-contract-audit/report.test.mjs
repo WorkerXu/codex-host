@@ -57,6 +57,34 @@ describe("Codex Desktop contract audit report", () => {
     expect(surfaces.find(({ id }) => id === "permission")?.verdict).toBe("unverified");
     expect(surfaces.find(({ id }) => id === "fork")?.verdict).toBe("unverified");
     expect(surfaces.find(({ id }) => id === "composer")?.verdict).toBe("no-impact");
+    expect(surfaces.find(({ id }) => id === "project-groups")?.verdict).toBe("unverified");
+  });
+
+  it("classifies the project-groups sidebar contract", () => {
+    const healthy = buildSurfaceResults({
+      ...contracts,
+      projectGroups: {
+        sectionCount: 1,
+        projectCount: 12,
+        threadRowCount: 4,
+        missingNewChatCount: 0,
+        hasContextMenu: true,
+        contractOk: true,
+      },
+    }).find(({ id }) => id === "project-groups");
+    expect(healthy).toMatchObject({ verdict: "no-impact", reason: "project-groups-dom-contract" });
+    const broken = buildSurfaceResults({
+      ...contracts,
+      projectGroups: {
+        sectionCount: 1,
+        projectCount: 12,
+        threadRowCount: 4,
+        missingNewChatCount: 1,
+        hasContextMenu: false,
+        contractOk: false,
+      },
+    }).find(({ id }) => id === "project-groups");
+    expect(broken?.verdict).toBe("confirmed-impact");
   });
 
   it("classifies the Codex usage gate from owner and gate cardinality", () => {

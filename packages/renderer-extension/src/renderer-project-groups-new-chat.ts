@@ -59,7 +59,7 @@ export class ProjectGroupNewChatPicker {
     popover.setAttribute("aria-label", "选择新建对话的机器");
     style(popover, {
       position: "fixed",
-      top: `${Math.min(rect.bottom + 4, this.#window.innerHeight - 340)}px`,
+      top: `${Math.max(8, Math.min(rect.bottom + 4, this.#window.innerHeight - 340))}px`,
       left: `${Math.min(rect.left, this.#window.innerWidth - 300)}px`,
       width: "280px",
       "max-height": "320px",

@@ -34,6 +34,7 @@ export interface ProjectGroupsDomContract {
   hasHasSelector: boolean;
   projectCount: number;
   threadRowCount: number;
+  missingNewChatCount: number;
   hasContextMenu: boolean;
 }
 
@@ -183,7 +184,9 @@ export function statusIconState(row: HTMLElement): MachineConnectionState {
 export function hasNativeContextMenu(row: HTMLElement): boolean {
   const names = Object.getOwnPropertyNames(row).filter((name) => name.startsWith("__reactFiber$"));
   if (names.length !== 1) return false;
-  let fiber: unknown = Object.getOwnPropertyDescriptor(row, names[0]!)?.value;
+  const name = names[0];
+  if (!name) return false;
+  let fiber: unknown = Object.getOwnPropertyDescriptor(row, name)?.value;
   for (let depth = 0; depth < 12 && fiber; depth += 1) {
     if (typeof fiber !== "object" || fiber === null) return false;
     const props = (fiber as { memoizedProps?: unknown }).memoizedProps;
@@ -203,7 +206,7 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
   const units = list ? projectUnits(list) : [];
   if (units.length === 0) missing.push("project-units");
   let projectCount = 0;
-  let missingNewChat = 0;
+  let missingNewChatCount = 0;
   let threadRowCount = 0;
   for (const unit of units) {
     const row = projectRowForUnit(unit);
@@ -216,12 +219,13 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
       continue;
     }
     projectCount += 1;
-    if (!newChatButton(row)) missingNewChat += 1;
+    if (!newChatButton(row)) missingNewChatCount += 1;
     const threadList = projectListForUnit(unit);
     if (threadList) threadRowCount += threadList.querySelectorAll(THREAD_ROW_SELECTOR).length;
   }
-  if (missingNewChat > 0) missing.push("new-chat-button");
-  const firstThreadRow = section?.querySelector<HTMLElement>(THREAD_ROW_SELECTOR) ?? null;
+  if (missingNewChatCount > 0) missing.push("new-chat-button");
+  const threadRows = section ? [...section.querySelectorAll<HTMLElement>(THREAD_ROW_SELECTOR)] : [];
+  const firstThreadRow = threadRows[0] ?? null;
   if (firstThreadRow && !firstThreadRow.getAttribute(THREAD_ID_ATTRIBUTE))
     missing.push("thread-row-identity");
   return {
@@ -233,6 +237,31 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
         : false,
     projectCount,
     threadRowCount,
-    hasContextMenu: firstThreadRow ? hasNativeContextMenu(firstThreadRow) : false,
+    missingNewChatCount,
+    hasContextMenu: threadRows.some((row) => hasNativeContextMenu(row)),
+  };
+}
+
+export interface RendererProjectGroupsContractInspection {
+  sectionCount: number;
+  projectCount: number;
+  threadRowCount: number;
+  missingNewChatCount: number;
+  hasContextMenu: boolean;
+  contractOk: boolean;
+}
+
+export function inspectRendererProjectGroupsContract(
+  root: ParentNode = document,
+): RendererProjectGroupsContractInspection {
+  const section = findProjectsSection(root);
+  const contract = probeProjectGroupsContract(section);
+  return {
+    sectionCount: section ? 1 : 0,
+    projectCount: contract.projectCount,
+    threadRowCount: contract.threadRowCount,
+    missingNewChatCount: contract.missingNewChatCount,
+    hasContextMenu: contract.hasContextMenu,
+    contractOk: contract.ok,
   };
 }
