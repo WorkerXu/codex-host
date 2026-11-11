@@ -57,10 +57,16 @@ describe("peer-exec request validation", () => {
       route: "/v1/harness/list",
       body: {},
     });
+    expect(parsePeerExecRequest({ route: "/v1/thread/list", body: {} })).toEqual({
+      route: "/v1/thread/list",
+      body: {},
+    });
     for (const value of [
       null,
       [],
       { route: "/v1/unknown", body: {} },
+      { route: "/v1/thread/watch", body: {} },
+      { route: "/v1/thread/watches", body: {} },
       { route: "/v1/harness/list", body: [] },
       { route: 7, body: {} },
     ]) {

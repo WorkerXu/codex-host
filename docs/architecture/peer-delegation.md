@@ -75,7 +75,7 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
 - `route` 必须属于控制 API 白名单：
   `/v1/harness/list`、`/v1/harness/inspect`、`/v1/delegate/start`、
   `/v1/thread/send`、`/v1/thread/cancel`、`/v1/thread/read`、
-  `/v1/thread/wait`、`/v1/thread/watch`、`/v1/thread/watches`、`/v1/thread/list`。
+  `/v1/thread/wait`、`/v1/thread/list`。`/v1/thread/watch` 和 `/v1/thread/watches` 第一版不跨机，不在白名单内。
 - 不接受 URL、endpoint、token 或路由参数；所有连接信息只从本机控制文件读取。
 - 请求体上限 2 MiB，与 Host Runtime 控制服务一致。
 - 正常响应和 Runtime 错误响应都原样写到 stdout；`{"error":{"code","message","details?"}}` 保持原格式，退出码为 1。

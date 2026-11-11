@@ -13,8 +13,6 @@ export const PEER_EXEC_ROUTES = [
   "/v1/thread/cancel",
   "/v1/thread/read",
   "/v1/thread/wait",
-  "/v1/thread/watch",
-  "/v1/thread/watches",
   "/v1/thread/list",
 ] as const;
 
