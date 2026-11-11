@@ -171,8 +171,9 @@ export async function runPeerCli(input: {
     if (!Object.hasOwn(config.peers, name)) {
       throw new DelegationControlError("INVALID_ARGUMENT", `Peer '${name}' is not configured`);
     }
-    const peers = { ...config.peers };
-    delete peers[name];
+    const peers = Object.fromEntries(
+      Object.entries(config.peers).filter(([peerName]) => peerName !== name),
+    );
     await writePeerConfig(environment, { ...config, peers });
     writeJson(output, { removed: name });
     return 0;
