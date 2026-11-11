@@ -47,8 +47,14 @@ export class ProjectGroupsService {
     });
   }
 
-  list(): Promise<ProjectGroupsListResult> {
-    return this.#store.list().then(({ revision, groups }) => ({ revision, groups }));
+  async list(): Promise<ProjectGroupsListResult> {
+    const { revision, groups } = await this.#store.list();
+    const backupName = this.#store.takeQuarantine();
+    return {
+      revision,
+      groups,
+      ...(backupName ? { warning: { kind: "quarantined" as const, backupName } } : {}),
+    };
   }
 
   replace(params: ProjectGroupsReplaceParams): Promise<ProjectGroupsReplaceResult> {

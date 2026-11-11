@@ -91,10 +91,18 @@ export const projectGroupsFileSchema = z
 
 export const projectGroupsListParamsSchema = z.object({}).strict();
 
+export const projectGroupWarningSchema = z
+  .object({
+    kind: z.literal("quarantined"),
+    backupName: z.string().min(1).max(256),
+  })
+  .strict();
+
 export const projectGroupsListResultSchema = z
   .object({
     revision: z.number().int().nonnegative(),
     groups: projectGroupsSchema,
+    warning: projectGroupWarningSchema.nullable().optional(),
   })
   .strict();
 
@@ -159,6 +167,7 @@ export type ProjectGroupRemoteMember = z.infer<typeof projectGroupRemoteMemberSc
 export type ProjectGroupMember = z.infer<typeof projectGroupMemberSchema>;
 export type ProjectGroup = z.infer<typeof projectGroupSchema>;
 export type ProjectGroupsFile = z.infer<typeof projectGroupsFileSchema>;
+export type ProjectGroupWarning = z.infer<typeof projectGroupWarningSchema>;
 export type ProjectGroupsListResult = z.infer<typeof projectGroupsListResultSchema>;
 export type ProjectGroupsReplaceParams = z.infer<typeof projectGroupsReplaceParamsSchema>;
 export type ProjectGroupsReplaceResult = z.infer<typeof projectGroupsReplaceResultSchema>;

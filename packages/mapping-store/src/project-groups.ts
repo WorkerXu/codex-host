@@ -95,6 +95,7 @@ export class ProjectGroupStore {
   readonly #directory: string;
   readonly #now: () => Date;
   #queue: Promise<void> = Promise.resolve();
+  #lastQuarantine: string | null = null;
 
   constructor(options: { directory: string; now?: () => Date }) {
     this.#directory = path.resolve(options.directory);
@@ -107,6 +108,13 @@ export class ProjectGroupStore {
 
   list(): Promise<ProjectGroupsFile> {
     return this.#enqueue(() => this.#read());
+  }
+
+  /** The most recent quarantine backup, consumed by the next list response. */
+  takeQuarantine(): string | null {
+    const backup = this.#lastQuarantine;
+    this.#lastQuarantine = null;
+    return backup;
   }
 
   replace(revision: number, groups: readonly ProjectGroup[]): Promise<ProjectGroupsFile> {
@@ -130,10 +138,11 @@ export class ProjectGroupStore {
       if (!(error instanceof ProjectGroupStoreError) || error.code !== "INVALID_FILE") throw error;
       // Presentation configuration must not block Host startup. Keep the bad
       // file for diagnosis and start from an empty configuration.
-      await rename(
-        this.file,
-        path.join(this.#directory, `groups.json.${this.#now().getTime()}.invalid`),
-      ).catch(() => undefined);
+      const backupName = `groups.json.${this.#now().getTime()}.invalid`;
+      const moved = await rename(this.file, path.join(this.#directory, backupName))
+        .then(() => true)
+        .catch(() => false);
+      if (moved) this.#lastQuarantine = backupName;
       return emptyProjectGroupsFile();
     }
   }

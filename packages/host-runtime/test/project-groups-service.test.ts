@@ -146,6 +146,21 @@ describe("Desktop project catalog reader", () => {
 });
 
 describe("Project groups service", () => {
+  it("reports a quarantined config once", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(path.join(directory, "groups.json"), "{broken", "utf8");
+    const service = new ProjectGroupsService({
+      directory,
+      now: () => new Date("2026-11-11T11:00:00.000Z"),
+    });
+    await expect(service.list()).resolves.toMatchObject({
+      revision: 0,
+      groups: [],
+      warning: { kind: "quarantined", backupName: "groups.json.1794394800000.invalid" },
+    });
+    await expect(service.list()).resolves.toEqual({ revision: 0, groups: [] });
+  });
+
   it("persists revisions and refreshes updatedAt", async () => {
     const directory = await temporaryDirectory();
     const codexHome = await temporaryDirectory();

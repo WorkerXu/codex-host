@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   desktopProjectsCatalogSchema,
   projectGroupsFileSchema,
+  projectGroupsListResultSchema,
   projectGroupsReplaceParamsSchema,
 } from "../src/project-groups.js";
 
@@ -39,6 +40,13 @@ describe("project group contracts", () => {
       revision: 2,
       groups: [group],
     });
+    expect(
+      projectGroupsListResultSchema.parse({
+        revision: 2,
+        groups: [group],
+        warning: { kind: "quarantined", backupName: "groups.json.1.invalid" },
+      }),
+    ).toMatchObject({ warning: { kind: "quarantined" } });
   });
 
   it("rejects a project that belongs to more than one group", () => {

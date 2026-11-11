@@ -91,6 +91,8 @@ describe("Project group store", () => {
       groups: [],
     });
     expect(await readdir(directory)).toContain("groups.json.1794391200000.invalid");
+    expect(store.takeQuarantine()).toBe("groups.json.1794391200000.invalid");
+    expect(store.takeQuarantine()).toBeNull();
   });
 
   it("rejects duplicate membership before writing", async () => {

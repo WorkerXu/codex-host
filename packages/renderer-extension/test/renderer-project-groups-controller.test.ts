@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => {
     thread,
     snapshot,
     contract,
+    warning: null as null | { kind: "quarantined"; backupName: string },
     calls: {
       menuOpen: 0,
       proxyMenuOpen: 0,
@@ -186,7 +187,11 @@ vi.mock("../src/renderer-project-groups-new-chat.js", () => ({
 
 vi.mock("../src/renderer-project-groups-rpc.js", () => ({
   createProjectGroupsRpc: () => ({
-    list: async () => ({ revision: 1, groups: [mocks.group] }),
+    list: async () => ({
+      revision: 1,
+      groups: [mocks.group],
+      ...(mocks.warning ? { warning: mocks.warning } : {}),
+    }),
     replace: async () => ({ revision: 2, groups: [mocks.group] }),
     readDesktopCatalog: async () => mocks.catalog,
   }),
@@ -212,7 +217,12 @@ function fakeDocument(): Document {
     documentElement: { dataset: {} },
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
-    createElement: () => ({ style: { setProperty: () => undefined } }),
+    createElement: () => ({
+      style: { setProperty: () => undefined },
+      setAttribute: () => undefined,
+      textContent: "",
+      remove: () => undefined,
+    }),
   } as unknown as Document;
 }
 
@@ -220,13 +230,14 @@ function fakeWindow(): Window {
   return {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
-    setTimeout: (callback: () => void) => setTimeout(callback, 0),
-    clearTimeout: (timer: ReturnType<typeof setTimeout>) => clearTimeout(timer),
+    setTimeout: () => 0,
+    clearTimeout: () => undefined,
   } as unknown as Window;
 }
 
 describe("project group controller menu wiring", () => {
   beforeEach(() => {
+    mocks.warning = null;
     mocks.calls.menuOpen = 0;
     mocks.calls.proxyMenuOpen = 0;
     mocks.calls.pinClicks = 0;
@@ -268,6 +279,18 @@ describe("project group controller menu wiring", () => {
     expect(mocks.calls.pinClicks).toBe(1);
     view.handlers.archiveThread(mocks.thread);
     expect(mocks.calls.archiveClicks).toBe(1);
+    handle.dispose();
+  });
+
+  it("shows a one-time warning when the Host quarantined the config", async () => {
+    mocks.warning = { kind: "quarantined", backupName: "groups.json.1.invalid" };
+    const handle = installRendererProjectGroups({
+      document: fakeDocument(),
+      window: fakeWindow(),
+      routing: () => ({ forHost: () => ({ manager: { sendRequest: async () => ({}) } }) }),
+    });
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    expect(handle.status().lastError).toContain("groups.json.1.invalid");
     handle.dispose();
   });
 });

@@ -148,6 +148,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #nativeContextUnsupported = false;
   #menuPending = false;
   #lastMenuMode: RendererProjectGroupsStatus["menu"] = "unknown";
+  #shownConfigWarnings = new Set<string>();
 
   constructor(options: RendererProjectGroupsOptions) {
     this.#document = options.document ?? document;
@@ -243,6 +244,15 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         this.#maybeFailOpenForHostFailure();
         this.#scheduleRetry(RETRY_DELAY_MS);
         return;
+      }
+      if (
+        config.warning?.kind === "quarantined" &&
+        !this.#shownConfigWarnings.has(config.warning.backupName)
+      ) {
+        this.#shownConfigWarnings.add(config.warning.backupName);
+        const message = `项目组配置无法读取，已备份为 ${config.warning.backupName}，已恢复为空配置`;
+        this.#recordError(new Error(message));
+        this.#notify(message);
       }
       let catalog: DesktopProjectsCatalog | null = null;
       try {
