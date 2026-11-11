@@ -62,12 +62,14 @@ export function validatePeerName(value: string): string {
 }
 
 export function validateSshAlias(value: string): string {
-  if (!SSH_ALIAS.test(value)) throw invalid("Peer SSH alias is invalid");
+  if (!SSH_ALIAS.test(value) || value.startsWith("-")) {
+    throw invalid("Peer SSH alias is invalid");
+  }
   return value;
 }
 
 export function validateRemoteCommand(value: string): string {
-  if (!REMOTE_COMMAND.test(value)) {
+  if (!REMOTE_COMMAND.test(value) || value.startsWith("-")) {
     throw invalid("Peer command must be one absolute path or command word without shell syntax");
   }
   return value;

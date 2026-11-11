@@ -76,6 +76,11 @@ describe("peer configuration", () => {
         peers: { mac: { ssh: "mac", hostIds: [], command: "codexhost; rm -rf /" } },
       },
     ],
+    ["an option-like SSH alias", { formatVersion: 1, peers: { mac: { ssh: "-o", hostIds: [] } } }],
+    [
+      "an option-like remote command",
+      { formatVersion: 1, peers: { mac: { ssh: "mac", hostIds: [], command: "-c" } } },
+    ],
     [
       "duplicate Host ID",
       {
