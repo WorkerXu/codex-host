@@ -228,6 +228,22 @@ describe("delegation CLI peer routing", () => {
     }
   });
 
+  it("fails a compact peer command when SSH hides the remote exit code", async () => {
+    const env = await environment();
+    const { spawnImpl } = peerSpawn([
+      { error: { code: "THREAD_NOT_FOUND", message: "Thread 't' does not exist" } },
+    ]);
+    const result = await run(["thread", "read", "t", "--host", "mac", "--format", "compact"], {
+      environment: env,
+      spawnImpl,
+    });
+    expect(result.code).toBe(1);
+    expect(result.output).toBe("");
+    expect(JSON.parse(result.diagnostics)).toEqual({
+      error: { code: "THREAD_NOT_FOUND", message: "Thread 't' does not exist" },
+    });
+  });
+
   it("routes reads and waits from thread references and peer flags", async () => {
     const env = await environment();
     const read = peerSpawn([snapshot()]);

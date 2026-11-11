@@ -220,18 +220,22 @@ export async function requestPeerRoute(input: {
       finish(() => {
         const stdoutText = Buffer.concat(stdout).toString("utf8");
         const stderrText = Buffer.concat(stderr).toString("utf8");
+        const body = parseJsonObject(stdoutText);
+        // The remote exit code is not trustworthy: Tailscale SSH, for example,
+        // reports 0 even when peer-exec failed. A structured error on stdout
+        // wins regardless of that code.
+        const error = errorEnvelope(body);
+        if (error) {
+          reject(
+            new DelegationControlError(
+              error.code as DelegationControlErrorCode,
+              error.message,
+              error.details as Record<string, unknown> | undefined,
+            ),
+          );
+          return;
+        }
         if (code !== 0) {
-          const error = errorEnvelope(parseJsonObject(stdoutText));
-          if (error) {
-            reject(
-              new DelegationControlError(
-                error.code as DelegationControlErrorCode,
-                error.message,
-                error.details as Record<string, unknown> | undefined,
-              ),
-            );
-            return;
-          }
           reject(
             unreachable(input.peer, `Peer '${input.peer.name}' command failed`, {
               reason: "peer_command_failed",
@@ -241,7 +245,6 @@ export async function requestPeerRoute(input: {
           );
           return;
         }
-        const body = parseJsonObject(stdoutText);
         if (!body) {
           reject(
             unreachable(input.peer, `Peer '${input.peer.name}' returned an unreadable response`, {

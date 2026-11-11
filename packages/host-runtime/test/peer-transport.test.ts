@@ -185,6 +185,21 @@ describe("peer SSH transport", () => {
     });
   });
 
+  it("treats a structured error as an error even when SSH reports exit 0", async () => {
+    const root = await dataDirectory();
+    const { spawnImpl } = fakeSpawn(() => ({
+      code: 0,
+      stdout: JSON.stringify({
+        error: { code: "THREAD_BUSY", message: "Thread is busy", details: { threadId: "t" } },
+      }),
+    }));
+    await expect(request({ root, spawnImpl })).rejects.toMatchObject({
+      code: "THREAD_BUSY",
+      message: "Thread is busy",
+      details: { threadId: "t" },
+    });
+  });
+
   it("reports a failed SSH command with its exit code and bounded stderr", async () => {
     const root = await dataDirectory();
     const { spawnImpl } = fakeSpawn(() => ({ code: 255, stderr: "Permission denied" }));

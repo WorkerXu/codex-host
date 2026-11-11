@@ -79,7 +79,7 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
 - 不接受 URL、endpoint、token 或路由参数；所有连接信息只从本机控制文件读取。
 - 请求体上限 2 MiB，与 Host Runtime 控制服务一致。
 - 正常响应和 Runtime 错误响应都原样写到 stdout；`{"error":{"code","message","details?"}}` 保持原格式，退出码为 1。
-- 本机没有存活的控制文件、控制端点不可达或响应不可解析时，也在 stdout 写出同格式错误并退出 1，便于 SSH 客户端保留错误码。
+- 本机没有存活的控制文件、控制端点不可达或响应不可解析时，也在 stdout 写出同格式错误并退出 1。退出码只是给普通 OpenSSH 客户端参考；调用方以 stdout 为准。
 
 ## peers.json
 
@@ -130,6 +130,7 @@ ssh \
 - `ControlMaster` 复用连接，降低连续 `send`/`read`/`wait` 的握手开销。
 - 超时：`harness`/`read`/`send`/`cancel` 默认 30 秒；`delegate start` 60 秒；`thread wait` 为本次切片 `timeoutMs` 加 30 秒余量。超时后发送 `SIGKILL` 并返回 `RUNTIME_UNREACHABLE`。
 - stdout 上限 8 MiB，超过返回 `RESPONSE_TOO_LARGE`；stderr 只保留前 64 KiB，错误详情里最多带 2 KiB 摘录。
+- 响应判定以 stdout 为准。stdout 是合法错误信封 `{"error":{"code","message","details?"}}` 时一律按错误返回，与 SSH 退出码无关：Tailscale SSH 等实现不把远端退出码传回本地（远端失败时本地仍是 0），只看退出码会把错误体当成成功响应。退出码非 0 且 stdout 不是错误信封时，返回 `RUNTIME_UNREACHABLE`（`reason: "peer_command_failed"`）。
 - SSH 子进程的 environment 会删除 `CODEXHOST_RUNTIME_ENDPOINT` 和 `CODEXHOST_RUNTIME_TOKEN`。即使 `~/.ssh/config` 配置了 `SendEnv CODEXHOST_*`，本机 token 也不会被转发。
 
 ## CLI 路由
@@ -187,7 +188,7 @@ ssh \
 - 控制文件的原子写入、权限、清理、并发 PID、失效 PID、非法 endpoint 和同路径替换。
 - `peer-exec` 的路由白名单、stdin 解析、原样透传、结构化错误、缺失/不可达 Runtime。
 - `peers.json` 的解析、校验、Host ID 唯一性、peer 名/Host ID/`self`/`local` 解析，以及 `peer self add|remove|list`。
-- SSH 传输的参数数组、stdin、超时、非零退出、超大输出、token 不出现在 SSH environment。
+- SSH 传输的参数数组、stdin、超时、错误信封优先于退出码、非零退出、超大输出、token 不出现在 SSH environment。
 - CLI 的 `--host` 路由、self Host ID 本地路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
 - 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
 
