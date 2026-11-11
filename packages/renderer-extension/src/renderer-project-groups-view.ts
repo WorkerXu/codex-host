@@ -18,6 +18,7 @@ export interface ProjectGroupViewHandlers {
   openThread(thread: ThreadSnapshot): void;
   openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): void;
   openNewChat(groupId: string, anchor: HTMLElement): void;
+  openManager(groupId?: string): void;
   expandProject(projectId: string): void;
   showAll(projectId: string): void;
 }
@@ -252,7 +253,10 @@ function projectContent(
       color: statusColor("error"),
       "font-size": "12px",
     });
-    container.append(message);
+    container.append(
+      message,
+      actionRow(document, "请在组管理中移除或重新绑定", "管理", () => handlers.openManager()),
+    );
     return container;
   }
   if (resolved.missing === "not-mounted") {
@@ -266,7 +270,10 @@ function projectContent(
       color: MUTED_COLOR,
       "font-size": "12px",
     });
-    container.append(message);
+    container.append(
+      message,
+      actionRow(document, "项目可能被侧边栏过滤", "管理", () => handlers.openManager()),
+    );
     return container;
   }
   if (!projectView.hasList) {
@@ -420,6 +427,7 @@ function groupRow(
     iconButton(document, "新建对话", "+", (event) =>
       handlers.openNewChat(view.group.id, event.currentTarget as HTMLElement),
     ),
+    iconButton(document, "管理项目组", "⋯", () => handlers.openManager(view.group.id)),
   );
 
   const toggle = (): void => handlers.toggleGroup(view.group.id);
@@ -481,7 +489,7 @@ export class ProjectGroupView {
 
   render(views: readonly ProjectGroupModelView[], options: ProjectGroupViewOptions): void {
     const section = findProjectsSection(this.#document);
-    if (!section || views.length === 0) {
+    if (!section) {
       this.dispose();
       return;
     }
@@ -500,6 +508,16 @@ export class ProjectGroupView {
     }
     if (this.#root.parentElement !== host || this.#root.nextElementSibling !== list)
       host.insertBefore(this.#root, list);
+
+    if (views.length === 0) {
+      const emptySignature = "empty";
+      if (this.#signature === emptySignature) return;
+      const empty = this.#document.createDocumentFragment();
+      empty.append(this.#createRow());
+      this.#root.replaceChildren(empty);
+      this.#signature = emptySignature;
+      return;
+    }
 
     const nextSignature = signature(views, options);
     if (nextSignature === this.#signature) return;
@@ -537,9 +555,36 @@ export class ProjectGroupView {
       }
       fragment.append(content);
     }
+    fragment.append(this.#createRow());
 
     this.#root.replaceChildren(fragment);
     this.#signature = nextSignature;
+  }
+
+  #createRow(): HTMLElement {
+    const create = this.#document.createElement("div");
+    create.setAttribute("role", "button");
+    create.tabIndex = 0;
+    create.dataset.codexhostProjectGroupCreate = "";
+    create.textContent = "＋ 新建项目组";
+    style(create, {
+      display: "flex",
+      "align-items": "center",
+      height: "28px",
+      padding: "0 6px 0 26px",
+      color: MUTED_COLOR,
+      cursor: "pointer",
+      "font-size": "12px",
+      "border-radius": ROW_RADIUS,
+    });
+    create.addEventListener("click", () => this.#handlers.openManager());
+    create.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this.#handlers.openManager();
+      }
+    });
+    return create;
   }
 
   dispose(): void {

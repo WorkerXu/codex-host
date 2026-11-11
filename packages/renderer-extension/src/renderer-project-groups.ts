@@ -27,6 +27,7 @@ import {
 } from "./renderer-project-groups-model.js";
 import { ProjectGroupHider } from "./renderer-project-groups-hide.js";
 import { ProjectGroupMenuProxy } from "./renderer-project-groups-menu.js";
+import { ProjectGroupsDialog } from "./renderer-project-groups-dialog.js";
 import { ProjectGroupNewChatPicker } from "./renderer-project-groups-new-chat.js";
 import { ProjectGroupView as ProjectGroupDomView } from "./renderer-project-groups-view.js";
 import {
@@ -101,6 +102,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   readonly #hider: ProjectGroupHider;
   readonly #menu: ProjectGroupMenuProxy;
   readonly #picker: ProjectGroupNewChatPicker;
+  readonly #dialog: ProjectGroupsDialog;
   readonly #view: ProjectGroupDomView;
   #groups: ProjectGroup[] = [];
   #revision = 0;
@@ -150,11 +152,19 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       window: this.#window,
       onSelect: (project) => this.#startNewChat(project),
     });
+    this.#dialog = new ProjectGroupsDialog({
+      document: this.#document,
+      window: this.#window,
+      catalog: () => this.#catalog,
+      groups: () => this.#groups,
+      save: (groups) => this.#saveGroups(groups),
+    });
     this.#view = new ProjectGroupDomView(this.#document, {
       toggleGroup: (groupId) => this.#toggleGroup(groupId),
       openThread: (thread) => this.#openThread(thread),
       openThreadMenu: (thread, anchor) => void this.#openThreadMenu(thread, anchor),
       openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
+      openManager: (groupId) => this.#openManager(groupId),
       expandProject: (projectId) => this.#expandProject(projectId),
       showAll: (projectId) => this.#showAll(projectId),
     });
@@ -254,6 +264,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#hider.dispose();
     this.#menu.dispose();
     this.#picker.dispose();
+    this.#dialog.close();
     this.#view.dispose();
     delete this.#document.documentElement.dataset.codexhostProjectGroupsState;
   }
@@ -482,6 +493,44 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       toast.style.setProperty(property, value);
     this.#document.body.append(toast);
     this.#window.setTimeout(() => toast.remove(), 4_000);
+  }
+
+  #openManager(groupId?: string): void {
+    if (!this.#catalog) {
+      void this.refresh().then(() => this.#dialog.open(groupId));
+      return;
+    }
+    this.#dialog.open(groupId);
+  }
+
+  async #saveGroups(groups: readonly ProjectGroup[]): Promise<{
+    ok: boolean;
+    conflict?: boolean;
+    message?: string;
+  }> {
+    const manager = this.#manager();
+    if (!manager) return { ok: false, message: "Host 暂不可用，无法保存项目组。" };
+    const rpc = createProjectGroupsRpc(manager);
+    try {
+      const result = await rpc.replace({ revision: this.#revision, groups: [...groups] });
+      this.#groups = result.groups;
+      this.#revision = result.revision;
+      this.#hostFailureAt = null;
+      this.#scheduleRefresh(0);
+      return { ok: true };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (/revision|changed/i.test(message)) {
+        await this.refresh();
+        return {
+          ok: false,
+          conflict: true,
+          message: "项目组已在其他窗口修改，已重新加载，请重试。",
+        };
+      }
+      this.#recordError(error);
+      return { ok: false, message: "保存项目组失败，请稍后重试。" };
+    }
   }
 
   #openNewChat(groupId: string, anchor: HTMLElement): void {
