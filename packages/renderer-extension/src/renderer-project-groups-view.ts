@@ -16,12 +16,14 @@ const SELECTED_BACKGROUND = "var(--color-primary-ghost-selected, rgba(127, 127, 
 export interface ProjectGroupViewHandlers {
   toggleGroup(groupId: string): void;
   openThread(thread: ThreadSnapshot): void;
+  openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): void;
   expandProject(projectId: string): void;
   showAll(projectId: string): void;
 }
 
 export interface ProjectGroupViewOptions {
   collapsedGroups: ReadonlySet<string>;
+  menuAvailable: boolean;
 }
 
 function style(element: HTMLElement, values: Record<string, string>): void {
@@ -86,10 +88,44 @@ function groupIcon(document: Document): HTMLElement {
   return icon;
 }
 
+function iconButton(
+  document: Document,
+  label: string,
+  text: string,
+  onClick: (event: MouseEvent) => void,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  style(button, {
+    border: "0",
+    background: "transparent",
+    color: MUTED_COLOR,
+    cursor: "pointer",
+    width: "22px",
+    height: "22px",
+    "border-radius": "5px",
+    display: "inline-flex",
+    "align-items": "center",
+    "justify-content": "center",
+    flex: "0 0 auto",
+    "font-size": "14px",
+    padding: "0",
+  });
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick(event);
+  });
+  return button;
+}
+
 function threadRow(
   document: Document,
   thread: ThreadSnapshot,
   handlers: ProjectGroupViewHandlers,
+  menuAvailable: boolean,
 ): HTMLElement {
   const row = document.createElement("div");
   row.setAttribute("role", "button");
@@ -139,6 +175,10 @@ function threadRow(
       flex: "0 0 auto",
     });
     row.append(pinned);
+  }
+
+  if (menuAvailable) {
+    row.append(iconButton(document, "对话操作", "⋯", () => handlers.openThreadMenu(thread, row)));
   }
 
   const activate = (): void => handlers.openThread(thread);
@@ -195,6 +235,7 @@ function projectContent(
   document: Document,
   projectView: ProjectGroupProjectView,
   handlers: ProjectGroupViewHandlers,
+  menuAvailable: boolean,
 ): HTMLElement {
   const container = document.createElement("div");
   container.dataset.codexhostProjectGroupProject = projectView.project.entry?.projectId ?? "";
@@ -249,7 +290,7 @@ function projectContent(
     container.append(empty);
   } else {
     for (const thread of projectView.threads)
-      container.append(threadRow(document, thread, handlers));
+      container.append(threadRow(document, thread, handlers, menuAvailable));
   }
   if (projectView.canShowAll && resolved.entry) {
     container.append(
@@ -265,6 +306,7 @@ function machineSection(
   document: Document,
   machine: ProjectGroupModelView["machines"][number],
   handlers: ProjectGroupViewHandlers,
+  menuAvailable: boolean,
 ): HTMLElement {
   const section = document.createElement("div");
   section.dataset.codexhostProjectGroupMachine = machine.key;
@@ -306,11 +348,11 @@ function machineSection(
         "font-size": "11px",
         "font-weight": "500",
       });
-      section.append(projectHeader, projectContent(document, project, handlers));
+      section.append(projectHeader, projectContent(document, project, handlers, menuAvailable));
     }
   } else {
     for (const project of machine.projects)
-      section.append(projectContent(document, project, handlers));
+      section.append(projectContent(document, project, handlers, menuAvailable));
   }
   return section;
 }
@@ -390,6 +432,7 @@ function signature(
 ): string {
   return JSON.stringify([
     [...options.collapsedGroups].sort(),
+    options.menuAvailable,
     views.map((view) => [
       view.group.id,
       view.group.name,
@@ -469,7 +512,9 @@ export class ProjectGroupView {
         "padding-bottom": "4px",
       });
       for (const machine of view.machines)
-        content.append(machineSection(this.#document, machine, this.#handlers));
+        content.append(
+          machineSection(this.#document, machine, this.#handlers, options.menuAvailable),
+        );
       if (view.unresolved.length > 0) {
         const warning = this.#document.createElement("div");
         warning.textContent = `${view.unresolved.length} 个成员项目当前不可用`;

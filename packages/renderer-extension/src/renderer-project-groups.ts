@@ -24,6 +24,7 @@ import {
   type ThreadSnapshot,
 } from "./renderer-project-groups-model.js";
 import { ProjectGroupHider } from "./renderer-project-groups-hide.js";
+import { ProjectGroupMenuProxy } from "./renderer-project-groups-menu.js";
 import { ProjectGroupView as ProjectGroupDomView } from "./renderer-project-groups-view.js";
 import {
   createProjectGroupsRpc,
@@ -95,6 +96,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   readonly #now: () => Date;
   readonly #onStatus: ((status: RendererProjectGroupsStatus) => void) | undefined;
   readonly #hider: ProjectGroupHider;
+  readonly #menu: ProjectGroupMenuProxy;
   readonly #view: ProjectGroupDomView;
   #groups: ProjectGroup[] = [];
   #revision = 0;
@@ -118,6 +120,10 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #queued = false;
   #hostFailureAt: number | null = null;
   #disposed = false;
+  #hasContextMenu = false;
+  #menuUnsupported = false;
+  #menuPending = false;
+  #lastMenuNotice = false;
 
   constructor(options: RendererProjectGroupsOptions) {
     this.#document = options.document ?? document;
@@ -130,9 +136,15 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#onStatus = options.onStatus;
     this.#bootstrapCatalog = readBootstrapCatalog(this.#window, this.#now);
     this.#hider = new ProjectGroupHider(this.#document);
+    this.#menu = new ProjectGroupMenuProxy({
+      document: this.#document,
+      window: this.#window,
+      onUnsupported: (reason) => this.#onMenuUnsupported(reason),
+    });
     this.#view = new ProjectGroupDomView(this.#document, {
       toggleGroup: (groupId) => this.#toggleGroup(groupId),
       openThread: (thread) => this.#openThread(thread),
+      openThreadMenu: (thread, anchor) => void this.#openThreadMenu(thread, anchor),
       expandProject: (projectId) => this.#expandProject(projectId),
       showAll: (projectId) => this.#showAll(projectId),
     });
@@ -230,6 +242,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#document.removeEventListener("visibilitychange", this.#onFocus);
     this.#window.removeEventListener("codexhost:renderer-adapter-status", this.#onFocus);
     this.#hider.dispose();
+    this.#menu.dispose();
     this.#view.dispose();
     delete this.#document.documentElement.dataset.codexhostProjectGroupsState;
   }
@@ -269,6 +282,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #observe(): void {
     const target = this.#document.body ?? this.#document.documentElement;
     this.#observer = new MutationObserver((mutations) => {
+      if (this.#menu.isOpen() || this.#menuPending) return;
       if (
         mutations.every((mutation) => {
           if (insideOwnUi(mutation.target)) return true;
@@ -359,7 +373,10 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       ),
     );
     this.#hider.apply(section, hidden);
-    this.#view.render(this.#views, { collapsedGroups: this.#collapsed });
+    this.#view.render(this.#views, {
+      collapsedGroups: this.#collapsed,
+      menuAvailable: this.#menuEnabled(),
+    });
     const missingMembers = this.#views.reduce((count, view) => count + view.unresolved.length, 0);
     this.#status = {
       ...this.#status,
@@ -374,7 +391,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         ),
       ).size,
       missingMembers,
-      menu: "unavailable",
+      menu: this.#menuEnabled() ? "native" : "unavailable",
     };
     this.#publishStatus();
   }
@@ -382,7 +399,10 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #toggleGroup(groupId: string): void {
     if (this.#collapsed.has(groupId)) this.#collapsed.delete(groupId);
     else this.#collapsed.add(groupId);
-    this.#view.render(this.#views, { collapsedGroups: this.#collapsed });
+    this.#view.render(this.#views, {
+      collapsedGroups: this.#collapsed,
+      menuAvailable: this.#menuEnabled(),
+    });
   }
 
   #openThread(thread: ThreadSnapshot): void {
@@ -390,6 +410,67 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
     if (row) row.click();
     else void this.refresh();
+  }
+
+  #menuEnabled(): boolean {
+    return !this.#menuUnsupported && this.#hasContextMenu && this.#menu.state() !== "unsupported";
+  }
+
+  #onMenuUnsupported(reason: string): void {
+    if (this.#menuUnsupported) return;
+    this.#menuUnsupported = true;
+    this.#recordError(new Error(reason));
+    this.#status = { ...this.#status, menu: "unavailable" };
+    this.#publishStatus();
+    this.#view.render(this.#views, {
+      collapsedGroups: this.#collapsed,
+      menuAvailable: this.#menuEnabled(),
+    });
+    if (!this.#lastMenuNotice) {
+      this.#lastMenuNotice = true;
+      this.#notify("该 Desktop 版本无法可靠显示原生对话菜单，已隐藏菜单；对话仍可点击打开。");
+    }
+  }
+
+  async #openThreadMenu(thread: ThreadSnapshot, anchor: HTMLElement): Promise<void> {
+    const section = findProjectsSection(this.#document);
+    const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
+    if (!row) {
+      await this.refresh();
+      return;
+    }
+    this.#menuPending = true;
+    try {
+      const opened = await this.#menu.open(row, anchor);
+      if (!opened) this.#onMenuUnsupported("native-context-menu-open-failed");
+    } finally {
+      this.#menuPending = false;
+    }
+  }
+
+  #notify(message: string): void {
+    const toast = this.#document.createElement("div");
+    toast.textContent = message;
+    toast.setAttribute("role", "status");
+    toast.setAttribute("data-codexhost-project-groups-toast", "");
+    for (const [property, value] of Object.entries({
+      position: "fixed",
+      bottom: "24px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      "z-index": "2147483001",
+      background: "var(--color-surface, #222)",
+      color: "var(--color-text, #fff)",
+      border: "1px solid var(--color-border, #555)",
+      "border-radius": "8px",
+      padding: "8px 12px",
+      "font-size": "12px",
+      "box-shadow": "0 8px 24px rgba(0,0,0,0.25)",
+      "max-width": "420px",
+    }))
+      toast.style.setProperty(property, value);
+    this.#document.body.append(toast);
+    this.#window.setTimeout(() => toast.remove(), 4_000);
   }
 
   #expandProject(projectId: string): void {
