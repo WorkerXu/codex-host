@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   findProjectsShowMoreButton,
   hasNativeContextMenu,
+  nativeThreadActionButton,
   newChatButton,
   probeProjectGroupsContract,
   restoreSidebarScrollAfterThreadClick,
@@ -117,6 +118,22 @@ function projectRow(label: string): FakeElement {
     "data-app-action-sidebar-project-label": label,
   });
 }
+
+describe("Native thread actions", () => {
+  it("finds pin and archive buttons by their localized labels", () => {
+    const pin = { getAttribute: () => "取消置顶聊天" } as unknown as HTMLElement;
+    const archive = { getAttribute: () => "归档聊天" } as unknown as HTMLElement;
+    const row = { querySelectorAll: () => [pin, archive] } as unknown as HTMLElement;
+    expect(nativeThreadActionButton(row, "pin")).toBe(pin);
+    expect(nativeThreadActionButton(row, "archive")).toBe(archive);
+  });
+
+  it("returns null when the native action is absent", () => {
+    const row = { querySelectorAll: () => [] } as unknown as HTMLElement;
+    expect(nativeThreadActionButton(row, "pin")).toBeNull();
+    expect(nativeThreadActionButton(row, "archive")).toBeNull();
+  });
+});
 
 describe("Project projects list compaction", () => {
   afterEach(() => vi.unstubAllGlobals());

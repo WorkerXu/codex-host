@@ -37,6 +37,7 @@ export interface ProjectGroupsDomContract {
   threadRowCount: number;
   missingNewChatCount: number;
   hasContextMenu: boolean;
+  hasThreadActions: boolean;
 }
 
 export function sidebarScrollContainer(root: ParentNode = document): HTMLElement | null {
@@ -205,6 +206,20 @@ export function projectMenuButton(row: HTMLElement): HTMLElement | null {
   return row.querySelector<HTMLElement>('button[aria-haspopup="menu"]');
 }
 
+export type NativeThreadAction = "pin" | "archive";
+
+export function nativeThreadActionButton(
+  row: HTMLElement,
+  action: NativeThreadAction,
+): HTMLElement | null {
+  const pattern = action === "pin" ? /置顶|pin/i : /归档|archive/i;
+  return (
+    [...row.querySelectorAll<HTMLElement>("button[aria-label]")].find((button) =>
+      pattern.test(button.getAttribute("aria-label") ?? ""),
+    ) ?? null
+  );
+}
+
 export function showAllToggle(root: ParentNode): HTMLElement | null {
   return root.querySelector<HTMLElement>(PROJECT_SHOW_ALL_TOGGLE_SELECTOR);
 }
@@ -291,6 +306,11 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
   const firstThreadRow = threadRows[0] ?? null;
   if (firstThreadRow && !firstThreadRow.getAttribute(THREAD_ID_ATTRIBUTE))
     missing.push("thread-row-identity");
+  const hasThreadActions = threadRows.some(
+    (row) =>
+      nativeThreadActionButton(row, "pin") !== null &&
+      nativeThreadActionButton(row, "archive") !== null,
+  );
   return {
     ok: missing.length === 0,
     missing: [...new Set(missing)],
@@ -302,6 +322,7 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
     threadRowCount,
     missingNewChatCount,
     hasContextMenu: threadRows.some((row) => hasNativeContextMenu(row)),
+    hasThreadActions,
   };
 }
 
@@ -311,6 +332,7 @@ export interface RendererProjectGroupsContractInspection {
   threadRowCount: number;
   missingNewChatCount: number;
   hasContextMenu: boolean;
+  hasThreadActions: boolean;
   contractOk: boolean;
 }
 
@@ -325,6 +347,7 @@ export function inspectRendererProjectGroupsContract(
     threadRowCount: contract.threadRowCount,
     missingNewChatCount: contract.missingNewChatCount,
     hasContextMenu: contract.hasContextMenu,
+    hasThreadActions: contract.hasThreadActions,
     contractOk: contract.ok,
   };
 }

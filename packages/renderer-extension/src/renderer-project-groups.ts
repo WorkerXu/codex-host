@@ -5,6 +5,7 @@ import {
   findNativeThreadRow,
   findProjectsSection,
   findProjectsShowMoreButton,
+  nativeThreadActionButton,
   newChatButton,
   probeProjectGroupsContract,
   projectListForUnit,
@@ -58,6 +59,7 @@ export interface RendererProjectGroupsStatus {
   projectCount: number;
   missingMembers: number;
   menu: "native" | "unavailable" | "unknown";
+  threadActions: "native" | "unavailable";
   lastError: string | null;
 }
 
@@ -120,6 +122,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     projectCount: 0,
     missingMembers: 0,
     menu: "unavailable",
+    threadActions: "unavailable",
     lastError: null,
   };
   #observer: MutationObserver | null = null;
@@ -130,6 +133,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #hostFailureAt: number | null = null;
   #disposed = false;
   #hasContextMenu = false;
+  #hasThreadActions = false;
+  #threadActionsUnsupported = false;
+  #lastThreadActionNotice = false;
   #lastHasContextMenu = false;
   #lastSection: HTMLElement | null = null;
   #lastReprobedRevision = -1;
@@ -171,6 +177,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       toggleGroup: (groupId) => this.#toggleGroup(groupId),
       openThread: (thread) => this.#openThread(thread),
       openThreadMenu: (thread, anchor) => void this.#openThreadMenu(thread, anchor),
+      toggleThreadPin: (thread) => void this.#proxyThreadAction(thread, "pin"),
+      archiveThread: (thread) => void this.#proxyThreadAction(thread, "archive"),
       openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
       openManager: (groupId) => this.#openManager(groupId),
       expandProject: (projectId) => this.#expandProject(projectId),
@@ -202,6 +210,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         return;
       }
       const contract = probeProjectGroupsContract(section);
+      this.#hasContextMenu = contract.hasContextMenu;
+      this.#hasThreadActions = contract.hasThreadActions;
       if (!contract.ok) {
         this.#failOpen(`contract-missing:${contract.missing.join(",")}`);
         this.#scheduleRetry(2_000);
@@ -239,6 +249,16 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         return;
       }
 
+      const sectionChanged = section !== this.#lastSection;
+      const menuAppeared = contract.hasContextMenu && !this.#lastHasContextMenu;
+      const revisionChanged = this.#revision !== this.#lastReprobedRevision;
+      if (contract.hasContextMenu && (sectionChanged || menuAppeared || revisionChanged)) {
+        this.#menu.reprobe();
+        this.#menuUnsupported = false;
+        this.#lastReprobedRevision = this.#revision;
+      }
+      this.#lastSection = section;
+      this.#lastHasContextMenu = contract.hasContextMenu;
       this.#hostFailureAt = null;
       this.#groups = config.groups;
       this.#revision = config.revision;
@@ -413,6 +433,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#view.render(this.#views, {
       collapsedGroups: this.#collapsed,
       menuAvailable: this.#menuEnabled(),
+      threadActionsAvailable: this.#threadActionsEnabled(),
     });
     const missingMembers = this.#views.reduce((count, view) => count + view.unresolved.length, 0);
     this.#status = {
@@ -429,6 +450,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       ).size,
       missingMembers,
       menu: this.#menuEnabled() ? "native" : "unavailable",
+      threadActions: this.#threadActionsEnabled() ? "native" : "unavailable",
     };
     this.#publishStatus();
   }
@@ -439,6 +461,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#view.render(this.#views, {
       collapsedGroups: this.#collapsed,
       menuAvailable: this.#menuEnabled(),
+      threadActionsAvailable: this.#threadActionsEnabled(),
     });
   }
 
@@ -474,6 +497,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#view.render(this.#views, {
       collapsedGroups: this.#collapsed,
       menuAvailable: this.#menuEnabled(),
+      threadActionsAvailable: this.#threadActionsEnabled(),
     });
     if (!this.#lastMenuNotice) {
       this.#lastMenuNotice = true;
@@ -496,6 +520,39 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     } finally {
       this.#menuPending = false;
     }
+  }
+
+  #threadActionsEnabled(): boolean {
+    return !this.#threadActionsUnsupported && this.#hasThreadActions;
+  }
+
+  #onThreadActionsUnsupported(reason: string): void {
+    if (this.#threadActionsUnsupported) return;
+    this.#threadActionsUnsupported = true;
+    this.#recordError(new Error(reason));
+    this.#status = { ...this.#status, threadActions: "unavailable" };
+    this.#publishStatus();
+    this.#view.render(this.#views, {
+      collapsedGroups: this.#collapsed,
+      menuAvailable: this.#menuEnabled(),
+      threadActionsAvailable: this.#threadActionsEnabled(),
+    });
+    if (!this.#lastThreadActionNotice) {
+      this.#lastThreadActionNotice = true;
+      this.#notify("该 Desktop 版本无法直接代理置顶/归档，已隐藏快捷按钮。");
+    }
+  }
+
+  async #proxyThreadAction(thread: ThreadSnapshot, action: "pin" | "archive"): Promise<void> {
+    const section = findProjectsSection(this.#document);
+    const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
+    const button = row ? nativeThreadActionButton(row, action) : null;
+    if (!button) {
+      this.#onThreadActionsUnsupported("native-thread-action-missing");
+      return;
+    }
+    button.click();
+    this.#scheduleRefresh(200);
   }
 
   #notify(message: string): void {
