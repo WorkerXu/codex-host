@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 
 import { expect, it, vi } from "vitest";
@@ -97,12 +100,20 @@ vi.mock("../src/remote-app-server.js", async (importOriginal) => ({
 it("registers the primary Remote Control Host as the catalog for its attached sessions", async () => {
   // Exercise the production composition without installing skills or starting a native process.
   const { runHostRuntime } = await import("../src/run-host-runtime.js");
-  expect(
-    await runHostRuntime({
-      arguments: [],
-      environment: { CODEXHOST_STOCK_CODEX_PATH: "/synthetic/codex" },
-    }),
-  ).toBe(0);
+  const controlDirectory = mkdtempSync(path.join(os.tmpdir(), "cx-runtime-control-"));
+  try {
+    expect(
+      await runHostRuntime({
+        arguments: [],
+        environment: {
+          CODEXHOST_STOCK_CODEX_PATH: "/synthetic/codex",
+          CODEXHOST_RUNTIME_CONTROL_DIR: controlDirectory,
+        },
+      }),
+    ).toBe(0);
+  } finally {
+    rmSync(controlDirectory, { recursive: true, force: true });
+  }
   expect(state.hosts).toHaveLength(2);
   for (const host of state.hosts) {
     expect(host.mappingStore).toBe(state.store);
