@@ -9,8 +9,11 @@ export type ProjectGroupMenuState = "unknown" | "native" | "unsupported";
 
 const MENU_SELECTOR =
   '[role="menu"], [data-radix-menu-content], [data-radix-popper-content-wrapper]';
-const MENU_TIMEOUT_MS = 500;
+// Native portal creation can exceed 500 ms under load or on the first open;
+// a too-tight wait caused one slow open to disable the menu for the session.
+const MENU_OPEN_TIMEOUT_MS = 1_500;
 const MENU_CLOSE_RECHECK_MS = 1_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 interface MenuCandidate {
   element: HTMLElement;
@@ -93,21 +96,26 @@ export class ProjectGroupMenuProxy {
   readonly #document: Document;
   readonly #window: Window;
   readonly #onUnsupported: ((reason: string) => void) | undefined;
+  readonly #onFailure: ((reason: string) => void) | undefined;
   readonly #onClosed: (() => void) | undefined;
   #state: ProjectGroupMenuState = "unknown";
   #openMenu: HTMLElement | null = null;
   #restoreGhost: (() => void) | null = null;
   #closeWatcher: (() => void) | null = null;
+  #consecutiveFailures = 0;
+  #lastError: string | null = null;
 
   constructor(options: {
     document: Document;
     window: Window;
     onUnsupported?: (reason: string) => void;
+    onFailure?: (reason: string) => void;
     onClosed?: () => void;
   }) {
     this.#document = options.document;
     this.#window = options.window;
     this.#onUnsupported = options.onUnsupported;
+    this.#onFailure = options.onFailure;
     this.#onClosed = options.onClosed;
   }
 
@@ -121,6 +129,22 @@ export class ProjectGroupMenuProxy {
 
   isAvailable(): boolean {
     return this.#state !== "unsupported";
+  }
+
+  lastError(): string | null {
+    return this.#lastError;
+  }
+
+  consecutiveFailures(): number {
+    return this.#consecutiveFailures;
+  }
+
+  /** Allow a fresh contract probe after Desktop DOM or group configuration changes. */
+  reprobe(): void {
+    if (this.#openMenu) return;
+    this.#state = "unknown";
+    this.#consecutiveFailures = 0;
+    this.#lastError = null;
   }
 
   async open(nativeRow: HTMLElement, anchor: HTMLElement): Promise<boolean> {
@@ -141,7 +165,7 @@ export class ProjectGroupMenuProxy {
       ghost();
     }
 
-    this.#markUnsupported("native-context-menu-position-unreliable");
+    this.#recordFailure("native-context-menu-position-unreliable");
     this.#closeForeignMenu();
     return false;
   }
@@ -178,6 +202,8 @@ export class ProjectGroupMenuProxy {
       return false;
     }
     this.#state = "native";
+    this.#consecutiveFailures = 0;
+    this.#lastError = null;
     this.#openMenu = candidate.element;
     this.#restoreGhost = ghost;
     this.#watchClose(candidate.element);
@@ -213,7 +239,7 @@ export class ProjectGroupMenuProxy {
           return;
         }
       });
-      const timer = this.#window.setTimeout(() => finish(null), MENU_TIMEOUT_MS);
+      const timer = this.#window.setTimeout(() => finish(null), MENU_OPEN_TIMEOUT_MS);
       const finish = (value: MenuCandidate | null): void => {
         this.#window.clearTimeout(timer);
         observer.disconnect();
@@ -292,7 +318,17 @@ export class ProjectGroupMenuProxy {
     );
   }
 
+  #recordFailure(reason: string): void {
+    this.#lastError = reason;
+    this.#consecutiveFailures += 1;
+    this.#onFailure?.(reason);
+    if (this.#consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      this.#markUnsupported(reason);
+    }
+  }
+
   #markUnsupported(reason: string): void {
+    this.#lastError = reason;
     if (this.#state === "unsupported") return;
     this.#state = "unsupported";
     this.#onUnsupported?.(reason);

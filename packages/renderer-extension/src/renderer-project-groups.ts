@@ -127,6 +127,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #hostFailureAt: number | null = null;
   #disposed = false;
   #hasContextMenu = false;
+  #lastHasContextMenu = false;
+  #lastSection: HTMLElement | null = null;
+  #lastReprobedRevision = -1;
   #menuUnsupported = false;
   #menuPending = false;
   #lastMenuNotice = false;
@@ -146,6 +149,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       document: this.#document,
       window: this.#window,
       onUnsupported: (reason) => this.#onMenuUnsupported(reason),
+      onFailure: (reason) => this.#recordError(new Error(reason)),
       onClosed: () => this.#scheduleRefresh(0),
     });
     this.#picker = new ProjectGroupNewChatPicker({
