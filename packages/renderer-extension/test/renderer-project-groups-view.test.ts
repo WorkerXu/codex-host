@@ -124,6 +124,22 @@ function fakeDocument(): Document {
   } as unknown as Document;
 }
 
+function allText(root: FakeElement): string {
+  return [root.textContent, ...root.children.map(allText)].join(" ");
+}
+
+function findElement(
+  root: FakeElement,
+  predicate: (element: FakeElement) => boolean,
+): FakeElement | null {
+  if (predicate(root)) return root;
+  for (const child of root.children) {
+    const found = findElement(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
 function findThreadRow(root: FakeElement): FakeElement | null {
   if (root.dataset.codexhostProjectGroupThread !== undefined) return root;
   for (const child of root.children) {
@@ -204,6 +220,31 @@ function groupView(): ProjectGroupModelView {
   };
 }
 
+function notMountedGroupView(): ProjectGroupModelView {
+  const base = groupView();
+  const project = base.projects[0];
+  if (!project?.project.entry) throw new Error("Missing project fixture");
+  const notMounted: ProjectGroupProjectView = {
+    ...project,
+    project: {
+      ...project.project,
+      missing: "not-mounted",
+      entry: { ...project.project.entry, native: null },
+    },
+    collapsed: true,
+    hasList: false,
+    newChatAvailable: false,
+  };
+  const machine = base.machines[0];
+  if (!machine) throw new Error("Missing machine fixture");
+  return {
+    ...base,
+    projects: [notMounted],
+    machines: [{ ...machine, projects: [notMounted] }],
+    unresolved: [notMounted.project.member],
+  };
+}
+
 describe("Project group thread row layout", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -237,5 +278,39 @@ describe("Project group thread row layout", () => {
     const actions = row.children.find((child) => child.children.length === 3);
     expect(actions?.style.getPropertyValue("position")).toBe("absolute");
     expect(actions?.offsetParent).toBe(row);
+  });
+
+  it("shows one neutral placeholder for a member that is not mounted", async () => {
+    vi.stubGlobal("HTMLElement", FakeElement);
+    vi.stubGlobal("Element", FakeElement);
+    const { ProjectGroupView } = await import("../src/renderer-project-groups-view.js");
+    const document = fakeDocument();
+    const host = list.parentElement as FakeElement;
+    const view = new ProjectGroupView(document, {
+      toggleGroup: () => undefined,
+      openThread: () => undefined,
+      openThreadMenu: () => undefined,
+      toggleThreadPin: () => undefined,
+      archiveThread: () => undefined,
+      openNewChat: () => undefined,
+      openManager: () => undefined,
+      expandProject: () => undefined,
+      showAll: () => undefined,
+      showMoreProjects: () => undefined,
+    });
+    view.render([notMountedGroupView()], {
+      collapsedGroups: new Set(),
+      menuAvailable: true,
+      threadActionsAvailable: true,
+    });
+    const root = host.children[0];
+    if (!root) throw new Error("Missing group root");
+    const text = allText(root);
+    expect(text.match(/该项目在收起的列表中/g)).toHaveLength(1);
+    expect(text).not.toContain("该项目当前未显示在侧边栏");
+    const warning = findElement(root, (element) =>
+      element.textContent.includes("个成员项目暂未加载"),
+    );
+    expect(warning?.style.getPropertyValue("color")).toBe("var(--color-text-secondary, #8b8b8b)");
   });
 });

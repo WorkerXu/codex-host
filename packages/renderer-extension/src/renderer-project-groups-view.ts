@@ -347,18 +347,7 @@ function projectContent(
     return container;
   }
   if (resolved.missing === "not-mounted") {
-    const message = document.createElement("div");
-    message.textContent = "该项目当前未显示在侧边栏";
-    style(message, {
-      padding: "0 6px 0 30px",
-      "min-height": "26px",
-      display: "flex",
-      "align-items": "center",
-      color: MUTED_COLOR,
-      "font-size": "12px",
-    });
     container.append(
-      message,
       actionRow(document, "该项目在收起的列表中", "展开", () => handlers.showMoreProjects()),
     );
     return container;
@@ -672,10 +661,10 @@ export class ProjectGroupView {
         );
       if (view.unresolved.length > 0) {
         const warning = this.#document.createElement("div");
-        warning.textContent = `${view.unresolved.length} 个成员项目当前不可用`;
+        warning.textContent = `${view.unresolved.length} 个成员项目暂未加载`;
         style(warning, {
           padding: "0 6px 0 26px",
-          color: statusColor("error"),
+          color: MUTED_COLOR,
           "font-size": "11px",
           "min-height": "22px",
           display: "flex",
