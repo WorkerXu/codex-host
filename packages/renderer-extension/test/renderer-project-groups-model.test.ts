@@ -84,6 +84,7 @@ const snapshots: NativeProjectSnapshot[] = [
     hostLabel: null,
     collapsed: false,
     hasList: true,
+    hasShowAllToggle: false,
     showAll: false,
   },
   {
@@ -93,6 +94,7 @@ const snapshots: NativeProjectSnapshot[] = [
     hostLabel: "beta-host",
     collapsed: false,
     hasList: true,
+    hasShowAllToggle: false,
     showAll: true,
   },
 ];
@@ -171,6 +173,26 @@ describe("Renderer project group model", () => {
       "local-alpha",
       "project-beta",
     ]);
+  });
+
+  it("only exposes Show all when the native project has a Show all control", () => {
+    const local = snapshots[0];
+    const without = buildProjectGroupViews({
+      groups: [group()],
+      catalog,
+      snapshots: [{ ...local, showAll: false, hasShowAllToggle: false }],
+      threadsByProject: new Map(),
+      machineState: new Map(),
+    });
+    expect(without[0]?.projects[0]?.canShowAll).toBe(false);
+    const withToggle = buildProjectGroupViews({
+      groups: [group()],
+      catalog,
+      snapshots: [{ ...local, showAll: false, hasShowAllToggle: true }],
+      threadsByProject: new Map(),
+      machineState: new Map(),
+    });
+    expect(withToggle[0]?.projects[0]?.canShowAll).toBe(true);
   });
 
   it("shortens the group row machine summary while keeping the full title", () => {

@@ -15,6 +15,7 @@ export interface NativeProjectSnapshot {
   hostLabel: string | null;
   collapsed: boolean;
   hasList: boolean;
+  hasShowAllToggle: boolean;
   showAll: boolean | null;
 }
 
@@ -49,6 +50,7 @@ export interface ProjectGroupProjectView {
   threads: readonly ThreadSnapshot[];
   collapsed: boolean;
   hasList: boolean;
+  hasShowAllToggle: boolean;
   showAll: boolean | null;
   canShowAll: boolean;
 }
@@ -224,8 +226,9 @@ function projectView(
     threads: native ? (threadsByProject.get(native.projectId) ?? []) : [],
     collapsed: native?.collapsed ?? true,
     hasList: native?.hasList ?? false,
+    hasShowAllToggle: native?.hasShowAllToggle ?? false,
     showAll: native?.showAll ?? null,
-    canShowAll: native?.hasList === true && native.showAll === false,
+    canShowAll: native?.hasList === true && native.showAll === false && native.hasShowAllToggle,
   };
 }
 

@@ -27,6 +27,7 @@ function project(missing: "missing" | "not-mounted" | null): ProjectGroupProject
           hostLabel: null,
           collapsed: false,
           hasList: true,
+          hasShowAllToggle: false,
           showAll: false,
         },
       },
@@ -35,6 +36,7 @@ function project(missing: "missing" | "not-mounted" | null): ProjectGroupProject
     threads: [],
     collapsed: false,
     hasList: true,
+    hasShowAllToggle: false,
     showAll: false,
     canShowAll: false,
   };

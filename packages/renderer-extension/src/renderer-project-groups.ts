@@ -606,10 +606,14 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     const section = findProjectsSection(this.#document);
     if (!section) return;
     const unit = projectUnitForId(section, projectId);
-    const list = unit ? projectListForUnit(unit) : null;
-    if (!list) return;
-    showAllToggle(list)?.click();
-    this.#scheduleRefresh(120);
+    if (!unit) return;
+    const toggle = showAllToggle(unit);
+    if (!toggle) {
+      this.#notify("该项目没有原生的「查看全部」控制。");
+      return;
+    }
+    toggle.click();
+    this.#scheduleRefresh(300);
   }
 
   #recordError(error: unknown): void {

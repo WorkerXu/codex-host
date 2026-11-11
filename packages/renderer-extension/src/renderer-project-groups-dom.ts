@@ -105,6 +105,7 @@ export function readNativeProjectSnapshots(section: HTMLElement): NativeProjectS
       hostLabel: projectHostLabel(row),
       collapsed: row.getAttribute(PROJECT_COLLAPSED_ATTRIBUTE) === "true",
       hasList: projectList !== null,
+      hasShowAllToggle: unit.querySelector(PROJECT_SHOW_ALL_TOGGLE_SELECTOR) !== null,
       showAll: showAll === null || showAll === undefined ? null : showAll === "true",
     });
   }
@@ -155,8 +156,8 @@ export function projectMenuButton(row: HTMLElement): HTMLElement | null {
   return row.querySelector<HTMLElement>('button[aria-haspopup="menu"]');
 }
 
-export function showAllToggle(list: HTMLElement): HTMLElement | null {
-  return list.querySelector<HTMLElement>(PROJECT_SHOW_ALL_TOGGLE_SELECTOR);
+export function showAllToggle(root: ParentNode): HTMLElement | null {
+  return root.querySelector<HTMLElement>(PROJECT_SHOW_ALL_TOGGLE_SELECTOR);
 }
 
 export function sectionCollapsed(section: HTMLElement): boolean {
