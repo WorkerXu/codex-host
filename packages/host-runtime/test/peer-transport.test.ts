@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ResolvedPeer } from "../src/peer-config.js";
 import {
+  DELEGATION_RUNTIME_ENDPOINT_ENV,
+  DELEGATION_RUNTIME_TOKEN_ENV,
+} from "../src/delegation-types.js";
+import {
   peerSshArguments,
   requestPeerRoute,
   type PeerProcess,
@@ -65,14 +69,14 @@ function fakeSpawn(
   behavior: (input: string) => { code: number | null; stdout?: string; stderr?: string },
 ): {
   spawnImpl: PeerSpawn;
-  calls: { command: string; args: string[] }[];
+  calls: { command: string; args: string[]; env: NodeJS.ProcessEnv }[];
   processes: FakeProcess[];
 } {
-  const calls: { command: string; args: string[] }[] = [];
+  const calls: { command: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
   const processes: FakeProcess[] = [];
-  const spawnImpl: PeerSpawn = (command, args) => {
+  const spawnImpl: PeerSpawn = (command, args, options) => {
     const child = new FakeProcess();
-    calls.push({ command, args: [...args] });
+    calls.push({ command, args: [...args], env: options.env });
     processes.push(child);
     let input = "";
     child.stdin.on("data", (chunk) => {
@@ -96,9 +100,10 @@ function request(input: {
   spawnImpl: PeerSpawn;
   peer?: ResolvedPeer;
   timeoutMs?: number;
+  environment?: NodeJS.ProcessEnv;
 }): Promise<Record<string, unknown>> {
   return requestPeerRoute({
-    environment: { CODEXHOST_DATA_DIR: input.root },
+    environment: input.environment ?? { CODEXHOST_DATA_DIR: input.root },
     peer: input.peer ?? peer(),
     route: "/v1/harness/list",
     body: {},
@@ -143,11 +148,21 @@ describe("peer SSH transport", () => {
       received = input;
       return { code: 0, stdout: '{"harnesses":["codex","pi"]}' };
     });
-    await expect(request({ root, spawnImpl })).resolves.toEqual({ harnesses: ["codex", "pi"] });
+    const environment = {
+      CODEXHOST_DATA_DIR: root,
+      [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+      [DELEGATION_RUNTIME_TOKEN_ENV]: "secret",
+    };
+    await expect(request({ root, spawnImpl, environment })).resolves.toEqual({
+      harnesses: ["codex", "pi"],
+    });
     expect(JSON.parse(received)).toEqual({ route: "/v1/harness/list", body: {} });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args).toContain("peer-exec");
     expect(calls[0]?.args).toContain("mac");
+    // A SendEnv rule must not be able to forward the local Runtime token.
+    expect(calls[0]?.env[DELEGATION_RUNTIME_TOKEN_ENV]).toBeUndefined();
+    expect(calls[0]?.env[DELEGATION_RUNTIME_ENDPOINT_ENV]).toBeUndefined();
   });
 
   it("preserves a structured error returned by the peer", async () => {

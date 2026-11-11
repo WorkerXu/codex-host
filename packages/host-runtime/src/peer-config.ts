@@ -47,9 +47,15 @@ function invalid(message: string): DelegationControlError {
 }
 
 export function validatePeerName(value: string): string {
-  if (!PEER_NAME.test(value) || value === "local") {
+  if (
+    !PEER_NAME.test(value) ||
+    value === "local" ||
+    value === "__proto__" ||
+    value === "constructor" ||
+    value === "prototype"
+  ) {
     throw invalid(
-      "Peer name must contain 1-64 letters, digits, dots, underscores, or hyphens and must not be 'local'",
+      "Peer name must contain 1-64 letters, digits, dots, underscores, or hyphens and must not be a reserved name",
     );
   }
   return value;

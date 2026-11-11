@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 
-import { DelegationControlError, type DelegationControlErrorCode } from "./delegation-types.js";
+import {
+  DELEGATION_RUNTIME_ENDPOINT_ENV,
+  DELEGATION_RUNTIME_TOKEN_ENV,
+  DelegationControlError,
+  type DelegationControlErrorCode,
+} from "./delegation-types.js";
 import type { ResolvedPeer } from "./peer-config.js";
 import { codexhostDataDirectory } from "./runtime-control-file.js";
 
@@ -68,6 +73,15 @@ function defaultSpawn(
   }) as unknown as PeerProcess;
 }
 
+/** A SendEnv rule must never forward this machine's Runtime token over SSH. */
+function sshEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      ([name]) => name !== DELEGATION_RUNTIME_ENDPOINT_ENV && name !== DELEGATION_RUNTIME_TOKEN_ENV,
+    ),
+  );
+}
+
 function unreachable(
   peer: ResolvedPeer,
   message: string,
@@ -119,10 +133,9 @@ export async function requestPeerRoute(input: {
   const timeoutMs = input.timeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
   const { command, args } = peerSshArguments(input);
   // ControlMaster sockets live here; ssh requires the directory to exist.
-  await mkdir(path.join(codexhostDataDirectory(input.environment), "ssh"), {
-    recursive: true,
-    mode: 0o700,
-  }).catch(() => undefined);
+  const controlDirectory = path.join(codexhostDataDirectory(input.environment), "ssh");
+  await mkdir(controlDirectory, { recursive: true, mode: 0o700 }).catch(() => undefined);
+  await chmod(controlDirectory, 0o700).catch(() => undefined);
 
   return await new Promise<Record<string, unknown>>((resolve, reject) => {
     let settled = false;
@@ -151,7 +164,7 @@ export async function requestPeerRoute(input: {
     try {
       child = (input.spawnImpl ?? defaultSpawn)(command, args, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: input.environment,
+        env: sshEnvironment(input.environment),
       });
     } catch (error) {
       finish(() => {

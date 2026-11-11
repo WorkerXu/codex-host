@@ -13,8 +13,10 @@ import {
 
 export type DelegationCliFormat = "json" | "compact";
 
-function threadLink(threadId: string): string {
-  return `codex://threads/${threadId}`;
+function threadLink(threadId: string, hostId?: string): string {
+  return hostId
+    ? `thread://${threadId}?hostId=${encodeURIComponent(hostId)}`
+    : `codex://threads/${threadId}`;
 }
 
 function watchOutput(watch: DelegationStartResult["watch"]): { watch?: unknown } {
@@ -56,9 +58,7 @@ function snapshotOutput(
   view: "result" | "messages",
 ): unknown {
   const common = {
-    thread: snapshot.hostId
-      ? `thread://${snapshot.threadId}?hostId=${encodeURIComponent(snapshot.hostId)}`
-      : threadLink(snapshot.threadId),
+    thread: threadLink(snapshot.threadId, snapshot.hostId),
     harnessId: snapshot.harnessId,
     status: snapshot.status,
     ...(snapshot.timedOut !== undefined ? { timedOut: snapshot.timedOut } : {}),
@@ -121,7 +121,7 @@ export function compactDelegationOutput(
     case "thread send": {
       const result = body as ThreadSendResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         harnessId: result.harnessId,
         status: result.status,
       };
@@ -129,7 +129,7 @@ export function compactDelegationOutput(
     case "thread cancel": {
       const result = body as ThreadCancelResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         harnessId: result.harnessId,
         cancelRequested: result.cancelled,
       };

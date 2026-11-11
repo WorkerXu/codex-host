@@ -6,6 +6,13 @@ import { parseDelegationArguments, type DelegationCliArguments } from "./delegat
 import { compactDelegationOutput } from "./delegation-cli-output.js";
 import { runPeerExec } from "./peer-exec.js";
 import { runPeerCli } from "./peer-cli.js";
+import {
+  peerThreadReference,
+  readPeerConfig,
+  resolvePeerTarget,
+  type ResolvedPeer,
+} from "./peer-config.js";
+import { DEFAULT_PEER_TIMEOUT_MS, requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
 
@@ -20,6 +27,7 @@ import {
 } from "./delegation-types.js";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+const PEER_START_TIMEOUT_MS = 60_000;
 // Node's fetch abandons a request that sends no response headers for 300 s, so
 // longer waits are split into Runtime requests that each answer well before then.
 const MAX_WAIT_REQUEST_MS = 240_000;
@@ -52,6 +60,20 @@ function decodeHostId(value: string): string {
   } catch {
     throw new DelegationControlError("INVALID_ARGUMENT", "Thread reference is invalid");
   }
+}
+
+function threadHost(
+  parsed: DelegationCliArguments,
+  reference: { hostId?: string },
+): string | undefined {
+  const host = value(parsed, "--host");
+  if (host && reference.hostId && host !== reference.hostId) {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "--host conflicts with the Thread reference",
+    );
+  }
+  return host ?? reference.hostId;
 }
 
 function positiveInteger(value: string | undefined, name: string, maximum?: number): number {
@@ -159,6 +181,86 @@ async function requestRuntime(input: {
   return body;
 }
 
+type HostTarget = ResolvedPeer | "local" | "unknown";
+
+async function resolveHostTarget(
+  environment: NodeJS.ProcessEnv,
+  host: string | undefined,
+): Promise<HostTarget> {
+  if (!host) return "local";
+  return resolvePeerTarget(await readPeerConfig(environment), host) ?? "unknown";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Routes one Runtime operation to this machine or to a configured peer. */
+async function requestHosted(input: {
+  environment: NodeJS.ProcessEnv;
+  target: HostTarget;
+  host?: string;
+  path: string;
+  body: Record<string, unknown>;
+  peerTimeoutMs?: number;
+  desktopFallback?: boolean;
+  fetchImpl?: typeof fetch;
+  spawnImpl?: PeerSpawn;
+}): Promise<unknown> {
+  if (input.target !== "local" && input.target !== "unknown") {
+    // hostId and callerThreadId are local routing context, not peer inputs.
+    const body = { ...input.body };
+    delete body.hostId;
+    delete body.callerThreadId;
+    return await requestPeerRoute({
+      environment: input.environment,
+      peer: input.target,
+      route: input.path,
+      body,
+      timeoutMs: input.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS,
+      ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+    });
+  }
+  if (input.target === "unknown" && !input.desktopFallback) {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      `No peer is configured for Host '${input.host}'. Add it with 'codexhost peer add' or use --host local.`,
+    );
+  }
+  return await requestRuntime({
+    environment: input.environment,
+    path: input.path,
+    body: input.body,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+  });
+}
+
+/** Peer results carry their Host so later compact links route back. */
+function withPeerHostId(result: unknown, target: HostTarget): unknown {
+  if (typeof target !== "object" || !isRecord(result)) return result;
+  return { ...result, hostId: target.linkHostId };
+}
+
+function peerDelegationResult(result: unknown, peer: ResolvedPeer): unknown {
+  if (!isRecord(result) || typeof result.threadId !== "string") return result;
+  const next = isRecord(result.next) ? result.next : {};
+  const suffix = ` --host ${peer.name}`;
+  return {
+    ...result,
+    deepLink: peerThreadReference(result.threadId, peer.linkHostId),
+    next: {
+      read:
+        typeof next.read === "string"
+          ? `${next.read}${suffix}`
+          : `codexhost thread read ${result.threadId} --host ${peer.name}`,
+      wait:
+        typeof next.wait === "string"
+          ? `${next.wait}${suffix}`
+          : `codexhost thread wait ${result.threadId} --host ${peer.name}`,
+    },
+  };
+}
+
 /** Waits are non-consuming, so a long wait repeats bounded Runtime waits until its own deadline. */
 async function waitInSlices(
   body: Record<string, unknown> & { timeoutMs?: number },
@@ -190,6 +292,7 @@ export async function runDelegationCli(input: {
   output?: Writable;
   diagnosticOutput?: Writable;
   fetchImpl?: typeof fetch;
+  spawnImpl?: PeerSpawn;
 }): Promise<number> {
   const output = input.output ?? process.stdout;
   const diagnosticOutput = input.diagnosticOutput ?? process.stderr;
@@ -225,26 +328,30 @@ export async function runDelegationCli(input: {
     ): void =>
       writeJson(output, format === "json" ? body : compactDelegationOutput(name, body, view));
     if (group === "harness" && command === "list") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, ["--host"]);
       if (parsed.positionals.length > 0) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
           "harness list accepts no positional arguments",
         );
       }
+      const host = value(parsed, "--host");
       writeResult(
         "harness list",
-        await requestRuntime({
+        await requestHosted({
           environment,
+          target: await resolveHostTarget(environment, host),
+          ...(host ? { host } : {}),
           path: "/v1/harness/list",
           body: {},
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+          ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
         }),
       );
       return 0;
     }
     if (group === "harness" && command === "inspect") {
-      rejectUnknown(parsed, ["--cwd", "--refresh"]);
+      rejectUnknown(parsed, ["--cwd", "--refresh", "--host"]);
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -259,10 +366,13 @@ export async function runDelegationCli(input: {
       if (refresh !== undefined && refresh !== "true" && refresh !== "false") {
         throw new DelegationControlError("INVALID_ARGUMENT", "--refresh must be true or false");
       }
+      const host = value(parsed, "--host");
       writeResult(
         "harness inspect",
-        await requestRuntime({
+        await requestHosted({
           environment,
+          target: await resolveHostTarget(environment, host),
+          ...(host ? { host } : {}),
           path: "/v1/harness/inspect",
           body: {
             harnessId,
@@ -270,6 +380,7 @@ export async function runDelegationCli(input: {
             ...(refresh !== undefined ? { refresh: refresh === "true" } : {}),
           },
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+          ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
         }),
       );
       return 0;
@@ -286,6 +397,7 @@ export async function runDelegationCli(input: {
         "--request-id",
         "--watch",
         "--watch-timeout-ms",
+        "--host",
       ]);
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
@@ -296,7 +408,19 @@ export async function runDelegationCli(input: {
       const task = value(parsed, "--task");
       if (!harnessId || !task)
         throw new DelegationControlError("INVALID_ARGUMENT", "--harness and --task are required");
-      const parentThread = value(parsed, "--parent-thread") ?? callerThreadId(environment);
+      const host = value(parsed, "--host");
+      const target = await resolveHostTarget(environment, host);
+      const peer = typeof target === "object" ? target : undefined;
+      if (peer && value(parsed, "--parent-thread"))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Cross-machine delegate start does not support --parent-thread",
+        );
+      // A remote Runtime has no local parent Thread; the caller environment is
+      // intentionally ignored so the child is not attached to a foreign ID.
+      const parentThread = peer
+        ? undefined
+        : (value(parsed, "--parent-thread") ?? callerThreadId(environment));
       const watch = value(parsed, "--watch");
       if (watch !== undefined && watch !== "true" && watch !== "false")
         throw new DelegationControlError("INVALID_ARGUMENT", "--watch must be true or false");
@@ -305,39 +429,44 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "--watch-timeout-ms requires --watch true",
         );
-      writeResult(
-        "delegate start",
-        await requestRuntime({
-          environment,
-          path: "/v1/delegate/start",
-          body: {
-            harnessId,
-            task,
-            ...(value(parsed, "--task-name") !== undefined
-              ? { taskName: value(parsed, "--task-name") }
-              : {}),
-            ...(cwdOption(parsed) ? { cwd: cwdOption(parsed) } : {}),
-            ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
-            ...(value(parsed, "--thinking")
-              ? { thinkingOptionId: value(parsed, "--thinking") }
-              : {}),
-            ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
-            ...(value(parsed, "--request-id") ? { requestId: value(parsed, "--request-id") } : {}),
-            ...(watch === "true"
-              ? {
-                  watchTimeoutMs: value(parsed, "--watch-timeout-ms")
-                    ? positiveInteger(value(parsed, "--watch-timeout-ms"), "--watch-timeout-ms")
-                    : DEFAULT_WATCH_TIMEOUT_MS,
-                }
-              : {}),
-          },
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
-        }),
-      );
+      if (peer && watch === "true")
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Cross-machine delegate start does not support --watch; use 'codexhost thread wait <thread> --host <peer>' after start",
+        );
+      const result = await requestHosted({
+        environment,
+        target,
+        ...(host ? { host } : {}),
+        path: "/v1/delegate/start",
+        body: {
+          harnessId,
+          task,
+          ...(value(parsed, "--task-name") !== undefined
+            ? { taskName: value(parsed, "--task-name") }
+            : {}),
+          ...(cwdOption(parsed) ? { cwd: cwdOption(parsed) } : {}),
+          ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
+          ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
+          ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
+          ...(value(parsed, "--request-id") ? { requestId: value(parsed, "--request-id") } : {}),
+          ...(watch === "true"
+            ? {
+                watchTimeoutMs: value(parsed, "--watch-timeout-ms")
+                  ? positiveInteger(value(parsed, "--watch-timeout-ms"), "--watch-timeout-ms")
+                  : DEFAULT_WATCH_TIMEOUT_MS,
+              }
+            : {}),
+        },
+        ...(peer ? { peerTimeoutMs: PEER_START_TIMEOUT_MS } : {}),
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+        ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+      });
+      writeResult("delegate start", peer ? peerDelegationResult(result, peer) : result);
       return 0;
     }
     if (group === "thread" && command === "send") {
-      rejectUnknown(parsed, ["--message"]);
+      rejectUnknown(parsed, ["--message", "--host"]);
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -352,19 +481,28 @@ export async function runDelegationCli(input: {
           "Thread identifier and --message are required",
         );
       }
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
       writeResult(
         "thread send",
-        await requestRuntime({
-          environment,
-          path: "/v1/thread/send",
-          body: { threadId: normalizeThreadId(threadId), message },
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
-        }),
+        withPeerHostId(
+          await requestHosted({
+            environment,
+            target,
+            ...(host ? { host } : {}),
+            path: "/v1/thread/send",
+            body: { threadId: reference.threadId, message },
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+            ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+          }),
+          target,
+        ),
       );
       return 0;
     }
     if (group === "thread" && command === "cancel") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, ["--host"]);
       if (parsed.positionals.length !== 1) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -375,25 +513,28 @@ export async function runDelegationCli(input: {
       if (!threadId) {
         throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
       }
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
       writeResult(
         "thread cancel",
-        await requestRuntime({
-          environment,
-          path: "/v1/thread/cancel",
-          body: { threadId: normalizeThreadId(threadId) },
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
-        }),
+        withPeerHostId(
+          await requestHosted({
+            environment,
+            target,
+            ...(host ? { host } : {}),
+            path: "/v1/thread/cancel",
+            body: { threadId: reference.threadId },
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+            ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+          }),
+          target,
+        ),
       );
       return 0;
     }
     if (group === "thread" && (command === "read" || command === "wait")) {
-      rejectUnknown(parsed, [
-        "--view",
-        "--cursor",
-        "--limit",
-        "--timeout-ms",
-        ...(command === "read" ? ["--host"] : []),
-      ]);
+      rejectUnknown(parsed, ["--view", "--cursor", "--limit", "--timeout-ms", "--host"]);
       if (parsed.positionals.length !== 1)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -415,20 +556,14 @@ export async function runDelegationCli(input: {
       const threadId = parsed.positionals[0];
       if (!threadId)
         throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
-      const reference =
-        command === "read"
-          ? readThreadReference(threadId)
-          : { threadId: normalizeThreadId(threadId) };
-      const hostId = value(parsed, "--host");
-      if (hostId && reference.hostId && hostId !== reference.hostId)
-        throw new DelegationControlError(
-          "INVALID_ARGUMENT",
-          "--host conflicts with the Thread reference",
-        );
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
       const caller = command === "read" ? callerThreadId(environment) : undefined;
       const body = {
-        ...reference,
-        ...(hostId ? { hostId } : {}),
+        threadId: reference.threadId,
+        // Remote Host context is meaningful only for reads; wait stays local or peer-routed.
+        ...(command === "read" && host ? { hostId: host } : {}),
         ...(caller ? { callerThreadId: normalizeThreadId(caller) } : {}),
         view,
         ...(value(parsed, "--cursor") ? { cursor: value(parsed, "--cursor") } : {}),
@@ -444,21 +579,32 @@ export async function runDelegationCli(input: {
           : {}),
       };
       const request = (requestBody: Record<string, unknown>) =>
-        requestRuntime({
+        requestHosted({
           environment,
+          target,
+          ...(host ? { host } : {}),
           path: command === "read" ? "/v1/thread/read" : "/v1/thread/wait",
           body: requestBody,
+          ...(command === "read" ? { desktopFallback: true } : {}),
+          // A peer wait must outlive the slice it asks the remote Runtime for.
+          ...(command === "wait"
+            ? {
+                peerTimeoutMs: Number(requestBody.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS) + 30_000,
+              }
+            : {}),
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+          ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
         });
+      const result = command === "read" ? await request(body) : await waitInSlices(body, request);
       writeResult(
         command === "read" ? "thread read" : "thread wait",
-        command === "read" ? await request(body) : await waitInSlices(body, request),
+        withPeerHostId(result, target),
         view,
       );
       return 0;
     }
     if (group === "thread" && command === "watch") {
-      rejectUnknown(parsed, ["--notify", "--timeout-ms"]);
+      rejectUnknown(parsed, ["--notify", "--timeout-ms", "--host"]);
       if (parsed.positionals.length !== 1)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -467,6 +613,14 @@ export async function runDelegationCli(input: {
       const threadId = parsed.positionals[0];
       if (!threadId)
         throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
+      if (target === "unknown" || typeof target === "object")
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "thread watch does not support remote Hosts; use 'codexhost thread wait <thread> --host <peer>' instead",
+        );
       const notifyThread = value(parsed, "--notify") ?? callerThreadId(environment);
       if (!notifyThread)
         throw new DelegationControlError(
@@ -479,7 +633,7 @@ export async function runDelegationCli(input: {
           environment,
           path: "/v1/thread/watch",
           body: {
-            threadId: normalizeThreadId(threadId),
+            threadId: reference.threadId,
             notifyThreadId: normalizeThreadId(notifyThread),
             timeoutMs: value(parsed, "--timeout-ms")
               ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
@@ -491,11 +645,17 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "watches") {
-      rejectUnknown(parsed, []);
+      rejectUnknown(parsed, ["--host"]);
       if (parsed.positionals.length > 0)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
           "thread watches accepts no positional arguments",
+        );
+      const host = value(parsed, "--host");
+      if (host && host !== "local")
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "thread watches is local-only; --host is not supported",
         );
       writeResult(
         "thread watches",

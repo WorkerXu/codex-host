@@ -116,6 +116,8 @@ export interface ThreadSendResult {
   turnId: string;
   harnessId: RoutedHarnessId;
   status: "running";
+  /** Set when the CLI routed the send to a peer. */
+  hostId?: string;
   next: { read: string; wait: string };
 }
 
@@ -128,6 +130,8 @@ export interface ThreadCancelResult {
   turnId: string | null;
   harnessId: RoutedHarnessId;
   cancelled: boolean;
+  /** Set when the CLI routed the cancellation to a peer. */
+  hostId?: string;
 }
 
 export interface ThreadReadInput {

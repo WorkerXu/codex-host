@@ -152,4 +152,18 @@ describe("compact delegation output", () => {
       nextCursor: null,
     });
   });
+
+  it("keeps a peer Host on send and cancel links", () => {
+    const common = {
+      threadId: "child",
+      harnessId: "pi",
+      hostId: "remote-ssh-discovered:mac",
+    };
+    expect(
+      compactDelegationOutput("thread send", { ...common, status: "running", next: {} }),
+    ).toMatchObject({ thread: "thread://child?hostId=remote-ssh-discovered%3Amac" });
+    expect(compactDelegationOutput("thread cancel", { ...common, cancelled: true })).toMatchObject({
+      thread: "thread://child?hostId=remote-ssh-discovered%3Amac",
+    });
+  });
 });
