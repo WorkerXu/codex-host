@@ -4,6 +4,7 @@ import type { Writable } from "node:stream";
 import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-help.js";
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
+import { runPeerExec } from "./peer-exec.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
 
@@ -193,6 +194,11 @@ export async function runDelegationCli(input: {
   const diagnosticOutput = input.diagnosticOutput ?? process.stderr;
   const environment = input.environment ?? process.env;
   try {
+    // Hidden remote half of peer delegation. It must run before help handling:
+    // it reads a JSON envelope from stdin instead of command-line options.
+    if (input.arguments[0] === "peer-exec") {
+      return await runPeerExec({ environment, output });
+    }
     const [group, command, ...rest] = input.arguments;
     const help = delegationCliHelp(input.arguments);
     if (help !== undefined) {

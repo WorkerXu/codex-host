@@ -598,7 +598,8 @@ if (userArguments.length === 0) {
 } else if (
   userArguments[0] === "harness" ||
   userArguments[0] === "delegate" ||
-  userArguments[0] === "thread"
+  userArguments[0] === "thread" ||
+  userArguments[0] === "peer-exec"
 ) {
   launchArguments = null;
   delegationArguments = userArguments;
