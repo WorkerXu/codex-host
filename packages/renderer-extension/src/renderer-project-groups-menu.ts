@@ -10,7 +10,7 @@ export type ProjectGroupMenuState = "unknown" | "native" | "unsupported";
 const MENU_SELECTOR =
   '[role="menu"], [data-radix-menu-content], [data-radix-popper-content-wrapper]';
 const MENU_TIMEOUT_MS = 500;
-const MENU_CLOSE_TIMEOUT_MS = 15_000;
+const MENU_CLOSE_RECHECK_MS = 1_000;
 
 interface MenuCandidate {
   element: HTMLElement;
@@ -41,6 +41,46 @@ function projectUnitForRow(row: HTMLElement): HTMLElement | null {
 
 function restoreStyle(element: HTMLElement, value: string): void {
   element.style.cssText = value;
+}
+
+export function watchNativeMenuClose(options: {
+  menu: HTMLElement;
+  document: Document;
+  window: Window;
+  onClosed: () => void;
+  recheckMs?: number;
+}): () => void {
+  const { menu, document, window, onClosed } = options;
+  let cleaned = false;
+  let observer: MutationObserver | null = null;
+  let interval: number | null = null;
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    observer?.disconnect();
+    observer = null;
+    if (interval !== null) window.clearInterval(interval);
+    interval = null;
+  };
+  const isClosed = (): boolean => !menu.isConnected || menu.getAttribute("data-state") === "closed";
+  const finish = (): void => {
+    if (cleaned) return;
+    cleanup();
+    onClosed();
+  };
+  const check = (): void => {
+    if (isClosed()) finish();
+  };
+  observer = new MutationObserver(check);
+  observer.observe(document.body ?? document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-state"],
+  });
+  interval = window.setInterval(check, options.recheckMs ?? MENU_CLOSE_RECHECK_MS);
+  check();
+  return cleanup;
 }
 
 /**
@@ -238,20 +278,12 @@ export class ProjectGroupMenuProxy {
       this.#restoreGhost = null;
       this.#onClosed?.();
     };
-    const observer = new MutationObserver(() => {
-      if (!menu.isConnected || menu.getAttribute("data-state") === "closed") finish();
+    this.#closeWatcher = watchNativeMenuClose({
+      menu,
+      document: this.#document,
+      window: this.#window,
+      onClosed: finish,
     });
-    observer.observe(this.#document.body ?? this.#document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-state"],
-    });
-    const timer = this.#window.setTimeout(finish, MENU_CLOSE_TIMEOUT_MS);
-    this.#closeWatcher = () => {
-      observer.disconnect();
-      this.#window.clearTimeout(timer);
-    };
   }
 
   #closeForeignMenu(): void {
