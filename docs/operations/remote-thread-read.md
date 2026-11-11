@@ -1,7 +1,13 @@
 # Read a Thread on another Host
 
-The delegation CLI can read a native Codex or external Harness Thread through an
-existing Codex Desktop remote connection:
+The delegation CLI can read a native Codex or external Harness Thread on another
+machine in two ways. If `<data-dir>/peers.json` maps the Host ID or peer name to
+an SSH alias, the CLI uses the peer transport described in
+[`../architecture/peer-delegation.md`](../architecture/peer-delegation.md). That
+path needs a running codexhost Host Runtime on the peer, but no Desktop
+connection.
+
+Otherwise the CLI reads through an existing Codex Desktop remote connection:
 
 ```sh
 codexhost thread read 'thread://THREAD_ID?hostId=remote-ssh-discovered%3Amac' --view messages --limit 25
@@ -42,7 +48,9 @@ or local fallback on remote failure. Requests are bounded and not retried.
 
 `messages` pages visible user/Agent text, not tool output or reasoning. Preserve
 the returned Host-qualified link and `nextCursor` when requesting another page.
-Remote send, cancel, wait and watch are outside this feature's scope.
+Remote `thread send`, `cancel` and `wait` are available only through a configured
+peer; without a peer they are rejected rather than sent through Desktop. Remote
+`thread watch` is not supported.
 
 Serialized Controller replies (including the envelope and newline) are limited to
 16 MiB for Thread reads; settings operations retain their 1 MiB limit. Oversized
