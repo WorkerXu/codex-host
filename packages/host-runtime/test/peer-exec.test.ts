@@ -80,7 +80,7 @@ describe("peer-exec request validation", () => {
 describe("peer-exec proxy", () => {
   it("posts a whitelisted route to the live local Runtime and passes the response through", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const server = await startDelegationControlServer({ token, api: api() });
     const control = await publishRuntimeControl({
       environment,
@@ -106,7 +106,7 @@ describe("peer-exec proxy", () => {
 
   it("passes a structured Runtime error through and exits nonzero", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const server = await startDelegationControlServer({
       token,
       api: api({
@@ -146,7 +146,7 @@ describe("peer-exec proxy", () => {
       runPeerExec({
         stream: requestStream({ route: "/v1/harness/list", body: {} }),
         output,
-        environment: { CODEXHOST_DATA_DIR: root },
+        environment: { CODEXHOST_USER_DIR: root },
       }),
     ).resolves.toBe(1);
     expect(JSON.parse(outputText(output))).toMatchObject({

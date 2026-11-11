@@ -1,7 +1,7 @@
 # Read a Thread on another Host
 
 The delegation CLI can read a native Codex or external Harness Thread on another
-machine in two ways. If `<data-dir>/peers.json` maps the Host ID or peer name to
+machine in two ways. If `~/.codexhost/peers.json` maps the Host ID or peer name to
 an SSH alias, the CLI uses the peer transport described in
 [`../architecture/peer-delegation.md`](../architecture/peer-delegation.md). That
 path needs a running codexhost Host Runtime on the peer, but no Desktop

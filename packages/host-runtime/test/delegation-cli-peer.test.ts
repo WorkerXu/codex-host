@@ -19,7 +19,7 @@ const roots: string[] = [];
 async function environment(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(path.join(tmpdir(), "cx-cli-peer-"));
   roots.push(root);
-  const environment = { CODEXHOST_DATA_DIR: root };
+  const environment = { CODEXHOST_USER_DIR: root };
   await writePeerConfig(environment, {
     formatVersion: 1,
     peers: {

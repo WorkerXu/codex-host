@@ -46,7 +46,7 @@ function config(): PeerConfig {
 describe("peer configuration", () => {
   it("round-trips peers with owner-only permissions", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     await writePeerConfig(environment, config());
     await expect(readPeerConfig(environment)).resolves.toEqual(config());
     if (process.platform !== "win32") {
@@ -57,7 +57,7 @@ describe("peer configuration", () => {
 
   it("treats a missing file as no peers", async () => {
     const root = await dataDirectory();
-    await expect(readPeerConfig({ CODEXHOST_DATA_DIR: root })).resolves.toEqual({
+    await expect(readPeerConfig({ CODEXHOST_USER_DIR: root })).resolves.toEqual({
       formatVersion: 1,
       peers: {},
     });
@@ -95,9 +95,19 @@ describe("peer configuration", () => {
     expect(() => parsePeerConfig(value)).toThrow();
   });
 
+  it("does not read or write the real home from an unisolated test process", async () => {
+    await expect(readPeerConfig({ VITEST: "true" })).resolves.toEqual({
+      formatVersion: 1,
+      peers: {},
+    });
+    await expect(writePeerConfig({ VITEST: "true" }, config())).rejects.toThrow(
+      "CODEXHOST_USER_DIR",
+    );
+  });
+
   it("rejects malformed stored JSON with the file path", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     await writeFile(peerConfigPath(environment), "{oops");
     await expect(readPeerConfig(environment)).rejects.toThrow(peerConfigPath(environment));
   });

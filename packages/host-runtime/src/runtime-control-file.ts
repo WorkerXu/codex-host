@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 export const RUNTIME_CONTROL_FORMAT_VERSION = 1;
+export const RUNTIME_CONTROL_DIRECTORY_ENV = "CODEXHOST_RUNTIME_CONTROL_DIR";
+export const CODEXHOST_USER_DIR_ENV = "CODEXHOST_USER_DIR";
 const CONTROL_FILE_NAME = /^control-(\d+)\.json$/u;
 const CONTROL_DIRECTORY_NAME = "runtime";
 
@@ -28,15 +30,44 @@ export interface RuntimeControlHandle {
   close(): Promise<void>;
 }
 
-/** Same rule as the Runtime log, Launcher startup record, and console. */
-export function codexhostDataDirectory(environment: NodeJS.ProcessEnv): string {
-  return environment.CODEXHOST_DATA_DIR
-    ? path.resolve(environment.CODEXHOST_DATA_DIR)
-    : path.join(homedir(), ".codexhost");
+/**
+ * Fixed per-user location for files that ordinary SSH sessions must see. It is
+ * intentionally independent of CODEXHOST_DATA_DIR: a Desktop-managed remote
+ * Runtime uses a nested data directory, while `ssh ... codexhost peer-exec`
+ * does not inherit that variable.
+ */
+export function codexhostUserDirectory(environment: NodeJS.ProcessEnv): string {
+  const override = environment[CODEXHOST_USER_DIR_ENV];
+  return override ? path.resolve(override) : path.join(homedir(), ".codexhost");
 }
 
 export function runtimeControlDirectory(environment: NodeJS.ProcessEnv): string {
-  return path.join(codexhostDataDirectory(environment), CONTROL_DIRECTORY_NAME);
+  const override = environment[RUNTIME_CONTROL_DIRECTORY_ENV];
+  return override
+    ? path.resolve(override)
+    : path.join(codexhostUserDirectory(environment), CONTROL_DIRECTORY_NAME);
+}
+
+export function isVitestProcess(environment: NodeJS.ProcessEnv): boolean {
+  return (
+    environment.VITEST === "true" ||
+    environment.VITEST_WORKER_ID !== undefined ||
+    process.env.VITEST === "true" ||
+    process.env.VITEST_WORKER_ID !== undefined
+  );
+}
+
+/** Tests must opt into an isolated location instead of touching the real home. */
+export function isUnisolatedTestUserDirectory(environment: NodeJS.ProcessEnv): boolean {
+  return isVitestProcess(environment) && !environment[CODEXHOST_USER_DIR_ENV];
+}
+
+export function isUnisolatedTestControlDirectory(environment: NodeJS.ProcessEnv): boolean {
+  return (
+    isVitestProcess(environment) &&
+    !environment[CODEXHOST_USER_DIR_ENV] &&
+    !environment[RUNTIME_CONTROL_DIRECTORY_ENV]
+  );
 }
 
 export function runtimeControlPath(environment: NodeJS.ProcessEnv, pid = process.pid): string {
@@ -129,6 +160,10 @@ export async function publishRuntimeControl(input: {
     pid,
     startedAt: input.startedAt ?? new Date().toISOString(),
   };
+  // A test that forgot to set an isolated directory must not write the real home.
+  if (isUnisolatedTestControlDirectory(input.environment)) {
+    return { filePath: "", record, close: async () => undefined };
+  }
   const directory = runtimeControlDirectory(input.environment);
   await ensureControlDirectory(directory);
   const filePath = runtimeControlPath(input.environment, pid);
@@ -162,6 +197,8 @@ export async function readRuntimeControl(
   environment: NodeJS.ProcessEnv,
   options: { isProcessAlive?: (pid: number) => boolean } = {},
 ): Promise<RuntimeControlLocation | undefined> {
+  // Do not pick up a real home record from an unisolated test process.
+  if (isUnisolatedTestControlDirectory(environment)) return undefined;
   const directory = runtimeControlDirectory(environment);
   let entries;
   try {

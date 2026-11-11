@@ -23,7 +23,7 @@ ssh -o BatchMode=yes ... mac codexhost peer-exec
   │  stdin: {"route":"/v1/thread/read","body":{...}}
   ▼
 peer-exec (机器 B，隐藏子命令)
-  │  读取 <data-dir>/runtime/control-<pid>.json
+  │  读取 ~/.codexhost/runtime/control-<pid>.json
   ▼
 本机 Host Runtime 控制 API (127.0.0.1 随机端口, Bearer token)
 ```
@@ -36,10 +36,10 @@ peer-exec (机器 B，隐藏子命令)
 
 ## 本机控制入口
 
-Host Runtime 启动控制服务后，在数据目录下写入：
+Host Runtime 启动控制服务后，在固定用户目录下写入：
 
 ```
-<data-dir>/runtime/control-<pid>.json
+~/.codexhost/runtime/control-<pid>.json
 ```
 
 ```json
@@ -52,7 +52,9 @@ Host Runtime 启动控制服务后，在数据目录下写入：
 }
 ```
 
-数据目录规则沿用现有逻辑：设置了 `CODEXHOST_DATA_DIR` 就使用它，否则使用 `~/.codexhost`。
+固定用户目录是 `~/.codexhost`，可以用 `CODEXHOST_USER_DIR` 覆盖（测试隔离用）。它**不跟随** `CODEXHOST_DATA_DIR`：Desktop 通过 SSH 启动的远端 Runtime 通常带 `CODEXHOST_DATA_DIR=~/.codexhost/remote/data`，而普通 SSH 会话没有这个变量；如果控制文件放在数据目录，`ssh <别名> codexhost peer-exec` 将永远找不到它。控制目录还可以用专用变量 `CODEXHOST_RUNTIME_CONTROL_DIR` 单独覆盖。
+
+测试保护：在 Vitest 进程中，如果没有设置 `CODEXHOST_USER_DIR` 或 `CODEXHOST_RUNTIME_CONTROL_DIR`，发布和读取控制文件都会跳过真实 home，避免测试污染用户目录。
 
 实现约束：
 
@@ -94,8 +96,8 @@ Host Runtime 启动控制服务后，在数据目录下写入：
 }
 ```
 
-- 文件位于 `<data-dir>/peers.json`，权限 `0600`。
-- `ssh` 必须是本机 `~/.ssh/config` 里的别名，且能非交互认证（连接参数强制 `BatchMode=yes`）。
+- 文件位于 `~/.codexhost/peers.json`，权限 `0600`。`CODEXHOST_USER_DIR` 可以移动这个固定用户目录；`CODEXHOST_DATA_DIR` 不影响它。
+- `ssh` 必须是本机 `~/.ssh/config` 里的别名，且能非交互认证（连接参数强制 `BatchMode=yes`）。SSH ControlPath 也位于 `~/.codexhost/ssh/%C`，与 peers.json 使用同一个固定用户目录，因此 Desktop 托管远端和普通 SSH 会话看到的是同一份配置。
 - `hostIds` 是 Desktop 视角的 Host ID。解析优先级：peer 名 → 配置中的 Host ID → 特殊值 `local`。
 - `thread://<id>?hostId=<x>` 与 `--host <x>` 使用同一套解析。若某个 peer 显式配置了 `hostIds: ["local"]`，该 peer 会接管 `local` 链接；否则 `local` 保持本机行为。
 - 第一个 Host ID 用作输出链接里的 `hostId`；没有配置 Host ID 时退回 peer 名。
@@ -112,7 +114,7 @@ ssh \
   -o BatchMode=yes \
   -o ConnectTimeout=10 \
   -o ControlMaster=auto \
-  -o ControlPath=<data-dir>/ssh/%C \
+  -o ControlPath=~/.codexhost/ssh/%C \
   -o ControlPersist=60 \
   <ssh-alias> \
   <command 或 codexhost> peer-exec

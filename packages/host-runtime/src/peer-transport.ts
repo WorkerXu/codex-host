@@ -10,7 +10,7 @@ import {
   type DelegationControlErrorCode,
 } from "./delegation-types.js";
 import type { ResolvedPeer } from "./peer-config.js";
-import { codexhostDataDirectory } from "./runtime-control-file.js";
+import { codexhostUserDirectory, isUnisolatedTestUserDirectory } from "./runtime-control-file.js";
 
 export const PEER_EXEC_SUBCOMMAND = "peer-exec";
 export const DEFAULT_PEER_TIMEOUT_MS = 30_000;
@@ -41,7 +41,7 @@ export function peerSshArguments(input: { environment: NodeJS.ProcessEnv; peer: 
   command: string;
   args: string[];
 } {
-  const controlPath = path.join(codexhostDataDirectory(input.environment), "ssh", "%C");
+  const controlPath = path.join(codexhostUserDirectory(input.environment), "ssh", "%C");
   return {
     command: "ssh",
     args: [
@@ -133,9 +133,11 @@ export async function requestPeerRoute(input: {
   const timeoutMs = input.timeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
   const { command, args } = peerSshArguments(input);
   // ControlMaster sockets live here; ssh requires the directory to exist.
-  const controlDirectory = path.join(codexhostDataDirectory(input.environment), "ssh");
-  await mkdir(controlDirectory, { recursive: true, mode: 0o700 }).catch(() => undefined);
-  await chmod(controlDirectory, 0o700).catch(() => undefined);
+  const controlDirectory = path.join(codexhostUserDirectory(input.environment), "ssh");
+  if (!isUnisolatedTestUserDirectory(input.environment)) {
+    await mkdir(controlDirectory, { recursive: true, mode: 0o700 }).catch(() => undefined);
+    await chmod(controlDirectory, 0o700).catch(() => undefined);
+  }
 
   return await new Promise<Record<string, unknown>>((resolve, reject) => {
     let settled = false;

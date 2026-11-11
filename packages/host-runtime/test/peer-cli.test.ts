@@ -82,7 +82,7 @@ describe("peer CLI", () => {
 
   it("adds, lists, and removes peers", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const added = new PassThrough();
     await expect(
       runPeerCli({
@@ -153,7 +153,7 @@ describe("peer CLI", () => {
 
   it("rejects duplicate option values and shell syntax", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     for (const arguments_ of [
       ["add", "--name", "mac", "--name", "other", "--ssh", "mac"],
       ["add", "--name", "mac", "--ssh", "mac", "--command", "codexhost; rm -rf /"],
@@ -168,7 +168,7 @@ describe("peer CLI", () => {
 
   it("tests connectivity with one remote harness list", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     await runPeerCli({
       arguments: ["add", "--name", "mac", "--ssh", "mac"],
       environment,
@@ -185,7 +185,7 @@ describe("peer CLI", () => {
 
   it("rejects an unknown peer and an unknown command", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     await expect(
       runPeerCli({ arguments: ["test", "mac"], environment, output: new PassThrough() }),
     ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
@@ -200,7 +200,7 @@ describe("peer CLI", () => {
     await expect(
       runDelegationCli({
         arguments: ["peer", "remove", "missing"],
-        environment: { CODEXHOST_DATA_DIR: root },
+        environment: { CODEXHOST_USER_DIR: root },
         output: new PassThrough(),
         diagnosticOutput: diagnostics,
       }),
@@ -212,7 +212,7 @@ describe("peer CLI", () => {
 
   it("reports a malformed peer list instead of inventing Harnesses", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     await runPeerCli({
       arguments: ["add", "--name", "mac", "--ssh", "mac"],
       environment,

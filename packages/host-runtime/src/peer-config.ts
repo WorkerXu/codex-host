@@ -3,7 +3,11 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path";
 
 import { DelegationControlError } from "./delegation-types.js";
-import { codexhostDataDirectory } from "./runtime-control-file.js";
+import {
+  CODEXHOST_USER_DIR_ENV,
+  codexhostUserDirectory,
+  isUnisolatedTestUserDirectory,
+} from "./runtime-control-file.js";
 
 export const PEER_CONFIG_FORMAT_VERSION = 1;
 export const PEER_CONFIG_FILE_NAME = "peers.json";
@@ -39,7 +43,7 @@ export function emptyPeerConfig(): PeerConfig {
 }
 
 export function peerConfigPath(environment: NodeJS.ProcessEnv): string {
-  return path.join(codexhostDataDirectory(environment), PEER_CONFIG_FILE_NAME);
+  return path.join(codexhostUserDirectory(environment), PEER_CONFIG_FILE_NAME);
 }
 
 function invalid(message: string): DelegationControlError {
@@ -142,6 +146,8 @@ export function parsePeerConfig(value: unknown): PeerConfig {
 }
 
 export async function readPeerConfig(environment: NodeJS.ProcessEnv): Promise<PeerConfig> {
+  // An unisolated test must not inherit the developer's real peers.
+  if (isUnisolatedTestUserDirectory(environment)) return emptyPeerConfig();
   const filePath = peerConfigPath(environment);
   let text: string;
   try {
@@ -169,8 +175,11 @@ export async function writePeerConfig(
   environment: NodeJS.ProcessEnv,
   config: PeerConfig,
 ): Promise<void> {
+  if (isUnisolatedTestUserDirectory(environment)) {
+    throw new Error(`Peer configuration tests must set ${CODEXHOST_USER_DIR_ENV}`);
+  }
   const normalized = parsePeerConfig(config);
-  const directory = codexhostDataDirectory(environment);
+  const directory = codexhostUserDirectory(environment);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700).catch(() => undefined);
   const filePath = peerConfigPath(environment);

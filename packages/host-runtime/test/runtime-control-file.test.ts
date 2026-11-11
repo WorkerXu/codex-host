@@ -25,7 +25,7 @@ afterEach(async () => {
 describe("Host Runtime control file", () => {
   it("publishes an atomic, owner-only record and removes it on close", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const handle = await publishRuntimeControl({
       environment,
       endpoint: "http://127.0.0.1:4321",
@@ -66,7 +66,7 @@ describe("Host Runtime control file", () => {
 
   it("keeps concurrent Runtime records and reads the newest live one", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const older = await publishRuntimeControl({
       environment,
       endpoint: "http://127.0.0.1:1111",
@@ -102,7 +102,7 @@ describe("Host Runtime control file", () => {
 
   it("ignores stale PIDs, malformed records, and non-loopback endpoints", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const stale = await publishRuntimeControl({
       environment,
       endpoint: "http://127.0.0.1:1111",
@@ -144,9 +144,55 @@ describe("Host Runtime control file", () => {
     }
   });
 
+  it("ignores CODEXHOST_DATA_DIR and honors a dedicated control directory override", async () => {
+    const root = await dataDirectory();
+    const data = await dataDirectory();
+    const environment = { CODEXHOST_DATA_DIR: data, CODEXHOST_USER_DIR: root };
+    const handle = await publishRuntimeControl({
+      environment,
+      endpoint: "http://127.0.0.1:4321",
+      token: "synthetic-token",
+      pid: 1234,
+    });
+    try {
+      expect(handle.filePath).toBe(path.join(root, "runtime", "control-1234.json"));
+      await expect(readdir(data)).resolves.toEqual([]);
+    } finally {
+      await handle.close();
+    }
+
+    const override = await dataDirectory();
+    const overridden = await publishRuntimeControl({
+      environment: {
+        CODEXHOST_DATA_DIR: data,
+        CODEXHOST_USER_DIR: root,
+        CODEXHOST_RUNTIME_CONTROL_DIR: override,
+      },
+      endpoint: "http://127.0.0.1:4322",
+      token: "synthetic-token",
+      pid: 1235,
+    });
+    try {
+      expect(overridden.filePath).toBe(path.join(override, "control-1235.json"));
+    } finally {
+      await overridden.close();
+    }
+  });
+
+  it("does not read or write the real home from an unisolated test process", async () => {
+    const handle = await publishRuntimeControl({
+      environment: { VITEST: "true" },
+      endpoint: "http://127.0.0.1:4321",
+      token: "synthetic-token",
+    });
+    expect(handle.filePath).toBe("");
+    await expect(handle.close()).resolves.toBeUndefined();
+    await expect(readRuntimeControl({ VITEST: "true" })).resolves.toBeUndefined();
+  });
+
   it("does not remove a record that another process replaced at the same path", async () => {
     const root = await dataDirectory();
-    const environment = { CODEXHOST_DATA_DIR: root };
+    const environment = { CODEXHOST_USER_DIR: root };
     const handle = await publishRuntimeControl({
       environment,
       endpoint: "http://127.0.0.1:1111",
@@ -167,7 +213,7 @@ describe("Host Runtime control file", () => {
   it("returns no record when the data directory does not exist", async () => {
     const root = await dataDirectory();
     await expect(
-      readRuntimeControl({ CODEXHOST_DATA_DIR: path.join(root, "missing") }),
+      readRuntimeControl({ CODEXHOST_USER_DIR: path.join(root, "missing") }),
     ).resolves.toBeUndefined();
   });
 });

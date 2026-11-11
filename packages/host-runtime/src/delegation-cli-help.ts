@@ -62,13 +62,13 @@ Compact output keeps task links, Harness, status, title, and workspace.`,
 
 const PEER_COMMAND_HELP = {
   "peer list": `codexhost peer list [--format json|compact]
-List peers configured in <data-dir>/peers.json.`,
+List peers configured in ~/.codexhost/peers.json.`,
   "peer add": `codexhost peer add --name <name> --ssh <alias> [--host-id <id>]... [--command <path>] [--format json|compact]
 Register a machine reachable through an SSH config alias.
 --host-id may be repeated; the first ID is used in Thread links. Desktop normally reports another machine as remote-ssh-discovered:<alias>.
 --command overrides the remote codexhost executable when it is not on the peer's non-interactive PATH.`,
   "peer remove": `codexhost peer remove <name> [--format json|compact]
-Remove a peer from <data-dir>/peers.json. Existing remote Threads are not changed.`,
+Remove a peer from ~/.codexhost/peers.json. Existing remote Threads are not changed.`,
   "peer test": `codexhost peer test <name> [--format json|compact]
 Run harness list on the peer through SSH and print the returned Harnesses.`,
 } as const;
@@ -77,7 +77,7 @@ export type DelegationCliCommand = keyof typeof COMMAND_HELP;
 export type PeerCliCommand = keyof typeof PEER_COMMAND_HELP;
 
 const COMMON_HELP = `Thread references accept a bare ID, codex://threads/<id>, or thread://<id>?hostId=<encoded-host-id>.
---host <peer-or-host-id> routes delegate start, harness list|inspect, and thread read|send|cancel|wait to a peer configured in <data-dir>/peers.json; a Thread reference with hostId routes automatically. --host local, or no --host, uses this machine.
+--host <peer-or-host-id> routes delegate start, harness list|inspect, and thread read|send|cancel|wait to a peer configured in ~/.codexhost/peers.json; a Thread reference with hostId routes automatically. --host local, or no --host, uses this machine.
 A cross-machine delegate start has no parent Thread, rejects --parent-thread and --watch, and returns a host-qualified Thread link; use thread wait --host afterwards. thread watch and thread watches are local-only.
 Options accept --name <value> or --name=<value>. --task, --task-name, and --message take the next argument verbatim, even when it is empty or starts with --.
 --format json is the compatible full JSON output (default); --format compact returns concise JSON using task links instead of internal IDs.
@@ -91,7 +91,8 @@ export const PEER_HELP = `usage:
   codexhost peer remove <name>
   codexhost peer test <name>
 
-Peers are stored in <data-dir>/peers.json (CODEXHOST_DATA_DIR, or ~/.codexhost).
+Peers are stored in ~/.codexhost/peers.json (CODEXHOST_USER_DIR moves that fixed user directory; CODEXHOST_DATA_DIR does not).
+The control endpoint and SSH ControlPath use the same fixed user directory, so a normal SSH session sees the Desktop-managed Runtime.
 The SSH alias comes from ~/.ssh/config and must authenticate non-interactively (BatchMode).
 The peer must run codexhost and have a live Host Runtime. peer-exec is its hidden remote entry point.
 Use the peer name or any configured Host ID with --host. Use <command> --help for command options.

@@ -103,7 +103,7 @@ function request(input: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<Record<string, unknown>> {
   return requestPeerRoute({
-    environment: input.environment ?? { CODEXHOST_DATA_DIR: input.root },
+    environment: input.environment ?? { CODEXHOST_USER_DIR: input.root },
     peer: input.peer ?? peer(),
     route: "/v1/harness/list",
     body: {},
@@ -115,7 +115,12 @@ function request(input: {
 describe("peer SSH transport", () => {
   it("passes the SSH options and remote command as an argument array", async () => {
     const root = await dataDirectory();
-    expect(peerSshArguments({ environment: { CODEXHOST_DATA_DIR: root }, peer: peer() })).toEqual({
+    expect(
+      peerSshArguments({
+        environment: { CODEXHOST_DATA_DIR: "/synthetic/data", CODEXHOST_USER_DIR: root },
+        peer: peer(),
+      }),
+    ).toEqual({
       command: "ssh",
       args: [
         "-o",
@@ -135,7 +140,7 @@ describe("peer SSH transport", () => {
     });
     expect(
       peerSshArguments({
-        environment: { CODEXHOST_DATA_DIR: root },
+        environment: { CODEXHOST_USER_DIR: root },
         peer: peer({ command: "/opt/codexhost/bin/codexhost" }),
       }).args.slice(-2),
     ).toEqual(["/opt/codexhost/bin/codexhost", "peer-exec"]);
@@ -149,7 +154,7 @@ describe("peer SSH transport", () => {
       return { code: 0, stdout: '{"harnesses":["codex","pi"]}' };
     });
     const environment = {
-      CODEXHOST_DATA_DIR: root,
+      CODEXHOST_USER_DIR: root,
       [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
       [DELEGATION_RUNTIME_TOKEN_ENV]: "secret",
     };
