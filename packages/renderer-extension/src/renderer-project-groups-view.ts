@@ -22,6 +22,7 @@ export interface ProjectGroupViewHandlers {
   openManager(groupId?: string): void;
   expandProject(projectId: string): void;
   showAll(projectId: string): void;
+  showMoreProjects(): void;
 }
 
 export interface ProjectGroupViewOptions {
@@ -291,7 +292,7 @@ function projectContent(
     });
     container.append(
       message,
-      actionRow(document, "项目可能被侧边栏过滤", "管理", () => handlers.openManager()),
+      actionRow(document, "该项目在收起的列表中", "展开", () => handlers.showMoreProjects()),
     );
     return container;
   }

@@ -198,6 +198,21 @@ export function hasNativeContextMenu(row: HTMLElement): boolean {
   return false;
 }
 
+export function findProjectsShowMoreButton(section: HTMLElement): HTMLElement | null {
+  const list = findProjectList(section);
+  if (!list) return null;
+  const units = projectUnits(list);
+  for (const unit of units.toReversed()) {
+    if (projectRowForUnit(unit)) continue;
+    const buttons = [...unit.querySelectorAll<HTMLElement>("button")];
+    const labelled = buttons.find((button) =>
+      /展开显示|Show more/i.test((button.textContent ?? "").trim()),
+    );
+    if (labelled) return labelled;
+  }
+  return null;
+}
+
 export function probeProjectGroupsContract(section: HTMLElement | null): ProjectGroupsDomContract {
   const missing: string[] = [];
   if (!section) missing.push("projects-section");
@@ -210,11 +225,9 @@ export function probeProjectGroupsContract(section: HTMLElement | null): Project
   let threadRowCount = 0;
   for (const unit of units) {
     const row = projectRowForUnit(unit);
-    if (
-      !row ||
-      !row.getAttribute(PROJECT_ID_ATTRIBUTE) ||
-      !row.getAttribute(PROJECT_LABEL_ATTRIBUTE)
-    ) {
+    // `Show more` and other section rows are direct listitems without a project row.
+    if (!row) continue;
+    if (!row.getAttribute(PROJECT_ID_ATTRIBUTE) || !row.getAttribute(PROJECT_LABEL_ATTRIBUTE)) {
       missing.push("project-row-identity");
       continue;
     }

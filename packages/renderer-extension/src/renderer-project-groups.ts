@@ -4,6 +4,7 @@ import { readBootstrapCatalog } from "./renderer-project-groups-bootstrap.js";
 import {
   findNativeThreadRow,
   findProjectsSection,
+  findProjectsShowMoreButton,
   newChatButton,
   probeProjectGroupsContract,
   projectListForUnit,
@@ -172,6 +173,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       openManager: (groupId) => this.#openManager(groupId),
       expandProject: (projectId) => this.#expandProject(projectId),
       showAll: (projectId) => this.#showAll(projectId),
+      showMoreProjects: () => this.#showMoreProjects(),
     });
     this.#installListeners();
     this.#observe();
@@ -587,6 +589,17 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     }
     button.click();
     this.#scheduleRefresh(120);
+  }
+
+  #showMoreProjects(): void {
+    const section = findProjectsSection(this.#document);
+    const button = section ? findProjectsShowMoreButton(section) : null;
+    if (!button) {
+      this.#notify("原生 Projects 列表没有可用的展开按钮。");
+      return;
+    }
+    button.click();
+    this.#scheduleRefresh(300);
   }
 
   #showAll(projectId: string): void {
