@@ -271,12 +271,20 @@ export function findProjectsShowMoreButton(section: HTMLElement): HTMLElement | 
   for (const unit of units.toReversed()) {
     if (projectRowForUnit(unit)) continue;
     const buttons = [...unit.querySelectorAll<HTMLElement>("button")];
-    const labelled = buttons.find((button) =>
-      /展开显示|Show more/i.test((button.textContent ?? "").trim()),
+    const labelled = buttons.find(
+      (button) =>
+        /展开显示|Show more/i.test((button.textContent ?? "").trim()) ||
+        /show more/i.test(button.getAttribute("aria-label") ?? ""),
     );
     if (labelled) return labelled;
   }
-  return null;
+  return (
+    [...section.querySelectorAll<HTMLElement>("button")].find(
+      (button) =>
+        /展开显示|Show more/i.test((button.textContent ?? "").trim()) ||
+        /show more/i.test(button.getAttribute("aria-label") ?? ""),
+    ) ?? null
+  );
 }
 
 export function probeProjectGroupsContract(section: HTMLElement | null): ProjectGroupsDomContract {

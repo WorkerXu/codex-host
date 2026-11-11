@@ -255,6 +255,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       if (contract.hasContextMenu && (sectionChanged || menuAppeared || revisionChanged)) {
         this.#menu.reprobe();
         this.#menuUnsupported = false;
+        this.#threadActionsUnsupported = false;
         this.#lastReprobedRevision = this.#revision;
       }
       this.#lastSection = section;
