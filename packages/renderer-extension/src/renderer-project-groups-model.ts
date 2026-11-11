@@ -98,6 +98,16 @@ export function projectHostKey(entry: ProjectIndexEntry): string {
     : (entry.hostId ?? `host-label:${entry.hostLabel ?? entry.projectId}`);
 }
 
+export function projectGroupMachineSummary(machines: readonly ProjectGroupMachineView[]): {
+  text: string;
+  title: string;
+} {
+  const title = machines.map((machine) => machine.label).join(" · ");
+  if (machines.length === 0) return { text: "", title };
+  if (machines.length === 1) return { text: machines[0]?.label ?? "", title };
+  return { text: `${machines.length} 台机器`, title };
+}
+
 export function projectHostLabel(
   entry: ProjectIndexEntry,
   catalog: DesktopProjectsCatalog,

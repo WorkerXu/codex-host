@@ -5,6 +5,7 @@ import {
   buildProjectGroupViews,
   buildProjectIndex,
   mergeMachineState,
+  projectGroupMachineSummary,
   projectHostKey,
   worseConnectionState,
   type NativeProjectSnapshot,
@@ -170,6 +171,21 @@ describe("Renderer project group model", () => {
       "local-alpha",
       "project-beta",
     ]);
+  });
+
+  it("shortens the group row machine summary while keeping the full title", () => {
+    expect(projectGroupMachineSummary([])).toEqual({ text: "", title: "" });
+    expect(
+      projectGroupMachineSummary([
+        { key: "local", label: "本机", state: "connected", projects: [] },
+      ]),
+    ).toEqual({ text: "本机", title: "本机" });
+    expect(
+      projectGroupMachineSummary([
+        { key: "local", label: "本机", state: "connected", projects: [] },
+        { key: "remote", label: "colab", state: "connected", projects: [] },
+      ]),
+    ).toEqual({ text: "2 台机器", title: "本机 · colab" });
   });
 
   it("derives stable machine keys and connection ordering", () => {

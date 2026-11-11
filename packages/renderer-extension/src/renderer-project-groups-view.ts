@@ -3,6 +3,7 @@ import type {
   ProjectGroupProjectView,
   ProjectGroupView as ProjectGroupModelView,
   ThreadSnapshot,
+  projectGroupMachineSummary,
 } from "./renderer-project-groups-model.js";
 import { findProjectList, findProjectsSection } from "./renderer-project-groups-dom.js";
 
