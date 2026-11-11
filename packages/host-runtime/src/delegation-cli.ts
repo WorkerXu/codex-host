@@ -235,10 +235,24 @@ async function requestHosted(input: {
   });
 }
 
-/** Peer results carry their Host so later compact links route back. */
+/** Peer results carry their Host and host-qualified follow-up commands. */
 function withPeerHostId(result: unknown, target: HostTarget): unknown {
   if (typeof target !== "object" || !isRecord(result)) return result;
-  return { ...result, hostId: target.linkHostId };
+  const next = isRecord(result.next) ? result.next : undefined;
+  const suffix = ` --host ${target.name}`;
+  return {
+    ...result,
+    hostId: target.linkHostId,
+    ...(next
+      ? {
+          next: {
+            ...next,
+            ...(typeof next.read === "string" ? { read: `${next.read}${suffix}` } : {}),
+            ...(typeof next.wait === "string" ? { wait: `${next.wait}${suffix}` } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 function peerDelegationResult(result: unknown, peer: ResolvedPeer): unknown {

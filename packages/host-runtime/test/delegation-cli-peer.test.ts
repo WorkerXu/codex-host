@@ -300,6 +300,28 @@ describe("delegation CLI peer routing", () => {
       body: { threadId: "t", message: "go" },
     });
 
+    const sendFull = peerSpawn([
+      {
+        threadId: "t",
+        turnId: "turn",
+        harnessId: "pi",
+        status: "running",
+        next: { read: "codexhost thread read t", wait: "codexhost thread wait t" },
+      },
+    ]);
+    const sendFullResult = await run(["thread", "send", "t", "--host", "mac", "--message", "go"], {
+      environment: env,
+      spawnImpl: sendFull.spawnImpl,
+    });
+    expect(sendFullResult.code).toBe(0);
+    expect(JSON.parse(sendFullResult.output)).toMatchObject({
+      hostId: "remote-ssh-discovered:mac",
+      next: {
+        read: "codexhost thread read t --host mac",
+        wait: "codexhost thread wait t --host mac",
+      },
+    });
+
     const cancel = peerSpawn([{ threadId: "t", turnId: null, harnessId: "pi", cancelled: true }]);
     const cancelResult = await run(
       ["thread", "cancel", "t", "--host", "mac", "--format", "compact"],
