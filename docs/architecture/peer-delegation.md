@@ -106,9 +106,9 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
 - 同一个 Host ID 同时出现在 `self` 和某个 peer 中会被视为配置错误，避免同一链接有两个目标。
 - `thread://<id>?hostId=<x>` 与 `--host <x>` 使用同一套解析。若某个 peer 显式配置了 `hostIds: ["local"]`，该 peer 会接管 `local` 链接；否则 `local` 保持本机行为。
 - 第一个 Host ID 用作输出链接里的 `hostId`；没有配置 Host ID 时退回 peer 名。
-- `command` 可选。远端非交互 shell 的 `PATH` 通常不包含 `codexhost`，此时用绝对路径覆盖；该值必须是单个路径或命令词，不允许空白或 shell 元字符。
+- `command` 可选。远端非交互 shell 的 `PATH` 通常不包含 `codexhost`，此时用绝对路径覆盖；该值必须是单个路径或命令词，不允许空白或 shell 元字符。用 `codexhost peer add --command <path>` 设置，`codexhost peer list` 会显示它。
 
-`codexhost peer add` 会拒绝重复的 peer 名、保留名（`local`、`__proto__` 等）以及被其他 peer 或 `self` 占用的 Host ID。
+`codexhost peer add` 会拒绝重复的 peer 名、保留名（`local`、`__proto__` 等）、被其他 peer 或 `self` 占用的 Host ID，以及包含空白、shell 元字符或以 `-` 开头（避免被当作 ssh 选项）的 `--command`。
 
 ## SSH 传输
 

@@ -96,7 +96,7 @@ Native Codex shell commands also need the Host-provided CODEXHOST_* environment 
 
 export const PEER_HELP = `usage:
   codexhost peer list
-  codexhost peer add --name <name> --ssh <alias> [--host-id <id>]...
+  codexhost peer add --name <name> --ssh <alias> [--host-id <id>]... [--command <path>]
   codexhost peer remove <name>
   codexhost peer test <name>
   codexhost peer self [list]

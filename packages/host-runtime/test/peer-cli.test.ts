@@ -80,6 +80,16 @@ describe("peer CLI", () => {
     expect(outputText(output)).toBe(PEER_HELP);
   });
 
+  it("documents the remote command option in peer help", async () => {
+    const overview = new PassThrough();
+    await expect(runPeerCli({ arguments: ["--help"], output: overview })).resolves.toBe(0);
+    expect(outputText(overview)).toContain("--command <path>");
+
+    const add = new PassThrough();
+    await expect(runPeerCli({ arguments: ["add", "--help"], output: add })).resolves.toBe(0);
+    expect(outputText(add)).toContain("--command <path>");
+  });
+
   it("adds, lists, and removes peers", async () => {
     const root = await dataDirectory();
     const environment = { CODEXHOST_USER_DIR: root };
