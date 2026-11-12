@@ -109,7 +109,7 @@ v2 不再自绘对话行：成员项目对应的原生项目块（项目行 + �
 - 定位 Projects 列表：`section[...] div[role="list"]:has(> div[role="listitem"] [data-app-action-sidebar-project-row])`。
 - 列表保持 `display:flex; flex-direction:column`。
 - 所有项目单元默认 `order: 1000000`，非成员之间保持原生文档顺序。
-- 每个成员按组顺序设置 `order`，并用 `margin-left: 12px` 形成组内缩进。
+- 每个成员按其原生 DOM 顺序设置 `order`（组内拖拽重排后下一次刷新即跟随），并用 `margin-left: 12px` 形成组内缩进。
 - 折叠组的成员加 `display: none !important`；展开时移除该规则。
 - 组序号使用 1000 的间隔，成员 `+10..`，占位 `+900`，「新建项目组」在最后一个组之后、非成员之前。
 
@@ -157,7 +157,7 @@ v2 不再自绘对话行：成员项目对应的原生项目块（项目行 + �
 
 - 布局依赖原生列表是 flex column 和 Chromium 的 `:has()`；Desktop 改版导致契约不满足时整体 fail-open。
 - 组标题/占位是 React 列表里的外来节点；React 替换列表容器到下一次 refresh 之间可能存在一个短暂空档（debounce 约 40ms）。
-- 组成员顺序遵循组配置的成员顺序，不跟随原生 Projects 拖拽顺序；原生拖拽仍只改变非成员或成员在 Desktop 状态里的顺序。
+- 组成员视觉顺序跟随原生 DOM 顺序，组标题顺序由组配置 `order` 决定；跨组拖拽不会改变成员归属。
 - 缩进只是视觉上的 `margin-left`，不改变原生 DOM 层级和拖拽目标。
 - 组折叠状态保存在当前 Renderer 内存中，不写回 `groups.json`。
 - 原生置顶区等 Projects 之外的项目不会出现在组内，也不显示占位。

@@ -72,6 +72,16 @@ const mocks = vi.hoisted(() => {
     group,
     catalog,
     snapshot,
+    snapshots: [snapshot] as Array<
+      | typeof snapshot
+      | {
+          projectId: string;
+          label: string;
+          kind: "remote";
+          hostLabel: null;
+          hasNewChatButton: boolean;
+        }
+    >,
     contract,
     warning: null as null | { kind: "quarantined"; backupName: string },
     showMore: false,
@@ -101,7 +111,7 @@ vi.mock("../src/renderer-project-groups-dom.js", () => ({
   projectRowForUnit: () => ({}),
   projectRowOutsideSection: () => (mocks.rowOutside ? {} : null),
   projectUnitForId: () => ({}),
-  readNativeProjectSnapshots: () => [mocks.snapshot],
+  readNativeProjectSnapshots: () => mocks.snapshots,
   statusIconState: () => "connected",
 }));
 
@@ -216,6 +226,7 @@ function lastHandlers(): FakeHandlers {
 describe("project group controller", () => {
   beforeEach(() => {
     mocks.warning = null;
+    mocks.snapshots = [mocks.snapshot];
     mocks.showMore = false;
     mocks.rowOutside = false;
     mocks.contract.ok = true;
@@ -263,6 +274,30 @@ describe("project group controller", () => {
     ]);
     expect(render?.options.collapsedGroups.size).toBe(0);
     expect(render?.options.placeholders.size).toBe(0);
+    handle.dispose();
+  });
+
+  it("follows the native project order inside a group", async () => {
+    mocks.snapshots = [
+      {
+        projectId: "project-beta",
+        label: "beta",
+        kind: "remote",
+        hostLabel: null,
+        hasNewChatButton: true,
+      },
+      mocks.snapshot,
+    ];
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    expect(mocks.calls.layoutApply.at(-1)?.[0]?.projectIds).toEqual([
+      "project-beta",
+      "local-alpha",
+    ]);
+    expect(mocks.calls.headerRender.at(-1)?.items[0]?.projectIds).toEqual([
+      "project-beta",
+      "local-alpha",
+    ]);
     handle.dispose();
   });
 

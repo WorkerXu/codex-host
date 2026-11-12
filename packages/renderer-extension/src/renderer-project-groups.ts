@@ -119,6 +119,7 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #catalog: DesktopProjectsCatalog | null = null;
   #bootstrapCatalog: DesktopProjectsCatalog | null = null;
   #views: ProjectGroupView[] = [];
+  #nativeOrder = new Map<string, number>();
   #placeholders = new Map<string, number>();
   #collapsed = new Set<string>();
   #status: RendererProjectGroupsStatus = {
@@ -393,6 +394,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       snapshots,
       machineState,
     });
+    this.#nativeOrder = new Map(
+      snapshots.map((snapshot, position) => [snapshot.projectId, position]),
+    );
     this.#placeholders = this.#computePlaceholders(section, this.#views);
     this.#paint();
     const missingMembers = this.#views.reduce(
@@ -444,9 +448,21 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         name: view.group.name,
         machineSummary: summary.text,
         machineSummaryTitle: summary.title,
-        projectIds: view.projects.flatMap((project) =>
-          project.project.entry?.native ? [project.project.entry.projectId] : [],
-        ),
+        // Follow the native DOM order so Desktop's own drag-to-reorder keeps
+        // working inside a group instead of being overridden by config order.
+        projectIds: view.projects
+          .flatMap((project) => {
+            const entry = project.project.entry;
+            if (!entry?.native) return [];
+            return [
+              {
+                id: entry.projectId,
+                position: this.#nativeOrder.get(entry.projectId) ?? Number.MAX_SAFE_INTEGER,
+              },
+            ];
+          })
+          .sort((left, right) => left.position - right.position)
+          .map((member) => member.id),
       };
     });
     const layoutGroups: ProjectGroupLayoutGroup[] = items.map((item) => ({
