@@ -139,12 +139,16 @@ export class ProjectMirrorStore {
       const current = await this.#read();
       if (current.revision !== revision)
         throw new ProjectMirrorRevisionConflictError(revision, current.revision);
-      const projects = { ...current.projects };
+      let projects = { ...current.projects };
       const acknowledged = { ...current.acknowledged };
       if (update.acknowledge) acknowledged[sourceProjectId] = true;
-      if (update.record === null) delete projects[sourceProjectId];
-      else if (update.record !== undefined)
+      if (update.record === null) {
+        projects = Object.fromEntries(
+          Object.entries(projects).filter(([projectId]) => projectId !== sourceProjectId),
+        );
+      } else if (update.record !== undefined) {
         projects[sourceProjectId] = projectMirrorRecordSchema.parse(update.record);
+      }
       const next = {
         formatVersion: PROJECT_MIRRORS_FORMAT_VERSION,
         revision: current.revision + 1,
