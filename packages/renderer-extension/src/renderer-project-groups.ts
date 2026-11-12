@@ -317,9 +317,18 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#observer = new MutationObserver((mutations) => {
       // Ignore our own header/style DOM writes, but never ignore a batch that
       // also removes native nodes: React may clear a list together with the
-      // foreign group headers inside it.
+      // foreign group headers inside it. Ignore unrelated transcript and portal
+      // mutations so streaming does not re-run the Host RPC on every frame.
+      const section = findProjectsSection(this.#document);
       const relevant = mutations.some((mutation) => {
         if (insideOwnUi(mutation.target)) return false;
+        if (section) {
+          const inSection =
+            mutation.target === section ||
+            section.contains(mutation.target) ||
+            mutation.target.contains(section);
+          if (!inSection) return false;
+        }
         if (mutation.type === "attributes") return true;
         return [...mutation.addedNodes, ...mutation.removedNodes].some(
           (node) => !insideOwnUi(node),
