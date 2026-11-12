@@ -7,7 +7,8 @@
 - 让 `delegate start`、`harness list|inspect`、`thread read|send|cancel|wait` 可以用 `--host <peer 名或 Host ID>` 指向另一台机器。
 - Thread 链接 `thread://<id>?hostId=<x>` 中的 Host ID 可以自动解析到对应 peer。
 - 复用每台机器已有的本机控制 API，不新增远程 RPC 协议，也不开放任意 URL 转发。
-- 第一版不跨机注册 `thread watch` / `thread watches`，跨机 `delegate start` 不建立父子关系。
+- 第一版由调用方本机登记跨机 watch，后台轮询远端 Thread；跨机 `delegate start` 不建立父子关系。
+- `#` 选择器通过 Host Runtime 的 peer catalog RPC 展示各机器的 Harness；mention 链接携带 hostId。
 - SSH 是唯一的授权边界：能通过 SSH 以该用户身份执行命令，就能使用该用户的 Host Runtime。
 
 ## 组件
@@ -32,7 +33,10 @@ peer-exec (机器 B，隐藏子命令)
 - `packages/host-runtime/src/peer-exec.ts`：远端代理入口与路由白名单。
 - `packages/host-runtime/src/peer-config.ts`：`peers.json` 解析、校验和 Host ID 解析。
 - `packages/host-runtime/src/peer-transport.ts`：SSH 启动、stdin/stdout 传输、超时与输出上限。
-- `packages/host-runtime/src/peer-cli.ts`：`codexhost peer list|add|remove|test`。
+- `packages/host-runtime/src/peer-catalog.ts`：读取 `peers.json`，并发查询各 peer 的 `harness list`，为 Renderer 提供带缓存的机器目录。
+- `packages/host-runtime/src/delegation-watch.ts`：本机与跨机 watch、轮询退避、一次性通知和取消。
+- `packages/host-runtime/src/peer-cli.ts`：`codexhost peer list|add|remove|test|self`。
+- `packages/renderer-extension/src/renderer-delegation-mention.ts` / `renderer-delegation-peer-catalog.ts`：`#` 选择器的机器分组与 hostId mention。
 
 ## 本机控制入口
 
@@ -133,16 +137,25 @@ ssh \
 - 响应判定以 stdout 为准。stdout 是合法错误信封 `{"error":{"code","message","details?"}}` 时一律按错误返回，与 SSH 退出码无关：Tailscale SSH 等实现不把远端退出码传回本地（远端失败时本地仍是 0），只看退出码会把错误体当成成功响应。退出码非 0 且 stdout 不是错误信封时，返回 `RUNTIME_UNREACHABLE`（`reason: "peer_command_failed"`）。
 - SSH 子进程的 environment 会删除 `CODEXHOST_RUNTIME_ENDPOINT` 和 `CODEXHOST_RUNTIME_TOKEN`。即使 `~/.ssh/config` 配置了 `SendEnv CODEXHOST_*`，本机 token 也不会被转发。
 
+## `#` 选择器与 mention
+
+- Renderer 通过 Host Runtime 的 `codexhost/delegation/peers/list` RPC 获取机器目录。选择这个来源而不是复用 Desktop 的 Host 连接，是因为 `peers.json` 才是 CLI 实际路由的权威配置；RPC 还能在 Desktop 没有对应 SSH 连接时列出机器，并复用同一套 peer 传输验证连通性。
+- Host Runtime 读取 `peers.json`，并发调用每个 peer 的 `harness list`（默认 8 秒超时），结果缓存 30 秒；某台机器失败时返回 `state: "unreachable"` 和错误摘要，并保留上一次成功的 Harness 列表用于置灰展示。
+- 选择器先列本机 Harness，再按 peer 分组列出远端 Harness；行文本形如 `Grok · oracle-sg`。不可达但已知 Harness 的机器显示为置灰行；从未成功获取过 Harness 的机器显示为不可达分组。输入查询可以匹配 Harness 名、ID 或机器名。
+- 选中远端 Harness 后，mention 链接为 `[@Grok](subagent://codexhost.grok?host=oracle-sg)`；`host` 是 peer 名。旧的无 `host` 链接继续按本机处理。
+- Host 端的 mention rewrite 会把 `--host oracle-sg` 写进模型指令；本机 mention 不带 host，行为不变。
+
 ## CLI 路由
 
 | 命令 | `--host` | Thread 引用 hostId | 说明 |
 | --- | --- | --- | --- |
 | `harness list` / `harness inspect` | 是 | 不适用 | peer 上执行枚举/检查 |
-| `delegate start` | 是 | 不适用 | 跨机不传 parent，不支持 `--watch true` |
+| `delegate start` | 是 | 不适用 | 跨机不传 parent；`--watch true` 由调用方本机登记跨机 watch |
 | `thread read` | 是 | 是 | peer 优先；未配置 peer 时保留 Desktop 远程读回退 |
 | `thread send` / `thread cancel` | 是 | 是 | 未配置 peer 的非本地 Host 直接报错 |
 | `thread wait` | 是 | 是 | 按切片等待；未配置 peer 的非本地 Host 直接报错 |
-| `thread watch` / `thread watches` | 明确报错 | 明确报错 | 第一版仅本机 |
+| `thread watch` | 是 | 是 | watch 登记在调用方本机，后台轮询 peer；`--cancel` 取消 |
+| `thread watches` | 本机列表 | 不适用 | 同时列出本机与跨机 watch；非本地 `--host` 报错 |
 | `thread list` | 否 | 否 | 不跨机 |
 
 未指定 `--host`、`--host local`，或 hostId 解析为本机时，保持原有本机 Runtime 行为。
@@ -156,11 +169,22 @@ ssh \
 - Coordinator 看到 `origin` 时完全不调用父推断，使用 `peer-origin:<encoded-hostId>[:<encoded-threadId>]` 作为 delegation 记录的 `parentHostThreadId`。这个值是持久化的来源元数据，不会解析成真实 Thread；子 Thread 实际是顶层对话，返回结果不含 `parentThreadId`。
 - 本机 CLI 的正常路径不发送 `origin`，原有 `CODEXHOST_THREAD_ID` / 唯一活跃 Thread 推断保持不变。
 - 显式 `--parent-thread` 与 peer 目标同时出现会被拒绝，避免产生一个远端不存在的父引用。
-- `--watch true` 会被拒绝，并提示改用在 start 之后执行 `thread wait <thread> --host <peer>`。
+- `--watch true` 不再拒绝：CLI 在 peer start 成功后，用返回的远端 Thread ID 向**本机** Runtime 登记一个跨机 watch，通知投递给调用方本机父 Thread。
 - 响应中的 `deepLink` 改写为 `thread://<id>?hostId=<encoded>`；`next.read` / `next.wait` 自动追加 `--host <peer>`。
 - `thread send` / `cancel` 的完整 JSON 增加 `hostId` 字段，compact 输出的链接使用该 Host ID，保证后续命令能路由回同一 peer。
 
 任务正文不添加额外来源说明。
+
+## 跨机 watch
+
+- `thread watch <thread> --host <peer>` 和 `delegate start --host <peer> --watch true` 都由**调用方本机 Host Runtime** 登记 watch。远端不需要 watch 服务，也不需要父 Thread。
+- 本机 watch 服务通过注入的 `readPeer` 调用 peer 传输读取远端 Thread；本地 `send` 负责通知，因此通知文本、结果字段和一次性语义与本机 watch 完全一致，前缀仍是 `[codexhost thread watch]`。
+- 跨机链接使用 `thread://<id>?hostId=<peer>`；本机 watch 仍使用 `codex://threads/<id>`。
+- 轮询：跨机 watch 默认 5 秒轮询一次；读失败时按 2 倍退避，上限 60 秒，恢复后回到 5 秒。总超时沿用 `--timeout-ms`；读失败持续 60 秒会以 `unreadable` 结束并通知。
+- 去重键包含 `hostId + threadId + notifyThreadId`；同一对 Thread 在不同机器上互不影响。
+- `thread watches` 返回本机与跨机 watch，跨机条目带 `hostId`。`thread watch <thread> --host <peer> --cancel` 只移除本地登记，不会影响远端 Thread。
+- watch 状态只在内存中：Host Runtime 重启后全部丢失，需要重新登记；这一点在 help、技能文本和本文中都已写明。
+- peer 不可达时：首次登记直接返回明确错误；轮询期间变成不可达则进入退避，超过 60 秒以 `unreadable` 通知。
 
 ## 安全边界
 
@@ -172,7 +196,8 @@ ssh \
 
 ## 已知限制
 
-- 不支持跨机 `thread watch` / `thread watches`；需要等待结果时用 `thread wait --host`。
+- 跨机 watch 由调用方本机轮询，最多 5 秒发现一次状态变化（失败时退避到 60 秒）；不是远端推送。
+- watch 状态只在内存中，Host Runtime 重启后丢失；需要重新登记。
 - 跨机子 Thread 不会出现在本机 Desktop 的父子树中；它属于远端 Runtime。
 - 只支持通过 SSH 主动连接，不支持反向连接、主机密钥自动接受或密码/交互式认证。
 - 每次调用启动一个 ssh 进程（连接由 ControlMaster 复用），没有常驻隧道或流式进度推送。
@@ -180,6 +205,7 @@ ssh \
 - 多个 Runtime 同时存活时只取最新存活者；不保证它一定是 Desktop 正在使用的那个。
 - 响应大小上限 8 MiB；超出时返回 `RESPONSE_TOO_LARGE`，与现有远程读上限一致。
 - 未配置 peer 的非本地 `thread send` / `cancel` / `wait` 不会回退到 Desktop；只有 `thread read` 保留 Desktop 回退。
+- peer catalog 首次查询会并发 SSH；Desktop 菜单异步刷新，首次打开可能短暂只显示本机 Harness。
 
 ## 验证
 
@@ -191,5 +217,9 @@ ssh \
 - SSH 传输的参数数组、stdin、超时、错误信封优先于退出码、非零退出、超大输出、token 不出现在 SSH environment。
 - CLI 的 `--host` 路由、self Host ID 本地路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
 - 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
+- mention 的 host 序列化/解析、旧格式兼容，以及 rewrite 指令里的 `--host`。
+- peer catalog 的缓存、不可达状态、上次成功 Harness 的置灰保留，以及 Renderer 的机器分组和 host-qualified mention。
+- 跨机 watch 的轮询间隔、指数退避、终态只通知一次、超时、取消、watching 列表、peer 首次不可达和运行中失联。
+- `delegation-skill` 内容包含 `peer list`、`--host`、跨机 watch 和禁止读取 `~/.codexhost/runtime/` 的约束。
 
 测试通过注入的 spawn 模拟 SSH，不会建立真实连接。真实跨机连通性、主机密钥、远端 `PATH` 和远端 Host Runtime 状态需要在部署环境中另行验证。

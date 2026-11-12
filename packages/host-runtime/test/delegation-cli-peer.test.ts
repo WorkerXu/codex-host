@@ -211,10 +211,7 @@ describe("delegation CLI peer routing", () => {
 
   it("rejects unsupported cross-machine start options before contacting the peer", async () => {
     const env = await environment();
-    for (const extra of [
-      ["--watch", "true"],
-      ["--parent-thread", "parent"],
-    ]) {
+    for (const extra of [["--parent-thread", "parent"]]) {
       const { spawnImpl, inputs } = peerSpawn([{}]);
       const result = await run(
         ["delegate", "start", "--harness", "pi", "--task", "review", "--host", "mac", ...extra],
@@ -226,6 +223,106 @@ describe("delegation CLI peer routing", () => {
       });
       expect(inputs).toEqual([]);
     }
+  });
+
+  it("registers a cross-host watch on the caller Runtime after a peer start", async () => {
+    const env = await environment();
+    env[DELEGATION_THREAD_ID_ENV] = "local-parent";
+    env[DELEGATION_RUNTIME_ENDPOINT_ENV] = "http://127.0.0.1:4321";
+    env[DELEGATION_RUNTIME_TOKEN_ENV] = "token";
+    const { spawnImpl, inputs } = peerSpawn([
+      {
+        delegationId: "delegation",
+        threadId: "child",
+        turnId: "turn",
+        harnessId: "pi",
+        deepLink: "codex://threads/child",
+        status: "running",
+        next: { read: "read", wait: "wait" },
+      },
+    ]);
+    const watchResponse = {
+      threadId: "child",
+      notifyThreadId: "local-parent",
+      hostId: "mac",
+      state: "watching",
+      status: "running",
+      timeoutMs: 60_000,
+    };
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify(watchResponse), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const result = await run(
+      [
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "review",
+        "--host",
+        "mac",
+        "--watch",
+        "true",
+        "--watch-timeout-ms",
+        "60000",
+      ],
+      { environment: env, spawnImpl, fetchImpl },
+    );
+    expect(result.code).toBe(0);
+    expect(inputs[0]).toEqual({
+      route: "/v1/delegate/start",
+      body: {
+        harnessId: "pi",
+        task: "review",
+        origin: {
+          kind: "peer",
+          hostId: "remote-ssh-discovered:self",
+          threadId: "local-parent",
+        },
+      },
+    });
+    const watchCall = vi.mocked(fetchImpl).mock.calls[0];
+    if (!watchCall) throw new Error("Local watch request was not sent");
+    expect(String(watchCall[0])).toContain("/v1/thread/watch");
+    expect(JSON.parse(String(watchCall[1]?.body))).toEqual({
+      threadId: "child",
+      notifyThreadId: "local-parent",
+      timeoutMs: 60_000,
+      hostId: "mac",
+    });
+    expect(JSON.parse(result.output)).toMatchObject({
+      deepLink: "thread://child?hostId=remote-ssh-discovered%3Amac",
+      watch: { state: "watching", hostId: "mac" },
+    });
+  });
+
+  it("reports an unregistered cross-host watch when there is no caller Thread", async () => {
+    const env = await environment();
+    const { spawnImpl } = peerSpawn([
+      { threadId: "child", harnessId: "pi", status: "running", next: {} },
+    ]);
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const result = await run(
+      [
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "review",
+        "--host",
+        "mac",
+        "--watch",
+        "true",
+      ],
+      { environment: env, spawnImpl, fetchImpl },
+    );
+    expect(result.code).toBe(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.parse(result.output)).toMatchObject({
+      watch: { state: "notRegistered", reason: expect.stringContaining("caller Thread") },
+    });
   });
 
   it("fails a compact peer command when SSH hides the remote exit code", async () => {
@@ -418,11 +515,56 @@ describe("delegation CLI peer routing", () => {
     });
   });
 
+  it("registers and cancels a cross-host watch through the caller Runtime", async () => {
+    const env = {
+      ...(await environment()),
+      [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+      [DELEGATION_RUNTIME_TOKEN_ENV]: "token",
+    };
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            threadId: "t",
+            notifyThreadId: "parent",
+            hostId: "mac",
+            state: "watching",
+            status: "running",
+            timeoutMs: 60_000,
+          }),
+          { status: 200 },
+        ),
+    ) as unknown as typeof fetch;
+    const watched = await run(["thread", "watch", "t", "--host", "mac", "--notify", "parent"], {
+      environment: env,
+      fetchImpl,
+    });
+    expect(watched.code).toBe(0);
+    expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0]?.[1]?.body))).toEqual({
+      threadId: "t",
+      notifyThreadId: "parent",
+      hostId: "mac",
+      timeoutMs: expect.any(Number),
+    });
+
+    const cancelled = await run(
+      ["thread", "watch", "t", "--host", "mac", "--notify", "parent", "--cancel"],
+      { environment: env, fetchImpl },
+    );
+    expect(cancelled.code).toBe(0);
+    expect(String(vi.mocked(fetchImpl).mock.calls[1]?.[0])).toContain("/v1/thread/watch/cancel");
+    expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls[1]?.[1]?.body))).toEqual({
+      threadId: "t",
+      notifyThreadId: "parent",
+      hostId: "mac",
+    });
+  });
+
   it.each([
     ["thread send", ["thread", "send", "t", "--message", "go", "--host", "unknown"]],
     ["thread cancel", ["thread", "cancel", "t", "--host", "unknown"]],
     ["thread wait", ["thread", "wait", "t", "--host", "unknown"]],
-    ["thread watch", ["thread", "watch", "t", "--host", "mac", "--notify", "parent"]],
+    ["thread watch", ["thread", "watch", "t", "--host", "unknown", "--notify", "parent"]],
     ["thread watches", ["thread", "watches", "--host", "mac"]],
   ])("rejects %s without a configured peer", async (_name, arguments_) => {
     const env = await environment();

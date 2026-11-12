@@ -449,11 +449,9 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "--watch-timeout-ms requires --watch true",
         );
-      if (peer && watch === "true")
-        throw new DelegationControlError(
-          "INVALID_ARGUMENT",
-          "Cross-machine delegate start does not support --watch; use 'codexhost thread wait <thread> --host <peer>' after start",
-        );
+      const watchTimeoutMs = value(parsed, "--watch-timeout-ms")
+        ? positiveInteger(value(parsed, "--watch-timeout-ms"), "--watch-timeout-ms")
+        : DEFAULT_WATCH_TIMEOUT_MS;
       const result = await requestHosted({
         environment,
         target,
@@ -471,19 +469,54 @@ export async function runDelegationCli(input: {
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
           ...(origin ? { origin } : {}),
           ...(value(parsed, "--request-id") ? { requestId: value(parsed, "--request-id") } : {}),
-          ...(watch === "true"
-            ? {
-                watchTimeoutMs: value(parsed, "--watch-timeout-ms")
-                  ? positiveInteger(value(parsed, "--watch-timeout-ms"), "--watch-timeout-ms")
-                  : DEFAULT_WATCH_TIMEOUT_MS,
-              }
-            : {}),
+          ...(watch === "true" && !peer ? { watchTimeoutMs } : {}),
         },
         ...(peer ? { peerTimeoutMs: PEER_START_TIMEOUT_MS } : {}),
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
       });
-      writeResult("delegate start", peer ? peerDelegationResult(result, peer) : result);
+      if (!peer || watch !== "true") {
+        writeResult("delegate start", peer ? peerDelegationResult(result, peer) : result);
+        return 0;
+      }
+      // Cross-host watch is registered on the caller's Runtime, which polls the
+      // peer and delivers the notification to the local parent Thread.
+      let watchResult: unknown;
+      if (!caller) {
+        watchResult = {
+          state: "notRegistered",
+          reason: "Cross-host watch requires a caller Thread (CODEXHOST_THREAD_ID)",
+        };
+      } else if (!isRecord(result) || typeof result.threadId !== "string") {
+        watchResult = {
+          state: "notRegistered",
+          reason: "Peer start returned no Thread identifier",
+        };
+      } else {
+        try {
+          watchResult = await requestRuntime({
+            environment,
+            path: "/v1/thread/watch",
+            body: {
+              threadId: result.threadId,
+              notifyThreadId: normalizeThreadId(caller),
+              timeoutMs: watchTimeoutMs,
+              hostId: peer.name,
+            },
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+          });
+        } catch (error) {
+          watchResult = {
+            state: "notRegistered",
+            reason: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+      const peerResult = peerDelegationResult(result, peer);
+      writeResult(
+        "delegate start",
+        isRecord(peerResult) ? { ...peerResult, watch: watchResult } : peerResult,
+      );
       return 0;
     }
     if (group === "thread" && command === "send") {
@@ -626,7 +659,7 @@ export async function runDelegationCli(input: {
       return 0;
     }
     if (group === "thread" && command === "watch") {
-      rejectUnknown(parsed, ["--notify", "--timeout-ms", "--host"]);
+      rejectUnknown(parsed, ["--notify", "--timeout-ms", "--host", "--cancel"]);
       if (parsed.positionals.length !== 1)
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -638,10 +671,19 @@ export async function runDelegationCli(input: {
       const reference = readThreadReference(threadId);
       const host = threadHost(parsed, reference);
       const target = await resolveHostTarget(environment, host);
-      if (target === "unknown" || typeof target === "object")
+      if (target === "unknown")
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
-          "thread watch does not support remote Hosts; use 'codexhost thread wait <thread> --host <peer>' instead",
+          "thread watch requires a configured peer or the local Host",
+        );
+      const hostId = typeof target === "object" ? target.name : undefined;
+      const cancel = value(parsed, "--cancel");
+      if (cancel !== undefined && cancel !== "true" && cancel !== "false")
+        throw new DelegationControlError("INVALID_ARGUMENT", "--cancel must be true or false");
+      if (cancel === "true" && value(parsed, "--timeout-ms"))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "--timeout-ms cannot be used with --cancel",
         );
       const notifyThread = value(parsed, "--notify") ?? callerThreadId(environment);
       if (!notifyThread)
@@ -649,18 +691,24 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "--notify <thread> is required when the caller Thread is unknown; delegate start reports it as parent",
         );
+      const body = {
+        threadId: reference.threadId,
+        notifyThreadId: normalizeThreadId(notifyThread),
+        ...(hostId ? { hostId } : {}),
+        ...(cancel === "true"
+          ? {}
+          : {
+              timeoutMs: value(parsed, "--timeout-ms")
+                ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
+                : DEFAULT_WATCH_TIMEOUT_MS,
+            }),
+      };
       writeResult(
         "thread watch",
         await requestRuntime({
           environment,
-          path: "/v1/thread/watch",
-          body: {
-            threadId: reference.threadId,
-            notifyThreadId: normalizeThreadId(notifyThread),
-            timeoutMs: value(parsed, "--timeout-ms")
-              ? positiveInteger(value(parsed, "--timeout-ms"), "--timeout-ms")
-              : DEFAULT_WATCH_TIMEOUT_MS,
-          },
+          path: cancel === "true" ? "/v1/thread/watch/cancel" : "/v1/thread/watch",
+          body,
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         }),
       );

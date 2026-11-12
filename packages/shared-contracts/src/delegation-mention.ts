@@ -12,18 +12,22 @@ export const DELEGATION_MENTION_PATH_PREFIX = "subagent://codexhost.";
 
 const HARNESS_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
 const MENTION_LINK_PATTERN =
-  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)>?\)/gu;
+  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)(?:\?host=([^)&\s>]+))?>?\)/gu;
 
 export interface DelegationMention {
   harnessId: string;
   label: string;
+  /** Desktop Host ID or peer name; absent for the local machine. */
+  hostId?: string;
 }
 
-export function delegationMentionPath(harnessId: string): string {
+export function delegationMentionPath(harnessId: string, hostId?: string): string {
   if (!HARNESS_ID_PATTERN.test(harnessId)) {
     throw new Error(`Invalid delegation mention Harness id: ${harnessId}`);
   }
-  return `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}`;
+  return hostId
+    ? `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}?host=${encodeURIComponent(hostId)}`
+    : `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}`;
 }
 
 function sanitizeLabel(label: string): string {
@@ -36,7 +40,7 @@ function sanitizeLabel(label: string): string {
 
 /** Markdown carrier Desktop restores into a native agent mention chip. */
 export function formatDelegationMentionLink(mention: DelegationMention): string {
-  return `[@${sanitizeLabel(mention.label)}](${delegationMentionPath(mention.harnessId)})`;
+  return `[@${sanitizeLabel(mention.label)}](${delegationMentionPath(mention.harnessId, mention.hostId)})`;
 }
 
 export interface DelegationMentionRewrite {
@@ -53,16 +57,27 @@ export function stripDelegationMentions(text: string): DelegationMentionRewrite 
   const seen = new Set<string>();
   const rewritten = text.replace(
     MENTION_LINK_PATTERN,
-    (_match, label: string, harnessId: string) => {
+    (_match, label: string, harnessId: string, encodedHostId?: string) => {
       const trimmed = label.trim();
-      if (!seen.has(harnessId)) {
-        seen.add(harnessId);
-        mentions.push({ harnessId, label: trimmed });
+      const hostId = encodedHostId ? decodeMentionHostId(encodedHostId) : undefined;
+      const key = `${hostId ?? ""}\u0000${harnessId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        mentions.push({ harnessId, label: trimmed, ...(hostId ? { hostId } : {}) });
       }
       return `@${trimmed}`;
     },
   );
   return { text: rewritten, mentions };
+}
+
+function decodeMentionHostId(value: string): string | undefined {
+  try {
+    const decoded = decodeURIComponent(value).trim();
+    return decoded.length > 0 ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

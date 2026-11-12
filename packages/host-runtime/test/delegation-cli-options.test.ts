@@ -68,6 +68,15 @@ describe("delegation CLI option values", () => {
     });
   });
 
+  it("treats --cancel as a boolean flag for thread watch", async () => {
+    await expect(
+      sentBody(["thread", "watch", "t", "--notify", "parent", "--cancel"]),
+    ).resolves.toEqual({
+      threadId: "t",
+      notifyThreadId: "parent",
+    });
+  });
+
   it("forwards an empty --task-name for Runtime validation", async () => {
     await expect(
       sentBody(["delegate", "start", "--harness", "pi", "--task", "work", "--task-name", ""]),

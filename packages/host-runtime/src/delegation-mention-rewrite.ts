@@ -9,13 +9,24 @@ export interface DelegationSkillReference {
   path: string;
 }
 
+function code(value: string): string {
+  return `\`${value.replace(/[`\n\r]/gu, "")}\``;
+}
+
 function describeTargets(mentions: readonly DelegationMention[]): string {
-  return mentions.map(({ harnessId, label }) => `@${label} (Harness \`${harnessId}\`)`).join(", ");
+  return mentions
+    .map(({ harnessId, label, hostId }) =>
+      hostId
+        ? `@${label} on machine ${code(hostId)} (Harness ${code(harnessId)}, pass \`--host ${hostId.replace(/[`\n\r]/gu, "")}\`)`
+        : `@${label} (Harness ${code(harnessId)})`,
+    )
+    .join(", ");
 }
 
 /**
  * Explicit, model-facing delegation request derived from `#` mention chips.
- * The target Harness is resolved by the Host, so the model does not guess it.
+ * The target Harness and optional machine are resolved by the Host, so the
+ * model does not guess them.
  */
 export function delegationMentionInstruction(mentions: readonly DelegationMention[]): string {
   const plural = mentions.length > 1;
@@ -23,6 +34,7 @@ export function delegationMentionInstruction(mentions: readonly DelegationMentio
     `[codexhost delegation] The user mentioned ${describeTargets(mentions)}.`,
     `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
     "with `delegate start --harness <id>` through the executable in CODEXHOST_CLI_PATH, instead of doing the task yourself.",
+    "When a target names a machine, pass its `--host` value; otherwise omit `--host`.",
   ].join(" ");
 }
 
