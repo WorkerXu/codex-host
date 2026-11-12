@@ -34,6 +34,7 @@ import {
   type DelegationThreadSnapshot,
   type HarnessInspectInput,
   type HarnessInspectResult,
+  type HarnessListInput,
   type HarnessListResult,
   type ThreadCancelInput,
   type ThreadCancelResult,
@@ -261,8 +262,30 @@ export class HarnessDelegationCoordinator {
     this.#externalThreadBusy = input.externalThreadBusy;
   }
 
-  async listHarnesses(): Promise<HarnessListResult> {
-    return { harnesses: ["codex", ...this.#adapters.keys()] };
+  async listHarnesses(input: HarnessListInput = {}): Promise<HarnessListResult> {
+    const harnesses: RoutedHarnessId[] = ["codex", ...this.#adapters.keys()];
+    if (!input.includeAvailability) return { harnesses };
+    const availability: NonNullable<HarnessListResult["availability"]> = {};
+    await Promise.all(
+      harnesses.map(async (harnessId) => {
+        if (harnessId === "codex") {
+          availability[harnessId] = "ready";
+          return;
+        }
+        const adapter = this.#adapters.get(harnessId as ExternalHarnessId);
+        if (!adapter) {
+          availability[harnessId] = "unavailable";
+          return;
+        }
+        try {
+          const inspection = await adapter.inspect({ purpose: "availability" });
+          availability[harnessId] = inspection.status;
+        } catch {
+          availability[harnessId] = "error";
+        }
+      }),
+    );
+    return { harnesses, availability };
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {

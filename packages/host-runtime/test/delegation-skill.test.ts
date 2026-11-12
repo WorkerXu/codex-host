@@ -64,6 +64,8 @@ describe("delegation Skill installation", () => {
     ["v9 Skill without child-session name guidance", "codexhost-delegation-v9.md"],
     ["v10 Skill before cross-machine delegation guidance", "codexhost-delegation-v10.md"],
     ["upstream v0.18 beta v11 Skill", "codexhost-delegation-upstream-v11.md"],
+    ["branch v11 cross-host Skill", "codexhost-delegation-v11.md"],
+    ["v12 Skill before direct-command guidance", "codexhost-delegation-v12.md"],
   ])("updates the %s", async (_name, fixture) => {
     const root = await home();
     const shipped = await readFile(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8");
@@ -101,7 +103,7 @@ describe("delegation Skill installation", () => {
   });
 
   it("routes natural agent requests and points execution to the authoritative help", () => {
-    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 12");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 13");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("@agent) to independently perform a task");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("session's content, progress, or results");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("Not for recapping the current conversation");
@@ -123,5 +125,15 @@ describe("delegation Skill installation", () => {
     expect(CODEXHOST_DELEGATION_SKILL).toContain("thread watches");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("--cancel");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("Never read files under `~/.codexhost/runtime/`");
+  });
+
+  it("prefers an exact command and watch-first over help and polling", () => {
+    expect(CODEXHOST_DELEGATION_SKILL).toContain(
+      "A delegation mention may contain complete `codexhost delegate start` commands",
+    );
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("do not run");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("`--help` or `peer list` first");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("prefer `delegate start --watch true`");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("Do not poll with repeated `thread wait`");
   });
 });

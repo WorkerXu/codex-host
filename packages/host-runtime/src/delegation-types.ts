@@ -91,8 +91,15 @@ export interface HarnessInspectResult {
   inspection: HarnessInspection;
 }
 
+export interface HarnessListInput {
+  /** Ask the Host to inspect each Harness before returning its catalog. */
+  includeAvailability?: boolean;
+}
+
 export interface HarnessListResult {
   harnesses: RoutedHarnessId[];
+  /** Present only when the caller asked for availability. */
+  availability?: Partial<Record<RoutedHarnessId, HarnessInspection["status"]>>;
 }
 
 export interface DelegationConfigurationResult {
@@ -271,7 +278,7 @@ export interface DelegationPeerCatalogApi {
 }
 
 export interface DelegationControlApi {
-  listHarnesses(): Promise<HarnessListResult>;
+  listHarnesses(input?: HarnessListInput): Promise<HarnessListResult>;
   inspect(input: HarnessInspectInput): Promise<HarnessInspectResult>;
   start(input: DelegationStartInput): Promise<DelegationStartResult>;
   send(input: ThreadSendInput): Promise<ThreadSendResult>;

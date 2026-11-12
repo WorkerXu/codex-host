@@ -888,8 +888,8 @@ export class AppServerHost {
     const maintenanceOperation = <T>(run: () => Promise<T>): Promise<T> =>
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
     const unregisterDelegationApi = options.onDelegationApi?.({
-      listHarnesses: () =>
-        this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses()),
+      listHarnesses: (input) =>
+        this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses(input)),
       inspect: (input) =>
         this.#waitForPlugins().then(() => this.#delegationCoordinator.inspect(input)),
       start: (input) =>
