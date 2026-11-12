@@ -263,6 +263,7 @@ export class ProjectGroupHeaders {
     row.append(groupIcon(document));
     const name = document.createElement("span");
     name.textContent = group.name;
+    name.title = group.name;
     style(name, {
       flex: "1 1 auto",
       "min-width": "0",
