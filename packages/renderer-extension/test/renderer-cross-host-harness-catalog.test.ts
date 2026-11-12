@@ -1,4 +1,4 @@
-import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
+import { harnessIdSchema, type HarnessPluginDescriptor } from "@codexhost/shared-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,13 +8,17 @@ import {
 } from "../src/renderer-cross-host-harness-catalog.js";
 
 const claudeCode: HarnessPluginDescriptor = {
-  id: "claude-code",
+  id: harnessIdSchema.parse("claude-code"),
   name: "Claude Code",
   version: "1",
 };
-const notInstalled: HarnessPluginDescriptor = { id: "grok", name: "Grok", version: "1" };
+const notInstalled: HarnessPluginDescriptor = {
+  id: harnessIdSchema.parse("grok"),
+  name: "Grok",
+  version: "1",
+};
 const usageOnly: HarnessPluginDescriptor = {
-  id: "usage-only",
+  id: harnessIdSchema.parse("usage-only"),
   name: "Usage",
   version: "1",
   kind: "usage",
