@@ -1139,7 +1139,11 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus === "error",
     );
     showCodexUsageGateStatus(mounted, mounted.codexUsageGate.update(externalSubmissionReady));
-    if (hostId && mounted.modelTarget?.[0] === "default") {
+    if (
+      hostId &&
+      mounted.modelTarget?.[0] === "default" &&
+      controller.get(mounted.composer).agent === "codex"
+    ) {
       window.__codexhostProjectMirrorV1?.consumePending({
         composer: mounted.composer,
         hostId,
