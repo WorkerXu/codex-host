@@ -54,6 +54,10 @@ import {
   CREDENTIAL_IMPORTS_METHOD,
   credentialImportsParamsSchema,
 } from "@codexhost/shared-contracts";
+import {
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerListParamsSchema,
+} from "@codexhost/shared-contracts";
 import { handleCredentialImports } from "./credential-imports.js";
 import { HarnessDisplaySettingsStore } from "./harness-display-settings.js";
 import {
@@ -233,6 +237,7 @@ import {
 import { DesktopRequestQueue } from "./desktop-request-queue.js";
 import type {
   DelegationControlRegistration,
+  DelegationPeerCatalogApi,
   DelegationStartInput,
   DelegationStartResult,
   DelegationThreadListResult,
@@ -383,6 +388,8 @@ export interface AppServerHostOptions {
   /** Local-only project-group configuration and Desktop project catalog reads. */
   projectGroups?: ProjectGroupsService;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
+  /** Peer names and Harness catalogs for the Renderer's `#` picker. */
+  delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
   /** Shared by all Hosts of one runtime; defaults to the bundled snapshot only. */
   modelPrices?: ModelPriceCatalog;
   /** Machine-wide usage statistics; one per runtime, read from the loaded Harness plugins. */
@@ -1543,6 +1550,26 @@ export class AppServerHost {
       request.method === "codexhost/update/status"
     ) {
       this.#dispatchDesktopReply(request, () => this.#handleUpdateRequest(request));
+      return;
+    }
+    if (request.method === DELEGATION_PEER_LIST_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        const params = delegationPeerListParamsSchema.safeParse(request.params ?? {});
+        if (!params.success) {
+          await this.#writer.json(rpcError(request, -32602, "Invalid peer catalog request"));
+          return;
+        }
+        if (!this.#options.delegationPeers) {
+          await this.#writer.json(rpcError(request, -32000, "Peer catalog is unavailable"));
+          return;
+        }
+        try {
+          const result = await this.#options.delegationPeers.listPeers(params.data);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32000, errorMessage(error)));
+        }
+      });
       return;
     }
     if (request.method === CONSOLE_OPEN_METHOD) {

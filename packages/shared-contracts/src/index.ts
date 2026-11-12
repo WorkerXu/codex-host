@@ -362,6 +362,18 @@ export {
 export { desktopImageAttachmentPaths } from "./desktop-attachments.js";
 
 export {
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerListParamsSchema,
+  delegationPeerStateSchema,
+  delegationPeerCatalogEntrySchema,
+  delegationPeerCatalogSchema,
+  type DelegationPeerListParams,
+  type DelegationPeerState,
+  type DelegationPeerCatalogEntry,
+  type DelegationPeerCatalog,
+} from "./delegation-peer.js";
+
+export {
   REMOTE_SSH_SETUP_METHOD,
   remoteSshSetupParamsSchema,
   remoteSshSetupResultSchema,

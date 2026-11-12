@@ -12,6 +12,7 @@ import {
   type ThreadSendInput,
   type ThreadReadInput,
   type ThreadWaitInput,
+  type ThreadWatchCancelInput,
   type ThreadWatchInput,
 } from "./delegation-types.js";
 import { matchesBearerToken } from "./bearer-token.js";
@@ -161,6 +162,13 @@ export async function startDelegationControlServer(input: {
           return;
         case "/v1/thread/watches":
           writeJson(response, 200, await watchApi(input.watchApi).watches());
+          return;
+        case "/v1/thread/watch/cancel":
+          writeJson(
+            response,
+            200,
+            await watchApi(input.watchApi).cancelWatch(body as unknown as ThreadWatchCancelInput),
+          );
           return;
         case "/v1/thread/list":
           writeJson(response, 200, await input.api.list(body as unknown as ThreadListInput));
