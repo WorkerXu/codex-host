@@ -95,16 +95,18 @@ export function projectGroupMachineSummary(machines: readonly ProjectGroupMachin
   return { text: `${machines.length} 台`, title };
 }
 
-export function projectHostLabel(
+/** Machine name used by group headers and native-row subtitles. */
+export function projectMachineName(
   entry: ProjectIndexEntry,
   catalog: DesktopProjectsCatalog,
 ): string {
   if (entry.kind === "local") return "本机";
-  if (entry.hostLabel) return entry.hostLabel;
   const connection = entry.hostId
     ? catalog.codexManagedRemoteConnections.find(({ hostId }) => hostId === entry.hostId)
     : undefined;
-  return connection?.displayName ?? connection?.alias ?? entry.hostId ?? "远程机器";
+  return (
+    connection?.displayName ?? connection?.alias ?? entry.hostLabel ?? entry.hostId ?? "远程机器"
+  );
 }
 
 function sameRootPaths(left: readonly string[], right: readonly string[]): boolean {
@@ -235,7 +237,7 @@ export function buildProjectGroupViews(input: {
         if (!machine) {
           machine = {
             key,
-            label: projectHostLabel(entry, input.catalog),
+            label: projectMachineName(entry, input.catalog),
             state: input.machineState.get(key) ?? "unknown",
             projects: [],
           };

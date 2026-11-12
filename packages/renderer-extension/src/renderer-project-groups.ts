@@ -20,6 +20,7 @@ import {
   mergeMachineState,
   projectGroupMachineSummary,
   projectHostKey,
+  projectMachineName,
   type MachineConnectionState,
   type ProjectGroupProjectView,
   type ProjectGroupView,
@@ -31,6 +32,7 @@ import {
 import {
   ProjectGroupLayoutStyle,
   type ProjectGroupLayoutGroup,
+  type ProjectGroupLayoutMember,
 } from "./renderer-project-groups-layout.js";
 import { ProjectGroupsDialog } from "./renderer-project-groups-dialog.js";
 import { ProjectGroupNewChatPicker } from "./renderer-project-groups-new-chat.js";
@@ -440,36 +442,50 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     return placeholders;
   }
 
+  #layoutMembers(view: ProjectGroupView): ProjectGroupLayoutMember[] {
+    const catalog = this.#catalog;
+    if (!catalog) return [];
+    return view.projects
+      .flatMap((project) => {
+        const entry = project.project.entry;
+        if (!entry?.native) return [];
+        return [
+          {
+            member: {
+              projectId: entry.projectId,
+              label: entry.label,
+              machineName: projectMachineName(entry, catalog),
+              kind: entry.kind,
+            } satisfies ProjectGroupLayoutMember,
+            position: this.#nativeOrder.get(entry.projectId) ?? Number.MAX_SAFE_INTEGER,
+          },
+        ];
+      })
+      .sort((left, right) => left.position - right.position)
+      .map(({ member }) => member);
+  }
+
   #paint(): void {
+    const layoutGroups: ProjectGroupLayoutGroup[] = [];
     const items: ProjectGroupHeaderItem[] = this.#views.map((view) => {
       const summary = projectGroupMachineSummary(view.machines);
+      // Follow the native DOM order so Desktop's own drag-to-reorder keeps
+      // working inside a group instead of being overridden by config order.
+      const members = this.#layoutMembers(view);
+      layoutGroups.push({
+        id: view.group.id,
+        name: view.group.name,
+        collapsed: this.#collapsed.has(view.group.id),
+        members,
+      });
       return {
         id: view.group.id,
         name: view.group.name,
         machineSummary: summary.text,
         machineSummaryTitle: summary.title,
-        // Follow the native DOM order so Desktop's own drag-to-reorder keeps
-        // working inside a group instead of being overridden by config order.
-        projectIds: view.projects
-          .flatMap((project) => {
-            const entry = project.project.entry;
-            if (!entry?.native) return [];
-            return [
-              {
-                id: entry.projectId,
-                position: this.#nativeOrder.get(entry.projectId) ?? Number.MAX_SAFE_INTEGER,
-              },
-            ];
-          })
-          .sort((left, right) => left.position - right.position)
-          .map((member) => member.id),
+        projectIds: members.map((member) => member.projectId),
       };
     });
-    const layoutGroups: ProjectGroupLayoutGroup[] = items.map((item) => ({
-      id: item.id,
-      collapsed: this.#collapsed.has(item.id),
-      projectIds: item.projectIds,
-    }));
     this.#layout.apply(layoutGroups);
     this.#headers.render(items, {
       collapsedGroups: this.#collapsed,

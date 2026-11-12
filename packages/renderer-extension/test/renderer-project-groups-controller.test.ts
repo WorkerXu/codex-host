@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-type LayoutGroup = { id: string; collapsed: boolean; projectIds: readonly string[] };
+type LayoutMember = {
+  projectId: string;
+  label: string;
+  machineName: string;
+  kind: "local" | "remote";
+};
+type LayoutGroup = {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  members: readonly LayoutMember[];
+};
 type HeaderItem = {
   id: string;
   name: string;
@@ -50,7 +61,14 @@ const mocks = vi.hoisted(() => {
       },
     ],
     threadProjectAssignments: {},
-    codexManagedRemoteConnections: [],
+    codexManagedRemoteConnections: [
+      {
+        hostId: "remote-ssh-discovered:beta",
+        displayName: "oracle-sg",
+        alias: "beta",
+        source: "discovered",
+      },
+    ],
     projectOrder: ["local-alpha", "project-beta"],
     readAt: "2026-11-11T10:00:00.000Z",
   };
@@ -259,8 +277,20 @@ describe("project group controller", () => {
       projectCount: 2,
       missingMembers: 0,
     });
-    expect(mocks.calls.layoutApply.at(-1)).toEqual([
-      { id: mocks.group.id, collapsed: false, projectIds: ["local-alpha"] },
+    expect(
+      mocks.calls.layoutApply.at(-1)?.map((group) => ({
+        id: group.id,
+        name: group.name,
+        collapsed: group.collapsed,
+        projectIds: group.members.map((member) => member.projectId),
+      })),
+    ).toEqual([
+      {
+        id: mocks.group.id,
+        name: "Cross-host",
+        collapsed: false,
+        projectIds: ["local-alpha"],
+      },
     ]);
     const render = mocks.calls.headerRender.at(-1);
     expect(render?.items).toEqual([
@@ -268,12 +298,20 @@ describe("project group controller", () => {
         id: mocks.group.id,
         name: "Cross-host",
         machineSummary: "2 台",
-        machineSummaryTitle: "本机 · remote-ssh-discovered:beta",
+        machineSummaryTitle: "本机 · oracle-sg",
         projectIds: ["local-alpha"],
       },
     ]);
     expect(render?.options.collapsedGroups.size).toBe(0);
     expect(render?.options.placeholders.size).toBe(0);
+    expect(mocks.calls.layoutApply.at(-1)?.[0]?.members).toEqual([
+      {
+        projectId: "local-alpha",
+        label: "alpha",
+        machineName: "本机",
+        kind: "local",
+      },
+    ]);
     handle.dispose();
   });
 
@@ -290,9 +328,26 @@ describe("project group controller", () => {
     ];
     const handle = install();
     await vi.waitFor(() => expect(handle.status().state).toBe("active"));
-    expect(mocks.calls.layoutApply.at(-1)?.[0]?.projectIds).toEqual([
-      "project-beta",
-      "local-alpha",
+    expect(
+      mocks.calls.layoutApply.at(-1)?.[0]?.members.map((member) => ({
+        projectId: member.projectId,
+        label: member.label,
+        machineName: member.machineName,
+        kind: member.kind,
+      })),
+    ).toEqual([
+      {
+        projectId: "project-beta",
+        label: "beta",
+        machineName: "oracle-sg",
+        kind: "remote",
+      },
+      {
+        projectId: "local-alpha",
+        label: "alpha",
+        machineName: "本机",
+        kind: "local",
+      },
     ]);
     expect(mocks.calls.headerRender.at(-1)?.items[0]?.projectIds).toEqual([
       "project-beta",
