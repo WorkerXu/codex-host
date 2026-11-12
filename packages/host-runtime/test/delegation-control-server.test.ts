@@ -203,6 +203,12 @@ describe("delegation control server", () => {
       status: "running" as const,
       timeoutMs: 5_000,
     }));
+    const cancelWatch = vi.fn(
+      async (input: { threadId: string; notifyThreadId: string; hostId?: string }) => ({
+        ...input,
+        cancelled: true as const,
+      }),
+    );
     const api = {
       listHarnesses: vi.fn(),
       inspect: vi.fn(),
@@ -216,7 +222,7 @@ describe("delegation control server", () => {
     const server = await startDelegationControlServer({
       token,
       api,
-      watchApi: { watch, watches: vi.fn(async () => ({ watches: [] })) },
+      watchApi: { watch, watches: vi.fn(async () => ({ watches: [] })), cancelWatch },
     });
     const unsupported = await startDelegationControlServer({ token, api });
     try {
@@ -263,11 +269,32 @@ describe("delegation control server", () => {
         timeoutMs: 5_000,
       });
 
+      const cancelled = await fetch(
+        `${server.endpoint}/v1/thread/watch/cancel`,
+        authorized({ threadId: "child", notifyThreadId: "parent", hostId: "mac" }),
+      );
+      await expect(cancelled.json()).resolves.toEqual({
+        threadId: "child",
+        notifyThreadId: "parent",
+        hostId: "mac",
+        cancelled: true,
+      });
+      expect(cancelWatch).toHaveBeenCalledWith({
+        threadId: "child",
+        notifyThreadId: "parent",
+        hostId: "mac",
+      });
+
       const rejected = await fetch(
         `${unsupported.endpoint}/v1/thread/watch`,
         authorized({ threadId: "child", notifyThreadId: "parent", timeoutMs: 5_000 }),
       );
       expect(rejected.status).toBe(400);
+      const unsupportedCancel = await fetch(
+        `${unsupported.endpoint}/v1/thread/watch/cancel`,
+        authorized({ threadId: "child", notifyThreadId: "parent", hostId: "mac" }),
+      );
+      expect(unsupportedCancel.status).toBe(400);
     } finally {
       await server.close();
       await unsupported.close();

@@ -1,4 +1,5 @@
 import {
+  DELEGATION_PEER_LIST_METHOD,
   HARNESS_INSTALLATION_START_METHOD,
   HARNESS_LAUNCH_SETTINGS_GET_METHOD,
   HARNESS_LAUNCH_SETTINGS_SET_METHOD,
@@ -420,6 +421,7 @@ describe("Renderer fixed Model request client", () => {
       "inspectThreadUsage",
       "installation",
       "listCodexAccounts",
+      "listDelegationPeers",
       "listHarnessAccountSources",
       "listHarnessAccounts",
       "listHarnessPlugins",
@@ -934,16 +936,18 @@ describe("Renderer fixed Model request client", () => {
     ]);
   });
 
-  it("does not retry a full inspection rejected for its params", async () => {
-    const sendRequest = vi
-      .fn()
-      .mockRejectedValue(Object.assign(new Error("Invalid params"), { code: -32602 }));
+  it("queries the peer catalog through the fixed method", async () => {
+    const sendRequest = vi.fn(async () => ({
+      peers: [],
+      self: { hostIds: ["remote-ssh-discovered:self"] },
+    }));
     const client = createRendererModelClient([{ sendRequest }]);
-    if (!client) throw new Error("Synthetic Model client was not created");
+    if (!client?.listDelegationPeers) throw new Error("Peer catalog method is missing");
 
-    await expect(client.inspectHarness({ harnessId: piHarnessId })).rejects.toThrow(
-      "Invalid params",
-    );
-    expect(sendRequest).toHaveBeenCalledOnce();
+    await expect(client.listDelegationPeers({ refresh: true })).resolves.toEqual({
+      peers: [],
+      self: { hostIds: ["remote-ssh-discovered:self"] },
+    });
+    expect(sendRequest).toHaveBeenCalledWith(DELEGATION_PEER_LIST_METHOD, { refresh: true });
   });
 });

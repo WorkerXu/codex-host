@@ -64,7 +64,7 @@ function fakeSpawn(
   },
 ): { spawnImpl: PeerSpawn; calls: { args: string[]; body: string }[] } {
   const calls: { args: string[]; body: string }[] = [];
-  const spawnImpl: PeerSpawn = (_command, args, _options) => {
+  const spawnImpl: PeerSpawn = (_command, args) => {
     const child = new FakeProcess();
     let body = "";
     child.stdin.on("data", (chunk) => {
