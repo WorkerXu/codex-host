@@ -35,6 +35,16 @@ export {
   readProjectGroupsFile,
   writeProjectGroupsFile,
 } from "./project-groups.js";
+export {
+  ProjectMirrorRevisionConflictError,
+  ProjectMirrorStore,
+  ProjectMirrorStoreError,
+  emptyProjectMirrorsFile,
+  projectMirrorsFilePath,
+  readProjectMirrorsFile,
+  writeProjectMirrorsFile,
+} from "./project-mirrors.js";
+export type { ProjectMirrorUpdate } from "./project-mirrors.js";
 export { SUPERSEDED_SESSIONS_MAX } from "./superseded-sessions.js";
 export type { StoredSupersededSessionV1 } from "./superseded-sessions.js";
 export type { StoredSectionPlacementV1, StoredThreadSection } from "./section-placements.js";
