@@ -22,8 +22,9 @@
    - 菜单：`<div id="<composerId>-agent-menu" role="menu" popover="auto">`
 3. 菜单打开时在末尾追加 `data-codexhost-cross-host-agent-menu` 分组：
    - 按机器分组，机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`）；离线置灰。
-   - 展开机器后列出该机器的 Harness：Codex 固定第一项，其余来自目标 Host 的 `codexhost/harness/plugins/list`，过滤 `kind === "usage"`。
-   - 列表加载失败时仍保留 Codex，并标注「列表不可用」。
+   - 展开机器后列出该机器的 Harness：Codex 固定第一项，其余来自目标 Host 的插件目录，并按该 Host 的 availability 只保留 `ready`（未安装/不可用不显示）。
+   - 行高、内边距、字体和图标复用 Agent 选择器原生行；机器行带服务器图标与状态点，Harness 行缩进一级并带各自图标。
+   - 列表加载中/失败用一条与原生行同色的次要文字展示，不再放右侧徽标；滚动由整个弹框承担。
 4. 已有对话中 Agent 触发按钮为 `disabled`，菜单不会打开；因此该分组只出现在新对话草稿里。
 5. 模型菜单不再注入任何分组。
 
@@ -42,7 +43,7 @@
   - 同路径被不同名项目占用 → 跳过，尝试下一个候选。
   - 目录存在但不是项目 → 复用该目录。
   - 路径不存在 → 创建目录后建项目。
-- 目录通过 Desktop renderer 服务 `appServices.workspaceFiles.createDirectory({hostId, path})` 创建；home 通过 `appServices.executionPaths.readHomeDirectory(hostId)` 获取。
+- 目录通过 Desktop renderer 服务 `appServices.workspaceFiles.createDirectory({hostId, path})` 创建；home 通过 `appServices.executionPaths.readHomeDirectory(hostId)` 获取。`ProjectMirrorDesktopServices` 保持这套嵌套形状，不拍平成顶层方法。
 
 ## 创建项目
 
@@ -99,7 +100,7 @@ Host 只提供本地 RPC：
 
 | 失败点 | 行为 |
 | --- | --- |
-| 机器离线/无路由 | 菜单中置灰；不创建 |
+| 机器离线/无路由 | 菜单中整行置灰；不创建 |
 | home/dir 读取失败 | toast，结束 |
 | `createRemote` 返回 null（用户取消信任确认） | toast，结束 |
 | 项目已创建但侧栏未出现（5s） | toast「项目已创建，请稍后手动打开」 |
