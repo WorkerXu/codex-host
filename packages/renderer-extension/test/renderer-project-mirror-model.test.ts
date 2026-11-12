@@ -3,11 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   chooseMirrorDestination,
-  effectiveModelId,
-  groupProviderModels,
   isNameOnlyProject,
   mirrorDirectoryCandidates,
   planMirrorGroup,
+  readComposerProject,
   sanitizeMirrorDirectoryName,
 } from "../src/renderer-project-mirror-model.js";
 
@@ -63,31 +62,33 @@ describe("name-only project classification", () => {
   });
 });
 
-describe("model provider grouping", () => {
-  it("uses the model id prefix, otherwise the host default provider", () => {
-    expect(effectiveModelId("eshetang", "gpt-6", "magpie")).toBe("eshetang/gpt-6");
-    expect(effectiveModelId("magpie", "gpt-6", "magpie")).toBe("gpt-6");
-    expect(effectiveModelId("magpie", "eshetang/gpt-6", "magpie")).toBe("eshetang/gpt-6");
+describe("composer project context", () => {
+  it("reads selectedProject from the nearest React fiber", () => {
+    const composer = {} as Element;
+    Object.defineProperty(composer, "__reactFiber$test", {
+      value: {
+        memoizedProps: { selectedProject: null },
+        return: {
+          memoizedProps: {
+            selectedProject: { type: "local", projectId: "local-alpha" },
+          },
+          return: null,
+        },
+      },
+    });
+    expect(readComposerProject(composer)).toEqual({
+      type: "local",
+      projectId: "local-alpha",
+    });
   });
 
-  it("groups, hides, and orders models", () => {
-    const groups = groupProviderModels(
-      [
-        { id: "eshetang/gpt-b", displayName: "B", isDefault: false },
-        { id: "eshetang/gpt-a", displayName: "A", isDefault: true },
-        { id: "plain", displayName: "Plain" },
-        { id: "eshetang/hidden", displayName: "Hidden", hidden: true },
-      ],
-      { eshetang: { name: "OpenAI" }, magpie: { name: "Magpie" } },
-      "magpie",
-    );
-    expect(groups.map((entry) => entry.providerId)).toEqual(["eshetang", "magpie"]);
-    expect(groups[0]?.providerLabel).toBe("OpenAI");
-    expect(groups[0]?.models.map((model) => model.id)).toEqual([
-      "eshetang/gpt-a",
-      "eshetang/gpt-b",
-    ]);
-    expect(groups[1]?.models.map((model) => model.id)).toEqual(["plain"]);
+  it("returns null without a usable fiber value", () => {
+    expect(readComposerProject({} as Element)).toBeNull();
+    const composer = {} as Element;
+    Object.defineProperty(composer, "__reactFiber$test", {
+      value: { memoizedProps: { selectedProject: { type: "local" } }, return: null },
+    });
+    expect(readComposerProject(composer)).toBeNull();
   });
 });
 

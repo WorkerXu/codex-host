@@ -1,4 +1,8 @@
-import type { ProjectGroup, ProjectGroupMember } from "@codexhost/shared-contracts";
+import type {
+  DesktopSelectedProject,
+  ProjectGroup,
+  ProjectGroupMember,
+} from "@codexhost/shared-contracts";
 
 export interface MirrorSourceProject {
   id: string;
@@ -43,69 +47,6 @@ export function mirrorDirectoryCandidates(parent: string, name: string, limit = 
     candidates.push(`${normalizedParent}/${base} ${index}`);
   }
   return candidates;
-}
-
-export function effectiveModelId(
-  providerId: string,
-  modelId: string,
-  defaultProviderId: string | null,
-): string {
-  if (modelId.includes("/")) return modelId;
-  return providerId === defaultProviderId ? modelId : `${providerId}/${modelId}`;
-}
-
-export interface HostModelLike {
-  id: string;
-  label?: string | null;
-  displayName?: string | null;
-  defaultReasoningEffort?: string | null;
-  isDefault?: boolean;
-  hidden?: boolean;
-}
-
-export interface ProviderConfigLike {
-  name?: string | null;
-}
-
-export interface ProviderModelGroup {
-  providerId: string;
-  providerLabel: string;
-  models: HostModelLike[];
-}
-
-/**
- * `model/list` does not return a provider field. Codex resolves a bare model id
- * through the host's default provider; a `provider/model` id names its
- * provider explicitly.
- */
-export function groupProviderModels(
-  models: readonly HostModelLike[],
-  providers: Readonly<Record<string, ProviderConfigLike>>,
-  defaultProviderId: string | null,
-): ProviderModelGroup[] {
-  const groups = new Map<string, HostModelLike[]>();
-  for (const model of models) {
-    if (model.hidden) continue;
-    const slash = model.id.indexOf("/");
-    const providerId =
-      slash > 0 ? model.id.slice(0, slash) : (defaultProviderId ?? Object.keys(providers)[0] ?? "");
-    if (!providerId) continue;
-    const bucket = groups.get(providerId) ?? [];
-    bucket.push(model);
-    groups.set(providerId, bucket);
-  }
-  return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([providerId, bucket]) => ({
-      providerId,
-      providerLabel: providers[providerId]?.name?.trim() || providerId,
-      models: [...bucket].sort((left, right) => {
-        if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1;
-        return (left.label ?? left.displayName ?? left.id).localeCompare(
-          right.label ?? right.displayName ?? right.id,
-        );
-      }),
-    }));
 }
 
 export interface MirrorGroupPlan {
@@ -229,6 +170,41 @@ export async function chooseMirrorDestination(
     const state = await input.directoryState(candidate);
     if (state === "other") continue;
     return { path: candidate, projectId: null };
+  }
+  return null;
+}
+
+interface ReactFiberLike {
+  memoizedProps?: unknown;
+  return?: ReactFiberLike | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The Composer receives the project for its own Thread as a prop. The Host
+ * catalog's `selected-project` atom can lag behind during draft creation, so
+ * prefer the nearest Composer-owned value and fall back only when it is absent.
+ */
+export function readComposerProject(composer: Element): DesktopSelectedProject | null {
+  const key = Object.getOwnPropertyNames(composer).find((name) => name.startsWith("__reactFiber$"));
+  let fiber = key
+    ? (Object.getOwnPropertyDescriptor(composer, key)?.value as ReactFiberLike | undefined)
+    : undefined;
+  for (let depth = 0; fiber && depth < 16; depth += 1) {
+    const props = fiber.memoizedProps;
+    if (isRecord(props) && isRecord(props.selectedProject)) {
+      const selected = props.selectedProject;
+      if (
+        (selected.type === "local" || selected.type === "remote") &&
+        typeof selected.projectId === "string" &&
+        selected.projectId.length > 0
+      )
+        return { type: selected.type, projectId: selected.projectId };
+    }
+    fiber = fiber.return ?? undefined;
   }
   return null;
 }

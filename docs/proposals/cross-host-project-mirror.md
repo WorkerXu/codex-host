@@ -37,7 +37,7 @@
 5. 不迁移任何草稿/上下文；目标项目里打开空白新对话。
 6. 不自动发送。
 7. 推理强度用所选模型的默认值。
-8. 入口是**聊天框右下角的模型选择器**（原生 Codex 模型下拉）末尾的「其他机器」分组；**不改 Agent 图标选择器**，只在「只填名字」项目的新对话 Composer 中出现。
+8. 入口最终定为 **Agent/Harness 图标按钮的弹框**（模型名右侧、麦克风左侧，显示当前 Agent 图标）里的「其他机器」分组；模型菜单不注入。只在「只填名字」项目的新对话 Composer 中出现。
 
 ### Spike：Renderer 服务对象可达（路径 A 成立）
 
@@ -62,7 +62,24 @@ appHost, appServices, setAppHost, setAppServices
 1. 不需要走路径 B（原生创建远程项目弹窗）；实现可以直接调用 Desktop 自己的 `createRemote` / `createDirectory`，与内部 `create_project` 工具同源。
 2. 服务对象不是 `window` 全局，而是已加载模块的 live export；发现方式与仓库现有 `loadCodexNativeServices` 一致（扫描 `__codexhostLoadedModulesV1` 的模块导出，按 shape 匹配）。
 3. `readHomeDirectory` 可在 renderer 直接取目标机 home，用于拼接 `~/Documents/ChatGPT/<name>`；不必在目标机执行命令。
-4. 原生模型下拉是 Desktop React 组件，扩展通过“点击原生模型按钮后，在打开的菜单末尾追加 own 分组”的方式接入；追加失败时整体 fail-open（不显示「其他机器」），不影响原生模型选择。
+4. 入口改接 codexhost 自己的 Agent 选择器（`[data-codexhost-agent-control]`），不再依赖原生模型下拉的 DOM 契约；见下节实机修正。
+
+### B 实机验收修正（2026-11-12）
+
+实机现象：name-only 项目 `codexhost` 的新对话里，模型菜单没有「其他机器」；`window.__codexhostProjectMirrorV1` 已存在，说明注入条件静默失败。
+
+只读 CDP 定位结论：
+
+1. **旧入口没有收到点击**。原实现把 `onNativeModelOpen` 的 `click` 监听挂在 mount 时捕获的原生模型按钮上；`refreshNativeModelControl()` 在后续 render 中会替换 `control.nativeModelControl.element`，但没有把监听重新绑定到新元素。现场点击原生模型按钮后 `aria-expanded` 变为 `true`，而临时包裹的 `openFor` 记录到 **0 次调用**，因此菜单里不可能出现分组。
+2. **项目判定来源不可靠**。旧 `readContext()` 只读 Host catalog 的 `selected-project`；在草稿/新建对话状态下该值可能仍指向之前选择的远程项目。Composer 根节点的 React fiber 在 depth 1 带有自己的 `selectedProject {type, projectId}`，应优先使用它，catalog 仅作为缺失时的回退。
+3. **最终入口**。Agent 选择器是 codexhost 自己创建的 DOM：
+   - 根：`[data-codexhost-agent-control]`
+   - 触发：`button[aria-haspopup="menu"][aria-controls="<composerId>-agent-menu"]`
+   - 菜单：`<div id="<composerId>-agent-menu" role="menu" popover="auto">`，与触发同属一个 root
+   - 已有对话中触发为 `disabled`，只有草稿/新对话可打开，天然满足“只在新对话显示”。
+4. **Harness 列表**。每台机器调用目标 Host 的 `codexhost/harness/plugins/list`，过滤 `kind === "usage"`，并始终把 Codex 放在第一位；机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`），离线置灰。
+5. **预选 Harness**。选中后仍复用现有 draft agent switch（`switchComposerAgent`）：等目标 Host 的 availability 就绪，切到该 Harness，模型由 `inspectHarness` 的默认值/新对话偏好自动应用；不再写 `modelSettings.model`。
+6. **诊断**。`window.__codexhostProjectMirrorV1.status()` 返回 `{pickerDetected, projectEligible, peersLoaded, lastError, projectSource, machineCount}`，用于区分“入口没触发 / 不是 name-only 项目 / 对端目录没加载”。
 
 ---
 

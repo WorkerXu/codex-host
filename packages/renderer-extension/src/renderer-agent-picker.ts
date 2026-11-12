@@ -198,7 +198,7 @@ export function mountRendererAgentPicker(
   enabledAgents: readonly RendererAgent[],
   onSelect: (agent: RendererAgent) => void,
   onDownload: (agent: ExternalRendererAgent) => void,
-  onOpen?: () => void,
+  onOpen?: (control: RendererAgentPickerControl) => void,
   groupPreference: AgentGroupPreferenceStore = getSharedAgentGroupPreferenceStore(),
   plugins: readonly HarnessPluginDescriptor[] = [],
 ): RendererAgentPickerControl {
@@ -309,7 +309,7 @@ export function mountRendererAgentPicker(
     if (typeof menu.showPopover === "function") menu.showPopover();
     else menu.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
-    onOpen?.();
+    onOpen?.(control);
     queueMicrotask(() => focusOption(focus));
   };
 
