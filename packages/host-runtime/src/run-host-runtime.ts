@@ -53,6 +53,7 @@ import { ModelPriceCatalog, defaultModelPriceDirectory } from "./model-prices.js
 import { UsageStatistics } from "./usage-statistics.js";
 import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-groups-service.js";
 import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-mirror-service.js";
+import { DelegationPeerCatalogService } from "./peer-catalog.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -152,8 +153,10 @@ async function prepareDelegationRuntime(input: {
     registry: DelegationControlRegistry,
   ): Promise<number>;
 }): Promise<number> {
+  const peerCatalog = new DelegationPeerCatalogService(input.environment);
   const registry = new DelegationControlRegistry({
     remoteRead: (request) => readRemoteDelegationThread(input.environment, request),
+    peerCatalog,
     diagnose: (error) =>
       process.stderr.write(
         `codexhost delegation watch: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
@@ -325,6 +328,7 @@ export async function runHostRuntime(input: {
               }),
               ...shared,
               ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
+              delegationPeers: registry,
               onDelegationApi,
               ...(updateCoordinator ? { updateCoordinator } : {}),
               ...(consoleOpener ? { consoleOpener } : {}),
@@ -365,6 +369,7 @@ export async function runHostRuntime(input: {
             usageStatistics,
             ...common,
             arguments: input.arguments,
+            delegationPeers: registry,
             // Every Remote Control client shares this backend and Mapping Store.
             onDelegationApi: (api) => registry.register(api, { harnessCatalog: true }),
           });
@@ -381,6 +386,7 @@ export async function runHostRuntime(input: {
                 desktopInput,
                 desktopOutput,
                 diagnosticOutput,
+                delegationPeers: registry,
                 onDelegationApi: (api) => registry.register(api),
               }),
           });
@@ -462,6 +468,7 @@ export async function runHostRuntime(input: {
         closeMappingStoreOnExit: false,
         officialRuntimeScope,
         accountControl,
+        delegationPeers: registry,
         onDelegationApi: (api) => {
           sharedDelegation = api;
           return registry.register(api, { harnessCatalog: true });
@@ -499,6 +506,7 @@ export async function runHostRuntime(input: {
             closeMappingStoreOnExit: false,
             officialRuntimeScope,
             accountControl,
+            delegationPeers: registry,
             onDelegationApi: (api) => registry.register(api),
             ...(updateCoordinator ? { updateCoordinator } : {}),
           });

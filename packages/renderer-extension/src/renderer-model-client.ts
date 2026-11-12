@@ -2,6 +2,11 @@ import {
   DELEGATION_READ_METHOD,
   delegationReadParamsSchema,
   type DelegationReadParams,
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerListParamsSchema,
+  delegationPeerCatalogSchema,
+  type DelegationPeerListParams,
+  type DelegationPeerCatalog,
   REMOTE_SSH_SETUP_METHOD,
   remoteSshSetupResultSchema,
   remoteSshSetupParamsSchema,
@@ -232,6 +237,7 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   ): Promise<HarnessConfigurationState>;
   setupSsh?(input: RemoteSshSetupParams): Promise<RemoteSshSetupResult>;
   readDelegationThread?(input: DelegationReadParams): Promise<unknown>;
+  listDelegationPeers?(input?: DelegationPeerListParams): Promise<DelegationPeerCatalog>;
   runtimeStatus?(): Promise<RuntimeStatus>;
   updateRemote?(version: string): Promise<RuntimeStatus>;
   checkUpdate(): Promise<UpdateCheckResult | null>;
@@ -519,6 +525,16 @@ export function createRendererModelClient(
     },
     async readDelegationThread(input: DelegationReadParams) {
       return source.sendRequest(DELEGATION_READ_METHOD, delegationReadParamsSchema.parse(input));
+    },
+    async listDelegationPeers(
+      input: DelegationPeerListParams = {},
+    ): Promise<DelegationPeerCatalog> {
+      return delegationPeerCatalogSchema.parse(
+        await manager.sendRequest(
+          DELEGATION_PEER_LIST_METHOD,
+          delegationPeerListParamsSchema.parse(input),
+        ),
+      );
     },
     async runtimeStatus() {
       // Asked directly rather than through the remembering sender: an outdated remote

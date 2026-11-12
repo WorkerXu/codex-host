@@ -23,6 +23,29 @@ describe("delegation mention carrier", () => {
     expect(() => delegationMentionPath("../x")).toThrow();
   });
 
+  it("carries an optional Host in the mention link", () => {
+    const remote = { harnessId: "grok", label: "Grok", hostId: "oracle-sg" };
+    expect(formatDelegationMentionLink(remote)).toBe(
+      "[@Grok](subagent://codexhost.grok?host=oracle-sg)",
+    );
+    expect(formatDelegationMentionLink({ ...remote, hostId: "remote-ssh-discovered:mac" })).toBe(
+      "[@Grok](subagent://codexhost.grok?host=remote-ssh-discovered%3Amac)",
+    );
+    expect(
+      stripDelegationMentions(
+        "[@Grok](subagent://codexhost.grok?host=oracle-sg) and [@Grok](subagent://codexhost.grok)",
+      ).mentions,
+    ).toEqual([
+      { harnessId: "grok", label: "Grok", hostId: "oracle-sg" },
+      { harnessId: "grok", label: "Grok" },
+    ]);
+  });
+
+  it("keeps old links without a Host compatible", () => {
+    const result = stripDelegationMentions("[@Claude Code](subagent://codexhost.claude-code)");
+    expect(result.mentions).toEqual([{ harnessId: "claude-code", label: "Claude Code" }]);
+  });
+
   it("strips carriers into readable mentions without duplicates", () => {
     const result = stripDelegationMentions(
       "[@Claude Code](subagent://codexhost.claude-code) review, then [@Grok](subagent://codexhost.grok) and [@Claude Code](subagent://codexhost.claude-code)",

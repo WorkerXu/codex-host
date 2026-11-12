@@ -49,8 +49,9 @@ or local fallback on remote failure. Requests are bounded and not retried.
 `messages` pages visible user/Agent text, not tool output or reasoning. Preserve
 the returned Host-qualified link and `nextCursor` when requesting another page.
 Remote `thread send`, `cancel` and `wait` are available only through a configured
-peer; without a peer they are rejected rather than sent through Desktop. Remote
-`thread watch` is not supported.
+peer; without a peer they are rejected rather than sent through Desktop. A
+cross-host `thread watch` is registered on the caller's local Runtime, which
+polls the peer; the remote Host does not need a watch service.
 
 Serialized Controller replies (including the envelope and newline) are limited to
 16 MiB for Thread reads; settings operations retain their 1 MiB limit. Oversized

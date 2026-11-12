@@ -2,6 +2,8 @@ import { DelegationControlError } from "./delegation-types.js";
 
 /** Options whose value is user text: the next argument is taken verbatim, even empty or dash-leading. */
 const FREE_TEXT_OPTIONS: ReadonlySet<string> = new Set(["--task", "--task-name", "--message"]);
+/** Boolean switches that do not consume the following argument. */
+const FLAG_OPTIONS: ReadonlySet<string> = new Set(["--cancel"]);
 
 export interface DelegationCliArguments {
   positionals: string[];
@@ -36,6 +38,8 @@ export function parseDelegationArguments(arguments_: readonly string[]): Delegat
     let optionValue: string | undefined;
     if (separator !== -1) {
       optionValue = argument.slice(separator + 1);
+    } else if (FLAG_OPTIONS.has(name)) {
+      optionValue = "true";
     } else if (consumesNextArgument(argument, arguments_[index + 1])) {
       optionValue = arguments_[index + 1];
       index += 1;

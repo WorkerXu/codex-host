@@ -4,12 +4,14 @@ import {
   DelegationControlError,
   type DelegationControlApi,
   type DelegationControlRegistration,
+  type DelegationPeerCatalogApi,
   type DelegationStartInput,
   type DelegationWatchApi,
   type HarnessInspectInput,
   type ThreadListInput,
   type ThreadReadInput,
   type ThreadWaitInput,
+  type ThreadWatchCancelInput,
   type ThreadWatchInput,
 } from "./delegation-types.js";
 import {
@@ -29,7 +31,9 @@ function only<T>(values: readonly T[], message: string): T {
   return value;
 }
 
-export class DelegationControlRegistry implements DelegationControlApi, DelegationWatchApi {
+export class DelegationControlRegistry
+  implements DelegationControlApi, DelegationWatchApi, DelegationPeerCatalogApi
+{
   readonly #registrations = new Set<DelegationControlRegistration>();
   // Changes whenever the session set changes, so a merged list cursor cannot outlive it. The
   // instance id keeps a cursor from matching a rebuilt Registry at the same count.
@@ -38,6 +42,7 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
   #harnessCatalog: DelegationControlRegistration | undefined;
   // Watches sit above the sessions so either end may belong to any registered session.
   readonly #watchService: DelegationWatchService;
+  readonly #peerCatalog: DelegationPeerCatalogApi | undefined;
 
   readonly #remoteRead:
     ((input: ThreadReadInput) => ReturnType<DelegationControlApi["read"]>) | undefined;
@@ -46,10 +51,16 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
     options: {
       diagnose?: (error: unknown) => void;
       remoteRead?: (input: ThreadReadInput) => ReturnType<DelegationControlApi["read"]>;
+      peerCatalog?: DelegationPeerCatalogApi;
     } = {},
   ) {
     this.#remoteRead = options.remoteRead;
-    this.#watchService = new DelegationWatchService(this, options);
+    const peerCatalog = options.peerCatalog;
+    this.#peerCatalog = peerCatalog;
+    this.#watchService = new DelegationWatchService(this, {
+      ...options,
+      ...(peerCatalog ? { readPeer: (input) => peerCatalog.readThread(input) } : {}),
+    });
   }
 
   get size(): number {
@@ -153,6 +164,24 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
 
   async watches() {
     return this.#watchService.watches();
+  }
+
+  async cancelWatch(input: ThreadWatchCancelInput) {
+    return this.#watchService.cancelWatch(input);
+  }
+
+  async listPeers(input: { refresh?: boolean | undefined } = {}) {
+    if (!this.#peerCatalog) {
+      throw new DelegationControlError("INTERNAL_ERROR", "Peer catalog is unavailable");
+    }
+    return this.#peerCatalog.listPeers(input);
+  }
+
+  async readThread(input: { hostId: string; threadId: string }) {
+    if (!this.#peerCatalog) {
+      throw new DelegationControlError("INTERNAL_ERROR", "Peer catalog is unavailable");
+    }
+    return this.#peerCatalog.readThread(input);
   }
 
   /** Stops all watches; pending notifications are dropped with the Host Runtime. */

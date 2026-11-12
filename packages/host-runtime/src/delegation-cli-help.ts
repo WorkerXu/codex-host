@@ -17,13 +17,13 @@ Omit --model and --thinking to use the Harness native defaults.
 --parent-thread overrides caller inference. PARENT_THREAD_AMBIGUOUS requires an explicit parent.
 Reuse --request-id for an idempotent retry. Identical recent parent/target/task/configuration requests are also deduplicated briefly.
 --watch true also registers thread watch on the child with the resolved parent as the notified Thread; the response's watch field reports whether it was registered.
---host runs the start on an SSH peer. Cross-machine starts have no parent Thread, reject --parent-thread and --watch, and return a host-qualified Thread link; follow them with thread wait --host.
+--host runs the start on an SSH peer. Cross-machine starts have no parent Thread and reject --parent-thread; they return a host-qualified Thread link. --watch true registers the watch on this machine so it can poll the peer and notify the local caller.
 The response confirms cwd and parent. Use its Thread reference with thread read, wait, send, cancel, or watch.`,
   "thread send": `codexhost thread send <thread> [--host <peer-or-host-id>] [--message <text>] [--format json|compact]
 Start a new Turn in an idle writable Thread and return immediately.
 A thread://<id>?hostId=<x> reference or --host routes to a configured SSH peer; local and unconfigured hosts use the local Runtime.
 THREAD_BUSY means the current Turn is still active: wait or cancel before sending. Messages are not queued.
-To be notified when that Turn ends, run thread watch after sending. Thread watch is local-only.`,
+To be notified when that Turn ends, run thread watch after sending.`,
   "thread cancel": `codexhost thread cancel <thread> [--host <peer-or-host-id>] [--format json|compact]
 Request cancellation of the active Turn while preserving the Thread and history.
 A thread://<id>?hostId=<x> reference or --host routes to a configured SSH peer.
@@ -41,18 +41,20 @@ Wait until the Thread is terminal or the timeout expires (default 30000 ms), the
 A thread://<id>?hostId=<x> reference or --host waits on a configured SSH peer; unknown non-local Hosts are rejected.
 timedOut=true is a running checkpoint: the child keeps running. The response already includes the result when available; another read is unnecessary unless more information is needed.
 Message pagination uses --view messages, default limit 25, maximum 100. hasMore is for current pages; nextCursor also supports future incremental reads.`,
-  "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--format json|compact]
+  "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--host <peer-or-host-id>] [--cancel] [--format json|compact]
 Ask the Host to notify one Thread, once, when the watched Thread stops. Returns immediately; no waiting or polling by the caller is needed, and the caller may end its Turn.
-Thread watch is local-only in this version: a thread:// reference with a hostId or --host fails with an explicit error. Use thread wait --host <peer> for a remote Thread.
+A thread://<id>?hostId=<x> reference or --host watches a configured SSH peer. The watch is registered on this machine; the Host polls the peer and sends the same notification locally.
 --notify defaults to the calling Thread when it is identified (CODEXHOST_THREAD_ID, or CODEX_THREAD_ID in native Codex); otherwise it is required. delegate start reports the caller as its parent.
-The notification starts a new Turn in the notified Thread with the watched Thread's link and outcome: completed, failed, interrupted, timedOut, unreadable, or notFound; a terminal outcome names the Turn it came from. It reports execution state only; read the Thread to judge the work.
+The notification starts a new Turn in the notified Thread with the watched Thread's host-qualified link and outcome: completed, failed, interrupted, timedOut, unreadable, or notFound; a terminal outcome names the Turn it came from. It reports execution state only; read the Thread to judge the work.
 --timeout-ms defaults to 1740000 (29 min). timedOut means the Thread had not reached a terminal state, which also covers a Harness that stopped without reporting it; watch again to keep waiting. unreadable means reads failed for 60 s, so the state is unknown.
 state=watching means registered. state=alreadyTerminal means the Thread was not running: nothing was registered and nothing will be sent.
 A busy notified Thread is notified after its Turn ends (retried for up to 6 hours); notifications due together arrive as one message. THREAD_BUSY is never treated as delivered.
-A watch is one-shot and cannot be cancelled. Watching the same pair again while it is still watched returns that watch; once it has stopped, a new watch covers the next stop and any pending notification is still delivered. Watches live in Host Runtime memory and are lost when it restarts.`,
+Watching the same pair again while it is still watched returns that watch; a new watch after it stops covers the next stop. Use --cancel to remove a watch that has not been delivered.
+Watches live in Host Runtime memory and are lost when it restarts; thread watches lists local and cross-machine watches.`,
   "thread watches": `codexhost thread watches [--host <peer-or-host-id>] [--format json|compact]
 List watches that have not been delivered: watching, pendingDelivery (waiting for the notified Thread), or undeliverable (with the reason). Delivered watches are removed.
-The watch registry is local-only in this version; a non-local --host fails with an explicit error.`,
+Cross-machine watches are registered on this machine and include the peer hostId. They are lost when the Host Runtime restarts.
+The watch registry itself is local, so a non-local --host fails; omit --host to see all local and cross-machine watches.`,
   "thread list": `codexhost thread list [--cwd <path>] [--parent <thread>] [--limit <n>] [--cursor <cursor>] [--sort created-asc|created-desc|updated-asc|updated-desc|recency-asc|recency-desc] [--format json|compact]
 Find existing Threads by workspace, or use --parent to list a Thread's delegated children.
 Workspace listing defaults to the caller process cwd. Default limit 25 (maximum 100), sorted created-desc.
@@ -87,7 +89,7 @@ export type PeerCliCommand = keyof typeof PEER_COMMAND_HELP;
 
 const COMMON_HELP = `Thread references accept a bare ID, codex://threads/<id>, or thread://<id>?hostId=<encoded-host-id>.
 --host <peer-or-host-id> routes delegate start, harness list|inspect, and thread read|send|cancel|wait to a peer configured in ~/.codexhost/peers.json; a Thread reference with hostId routes automatically. A Host ID configured under peer self stays local. --host local, or no --host, uses this machine.
-A cross-machine delegate start has no parent Thread, rejects --parent-thread and --watch, and returns a host-qualified Thread link; use thread wait --host afterwards. thread watch and thread watches are local-only.
+A cross-machine delegate start has no parent Thread and rejects --parent-thread; it returns a host-qualified Thread link. --watch true registers a caller-local watch that polls the peer. thread watches lists local and cross-machine watches.
 Options accept --name <value> or --name=<value>. --task, --task-name, and --message take the next argument verbatim, even when it is empty or starts with --.
 --format json is the compatible full JSON output (default); --format compact returns concise JSON using task links instead of internal IDs.
 Success is written to stdout; errors {"error":{"code":"...","message":"...","details":{...}}} go to stderr with exit code 1. Exit code 0 means the command succeeded, not that the delegated task succeeded.

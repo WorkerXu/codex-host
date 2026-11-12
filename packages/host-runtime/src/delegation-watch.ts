@@ -3,6 +3,8 @@ import {
   DelegationControlError,
   type DelegationControlApi,
   type DelegationThreadSnapshot,
+  type ThreadWatchCancelInput,
+  type ThreadWatchCancelResult,
   type ThreadWatchEntry,
   type ThreadWatchInput,
   type ThreadWatchListResult,
@@ -12,6 +14,8 @@ import {
 
 export { DEFAULT_WATCH_TIMEOUT_MS };
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_PEER_POLL_INTERVAL_MS = 5_000;
+const MAX_PEER_BACKOFF_MS = 60_000;
 /** How long a fired notification may wait for a busy or unreachable subscriber. */
 const DELIVERY_WINDOW_MS = 6 * 60 * 60_000;
 const MAX_UNDELIVERABLE_ENTRIES = 50;
@@ -24,6 +28,10 @@ interface Watch extends ThreadWatchEntry {
   deliveryDeadline?: number;
   unreadableSince?: number;
   lastReadError?: string;
+  /** Cross-host watches poll on their own interval and back off on failures. */
+  pollIntervalMs?: number;
+  backoffMs?: number;
+  nextPollAt?: number;
 }
 
 function terminal(status: DelegationThreadSnapshot["status"]): boolean {
@@ -50,8 +58,10 @@ function deliveryFailure(error: unknown): "permanent" | "rejected" | "unknown" {
   return "unknown";
 }
 
-function threadLink(threadId: string): string {
-  return `codex://threads/${threadId}`;
+function threadLink(threadId: string, hostId?: string): string {
+  return hostId
+    ? `thread://${threadId}?hostId=${encodeURIComponent(hostId)}`
+    : `codex://threads/${threadId}`;
 }
 
 function duration(milliseconds: number): string {
@@ -61,7 +71,7 @@ function duration(milliseconds: number): string {
 }
 
 function describe(watch: Watch): string {
-  const link = threadLink(watch.threadId);
+  const link = threadLink(watch.threadId, watch.hostId);
   switch (watch.outcome) {
     case "timedOut":
       return `${link} has not reached a terminal state after ${duration(watch.timeoutMs)}; this watch expired. Run 'codexhost thread watch' again to keep waiting.`;
@@ -93,6 +103,11 @@ function notification(watches: readonly Watch[]): string {
 export class DelegationWatchService {
   readonly #api: Pick<DelegationControlApi, "read" | "send">;
   readonly #pollIntervalMs: number;
+  readonly #peerPollIntervalMs: number;
+  readonly #peerMaxBackoffMs: number;
+  readonly #readPeer:
+    | ((input: { hostId: string; threadId: string }) => Promise<DelegationThreadSnapshot>)
+    | undefined;
   readonly #diagnose: (error: unknown) => void;
   readonly #watches: Watch[] = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -100,10 +115,19 @@ export class DelegationWatchService {
 
   constructor(
     api: Pick<DelegationControlApi, "read" | "send">,
-    options: { pollIntervalMs?: number; diagnose?: (error: unknown) => void } = {},
+    options: {
+      pollIntervalMs?: number;
+      peerPollIntervalMs?: number;
+      peerMaxBackoffMs?: number;
+      readPeer?: (input: { hostId: string; threadId: string }) => Promise<DelegationThreadSnapshot>;
+      diagnose?: (error: unknown) => void;
+    } = {},
   ) {
     this.#api = api;
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.#peerPollIntervalMs = options.peerPollIntervalMs ?? DEFAULT_PEER_POLL_INTERVAL_MS;
+    this.#peerMaxBackoffMs = options.peerMaxBackoffMs ?? MAX_PEER_BACKOFF_MS;
+    this.#readPeer = options.readPeer;
     this.#diagnose = options.diagnose ?? (() => undefined);
   }
 
@@ -120,13 +144,23 @@ export class DelegationWatchService {
       throw new DelegationControlError("INVALID_ARGUMENT", "A Thread cannot watch itself");
     if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)
       throw new DelegationControlError("INVALID_ARGUMENT", "timeoutMs must be a positive integer");
+    if (input.hostId !== undefined && (typeof input.hostId !== "string" || !input.hostId.trim())) {
+      throw new DelegationControlError("INVALID_ARGUMENT", "Host identifier is invalid");
+    }
+    if (input.hostId && !this.#readPeer) {
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "This Runtime does not support cross-host watches",
+      );
+    }
 
     // Both reads reject unknown Threads, so a watch is never reported for a missing end.
-    const target = await this.#api.read({ threadId: input.threadId, view: "result" });
+    const target = await this.#readTarget(input.hostId, input.threadId);
     await this.#api.read({ threadId: input.notifyThreadId, view: "result" });
     const result = {
       threadId: input.threadId,
       notifyThreadId: input.notifyThreadId,
+      ...(input.hostId ? { hostId: input.hostId } : {}),
       status: target.status,
       timeoutMs: input.timeoutMs,
     };
@@ -135,17 +169,26 @@ export class DelegationWatchService {
       (watch) =>
         watch.state === "watching" &&
         watch.threadId === input.threadId &&
-        watch.notifyThreadId === input.notifyThreadId,
+        watch.notifyThreadId === input.notifyThreadId &&
+        watch.hostId === input.hostId,
     );
     if (existing) return { ...result, state: "watching", timeoutMs: existing.timeoutMs };
     if (this.#closed) throw new DelegationControlError("INTERNAL_ERROR", "Host Runtime is closing");
     this.#watches.push({
       threadId: input.threadId,
       notifyThreadId: input.notifyThreadId,
+      ...(input.hostId ? { hostId: input.hostId } : {}),
       state: "watching",
       registeredAt: new Date().toISOString(),
       timeoutMs: input.timeoutMs,
       deadline: Date.now() + input.timeoutMs,
+      ...(input.hostId
+        ? {
+            pollIntervalMs: this.#peerPollIntervalMs,
+            backoffMs: this.#peerPollIntervalMs,
+            nextPollAt: Date.now() + this.#peerPollIntervalMs,
+          }
+        : {}),
     });
     this.#schedule();
     return { ...result, state: "watching" };
@@ -154,9 +197,10 @@ export class DelegationWatchService {
   async watches(): Promise<ThreadWatchListResult> {
     return {
       watches: this.#watches.map(
-        ({ threadId, notifyThreadId, state, outcome, turnId, reason, registeredAt }) => ({
+        ({ threadId, notifyThreadId, hostId, state, outcome, turnId, reason, registeredAt }) => ({
           threadId,
           notifyThreadId,
+          ...(hostId ? { hostId } : {}),
           state,
           ...(outcome ? { outcome } : {}),
           ...(turnId ? { turnId } : {}),
@@ -164,6 +208,36 @@ export class DelegationWatchService {
           registeredAt,
         }),
       ),
+    };
+  }
+
+  async cancelWatch(input: ThreadWatchCancelInput): Promise<ThreadWatchCancelResult> {
+    if (typeof input.threadId !== "string" || !input.threadId.trim()) {
+      throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
+    }
+    if (typeof input.notifyThreadId !== "string" || !input.notifyThreadId.trim()) {
+      throw new DelegationControlError("INVALID_ARGUMENT", "Notified Thread is required");
+    }
+    const index = this.#watches.findIndex(
+      (watch) =>
+        watch.threadId === input.threadId &&
+        watch.notifyThreadId === input.notifyThreadId &&
+        watch.hostId === input.hostId,
+    );
+    if (index < 0) {
+      return {
+        threadId: input.threadId,
+        notifyThreadId: input.notifyThreadId,
+        ...(input.hostId ? { hostId: input.hostId } : {}),
+        cancelled: false,
+      };
+    }
+    this.#watches.splice(index, 1);
+    return {
+      threadId: input.threadId,
+      notifyThreadId: input.notifyThreadId,
+      ...(input.hostId ? { hostId: input.hostId } : {}),
+      cancelled: true,
     };
   }
 
@@ -190,10 +264,15 @@ export class DelegationWatchService {
   }
 
   async #tick(): Promise<void> {
+    const now = Date.now();
     for (const watch of [...this.#watches]) {
       if (this.#closed) return;
       if (watch.state !== "watching") continue;
+      if (watch.nextPollAt !== undefined && now < watch.nextPollAt) continue;
       const observed = await this.#observe(watch);
+      if (watch.hostId) {
+        watch.nextPollAt = Date.now() + (watch.backoffMs ?? this.#peerPollIntervalMs);
+      }
       if (!observed) continue;
       const { outcome, turnId } = observed;
       watch.state = "pendingDelivery";
@@ -212,11 +291,24 @@ export class DelegationWatchService {
     }
   }
 
+  #readTarget(hostId: string | undefined, threadId: string): Promise<DelegationThreadSnapshot> {
+    if (!hostId) return this.#api.read({ threadId, view: "result" });
+    if (!this.#readPeer) {
+      return Promise.reject(
+        new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "This Runtime does not support cross-host watches",
+        ),
+      );
+    }
+    return this.#readPeer({ hostId, threadId });
+  }
+
   async #observe(
     watch: Watch,
   ): Promise<{ outcome: ThreadWatchOutcome; turnId?: string } | undefined> {
     try {
-      const snapshot = await this.#api.read({ threadId: watch.threadId, view: "result" });
+      const snapshot = await this.#readTarget(watch.hostId, watch.threadId);
       if (terminal(snapshot.status)) {
         return {
           outcome: snapshot.status as ThreadWatchOutcome,
@@ -224,11 +316,18 @@ export class DelegationWatchService {
         };
       }
       delete watch.unreadableSince;
+      if (watch.hostId) watch.backoffMs = this.#peerPollIntervalMs;
     } catch (error) {
       if (errorCode(error) === "THREAD_NOT_FOUND") return { outcome: "notFound" };
       // Other read failures may be transient, so only a sustained failure is reported.
       watch.unreadableSince ??= Date.now();
       watch.lastReadError = error instanceof Error ? error.message : String(error);
+      if (watch.hostId) {
+        watch.backoffMs = Math.min(
+          (watch.backoffMs ?? this.#peerPollIntervalMs) * 2,
+          this.#peerMaxBackoffMs,
+        );
+      }
       if (Date.now() - watch.unreadableSince >= UNREADABLE_GRACE_MS)
         return { outcome: "unreadable" };
     }

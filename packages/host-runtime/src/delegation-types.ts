@@ -1,4 +1,5 @@
 import type { RoutedHarnessId } from "@codexhost/protocol-core";
+import type { DelegationPeerCatalog } from "@codexhost/shared-contracts";
 import type {
   HarnessInspection,
   HarnessModelRef,
@@ -198,6 +199,8 @@ export interface ThreadWatchInput {
   /** Thread that receives the single notification. */
   notifyThreadId: string;
   timeoutMs: number;
+  /** Peer name or Host ID; absent for a local watch. */
+  hostId?: string;
 }
 
 export type ThreadWatchOutcome =
@@ -213,6 +216,7 @@ export type ThreadWatchOutcome =
 export interface ThreadWatchResult {
   threadId: string;
   notifyThreadId: string;
+  hostId?: string;
   /** `alreadyTerminal` means no watch was registered and no notification will be sent. */
   state: "watching" | "alreadyTerminal";
   status: DelegationThreadStatus;
@@ -222,6 +226,7 @@ export interface ThreadWatchResult {
 export interface ThreadWatchEntry {
   threadId: string;
   notifyThreadId: string;
+  hostId?: string;
   state: "watching" | "pendingDelivery" | "undeliverable";
   outcome?: ThreadWatchOutcome;
   /** Turn that reached the terminal outcome, when the Thread reported one. */
@@ -235,6 +240,19 @@ export interface ThreadWatchListResult {
   watches: ThreadWatchEntry[];
 }
 
+export interface ThreadWatchCancelInput {
+  threadId: string;
+  notifyThreadId: string;
+  hostId?: string;
+}
+
+export interface ThreadWatchCancelResult {
+  threadId: string;
+  notifyThreadId: string;
+  hostId?: string;
+  cancelled: boolean;
+}
+
 /**
  * Opt-in, one-shot notifications when a watched Thread stops. Separate from
  * DelegationControlApi so Host sessions keep implementing only the per-Thread
@@ -243,6 +261,13 @@ export interface ThreadWatchListResult {
 export interface DelegationWatchApi {
   watch(input: ThreadWatchInput): Promise<ThreadWatchResult>;
   watches(): Promise<ThreadWatchListResult>;
+  cancelWatch(input: ThreadWatchCancelInput): Promise<ThreadWatchCancelResult>;
+}
+
+/** Peer discovery and remote reads used by the `#` picker and cross-host watches. */
+export interface DelegationPeerCatalogApi {
+  listPeers(input?: { refresh?: boolean | undefined }): Promise<DelegationPeerCatalog>;
+  readThread(input: { hostId: string; threadId: string }): Promise<DelegationThreadSnapshot>;
 }
 
 export interface DelegationControlApi {

@@ -68,6 +68,23 @@ export interface RendererDelegationTarget {
   agent: RendererAgent;
   label: string;
   plugin?: HarnessPluginDescriptor;
+  /** Peer name or Desktop Host ID carried by the mention link. */
+  hostId?: string;
+  /** Machine group shown in the menu. */
+  hostLabel?: string;
+  /** Non-null when the machine or Harness cannot be selected now. */
+  disabledReason?: string;
+}
+
+/** A configured peer with no known Harnesses, shown as an unavailable group. */
+export interface RendererDelegationPeerNotice {
+  name: string;
+  reason: string;
+}
+
+export interface RendererDelegationTargetGroup {
+  label?: string;
+  targets: RendererDelegationTarget[];
 }
 
 export interface RendererDelegationTrigger {
@@ -98,10 +115,11 @@ export function filterDelegationTargets(
   const scored = targets.flatMap((target, index) => {
     const label = target.label.toLowerCase();
     const id = target.agent.toLowerCase();
+    const host = (target.hostLabel ?? target.hostId ?? "").toLowerCase();
     const score =
-      label.startsWith(needle) || id.startsWith(needle)
+      label.startsWith(needle) || id.startsWith(needle) || host.startsWith(needle)
         ? 2
-        : label.includes(needle) || id.includes(needle)
+        : label.includes(needle) || id.includes(needle) || host.includes(needle)
           ? 1
           : 0;
     return score > 0 ? [{ target, score, index }] : [];
@@ -109,6 +127,31 @@ export function filterDelegationTargets(
   return scored
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(({ target }) => target);
+}
+
+/** Keep machine groups contiguous while preserving the local group first. */
+export function groupDelegationTargets(
+  targets: readonly RendererDelegationTarget[],
+): RendererDelegationTargetGroup[] {
+  const groups: RendererDelegationTargetGroup[] = [];
+  const byLabel = new Map<string, RendererDelegationTargetGroup>();
+  for (const target of targets) {
+    const label = target.hostLabel ?? target.hostId;
+    const key = label ?? "";
+    let group = byLabel.get(key);
+    if (!group) {
+      group = { ...(label ? { label } : {}), targets: [] };
+      byLabel.set(key, group);
+      groups.push(group);
+    }
+    group.targets.push(target);
+  }
+  return groups;
+}
+
+/** Exact Desktop mention path for a selected target, including its machine. */
+export function delegationMentionPathForTarget(target: RendererDelegationTarget): string {
+  return delegationMentionPath(target.agent, target.hostId);
 }
 
 /** Match Harness commands by invocation (with or without `/`) and label. */
@@ -233,12 +276,13 @@ function syncChipStyle(
   const rules = [
     withPseudo(" > span:last-child") + "{display:none;}",
     withPseudo("::after") + "{content:attr(agent-mention-display-name);}",
-    ...targets.flatMap(({ agent, plugin }) => {
+    ...targets.flatMap((target) => {
+      const { agent, plugin } = target;
       const key = JSON.stringify([plugin?.icon ?? agent, plugin?.iconStyle]);
       if (!cache.has(key)) cache.set(key, iconUrl(agent, ownerDocument, plugin));
       const url = cache.get(key);
       if (!url) return [];
-      const selector = `[agent-mention-path=${cssString(delegationMentionPath(agent))}]::before`;
+      const selector = `[agent-mention-path=${cssString(delegationMentionPathForTarget(target))}]::before`;
       return [
         `${selector}{content:"";display:inline-block;width:16px;height:16px;` +
           `margin-inline-end:3px;vertical-align:-3px;` +
@@ -263,6 +307,8 @@ export interface RendererDelegationMentionOptions {
   /** Whether the editable element belongs to a Composer we manage. */
   isComposerEditor(editor: HTMLElement): boolean;
   readLocale(): RendererSettingsLocale;
+  /** Peers with no known Harnesses, shown as unavailable machine groups. */
+  readPeerNotices?(editor: HTMLElement): readonly RendererDelegationPeerNotice[];
   /** Element the menu spans, like Desktop's own suggestion menu (the Composer). */
   anchorForEditor(editor: HTMLElement): Element | null;
   /** Native commands of the Composer's current Harness, if it has any. */
@@ -433,6 +479,15 @@ export function installRendererDelegationMention(
     return item;
   };
 
+  const disabledRow = (content: HTMLElement): HTMLElement => {
+    const item = ownerDocument.createElement("div");
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-disabled", "true");
+    item.className = `${ROW_CLASS} opacity-50`;
+    item.append(content);
+    return item;
+  };
+
   const render = (
     trigger: ActiveTrigger,
     commands: {
@@ -440,24 +495,29 @@ export function installRendererDelegationMention(
       matches: HarnessCommandDescriptor[];
     } | null,
     targets: RendererDelegationTarget[],
+    peerNotices: readonly RendererDelegationPeerNotice[],
   ): void => {
     const locale = options.readLocale();
     const rows: HTMLElement[] = [];
     entries = [];
-    if (targets.length > 0) {
-      rows.push(sectionHeader(agentsTitle(locale)));
-      for (const target of targets) {
+    for (const group of groupDelegationTargets(targets)) {
+      rows.push(sectionHeader(group.label ?? agentsTitle(locale)));
+      for (const target of group.targets) {
+        const content = rowContent(
+          createRendererAgentIcon(target.agent, 16, ownerDocument, target.plugin),
+          target.label,
+          target.disabledReason ?? "",
+        );
         rows.push(
-          optionRow(
-            { kind: "agent", target },
-            rowContent(
-              createRendererAgentIcon(target.agent, 16, ownerDocument, target.plugin),
-              target.label,
-              "",
-            ),
-          ),
+          target.disabledReason
+            ? disabledRow(content)
+            : optionRow({ kind: "agent", target }, content),
         );
       }
+    }
+    for (const notice of peerNotices) {
+      rows.push(sectionHeader(notice.name));
+      rows.push(disabledRow(rowContent(null, notice.name, notice.reason)));
     }
     if (commands) {
       // Harnesses that report the distinction get separate Skills; everything
@@ -546,17 +606,29 @@ export function installRendererDelegationMention(
     const allTargets = options.readTargets(trigger.editor);
     syncChipStyle(ownerDocument, allTargets, iconCache);
     const targets = filterDelegationTargets(allTargets, trigger.query);
+    const needle = trigger.query.trim().toLowerCase();
+    const peerNotices = (options.readPeerNotices?.(trigger.editor) ?? []).filter(
+      (notice) =>
+        !needle ||
+        notice.name.toLowerCase().includes(needle) ||
+        notice.reason.toLowerCase().includes(needle),
+    );
     const source = options.readCommands(trigger.editor);
     const commandMatches = source ? filterDelegationCommands(source.commands, trigger.query) : [];
     const showsNotice = Boolean(source?.pendingNotice) && trigger.query === "";
-    if (targets.length === 0 && commandMatches.length === 0 && !showsNotice) {
+    if (
+      targets.length === 0 &&
+      commandMatches.length === 0 &&
+      peerNotices.length === 0 &&
+      !showsNotice
+    ) {
       close();
       return;
     }
     const sameQuery = active?.query === trigger.query && active.node === trigger.node;
     active = trigger;
     if (!sameQuery) activeIndex = 0;
-    render(trigger, source ? { source, matches: commandMatches } : null, targets);
+    render(trigger, source ? { source, matches: commandMatches } : null, targets, peerNotices);
     // Keep a menu of only disabled rows open so their explanation stays visible.
     if (rowsRendered === 0) close();
   };
@@ -583,7 +655,7 @@ export function installRendererDelegationMention(
     range: NativeTextRange,
     target: RendererDelegationTarget,
   ): Promise<void> => {
-    const path = delegationMentionPath(target.agent);
+    const path = delegationMentionPathForTarget(target);
     // Preferred: Desktop's own controller inserts an inline agent mention
     // exactly like its `@` menu, independent of the plain-text editor setting.
     if (
@@ -596,7 +668,7 @@ export function installRendererDelegationMention(
       return;
     }
     if (!(await selectTriggerText(trigger))) return;
-    const carrier = `${formatDelegationMentionLink({ harnessId: target.agent, label: target.label })} `;
+    const carrier = `${formatDelegationMentionLink({ harnessId: target.agent, label: target.label, ...(target.hostId ? { hostId: target.hostId } : {}) })} `;
     const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
     if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
   };

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  delegationMentionPathForTarget,
   filterDelegationCommands,
   filterDelegationTargets,
   findDelegationTrigger,
+  groupDelegationTargets,
   harnessCommandDisplayName,
 } from "../src/renderer-delegation-mention.js";
 
@@ -35,6 +37,41 @@ describe("delegation target filtering", () => {
     expect(filterDelegationTargets(targets, "pi").map(({ agent }) => agent)).toEqual(["omp"]);
     expect(filterDelegationTargets(targets, "")).toHaveLength(3);
     expect(filterDelegationTargets(targets, "zzz")).toEqual([]);
+  });
+
+  it("matches a machine name and keeps its Harnesses together", () => {
+    const remote = [
+      { agent: "grok", label: "Grok", hostId: "oracle-sg", hostLabel: "oracle-sg" },
+      {
+        agent: "claude-code",
+        label: "Claude Code",
+        hostId: "colab",
+        hostLabel: "colab",
+        disabledReason: "Machine is unreachable",
+      },
+    ];
+    expect(filterDelegationTargets(remote, "oracle").map(({ agent }) => agent)).toEqual(["grok"]);
+    expect(filterDelegationTargets(remote, "colab").map(({ agent }) => agent)).toEqual([
+      "claude-code",
+    ]);
+    expect(groupDelegationTargets([...targets, ...remote])).toMatchObject([
+      { targets: [{ agent: "codex" }, { agent: "claude-code" }, { agent: "omp" }] },
+      { label: "oracle-sg", targets: [{ agent: "grok" }] },
+      { label: "colab", targets: [{ agent: "claude-code" }] },
+    ]);
+  });
+
+  it("generates a host-qualified path for a remote target", () => {
+    expect(
+      delegationMentionPathForTarget({
+        agent: "grok",
+        label: "Grok",
+        hostId: "oracle-sg",
+      }),
+    ).toBe("subagent://codexhost.grok?host=oracle-sg");
+    expect(delegationMentionPathForTarget({ agent: "grok", label: "Grok" })).toBe(
+      "subagent://codexhost.grok",
+    );
   });
 });
 

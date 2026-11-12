@@ -292,6 +292,7 @@ export function createFixture(
     usageStatistics?: AppServerHostOptions["usageStatistics"];
     projectGroups?: ProjectGroupsService;
     externalOnly?: boolean;
+    delegationPeers?: AppServerHostOptions["delegationPeers"];
   } = {},
 ) {
   const adapter =
@@ -366,6 +367,7 @@ export function createFixture(
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),
+    ...(options.delegationPeers ? { delegationPeers: options.delegationPeers } : {}),
     ...(options.onCreateRequestRoute ? { onCreateRequestRoute: options.onCreateRequestRoute } : {}),
   });
   const running = host.run();
