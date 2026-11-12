@@ -9,17 +9,27 @@ export interface DesktopRemoteProjectResult {
   label: string;
 }
 
-/** Subset of Desktop's renderer app-services used by the project-mirror flow. */
+/**
+ * Subset of Desktop's renderer `appServices`. The methods stay on their real
+ * nested service objects; the mirror calls `projects.createRemote`,
+ * `workspaceFiles.createDirectory`, and `executionPaths.readHomeDirectory`.
+ */
 export interface ProjectMirrorDesktopServices {
-  createRemote(input: {
-    appearance: null;
-    hostId: string;
-    label: string;
-    remotePath: string;
-    reuseExisting?: boolean;
-  }): Promise<DesktopRemoteProjectResult | null>;
-  createDirectory(input: { hostId: string; path: string }): Promise<unknown>;
-  readHomeDirectory(hostId: string): Promise<{ homeDirectory: string }>;
+  projects: {
+    createRemote(input: {
+      appearance: null;
+      hostId: string;
+      label: string;
+      remotePath: string;
+      reuseExisting?: boolean;
+    }): Promise<DesktopRemoteProjectResult | null>;
+  };
+  workspaceFiles: {
+    createDirectory(input: { hostId: string; path: string }): Promise<unknown>;
+  };
+  executionPaths: {
+    readHomeDirectory(hostId: string): Promise<{ homeDirectory: string }>;
+  };
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>

@@ -272,6 +272,12 @@ export interface RendererBindingProbeStatus {
   adapter: RendererAdapterStatus;
 }
 
+export interface RendererHarnessDirectorySnapshot {
+  plugins: readonly HarnessPluginDescriptor[] | null;
+  availability: Readonly<Record<string, RendererAgentAvailability | undefined>>;
+  error: string | null;
+}
+
 export interface RendererBindingProbeOptions {
   enabledAgents?: readonly RendererAgent[];
   defaultAgent?: RendererAgent;
@@ -288,6 +294,8 @@ type ApplyAdapterAgent = (
 export interface RendererBindingProbeApi {
   remoteConnections(request: unknown): Promise<unknown>;
   status(): RendererBindingProbeStatus;
+  harnessDirectory(hostId: string): RendererHarnessDirectorySnapshot;
+  refreshHarnessDirectory(hostId: string): Promise<void>;
   currentThreadId(): string | null;
   lockedSelection(): LockedComposerSelection | null;
   setAdapter(
@@ -3543,6 +3551,18 @@ export function installRendererBindingProbe(
       return mounted.length === 1 && mounted[0]
         ? (threadIdFromComposerModelTarget(mounted[0].modelTarget) ?? null)
         : null;
+    },
+    harnessDirectory(hostId) {
+      const state = hostHarnessAvailabilityState(hostId);
+      return {
+        plugins: state.plugins,
+        availability: { ...state.availability },
+        error: state.directoryError ?? null,
+      };
+    },
+    async refreshHarnessDirectory(hostId) {
+      if (disposed || isRetiredSshHost(hostId)) return;
+      await refreshHarnessAvailabilityForHost(hostId, true);
     },
     status() {
       const selections = connectedComposers().map((mounted) => ({

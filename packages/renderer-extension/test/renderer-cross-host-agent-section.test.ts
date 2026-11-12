@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../src/renderer-agent-icon.js", () => ({
+  createRendererAgentIcon: (agent: string, _size: number, ownerDocument: Document) => {
+    const span = ownerDocument.createElement("span");
+    span.textContent = agent;
+    return span;
+  },
+}));
+
 import { createCrossHostAgentSection } from "../src/renderer-cross-host-agent-section.js";
 import type { CrossHostHarnessCatalog } from "../src/renderer-cross-host-harness-catalog.js";
 
@@ -52,6 +60,11 @@ class FakeElement {
     this.ownText = "";
   }
 
+  appendChild(node: FakeElement): FakeElement {
+    this.append(node);
+    return node;
+  }
+
   replaceChildren(...nodes: FakeElement[]): void {
     this.children.length = 0;
     this.append(...nodes);
@@ -88,6 +101,7 @@ class FakeElement {
 
 const document = {
   createElement: (tagName: string): FakeElement => new FakeElement(tagName),
+  createElementNS: (_namespace: string, tagName: string): FakeElement => new FakeElement(tagName),
 };
 Object.defineProperty(globalThis, "document", { configurable: true, value: document });
 
@@ -169,8 +183,28 @@ describe("cross-host Agent section", () => {
     });
 
     button(section.element as unknown as FakeElement, "tencent 列表不可用").click();
-    expect(section.element.textContent).toContain("仅可选择 Codex");
+    expect(section.element.textContent).toContain("Harness 列表不可用");
     expect(button(section.element as unknown as FakeElement, "tencent · Codex")).toBeDefined();
+    section.dispose();
+  });
+
+  it("shows a single secondary line while loading and when the directory fails", () => {
+    const section = createCrossHostAgentSection({
+      document: document as unknown as Document,
+      catalog: { machines: [], loadedPeers: 0 },
+      acknowledged: true,
+      loading: true,
+      onAcknowledge: vi.fn(),
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+    });
+    expect(section.element.textContent).toContain("正在加载其他机器…");
+    expect(section.element.textContent).not.toContain("oracle-sg");
+    section.refresh({ machines: [], loadedPeers: 0 }, true, {
+      loading: false,
+      error: "其他机器不可用",
+    });
+    expect(section.element.textContent).toContain("其他机器不可用");
     section.dispose();
   });
 });

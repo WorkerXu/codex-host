@@ -6,9 +6,17 @@ import {
   rendererAgentMenuPlacement,
   rendererAgentPickerTooltip,
   rendererAgentPickerView,
+  visiblePickerAgents,
 } from "../src/renderer-agent-picker.js";
 
 describe("Renderer Agent picker presentation", () => {
+  it("keeps one flat list and hides confirmed-missing Agents", () => {
+    expect(
+      visiblePickerAgents(["codex", "pi", "claude-code", "grok"], new Set(["pi", "grok"])),
+    ).toEqual(["codex", "claude-code"]);
+    expect(visiblePickerAgents(["codex"], new Set())).toEqual(["codex"]);
+  });
+
   it("normalizes viewport coordinates against the Codex window zoom", () => {
     expect(
       rendererAgentMenuPlacement(
