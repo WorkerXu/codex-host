@@ -15,13 +15,13 @@ description: >
 Run the CLI through the executable in CODEXHOST_CLI_PATH. Before acting, run
 help with the form for your shell:
 
-- POSIX: \`"$CODEXHOST_CLI_PATH" delegate --help\`
-- PowerShell: \`& $env:CODEXHOST_CLI_PATH delegate --help\`
-- cmd: \`"%CODEXHOST_CLI_PATH%" delegate --help\`
+- POSIX: `"$CODEXHOST_CLI_PATH" delegate --help`
+- PowerShell: `& $env:CODEXHOST_CLI_PATH delegate --help`
+- cmd: `"%CODEXHOST_CLI_PATH%" delegate --help`
 
-If CODEXHOST_CLI_PATH is unset, try \`codexhost\`; if that also fails, tell the
+If CODEXHOST_CLI_PATH is unset, try `codexhost`; if that also fails, tell the
 user to add CODEXHOST_CLI_PATH to shell_environment_policy.include_only.
-Commands shown by help and in \`next\` begin with \`codexhost\`; run them the
+Commands shown by help and in `next` begin with `codexhost`; run them the
 same way.
 
 Use CLI help as the authoritative source for commands and behavior. Consult

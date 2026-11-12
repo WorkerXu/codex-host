@@ -40,19 +40,20 @@ describe("renderer delegation peer targets", () => {
       catalog,
       () => undefined,
       (harnessId) => labels[harnessId] ?? harnessId,
+      (peer) => (peer.name === "oracle-sg" ? "Oracle SG" : undefined),
     );
     expect(result.targets).toEqual([
       {
         agent: "grok",
         label: "Grok",
         hostId: "oracle-sg",
-        hostLabel: "oracle-sg",
+        hostLabel: "Oracle SG",
       },
       {
         agent: "claude-code",
         label: "Claude Code",
         hostId: "oracle-sg",
-        hostLabel: "oracle-sg",
+        hostLabel: "Oracle SG",
       },
       {
         agent: "grok",
@@ -63,6 +64,25 @@ describe("renderer delegation peer targets", () => {
       },
     ]);
     expect(result.notices).toEqual([{ name: "newbox", reason: "ssh: no route to host" }]);
+  });
+
+  it("omits a reachable machine with no available Harnesses", () => {
+    expect(
+      delegationPeerTargets(
+        {
+          peers: [
+            {
+              name: "empty",
+              hostIds: [],
+              state: "ready",
+              harnesses: [],
+            },
+          ],
+        },
+        () => undefined,
+        (id) => id,
+      ),
+    ).toEqual({ targets: [], notices: [] });
   });
 
   it("returns nothing for an unavailable catalog", () => {

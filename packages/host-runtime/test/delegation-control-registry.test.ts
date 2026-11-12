@@ -545,4 +545,15 @@ describe("DelegationControlRegistry list paging across sessions", () => {
     expect(catalog.start).toHaveBeenCalledWith(input);
     expect(session.start).not.toHaveBeenCalled();
   });
+
+  it("forwards Harness availability requests to the catalog registration", async () => {
+    const catalog = registration("catalog");
+    const registry = new DelegationControlRegistry();
+    registry.register(catalog, { harnessCatalog: true });
+
+    await expect(registry.listHarnesses({ includeAvailability: true })).resolves.toEqual({
+      harnesses: ["codex", "pi"],
+    });
+    expect(catalog.listHarnesses).toHaveBeenCalledWith({ includeAvailability: true });
+  });
 });

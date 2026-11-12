@@ -56,19 +56,27 @@ describe("delegation mention rewrite", () => {
   it("rewrites External Harness text", () => {
     const text = rewriteDelegationMentionText(`${link} fix the test`);
     expect(text).toContain("@Claude Code fix the test");
-    expect(text).toContain("codexhost-delegation");
-    expect(text).toContain("through the executable in CODEXHOST_CLI_PATH");
-    expect(text).not.toContain("`codexhost delegate");
+    expect(text).toContain(
+      'codexhost delegate start --harness claude-code --task-name "<short-name>" --task "<task>" --watch true --format compact',
+    );
+    expect(text).toContain("do not run `--help` or `peer list` first");
+    expect(text).toContain("Keep `--watch true`");
+    expect(text).not.toContain("--host");
     expect(rewriteDelegationMentionText("plain")).toBe("plain");
   });
 
-  it("includes the machine and --host for a remote mention", () => {
+  it("includes the machine and a complete --host command for a remote mention", () => {
     const remote =
       "[@Grok](subagent://codexhost.grok?host=oracle-sg) and [@Claude Code](subagent://codexhost.claude-code)";
     const text = rewriteDelegationMentionText(remote);
     expect(text).toContain("@Grok on machine `oracle-sg`");
     expect(text).toContain("Harness `grok`, pass `--host oracle-sg`");
     expect(text).toContain("@Claude Code (Harness `claude-code`)");
-    expect(text).toContain("When a target names a machine");
+    expect(text).toContain(
+      'codexhost delegate start --harness grok --host oracle-sg --task-name "<short-name>" --task "<task>" --watch true --format compact',
+    );
+    expect(text).toContain(
+      'codexhost delegate start --harness claude-code --task-name "<short-name>" --task "<task>" --watch true --format compact',
+    );
   });
 });

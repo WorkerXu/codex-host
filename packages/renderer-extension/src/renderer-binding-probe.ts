@@ -948,6 +948,7 @@ export function installRendererBindingProbe(
   // per-Host inspections against the current connection catalog instead of
   // trusting the native route indefinitely.
   let sshConnectionHostIds: ReadonlySet<string> | null = null;
+  let sshConnectionDisplayNames = new Map<string, string>();
   let sshConnectionHostsRequest: Promise<void> | null = null;
   let sshConnectionHostsCheckedAt = 0;
   const SSH_CONNECTION_CATALOG_TTL_MS = 30_000;
@@ -965,8 +966,16 @@ export function installRendererBindingProbe(
     usageSubscriptions.delete(hostId);
     if (activeAvailabilityHostId === hostId) activeAvailabilityHostId = "local";
   };
-  const applySshConnectionHosts = (hostIds: Iterable<string>): void => {
-    const next = new Set(hostIds);
+  const applySshConnectionHosts = (
+    connections: Iterable<{ hostId: string; displayName?: string }>,
+  ): void => {
+    const list = [...connections];
+    const next = new Set(list.map(({ hostId }) => hostId));
+    sshConnectionDisplayNames = new Map(
+      list.flatMap(({ hostId, displayName }) =>
+        displayName ? [[hostId, displayName] as const] : [],
+      ),
+    );
     sshConnectionHostIds = next;
     sshConnectionHostsCheckedAt = Date.now();
     const removed = releaseRetiredSshConnectionHosts(
@@ -990,7 +999,7 @@ export function installRendererBindingProbe(
       (connections) => {
         sshConnectionHostsRequest = null;
         if (disposed) return;
-        applySshConnectionHosts(connections.map(({ hostId }) => hostId));
+        applySshConnectionHosts(connections);
       },
       () => {
         sshConnectionHostsRequest = null;
@@ -2828,7 +2837,7 @@ export function installRendererBindingProbe(
     reconcileConnections(connections) {
       // Settings already read the native catalog to resolve connection names;
       // apply that same catalog so a deleted connection cannot linger as a Host.
-      applySshConnectionHosts(connections.map(({ hostId }) => hostId));
+      applySshConnectionHosts(connections);
     },
     async installation(hostId, agent, action) {
       const client = modelClientForHost(hostId);
@@ -3383,6 +3392,19 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
+  const peerDelegationMenu = () =>
+    delegationPeerTargets(
+      peerDelegationCatalog,
+      (harnessId) => pluginForHost("local", harnessId),
+      rendererAgentLabel,
+      (peer) => {
+        for (const hostId of peer.hostIds) {
+          const displayName = sshConnectionDisplayNames.get(hostId);
+          if (displayName) return displayName;
+        }
+        return undefined;
+      },
+    );
   delegationMention = installRendererDelegationMention(document, {
     onOpen: (editor) => {
       const composer = composerForElement(editor);
@@ -3402,19 +3424,9 @@ export function installRendererBindingProbe(
           const plugin = mounted?.hostId ? pluginForHost(mounted.hostId, agent) : undefined;
           return { agent, label: rendererAgentLabel(agent, plugin), ...(plugin ? { plugin } : {}) };
         });
-      const peerTargets = delegationPeerTargets(
-        peerDelegationCatalog,
-        (harnessId) => pluginForHost("local", harnessId),
-        rendererAgentLabel,
-      );
-      return [...localTargets, ...peerTargets.targets];
+      return [...localTargets, ...peerDelegationMenu().targets];
     },
-    readPeerNotices: () =>
-      delegationPeerTargets(
-        peerDelegationCatalog,
-        (harnessId) => pluginForHost("local", harnessId),
-        rendererAgentLabel,
-      ).notices,
+    readPeerNotices: () => peerDelegationMenu().notices,
     isComposerEditor: (editor) => {
       const composer = composerForElement(editor);
       return composer !== null && isMountedComposer(composer);
