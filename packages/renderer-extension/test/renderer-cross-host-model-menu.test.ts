@@ -9,6 +9,7 @@ const catalog: CrossHostModelCatalog = {
       hostId: "remote-ssh-discovered:colab",
       label: "colab",
       state: "ready",
+      defaultProviderId: "example-provider",
       providers: [
         {
           providerId: "example-provider",
@@ -30,6 +31,7 @@ const catalog: CrossHostModelCatalog = {
       hostId: "remote-ssh-codex-managed:tencent-id",
       label: "tencent",
       state: "offline",
+      defaultProviderId: null,
       providers: [],
     },
   ],

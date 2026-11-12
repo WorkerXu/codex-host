@@ -1081,6 +1081,7 @@ export function installCurrentRendererAdapter(): {
     thinkingOptionId?: HarnessThinkingOptionId,
     permissionModeId?: HarnessPermissionModeId,
     composer?: Element,
+    reasoningEffort?: string | null,
   ): boolean => {
     if (disposed || (composer && isOrbitComposer(composer))) return false;
     const selection = modelSelectionForAgent(
@@ -1108,7 +1109,12 @@ export function installCurrentRendererAdapter(): {
       const previous = draftModels.model(draftKey);
       const policyChanged = route.policy.select(carrier ?? null, draftKey, binding.creationModes);
       try {
-        draftModels.apply(draftKey, binding, carrier ?? null);
+        draftModels.apply(
+          draftKey,
+          binding,
+          carrier ?? null,
+          agent === "codex" && reasoningEffort != null ? reasoningEffort : undefined,
+        );
       } catch (error) {
         // The draft keeps its previous model, so its selection must name that model again.
         try {

@@ -23,6 +23,7 @@ export interface CrossHostMachine {
   hostId: string;
   label: string;
   state: "ready" | "offline" | "error";
+  defaultProviderId: string | null;
   providers: CrossHostProvider[];
 }
 
@@ -94,7 +95,8 @@ export async function loadCrossHostModelCatalog(input: {
   const machines = await Promise.all(
     input.hostIds.map(async (hostId): Promise<CrossHostMachine> => {
       const label = crossHostMachineLabel(hostId, input.connections);
-      if (!input.isOnline(hostId)) return { hostId, label, state: "offline", providers: [] };
+      if (!input.isOnline(hostId))
+        return { hostId, label, state: "offline", defaultProviderId: null, providers: [] };
       try {
         const [modelsResponse, configResponse] = await Promise.all([
           input.request(hostId, "model/list", {}),
@@ -113,6 +115,7 @@ export async function loadCrossHostModelCatalog(input: {
           hostId,
           label,
           state: "ready",
+          defaultProviderId,
           providers: groups.map((group) => ({
             providerId: group.providerId,
             providerLabel: group.providerLabel,
@@ -125,7 +128,7 @@ export async function loadCrossHostModelCatalog(input: {
           })),
         };
       } catch {
-        return { hostId, label, state: "error", providers: [] };
+        return { hostId, label, state: "error", defaultProviderId: null, providers: [] };
       }
     }),
   );
