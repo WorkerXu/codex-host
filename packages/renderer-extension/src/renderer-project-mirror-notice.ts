@@ -100,7 +100,11 @@ export function confirmProjectMirror(document: Document, projectName: string): P
     panel.append(title, body, actions);
     dialog.append(panel);
     document.body.append(dialog);
-    dialog.showModal();
+    try {
+      dialog.showModal();
+    } catch {
+      dialog.setAttribute("open", "");
+    }
     confirm.focus();
   });
 }
