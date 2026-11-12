@@ -54,6 +54,8 @@ appHost, appServices, setAppHost, setAppServices
 | `appServices.projects.createRemote` | `typeof === "function"` |
 | `appServices.workspaceFiles.createDirectory` | `typeof === "function"` |
 | `appServices.executionPaths.readHomeDirectory(hostId)` | `local → {homeDirectory:"/Users/coderxu"}`；`colab → {homeDirectory:"/root"}` |
+| `appServices.projects.createRemote({})` | 返回 `Invalid remote project create request`（方法存在，参数校验拦截，未创建任何项目） |
+| `appServices.workspaceFiles.createDirectory({})` | 返回 `The "path" argument must be of type string`（方法存在，未创建目录） |
 
 结论：
 
