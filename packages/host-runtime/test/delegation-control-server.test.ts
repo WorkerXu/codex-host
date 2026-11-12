@@ -322,14 +322,14 @@ describe("delegation control server", () => {
     try {
       const response = await fetch(
         `${server.endpoint}/v1/harness/list`,
-        authorized({ includeAvailability: true }),
+        authorized({ includeAvailability: true, refresh: true }),
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
         harnesses: ["codex"],
         availability: { codex: "ready" },
       });
-      expect(listHarnesses).toHaveBeenCalledWith({ includeAvailability: true });
+      expect(listHarnesses).toHaveBeenCalledWith({ includeAvailability: true, refresh: true });
     } finally {
       await server.close();
     }

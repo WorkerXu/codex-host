@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -32,6 +32,7 @@ async function fixture(
   environment: NodeJS.ProcessEnv = {},
   externalThreadBusy: (thread: ExternalThread) => boolean = (thread) => thread.running,
   activeOfficialParents: () => string[] = () => [],
+  pluginRoots: readonly string[] = [],
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-delegation-coordinator-"));
   const store = new MappingStore({ directory });
@@ -86,6 +87,7 @@ async function fixture(
     },
     activeOfficialParents,
     externalThreadBusy,
+    ...(pluginRoots.length > 0 ? { pluginRoots } : {}),
   });
   return {
     adapter,
@@ -403,6 +405,139 @@ describe("HarnessDelegationCoordinator", () => {
       expect(inspect).toHaveBeenCalledWith({ purpose: "availability" });
     } finally {
       await value.close();
+    }
+  });
+
+  it("times out a slow availability inspection and caches the result", async () => {
+    vi.useFakeTimers();
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi
+      .spyOn(adapter, "inspect")
+      .mockImplementation(() => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>);
+    const value = await fixture(adapter);
+    try {
+      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(pending).resolves.toMatchObject({
+        harnesses: ["codex", "pi"],
+        availability: { codex: "ready", pi: "unavailable" },
+      });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("bypasses the availability cache when refresh is requested", async () => {
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi.spyOn(adapter, "inspect");
+    const value = await fixture(adapter);
+    try {
+      await value.coordinator.listHarnesses({ includeAvailability: true });
+      await value.coordinator.listHarnesses({ includeAvailability: true });
+      expect(inspect).toHaveBeenCalledTimes(1);
+      await value.coordinator.listHarnesses({ includeAvailability: true, refresh: true });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("invalidates a Harness when delegate start reports it is not installed", async () => {
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi.spyOn(adapter, "inspect");
+    const value = await fixture(adapter);
+    try {
+      await value.coordinator.listHarnesses({ includeAvailability: true });
+      expect(inspect).toHaveBeenCalledTimes(1);
+      vi.spyOn(adapter, "open").mockResolvedValue({
+        ok: false,
+        error: { code: "notInstalled", message: "Pi is not installed", retryable: false },
+      } as never);
+      await expect(
+        value.coordinator.start({ harnessId: "pi", task: "work", parentThreadId: "parent" }),
+      ).rejects.toMatchObject({ code: "DELEGATION_FAILED" });
+      await value.coordinator.listHarnesses({ includeAvailability: true });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+    }
+  });
+
+  it("reuses persisted availability after a Host Runtime restart", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "cx-availability-restart-"));
+    const environment = { CODEXHOST_USER_DIR: directory };
+    try {
+      const firstAdapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+      const firstInspect = vi.spyOn(firstAdapter, "inspect");
+      const first = await fixture(firstAdapter, undefined, environment);
+      try {
+        await first.coordinator.listHarnesses({ includeAvailability: true });
+        expect(firstInspect).toHaveBeenCalledTimes(1);
+      } finally {
+        await first.close();
+      }
+
+      const secondAdapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+      const secondInspect = vi.spyOn(secondAdapter, "inspect");
+      const second = await fixture(secondAdapter, undefined, environment);
+      try {
+        await expect(
+          second.coordinator.listHarnesses({ includeAvailability: true }),
+        ).resolves.toMatchObject({ availability: { pi: "ready" } });
+        expect(secondInspect).not.toHaveBeenCalled();
+      } finally {
+        await second.close();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates availability when the installed plugin version changes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cx-plugin-availability-"));
+    try {
+      await writeFile(
+        path.join(root, "enabled.json"),
+        JSON.stringify({ version: 1, enabled: ["pi"] }),
+      );
+      const plugin = path.join(root, "pi");
+      await mkdir(plugin);
+      await writeFile(path.join(plugin, "index.mjs"), "");
+      const writeManifest = (version: string) =>
+        writeFile(
+          path.join(plugin, "manifest.json"),
+          JSON.stringify({
+            manifestVersion: 1,
+            id: "pi",
+            name: "Pi",
+            version,
+            adapterApiVersion: 1,
+            entry: "index.mjs",
+          }),
+        );
+      await writeManifest("1.0.0");
+
+      const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+      const inspect = vi.spyOn(adapter, "inspect");
+      const value = await fixture(adapter, undefined, {}, undefined, undefined, [root]);
+      try {
+        await value.coordinator.listHarnesses({ includeAvailability: true });
+        expect(inspect).toHaveBeenCalledTimes(1);
+        await writeManifest("2.0.0");
+        await value.coordinator.listHarnesses({ includeAvailability: true });
+        expect(inspect).toHaveBeenCalledTimes(2);
+      } finally {
+        await value.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 

@@ -94,6 +94,8 @@ export interface HarnessInspectResult {
 export interface HarnessListInput {
   /** Ask the Host to inspect each Harness before returning its catalog. */
   includeAvailability?: boolean;
+  /** Ignore cached availability and inspect every Harness now. */
+  refresh?: boolean;
 }
 
 export interface HarnessListResult {

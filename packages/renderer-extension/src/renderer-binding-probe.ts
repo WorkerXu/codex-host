@@ -957,6 +957,7 @@ export function installRendererBindingProbe(
   // trusting the native route indefinitely.
   let sshConnectionHostIds: ReadonlySet<string> | null = null;
   let sshConnectionDisplayNames = new Map<string, string>();
+  let sshConnectionDisplayNamesByAlias = new Map<string, string>();
   let sshConnectionHostsRequest: Promise<void> | null = null;
   let sshConnectionHostsCheckedAt = 0;
   const SSH_CONNECTION_CATALOG_TTL_MS = 30_000;
@@ -975,15 +976,28 @@ export function installRendererBindingProbe(
     if (activeAvailabilityHostId === hostId) activeAvailabilityHostId = "local";
   };
   const applySshConnectionHosts = (
-    connections: Iterable<{ hostId: string; displayName?: string }>,
+    connections: Iterable<{
+      hostId: string;
+      displayName?: string;
+      sshAlias?: string | null;
+      sshHost?: string | null;
+    }>,
   ): void => {
     const list = [...connections];
     const next = new Set(list.map(({ hostId }) => hostId));
-    sshConnectionDisplayNames = new Map(
-      list.flatMap(({ hostId, displayName }) =>
-        displayName ? [[hostId, displayName] as const] : [],
-      ),
-    );
+    sshConnectionDisplayNames = new Map();
+    sshConnectionDisplayNamesByAlias = new Map();
+    for (const connection of list) {
+      const displayName = connection.displayName?.trim();
+      if (!displayName) continue;
+      sshConnectionDisplayNames.set(connection.hostId, displayName);
+      if (connection.sshAlias) {
+        sshConnectionDisplayNamesByAlias.set(connection.sshAlias, displayName);
+      }
+      if (connection.sshHost) {
+        sshConnectionDisplayNamesByAlias.set(connection.sshHost, displayName);
+      }
+    }
     sshConnectionHostIds = next;
     sshConnectionHostsCheckedAt = Date.now();
     const removed = releaseRetiredSshConnectionHosts(
@@ -1008,6 +1022,7 @@ export function installRendererBindingProbe(
         sshConnectionHostsRequest = null;
         if (disposed) return;
         applySshConnectionHosts(connections);
+        delegationMention?.refresh();
       },
       () => {
         sshConnectionHostsRequest = null;
@@ -1170,18 +1185,21 @@ export function installRendererBindingProbe(
   let peerDelegationCatalog: DelegationPeerCatalog | null = null;
   let peerDelegationCatalogAt = 0;
   let peerDelegationCatalogRequest: Promise<void> | null = null;
-  const PEER_DELEGATION_CATALOG_TTL_MS = 30_000;
+  const PEER_DELEGATION_REVALIDATE_MS = 60 * 60_000;
   const refreshPeerDelegationCatalog = (): void => {
+    // Populate Desktop display names before the menu can render peer groups.
+    void reconcileSshConnectionHosts();
     if (peerDelegationCatalogRequest) return;
     if (
       peerDelegationCatalog &&
-      Date.now() - peerDelegationCatalogAt < PEER_DELEGATION_CATALOG_TTL_MS
+      Date.now() - peerDelegationCatalogAt < PEER_DELEGATION_REVALIDATE_MS
     )
       return;
     const client = modelClientForHost("local");
     if (!client?.listDelegationPeers) return;
+    const revalidate = peerDelegationCatalog !== null;
     peerDelegationCatalogRequest = client
-      .listDelegationPeers()
+      .listDelegationPeers(revalidate ? { refresh: true } : {})
       .then((catalog) => {
         peerDelegationCatalog = catalog;
         peerDelegationCatalogAt = Date.now();
@@ -1189,7 +1207,7 @@ export function installRendererBindingProbe(
       })
       .catch(() => {
         // Retry later; an older Host may not implement the catalog yet.
-        peerDelegationCatalogAt = Date.now() - PEER_DELEGATION_CATALOG_TTL_MS + 10_000;
+        peerDelegationCatalogAt = Date.now() - PEER_DELEGATION_REVALIDATE_MS + 10_000;
       })
       .finally(() => {
         peerDelegationCatalogRequest = null;
@@ -2883,6 +2901,7 @@ export function installRendererBindingProbe(
       // Settings already read the native catalog to resolve connection names;
       // apply that same catalog so a deleted connection cannot linger as a Host.
       applySshConnectionHosts(connections);
+      delegationMention?.refresh();
     },
     async installation(hostId, agent, action) {
       const client = modelClientForHost(hostId);
@@ -3448,7 +3467,7 @@ export function installRendererBindingProbe(
           const displayName = sshConnectionDisplayNames.get(hostId);
           if (displayName) return displayName;
         }
-        return undefined;
+        return peer.ssh ? sshConnectionDisplayNamesByAlias.get(peer.ssh) : undefined;
       },
     );
   delegationMention = installRendererDelegationMention(document, {
