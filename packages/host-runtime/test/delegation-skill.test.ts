@@ -62,6 +62,7 @@ describe("delegation Skill installation", () => {
     ["v4 Skill shipped in v0.4.0-v0.6.0", "codexhost-delegation-v4.md"],
     ["v8 Skill that ran codexhost from PATH", "codexhost-delegation-v8.md"],
     ["v9 Skill without child-session name guidance", "codexhost-delegation-v9.md"],
+    ["v10 Skill before cross-machine delegation guidance", "codexhost-delegation-v10.md"],
   ])("updates the %s", async (_name, fixture) => {
     const root = await home();
     const shipped = await readFile(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8");
@@ -99,7 +100,7 @@ describe("delegation Skill installation", () => {
   });
 
   it("routes natural agent requests and points execution to the authoritative help", () => {
-    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 10");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 11");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("@agent) to independently perform a task");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("session's content, progress, or results");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("Not for recapping the current conversation");
@@ -111,5 +112,15 @@ describe("delegation Skill installation", () => {
     expect(CODEXHOST_DELEGATION_SKILL).toContain("send a follow-up message");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("cancel its current Turn");
     expect(CODEXHOST_DELEGATION_SKILL).not.toContain("--timeout-ms");
+  });
+
+  it("documents cross-machine targets and watches", () => {
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("codexhost peer list");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("--host <peer>");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("delegate start --host <peer> --watch true");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("thread watch <thread> --host <peer>");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("thread watches");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("--cancel");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("Never read files under `~/.codexhost/runtime/`");
   });
 });
