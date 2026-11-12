@@ -21,6 +21,7 @@ import {
   type ThreadUsageInspection,
   type ThreadUsageSnapshot,
   type CodexhostError,
+  type DelegationPeerCatalog,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -110,6 +111,7 @@ import {
   installRendererDelegationMention,
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
+import { delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
 import {
   createNativeScheduleWorkspaceThread,
@@ -1141,6 +1143,34 @@ export function installRendererBindingProbe(
   };
 
   let delegationMention: RendererDelegationMentionControl | null = null;
+  let peerDelegationCatalog: DelegationPeerCatalog | null = null;
+  let peerDelegationCatalogAt = 0;
+  let peerDelegationCatalogRequest: Promise<void> | null = null;
+  const PEER_DELEGATION_CATALOG_TTL_MS = 30_000;
+  const refreshPeerDelegationCatalog = (): void => {
+    if (peerDelegationCatalogRequest) return;
+    if (
+      peerDelegationCatalog &&
+      Date.now() - peerDelegationCatalogAt < PEER_DELEGATION_CATALOG_TTL_MS
+    )
+      return;
+    const client = modelClientForHost("local");
+    if (!client?.listDelegationPeers) return;
+    peerDelegationCatalogRequest = client
+      .listDelegationPeers()
+      .then((catalog) => {
+        peerDelegationCatalog = catalog;
+        peerDelegationCatalogAt = Date.now();
+        delegationMention?.refresh();
+      })
+      .catch(() => {
+        // Retry later; an older Host may not implement the catalog yet.
+        peerDelegationCatalogAt = Date.now() - PEER_DELEGATION_CATALOG_TTL_MS + 10_000;
+      })
+      .finally(() => {
+        peerDelegationCatalogRequest = null;
+      });
+  };
   /**
    * Workspace of each Host's current draft, published by the draft prewarm
    * (the only place Desktop names it). A draft asks the Host for that
@@ -3360,18 +3390,31 @@ export function installRendererBindingProbe(
       if (mounted && controller.get(mounted.composer).agent !== "codex") {
         void refreshCommands(mounted, { keepCurrent: true });
       }
+      refreshPeerDelegationCatalog();
     },
     readTargets: (editor) => {
       const composer = composerForElement(editor);
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       const availability = mounted ? composerAvailability(mounted) : {};
-      return enabledAgents
+      const localTargets = enabledAgents
         .filter((agent) => agent === "codex" || availability[agent] === "ready")
         .map((agent) => {
           const plugin = mounted?.hostId ? pluginForHost(mounted.hostId, agent) : undefined;
           return { agent, label: rendererAgentLabel(agent, plugin), ...(plugin ? { plugin } : {}) };
         });
+      const peerTargets = delegationPeerTargets(
+        peerDelegationCatalog,
+        (harnessId) => pluginForHost("local", harnessId),
+        rendererAgentLabel,
+      );
+      return [...localTargets, ...peerTargets.targets];
     },
+    readPeerNotices: () =>
+      delegationPeerTargets(
+        peerDelegationCatalog,
+        (harnessId) => pluginForHost("local", harnessId),
+        rendererAgentLabel,
+      ).notices,
     isComposerEditor: (editor) => {
       const composer = composerForElement(editor);
       return composer !== null && isMountedComposer(composer);
@@ -3417,6 +3460,7 @@ export function installRendererBindingProbe(
       };
     },
   });
+  refreshPeerDelegationCatalog();
 
   const connectedComposers = (): MountedComposer[] =>
     [...mountedByComposer.values()].filter(
