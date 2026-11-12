@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -32,6 +32,7 @@ async function fixture(
   environment: NodeJS.ProcessEnv = {},
   externalThreadBusy: (thread: ExternalThread) => boolean = (thread) => thread.running,
   activeOfficialParents: () => string[] = () => [],
+  pluginRoots: readonly string[] = [],
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-delegation-coordinator-"));
   const store = new MappingStore({ directory });
@@ -86,6 +87,7 @@ async function fixture(
     },
     activeOfficialParents,
     externalThreadBusy,
+    ...(pluginRoots.length > 0 ? { pluginRoots } : {}),
   });
   return {
     adapter,
@@ -495,6 +497,47 @@ describe("HarnessDelegationCoordinator", () => {
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates availability when the installed plugin version changes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cx-plugin-availability-"));
+    try {
+      await writeFile(
+        path.join(root, "enabled.json"),
+        JSON.stringify({ version: 1, enabled: ["pi"] }),
+      );
+      const plugin = path.join(root, "pi");
+      await mkdir(plugin);
+      await writeFile(path.join(plugin, "index.mjs"), "");
+      const writeManifest = (version: string) =>
+        writeFile(
+          path.join(plugin, "manifest.json"),
+          JSON.stringify({
+            manifestVersion: 1,
+            id: "pi",
+            name: "Pi",
+            version,
+            adapterApiVersion: 1,
+            entry: "index.mjs",
+          }),
+        );
+      await writeManifest("1.0.0");
+
+      const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+      const inspect = vi.spyOn(adapter, "inspect");
+      const value = await fixture(adapter, undefined, {}, undefined, undefined, [root]);
+      try {
+        await value.coordinator.listHarnesses({ includeAvailability: true });
+        expect(inspect).toHaveBeenCalledTimes(1);
+        await writeManifest("2.0.0");
+        await value.coordinator.listHarnesses({ includeAvailability: true });
+        expect(inspect).toHaveBeenCalledTimes(2);
+      } finally {
+        await value.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
