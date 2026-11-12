@@ -88,6 +88,7 @@ import {
 import type { RendererModelClient } from "./renderer-model-client.js";
 import { RendererMethodUnavailableError } from "./renderer-request-sender.js";
 import { thinkingOptionsForModel } from "./renderer-model-picker.js";
+import { readCachedModelCatalog, writeCachedModelCatalog } from "./renderer-model-catalog-cache.js";
 import { readClaudePermissionModePreference } from "./renderer-permission-mode-preference.js";
 import { isPermissionModeControlReady } from "./renderer-permission-mode-picker.js";
 import {
@@ -1668,6 +1669,26 @@ export function installRendererBindingProbe(
     return true;
   };
 
+  /** Name a reopened Thread's Model from the last Catalog while the Host answers; the picker
+   * stays disabled in the loading state, so nothing can be selected from the cached Catalog. */
+  const cachedModelPresentation = (
+    mounted: MountedComposer,
+    hostId: string,
+    agent: ExternalRendererAgent,
+  ): Partial<ExternalModelControlView> => {
+    const selected = controller.modelForAgent(mounted.composer, agent);
+    if (!selected) return {};
+    const catalog = readCachedModelCatalog(hostId, agent);
+    if (!catalog || !catalogModelForRef(catalog, selected)) return {};
+    const selectedThinkingOptionId = controller.thinkingOptionForAgent(mounted.composer, agent);
+    return {
+      catalog,
+      selected,
+      ...(selectedThinkingOptionId
+        ? { selectedThinkingOptionId, thinkingSelectionSupported: true }
+        : {}),
+    };
+  };
   const loadExternalCatalog = async (mounted: MountedComposer): Promise<void> => {
     if (!isMountedComposer(mounted.composer)) return;
     modelRecovery.delete(mounted);
@@ -1707,6 +1728,7 @@ export function installRendererBindingProbe(
     mounted.modelView = {
       status: composerAdapterState(mounted) === "ready" ? "loading" : "waitingForAdapter",
       thinkingSelectionSupported: false,
+      ...cachedModelPresentation(mounted, requestHostId, agent),
     };
     mounted.permissionModeView = { status: "idle" };
     renderMounted(mounted);
@@ -1737,6 +1759,7 @@ export function installRendererBindingProbe(
         return;
       }
       if (inspection.status !== "ready") throw new Error(inspection.error.message);
+      writeCachedModelCatalog(requestHostId, agent, inspection.catalog);
       const current = controller.get(mounted.composer);
       const previousModel = controller.modelForAgent(mounted.composer, agent);
       const previousModelAvailable =
