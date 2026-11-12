@@ -283,13 +283,6 @@ type ApplyAdapterAgent = (
   thinkingOptionId?: HarnessThinkingOptionId,
   permissionModeId?: HarnessPermissionModeId,
   composer?: Element,
-  reasoningEffort?: string | null,
-) => boolean;
-
-type ApplyCodexModel = (
-  composer: Element,
-  model: HarnessModelRef,
-  reasoningEffort?: string | null,
 ) => boolean;
 
 export interface RendererBindingProbeApi {
@@ -302,7 +295,6 @@ export interface RendererBindingProbeApi {
     dispose?: () => void,
     applyAgent?: ApplyAdapterAgent,
     modelControl?: RendererModelClient | null,
-    applyCodexModel?: ApplyCodexModel,
   ): void;
   dispose(): void;
 }
@@ -791,7 +783,6 @@ export function installRendererBindingProbe(
   let adapterDispose: (() => void) | null = null;
   let applyAdapterAgent: ApplyAdapterAgent | null = null;
   let modelControl: RendererModelClient | null = null;
-  let applyCodexModel: ApplyCodexModel | null = null;
   const activeModelHostId = (composer?: Element): string | null => {
     if (!modelControl) return null;
     return modelControl.currentHostId ? modelControl.currentHostId(composer) : "local";
@@ -1141,22 +1132,11 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus === "error",
     );
     showCodexUsageGateStatus(mounted, mounted.codexUsageGate.update(externalSubmissionReady));
-    if (
-      hostId &&
-      mounted.modelTarget?.[0] === "default" &&
-      controller.get(mounted.composer).agent === "codex"
-    ) {
+    if (hostId && mounted.modelTarget?.[0] === "default") {
       window.__codexhostProjectMirrorV1?.consumePending({
         composer: mounted.composer,
         hostId,
-        applyModel: (composer, modelId, reasoningEffort) => {
-          const model = { id: modelId } as HarnessModelRef;
-          if (applyCodexModel) return applyCodexModel(composer, model, reasoningEffort);
-          return (
-            applyAdapterAgent?.("codex", model, undefined, undefined, composer, reasoningEffort) ??
-            false
-          );
-        },
+        applyHarness: (composer, agentId) => applyHarnessToComposer(composer, agentId),
       });
     }
     if (mounted.control.usage) {
@@ -2419,6 +2399,36 @@ export function installRendererBindingProbe(
     }
   };
 
+  /**
+   * Applies the Harness a mirrored project asked for once its new Composer
+   * mounts. The target Host's availability discovery can still be running, so
+   * wait for it instead of dropping the request on the first render.
+   */
+  const applyHarnessToComposer = async (composer: Element, agentId: string): Promise<boolean> => {
+    const mounted = mountedByComposer.get(composer);
+    if (!mounted || !composer.isConnected) return false;
+    if (controller.get(composer).agent === agentId) return true;
+    if (agentId === "codex") return false;
+    const agent = agentId as RendererAgent;
+    const hostId = mounted.hostId;
+    if (!hostId) return false;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (controller.get(composer).agent === agent) return true;
+      if (composerAvailability(mounted)[agent] === "ready")
+        return switchComposerAgent(mounted, agent);
+      try {
+        await refreshHarnessAvailabilityForHost(hostId, true);
+      } catch {
+        // A later attempt may still succeed after the connection settles.
+      }
+      if (!composer.isConnected) return false;
+      if (composerAvailability(mounted)[agent] === "ready")
+        return switchComposerAgent(mounted, agent);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+    }
+    return false;
+  };
+
   const loadCodexAccounts = async (): Promise<void> => {
     const hostIds = new Set([...mountedByComposer.values()].map((mounted) => mounted.hostId));
     await Promise.all(
@@ -2964,8 +2974,9 @@ export function installRendererBindingProbe(
         void switchComposerAgent(mounted, agent);
       },
       (agent) => openInstallPage(activeModelHostId(composer), agent),
-      () => {
+      (picker) => {
         void loadCodexAccounts();
+        window.__codexhostProjectMirrorV1?.openForAgentPicker({ composer, picker });
       },
       (modelId) => {
         const mounted = mountedByComposer.get(composer);
@@ -2986,16 +2997,6 @@ export function installRendererBindingProbe(
         // The button is the discoverable entry to the `#` menu.
         const editor = composer.querySelector<HTMLElement>(EDITOR_SELECTOR);
         if (editor) delegationMention?.openFor(editor);
-      },
-      (trigger) => {
-        const mounted = mountedByComposer.get(composer);
-        if (!mounted) return;
-        window.__codexhostProjectMirrorV1?.openFor({
-          composer,
-          trigger,
-          agent: controller.get(composer).agent,
-          newThread: mounted.modelTarget?.[0] === "default",
-        });
       },
     );
     const mounted: MountedComposer = {
@@ -3021,7 +3022,6 @@ export function installRendererBindingProbe(
       commandRequestGeneration: 0,
     };
     mountedByComposer.set(composer, mounted);
-    window.__codexhostProjectMirrorV1?.prepare(composer);
     if (isComposerModelWriteAllowed(modelTarget)) {
       applyDraftAgentCarrier(composer, state.agent);
     }
@@ -3572,13 +3572,12 @@ export function installRendererBindingProbe(
         ...(permissionModeId ? { permissionModeId } : {}),
       };
     },
-    setAdapter(status, dispose, applyAgent, nextModelControl, nextApplyCodexModel) {
+    setAdapter(status, dispose, applyAgent, nextModelControl) {
       usageNotificationDispose();
       adapterDispose?.();
       adapterDispose = dispose ?? null;
       applyAdapterAgent = applyAgent ?? null;
       modelControl = nextModelControl ?? null;
-      applyCodexModel = nextApplyCodexModel ?? null;
       adapterStatus = status;
       publishConnectionStatus();
       const installedModelControl = modelControl;
