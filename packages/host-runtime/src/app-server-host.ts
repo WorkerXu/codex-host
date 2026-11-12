@@ -307,6 +307,11 @@ import {
 } from "./thread-list-aggregator.js";
 import { listSectionThreads, moveThreadSection } from "./external-thread-sections.js";
 import { externalThreadListEntries } from "./external-thread-list.js";
+import {
+  ExternalThreadInjectedContext,
+  injectedContextText,
+  withInjectedContext,
+} from "./external-thread-injected-context.js";
 import { externalThreadEmptyOfficialResult } from "./external-thread-official-defaults.js";
 import { ModelPriceCatalog } from "./model-prices.js";
 import { ObservedSessionUsage } from "./observed-session-usage.js";
@@ -695,6 +700,7 @@ export class AppServerHost {
   readonly #executionHosts = new WeakMap<ExternalThread, string>();
   readonly #externalPrewarms = new ExternalThreadPrewarms();
   readonly #externalSteering = new ExternalTurnSteering();
+  readonly #externalInjectedContext = new ExternalThreadInjectedContext();
   readonly #externalQueue = new ExternalThreadQueue({
     notifyChanged: (threadId) =>
       this.#writer.json({ method: "thread/queue/changed", params: { threadId } }),
@@ -2235,6 +2241,26 @@ export class AppServerHost {
           () => this.#handleExternalQueueRequest(request, location.record.hostThreadId),
           location.record.hostThreadId,
         );
+        return;
+      }
+    }
+    if (
+      request.method === "thread/inject_items" &&
+      isRecord(request.params) &&
+      typeof request.params.threadId === "string"
+    ) {
+      const location = await this.#locateExternalThread(request.params.threadId);
+      if (await this.#writeResolutionError(request, location)) return;
+      if (location.kind === "external") {
+        let texts: string[];
+        try {
+          texts = injectedContextText(request.params.items);
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+          return;
+        }
+        this.#externalInjectedContext.add(location.record.hostThreadId, texts);
+        await this.#writer.json(rpcEnvelope(request, { result: {} }));
         return;
       }
     }
@@ -5330,6 +5356,7 @@ export class AppServerHost {
     thread.responseGates.set(turnId, gate);
 
     const restoreExecutionHost = this.#setExecutionHost(thread, sourceHostId);
+    const injected = this.#externalInjectedContext.take(thread.id);
     try {
       if (thread.unsubmittedPrewarm && (await this.#externalRuntime.submitPrewarm(thread))) {
         await this.#notifyExternalThreadStarted(thread.thread);
@@ -5337,11 +5364,17 @@ export class AppServerHost {
       const result = await thread.session.execute({
         type: "turn.start",
         turnId,
-        input: [{ type: "text", text: rewriteDelegationMentionText(text) }],
+        input: [
+          {
+            type: "text",
+            text: withInjectedContext(injected?.prefix, rewriteDelegationMentionText(text)),
+          },
+        ],
       });
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
       return { turnId, turn: projection.projector.pendingTurn(), gate };
     } catch (error) {
+      injected?.restore();
       restoreExecutionHost();
       thread.running = false;
       thread.activeTurnId = null;
