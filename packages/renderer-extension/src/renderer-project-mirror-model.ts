@@ -110,6 +110,7 @@ export function groupProviderModels(
 export interface MirrorGroupPlan {
   groups: ProjectGroup[];
   action: "created" | "appended" | "skipped-other-group";
+  changed: boolean;
 }
 
 function memberKey(member: ProjectGroupMember): string {
@@ -138,7 +139,7 @@ export function planMirrorGroup(input: {
     group.members.some((member) => targetMembers.some((target) => sameMember(member, target))),
   );
   if (owner && owner.name.trim() !== name) {
-    return { groups: [...input.groups], action: "skipped-other-group" };
+    return { groups: [...input.groups], action: "skipped-other-group", changed: false };
   }
   const group = input.groups.find((candidate) => candidate.name.trim() === name);
   if (!group) {
@@ -146,6 +147,7 @@ export function planMirrorGroup(input: {
       input.groups.reduce((maximum, candidate) => Math.max(maximum, candidate.order), -1) + 1;
     return {
       action: "created",
+      changed: true,
       groups: [
         ...input.groups,
         {
@@ -163,13 +165,69 @@ export function planMirrorGroup(input: {
   const missing = targetMembers.filter(
     (target) => !group.members.some((member) => sameMember(member, target)),
   );
-  if (missing.length === 0) return { groups: [...input.groups], action: "appended" };
+  if (missing.length === 0)
+    return { groups: [...input.groups], action: "appended", changed: false };
   return {
     action: "appended",
+    changed: true,
     groups: input.groups.map((candidate) =>
       candidate === group
         ? { ...candidate, members: [...candidate.members, ...missing], updatedAt: input.now }
         : candidate,
     ),
   };
+}
+
+export interface MirrorDestinationInput {
+  name: string;
+  hostId: string;
+  candidates: readonly string[];
+  known: { hostId: string; remotePath: string; remoteProjectId: string } | null;
+  desktopProjects: readonly { id: string; label: string; remotePath: string }[];
+  appProjects: readonly { name: string; roots: readonly { path: string }[] }[];
+  directoryState(path: string): Promise<"directory" | "missing" | "other">;
+}
+
+export interface MirrorDestination {
+  path: string;
+  projectId: string | null;
+}
+
+/**
+ * Reuse the registered mirror first, then the first candidate that is either an
+ * existing same-named project, an existing directory, or a missing path (which
+ * the caller creates). A path owned by a differently named project is skipped
+ * so the caller falls through to `<name> 2`.
+ */
+export async function chooseMirrorDestination(
+  input: MirrorDestinationInput,
+): Promise<MirrorDestination | null> {
+  if (input.known && input.known.hostId === input.hostId) {
+    const desktopProject = input.desktopProjects.find(
+      (project) => project.id === input.known?.remoteProjectId,
+    );
+    if (desktopProject) return { path: desktopProject.remotePath, projectId: desktopProject.id };
+    const appProject = input.appProjects.some((project) =>
+      project.roots.some((root) => root.path === input.known?.remotePath),
+    );
+    if (appProject || (await input.directoryState(input.known.remotePath)) === "directory")
+      return { path: input.known.remotePath, projectId: null };
+  }
+  for (const candidate of input.candidates) {
+    const desktopProject = input.desktopProjects.find(
+      (project) => project.remotePath === candidate,
+    );
+    if (desktopProject) {
+      if (desktopProject.label !== input.name) continue;
+      return { path: candidate, projectId: desktopProject.id };
+    }
+    const appProject = input.appProjects.find((project) =>
+      project.roots.some((root) => root.path === candidate),
+    );
+    if (appProject && appProject.name !== input.name) continue;
+    const state = await input.directoryState(candidate);
+    if (state === "other") continue;
+    return { path: candidate, projectId: null };
+  }
+  return null;
 }

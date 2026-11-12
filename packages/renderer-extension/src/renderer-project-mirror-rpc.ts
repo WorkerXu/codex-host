@@ -1,9 +1,17 @@
 import {
+  PROJECT_GROUPS_LIST_METHOD,
+  PROJECT_GROUPS_REPLACE_METHOD,
   PROJECT_MIRROR_LIST_METHOD,
   PROJECT_MIRROR_UPSERT_METHOD,
+  projectGroupsListResultSchema,
+  projectGroupsReplaceParamsSchema,
+  projectGroupsReplaceResultSchema,
   projectMirrorListResultSchema,
   projectMirrorUpsertParamsSchema,
   projectMirrorUpsertResultSchema,
+  type ProjectGroupsListResult,
+  type ProjectGroupsReplaceParams,
+  type ProjectGroupsReplaceResult,
   type ProjectMirrorListResult,
   type ProjectMirrorUpsertParams,
   type ProjectMirrorUpsertResult,
@@ -16,6 +24,11 @@ export interface ProjectMirrorRequestManager {
 export interface ProjectMirrorRpc {
   list(): Promise<ProjectMirrorListResult>;
   upsert(input: ProjectMirrorUpsertParams): Promise<ProjectMirrorUpsertResult>;
+}
+
+export interface ProjectGroupRpc {
+  list(): Promise<ProjectGroupsListResult>;
+  replace(input: ProjectGroupsReplaceParams): Promise<ProjectGroupsReplaceResult>;
 }
 
 export function createProjectMirrorRpc(manager: ProjectMirrorRequestManager): ProjectMirrorRpc {
@@ -32,4 +45,27 @@ export function createProjectMirrorRpc(manager: ProjectMirrorRequestManager): Pr
       );
     },
   };
+}
+
+export function createProjectGroupRpc(manager: ProjectMirrorRequestManager): ProjectGroupRpc {
+  return {
+    async list() {
+      return projectGroupsListResultSchema.parse(
+        await manager.sendRequest(PROJECT_GROUPS_LIST_METHOD, {}),
+      );
+    },
+    async replace(input) {
+      const params = projectGroupsReplaceParamsSchema.parse(input);
+      return projectGroupsReplaceResultSchema.parse(
+        await manager.sendRequest(PROJECT_GROUPS_REPLACE_METHOD, params),
+      );
+    },
+  };
+}
+
+export function localProjectMirrorManager(
+  routing: { forHost(hostId: string): { manager: unknown } | null } | undefined,
+): ProjectMirrorRequestManager | null {
+  const manager = routing?.forHost("local")?.manager;
+  return manager ? (manager as ProjectMirrorRequestManager) : null;
 }

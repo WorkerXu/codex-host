@@ -281,6 +281,7 @@ type ApplyAdapterAgent = (
   thinkingOptionId?: HarnessThinkingOptionId,
   permissionModeId?: HarnessPermissionModeId,
   composer?: Element,
+  reasoningEffort?: string | null,
 ) => boolean;
 
 export interface RendererBindingProbeApi {
@@ -1130,6 +1131,21 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus === "error",
     );
     showCodexUsageGateStatus(mounted, mounted.codexUsageGate.update(externalSubmissionReady));
+    if (hostId && mounted.modelTarget?.[0] === "default") {
+      window.__codexhostProjectMirrorV1?.consumePending({
+        composer: mounted.composer,
+        hostId,
+        applyModel: (composer, modelId, reasoningEffort) =>
+          applyAdapterAgent?.(
+            "codex",
+            { id: modelId } as HarnessModelRef,
+            undefined,
+            undefined,
+            composer,
+            reasoningEffort,
+          ) ?? false,
+      });
+    }
     if (mounted.control.usage) {
       mounted.control.usage.onOpen = () => {
         void refreshThreadUsage(
@@ -2930,6 +2946,16 @@ export function installRendererBindingProbe(
         const editor = composer.querySelector<HTMLElement>(EDITOR_SELECTOR);
         if (editor) delegationMention?.openFor(editor);
       },
+      (trigger) => {
+        const mounted = mountedByComposer.get(composer);
+        if (!mounted) return;
+        window.__codexhostProjectMirrorV1?.openFor({
+          composer,
+          trigger,
+          agent: controller.get(composer).agent,
+          newThread: mounted.modelTarget?.[0] === "default",
+        });
+      },
     );
     const mounted: MountedComposer = {
       composer,
@@ -2954,6 +2980,7 @@ export function installRendererBindingProbe(
       commandRequestGeneration: 0,
     };
     mountedByComposer.set(composer, mounted);
+    window.__codexhostProjectMirrorV1?.prepare(composer);
     if (isComposerModelWriteAllowed(modelTarget)) {
       applyDraftAgentCarrier(composer, state.agent);
     }

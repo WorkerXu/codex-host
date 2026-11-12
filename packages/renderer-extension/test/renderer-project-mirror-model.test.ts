@@ -2,6 +2,7 @@ import type { ProjectGroup } from "@codexhost/shared-contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  chooseMirrorDestination,
   effectiveModelId,
   groupProviderModels,
   isNameOnlyProject,
@@ -146,5 +147,72 @@ describe("project group planning", () => {
     });
     expect(plan.action).toBe("skipped-other-group");
     expect(plan.groups).toHaveLength(1);
+  });
+});
+
+describe("mirror destination choice", () => {
+  const directoryState =
+    (states: Record<string, "directory" | "missing" | "other">) =>
+    async (path: string): Promise<"directory" | "missing" | "other"> =>
+      states[path] ?? "missing";
+
+  it("reuses a registered mirror project", async () => {
+    await expect(
+      chooseMirrorDestination({
+        name: "alpha",
+        hostId: "remote-ssh-discovered:colab",
+        candidates: [`${parent}/alpha`],
+        known: {
+          hostId: "remote-ssh-discovered:colab",
+          remotePath: `${parent}/alpha`,
+          remoteProjectId: "remote-alpha",
+        },
+        desktopProjects: [{ id: "remote-alpha", label: "alpha", remotePath: `${parent}/alpha` }],
+        appProjects: [],
+        directoryState: directoryState({}),
+      }),
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: "remote-alpha" });
+  });
+
+  it("skips a path owned by a differently named project", async () => {
+    await expect(
+      chooseMirrorDestination({
+        name: "alpha",
+        hostId: "remote-ssh-discovered:colab",
+        candidates: [`${parent}/alpha`, `${parent}/alpha 2`],
+        known: null,
+        desktopProjects: [{ id: "other", label: "other", remotePath: `${parent}/alpha` }],
+        appProjects: [],
+        directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
+      }),
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
+  });
+
+  it("reuses an existing directory without a project", async () => {
+    await expect(
+      chooseMirrorDestination({
+        name: "alpha",
+        hostId: "remote-ssh-discovered:colab",
+        candidates: [`${parent}/alpha`],
+        known: null,
+        desktopProjects: [],
+        appProjects: [],
+        directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
+      }),
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: null });
+  });
+
+  it("skips a file and uses the next numbered directory", async () => {
+    await expect(
+      chooseMirrorDestination({
+        name: "alpha",
+        hostId: "remote-ssh-discovered:colab",
+        candidates: [`${parent}/alpha`, `${parent}/alpha 2`],
+        known: null,
+        desktopProjects: [],
+        appProjects: [],
+        directoryState: directoryState({ [`${parent}/alpha`]: "other" }),
+      }),
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
   });
 });
