@@ -5,15 +5,30 @@ import {
 } from "./renderer-binding-probe.js";
 import { installRendererProjectGroups } from "./renderer-project-groups.js";
 import { installCurrentRendererAdapter } from "./versioned-renderer-adapter.js";
+import { installRendererProjectMirror } from "./renderer-project-mirror.js";
 
 export function installRendererBinding(
   enabledAgents?: readonly RendererAgent[],
 ): RendererBindingProbeApi {
   window.__codexhostRendererBindingProbeV1?.dispose();
+  try {
+    installRendererProjectMirror();
+  } catch (error) {
+    console.error(
+      "codexhost project mirror installation failed",
+      error instanceof Error ? error.name : "UnknownError",
+    );
+  }
   const binding = installRendererBindingProbe({ ...(enabledAgents ? { enabledAgents } : {}) });
   try {
     const adapter = installCurrentRendererAdapter();
-    binding.setAdapter(adapter.status, adapter.dispose, adapter.applyAgent, adapter.modelControl);
+    binding.setAdapter(
+      adapter.status,
+      adapter.dispose,
+      adapter.applyAgent,
+      adapter.modelControl,
+      adapter.applyCodexModel,
+    );
   } catch (error) {
     console.error(
       "codexhost Renderer Adapter installation failed",

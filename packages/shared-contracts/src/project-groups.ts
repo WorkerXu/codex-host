@@ -150,6 +150,15 @@ export const threadProjectAssignmentSchema = z
   })
   .passthrough();
 
+export const desktopSelectedProjectSchema = z
+  .object({
+    type: projectGroupKindSchema,
+    projectId: projectIdSchema,
+  })
+  .strict();
+
+export type DesktopSelectedProject = z.infer<typeof desktopSelectedProjectSchema>;
+
 export const desktopProjectsCatalogSchema = z
   .object({
     localProjects: z.record(z.string(), desktopLocalProjectSchema),
@@ -157,6 +166,13 @@ export const desktopProjectsCatalogSchema = z
     threadProjectAssignments: z.record(z.string(), threadProjectAssignmentSchema),
     codexManagedRemoteConnections: z.array(desktopRemoteConnectionSchema).max(1_024),
     projectOrder: z.array(z.string().min(1).max(1_024)).max(4_096),
+    /**
+     * Optional so older Hosts and test fixtures stay valid. The project-mirror
+     * companion treats a missing value as "unknown" and stays disabled.
+     */
+    selectedProject: desktopSelectedProjectSchema.nullable().optional(),
+    homeDirectory: z.string().min(1).max(4_096).optional(),
+    defaultProjectParent: z.string().min(1).max(4_096).optional(),
     readAt: z.string().datetime(),
   })
   .strict();
