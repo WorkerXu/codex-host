@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 11;
+const SKILL_VERSION = 12;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
@@ -20,8 +20,10 @@ const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
   "ca06be59f0d47c9a54d05ed2d9588c9c737306cc155cb4dff3fe2a2a61891dde",
   // v9, before the child-session name guidance.
   "b72a059e139bd5b93b95f7ac02ab80f428d5a721cc67b004210d5263e75baed7",
-  // v10, before cross-machine delegation guidance.
-  "57e44fc5fe81a6f8b04544ebc01ad1de6ad96acc893917e831f71a656c73640f",
+  // v10, before cross-machine delegation guidance (as shipped in v0.17.x).
+  "242a07e7521949e5d651102f6b353c48e7575a679e3403c5c5db295abad9896b",
+  // Upstream v0.18 beta v11, a different text that shares the version number.
+  "e762e3dea2633656dec27ea568b95f005e7f5c13a21b029dd149813f49c1330c",
 ];
 
 export const CODEXHOST_DELEGATION_SKILL = `---
