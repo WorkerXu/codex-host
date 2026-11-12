@@ -113,6 +113,13 @@ function normalize(raw: unknown, readAt: string): DesktopProjectsCatalog {
 
   const remoteProjects = value("remote-projects");
   const remoteConnections = value("codex-managed-remote-connections");
+  const selected = record(value("selected-project"));
+  const selectedProjectId = selected ? string(selected.projectId) : null;
+  const selectedProject =
+    selected && selectedProjectId && (selected.type === "local" || selected.type === "remote")
+      ? { type: selected.type, projectId: selectedProjectId }
+      : null;
+  const homeDirectory = os.homedir();
   return desktopProjectsCatalogSchema.parse({
     localProjects,
     remoteProjects: (Array.isArray(remoteProjects) ? remoteProjects : [])
@@ -123,6 +130,9 @@ function normalize(raw: unknown, readAt: string): DesktopProjectsCatalog {
       .map(connection)
       .filter((entry): entry is DesktopRemoteConnection => entry !== null),
     projectOrder: strings(value("project-order")),
+    selectedProject,
+    homeDirectory,
+    defaultProjectParent: path.join(homeDirectory, "Documents", "ChatGPT"),
     readAt,
   });
 }
