@@ -31,19 +31,14 @@ export function showProjectMirrorNotice(
 /** First-use confirmation for the name-only heuristic; never persists on cancel. */
 export function confirmProjectMirror(document: Document, projectName: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.setAttribute("data-codexhost-project-mirror-confirm", "");
-    overlay.style.position = "fixed";
-    overlay.style.inset = "0";
-    overlay.style.zIndex = "2147483647";
-    overlay.style.display = "flex";
-    overlay.style.alignItems = "center";
-    overlay.style.justifyContent = "center";
-    overlay.style.background = "rgba(0,0,0,0.35)";
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("data-codexhost-project-mirror-confirm", "");
+    dialog.style.padding = "0";
+    dialog.style.border = "0";
+    dialog.style.background = "transparent";
 
     const panel = document.createElement("div");
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("role", "document");
     panel.style.width = "min(420px, calc(100vw - 48px))";
     panel.style.padding = "16px";
     panel.style.borderRadius = "12px";
@@ -88,27 +83,24 @@ export function confirmProjectMirror(document: Document, projectName: string): P
     confirm.style.cursor = "pointer";
 
     const finish = (value: boolean): void => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      overlay.remove();
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.close();
+      dialog.remove();
       resolve(value);
     };
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        finish(false);
-      }
+    const onCancel = (event: Event): void => {
+      event.preventDefault();
+      finish(false);
     };
     cancel.addEventListener("click", () => finish(false));
     confirm.addEventListener("click", () => finish(true));
-    overlay.addEventListener("pointerdown", (event) => {
-      if (event.target === overlay) finish(false);
-    });
-    document.addEventListener("keydown", onKeyDown, true);
+    dialog.addEventListener("cancel", onCancel);
 
     actions.append(cancel, confirm);
     panel.append(title, body, actions);
-    overlay.append(panel);
-    document.body.append(overlay);
+    dialog.append(panel);
+    document.body.append(dialog);
+    dialog.showModal();
     confirm.focus();
   });
 }
