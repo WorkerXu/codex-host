@@ -106,7 +106,6 @@ export interface ComposerAgentControl {
   sendButton: HTMLButtonElement;
   sendDisabledBeforeSwitch: boolean | null;
   stopCompactLayout?: () => void;
-  nativeModelOpen?: { element: HTMLElement; listener: () => void };
 }
 
 export function eventElement(target: EventTarget | null): Element | null {
@@ -682,32 +681,17 @@ export function mountComposerAgentControl(
   enabledAgents: readonly RendererAgent[],
   onSelect: (agent: RendererAgent) => void,
   onDownload: (agent: ExternalRendererAgent) => void,
-  onOpenProviderPicker: () => void,
+  onOpenAgentMenu: (picker: RendererAgentPickerControl) => void,
   onSelectModel: (modelId: string) => void,
   onSelectThinking: (thinkingOptionId: string) => void,
   onSelectPermissionMode: (permissionModeId: string) => void,
   onOpenCommandMenu: () => void,
-  onNativeModelOpen?: (trigger: HTMLElement) => void,
 ): ComposerAgentControl {
   // External Harnesses inject more footer chips than native Codex. Let the
   // thread column shrink under sidebar / narrow-window pressure so those chips
   // can flex-shrink and ellipsis instead of overlapping (issue #284).
   if (composer instanceof HTMLElement) composer.style.minWidth = "0";
   const nativeModelControl = captureNativeControl(nativeModelControlForComposer(composer));
-  const nativeModelOpen =
-    nativeModelControl && onNativeModelOpen
-      ? {
-          element: nativeModelControl.element,
-          listener: () => {
-            try {
-              onNativeModelOpen(nativeModelControl.element);
-            } catch {
-              // The mirror entry is optional; never break the native model menu.
-            }
-          },
-        }
-      : undefined;
-  nativeModelOpen?.element.addEventListener("click", nativeModelOpen.listener);
   const nativeContextUsageControl = captureNativeControl(
     nativeContextUsageControlForComposer(composer),
   );
@@ -722,7 +706,7 @@ export function mountComposerAgentControl(
     enabledAgents,
     onSelect,
     onDownload,
-    onOpenProviderPicker,
+    onOpenAgentMenu,
   );
   const modelPicker = mountRendererModelPicker(composerId, onSelectModel, onSelectThinking);
   const permissionModePicker = mountRendererPermissionModePicker(
@@ -772,7 +756,7 @@ export function mountComposerAgentControl(
         ["codex", ...plugins.map(({ id }) => id)],
         onSelect,
         onDownload,
-        onOpenProviderPicker,
+        onOpenAgentMenu,
         undefined,
         plugins,
       );
@@ -793,7 +777,6 @@ export function mountComposerAgentControl(
     harnessCommands,
     sendButton,
     sendDisabledBeforeSwitch: null,
-    ...(nativeModelOpen ? { nativeModelOpen } : {}),
   };
   refreshTrailingClusterPlacement(control);
   refreshUsagePlacement(control);
@@ -919,8 +902,6 @@ export function renderComposerAgentControl(
 
 export function disposeComposerAgentControl(control: ComposerAgentControl): void {
   control.stopCompactLayout?.();
-  if (control.nativeModelOpen)
-    control.nativeModelOpen.element.removeEventListener("click", control.nativeModelOpen.listener);
   if (control.sendDisabledBeforeSwitch !== null) {
     control.sendButton.disabled = nativeSendDisabled(
       control.sendButton,

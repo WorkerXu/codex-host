@@ -53,7 +53,7 @@ export function confirmProjectMirror(document: Document, projectName: string): P
     title.style.marginBottom = "8px";
 
     const body = document.createElement("div");
-    body.textContent = `「${projectName}」看起来是在本机按名字自动创建的项目。启用后，在模型菜单的「其他机器」里选择一台机器，会在该机器创建同名项目并在那里打开新对话。`;
+    body.textContent = `「${projectName}」看起来是在本机按名字自动创建的项目。启用后，在 Agent 菜单的「其他机器」里选择一台机器和 Harness，会在该机器创建同名项目并在那里打开新对话。`;
     body.style.color = "var(--color-text-secondary, #555)";
     body.style.marginBottom = "16px";
 

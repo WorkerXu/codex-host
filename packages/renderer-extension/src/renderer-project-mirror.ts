@@ -6,21 +6,21 @@ import {
   type ProjectGroupMember,
 } from "@codexhost/shared-contracts";
 
+import type { RendererAgentPickerControl } from "./renderer-agent-picker.js";
 import {
-  loadCrossHostModelCatalog,
-  type CrossHostModelCatalog,
-} from "./renderer-cross-host-model-catalog.js";
-import { observeNativeModelMenu } from "./renderer-cross-host-model-menu.js";
+  loadCrossHostHarnessCatalog,
+  type CrossHostHarnessCatalog,
+} from "./renderer-cross-host-harness-catalog.js";
 import {
-  createCrossHostModelSection,
-  type CrossHostModelSection,
-} from "./renderer-cross-host-model-section.js";
+  createCrossHostAgentSection,
+  type CrossHostAgentSelection,
+} from "./renderer-cross-host-agent-section.js";
 import {
   chooseMirrorDestination,
-  effectiveModelId,
   isNameOnlyProject,
   mirrorDirectoryCandidates,
   planMirrorGroup,
+  readComposerProject,
 } from "./renderer-project-mirror-model.js";
 import { confirmProjectMirror, showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
 import {
@@ -34,11 +34,12 @@ import {
   loadProjectMirrorDesktopServices,
   type ProjectMirrorDesktopServices,
 } from "./renderer-project-mirror-services.js";
-import type { CrossHostMenuSelection } from "./renderer-cross-host-model-menu.js";
 
 type HostRoute = {
   manager: { sendRequest(method: string, params: unknown): Promise<unknown> };
 };
+
+type ProjectSource = "composer" | "catalog";
 
 export interface ProjectMirrorContext {
   catalog: DesktopProjectsCatalog;
@@ -47,25 +48,29 @@ export interface ProjectMirrorContext {
   revision: number;
 }
 
-export interface ProjectMirrorPendingSelection {
-  modelId: string;
-  reasoningEffort: string | null;
+export interface ProjectMirrorStatus {
+  pickerDetected: boolean;
+  projectEligible: boolean;
+  peersLoaded: number;
+  lastError: string | null;
+  projectSource: ProjectSource | null;
+  machineCount: number;
+}
+
+interface PendingHarness {
+  agentId: string;
   createdAt: number;
+  attemptedAt?: number;
 }
 
 export interface RendererProjectMirrorApi {
-  prepare(composer: Element): void;
-  openFor(input: {
-    composer: Element;
-    trigger: HTMLElement;
-    agent: string;
-    newThread: boolean;
-  }): void;
+  openForAgentPicker(input: { composer: Element; picker: RendererAgentPickerControl }): void;
   consumePending(input: {
     composer: Element;
     hostId: string;
-    applyModel(composer: Element, modelId: string, reasoningEffort: string | null): boolean;
+    applyHarness(composer: Element, agentId: string): Promise<boolean>;
   }): boolean;
+  status(): ProjectMirrorStatus;
   dispose(): void;
 }
 
@@ -75,10 +80,10 @@ declare global {
   }
 }
 
-const CONTEXT_TTL_MS = 2_000;
 const PENDING_TTL_MS = 60_000;
-const PENDING_RETRY_MS = 400;
+const PENDING_RETRY_MS = 800;
 const SIDEBAR_TIMEOUT_MS = 5_000;
+const HARNESS_CATALOG_TTL_MS = 10_000;
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -95,28 +100,46 @@ function hostRoute(hostId: string): HostRoute | null {
   return (window.__codexhostHostRoutingV1?.forHost(hostId) as HostRoute | null) ?? null;
 }
 
-async function readContext(): Promise<ProjectMirrorContext | null> {
+interface ContextResult {
+  context: ProjectMirrorContext | null;
+  source: ProjectSource | null;
+  error: string | null;
+}
+
+async function readContext(composer: Element): Promise<ContextResult> {
   const manager = localManager();
-  if (!manager) return null;
+  if (!manager) return { context: null, source: null, error: "Host runtime is unavailable" };
   try {
     const [registry, catalogValue] = await Promise.all([
       createProjectMirrorRpc(manager).list(),
       manager.sendRequest(DESKTOP_PROJECTS_CATALOG_METHOD, {}),
     ]);
     const catalog = desktopProjectsCatalogSchema.parse(catalogValue);
-    const selected = catalog.selectedProject;
-    if (!selected || selected.type !== "local") return null;
-    const source = catalog.localProjects[selected.projectId];
-    if (!source) return null;
-    if (!isNameOnlyProject(source, catalog.defaultProjectParent)) return null;
+    const composerProject = readComposerProject(composer);
+    const selected = composerProject ?? catalog.selectedProject ?? null;
+    const source: ProjectSource | null = composerProject ? "composer" : selected ? "catalog" : null;
+    if (!selected || selected.type !== "local") return { context: null, source, error: null };
+    const project = catalog.localProjects[selected.projectId];
+    if (!project)
+      return {
+        context: null,
+        source,
+        error: `Project ${selected.projectId} is missing from the Desktop catalog`,
+      };
+    if (!isNameOnlyProject(project, catalog.defaultProjectParent))
+      return { context: null, source, error: null };
     return {
-      catalog,
+      context: {
+        catalog,
+        source: project,
+        acknowledged: registry.acknowledged.includes(project.id),
+        revision: registry.revision,
+      },
       source,
-      acknowledged: registry.acknowledged.includes(source.id),
-      revision: registry.revision,
+      error: null,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return { context: null, source: null, error: errorMessage(error) };
   }
 }
 
@@ -146,20 +169,35 @@ async function upsertRegistry(
   }
 }
 
-let crossHostCache: { key: string; at: number; value: Promise<CrossHostModelCatalog> } | null =
-  null;
+let harnessCatalogCache: {
+  key: string;
+  at: number;
+  value: Promise<CrossHostHarnessCatalog>;
+} | null = null;
 
-function loadCrossHostCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostModelCatalog> {
+function loadHarnessCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostHarnessCatalog> {
   const routing = window.__codexhostHostRoutingV1;
-  const hostIds = (routing?.knownHostIds?.() ?? []).filter(
-    (hostId) => hostId !== "local" && hostId !== "durable" && hostId.includes(":"),
-  );
-  const key = `${hostIds.join("|")}\u0000${catalog.codexManagedRemoteConnections.length}`;
-  if (crossHostCache && crossHostCache.key === key && Date.now() - crossHostCache.at < 15_000)
-    return crossHostCache.value;
-  const value = loadCrossHostModelCatalog({
-    hostIds,
+  const knownHostIds = routing?.knownHostIds?.() ?? [];
+  const hostIds = [
+    ...new Set([
+      ...knownHostIds,
+      ...catalog.codexManagedRemoteConnections.map(({ hostId }) => hostId),
+      ...catalog.remoteProjects.map(({ hostId }) => hostId),
+    ]),
+  ].sort();
+  const key = hostIds
+    .map((hostId) => `${hostId}:${routing?.forHost(hostId) != null ? "1" : "0"}`)
+    .join("|");
+  if (
+    harnessCatalogCache &&
+    harnessCatalogCache.key === key &&
+    Date.now() - harnessCatalogCache.at < HARNESS_CATALOG_TTL_MS
+  )
+    return harnessCatalogCache.value;
+  const value = loadCrossHostHarnessCatalog({
     connections: catalog.codexManagedRemoteConnections,
+    knownHostIds,
+    remoteProjectHostIds: catalog.remoteProjects.map(({ hostId }) => hostId),
     isOnline: (hostId) => routing?.forHost(hostId) != null,
     request: async (hostId, method, params) => {
       const route = hostRoute(hostId);
@@ -167,9 +205,9 @@ function loadCrossHostCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHos
       return route.manager.sendRequest(method, params);
     },
   });
-  crossHostCache = { key, at: Date.now(), value };
+  harnessCatalogCache = { key, at: Date.now(), value };
   value.catch(() => {
-    if (crossHostCache?.value === value) crossHostCache = null;
+    if (harnessCatalogCache?.value === value) harnessCatalogCache = null;
   });
   return value;
 }
@@ -304,50 +342,37 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
   const existing = window.__codexhostProjectMirrorV1;
   if (existing) return existing;
 
-  const contexts = new WeakMap<Element, { value: ProjectMirrorContext | null; at: number }>();
-  const pending = new Map<string, ProjectMirrorPendingSelection & { attemptedAt?: number }>();
+  const pending = new Map<string, PendingHarness>();
   const inFlight = new Set<string>();
   const announcedConflicts = new Set<string>();
+  const status: ProjectMirrorStatus = {
+    pickerDetected: false,
+    projectEligible: false,
+    peersLoaded: 0,
+    lastError: null,
+    projectSource: null,
+    machineCount: 0,
+  };
   let disposed = false;
 
-  const prepare = (composer: Element): void => {
-    const cached = contexts.get(composer);
-    if (cached && Date.now() - cached.at < CONTEXT_TTL_MS) return;
-    contexts.set(composer, { value: null, at: Date.now() });
-    void readContext().then((value) => {
-      if (!disposed) contexts.set(composer, { value, at: Date.now() });
-    });
-  };
-
-  const contextFor = async (composer: Element): Promise<ProjectMirrorContext | null> => {
-    const cached = contexts.get(composer);
-    // A null snapshot may predate the project selection that opened this
-    // Composer; never let it hide the entry for the whole TTL.
-    if (cached?.value && Date.now() - cached.at < CONTEXT_TTL_MS) return cached.value;
-    const value = await readContext();
-    if (!disposed) contexts.set(composer, { value, at: Date.now() });
-    return value;
-  };
-
   const acknowledge = async (
-    section: CrossHostModelSection,
     context: ProjectMirrorContext,
-    catalog: CrossHostModelCatalog,
     rpc: ProjectMirrorRpc,
   ): Promise<void> => {
     if (!(await confirmProjectMirror(document, context.source.name))) return;
     try {
       await upsertRegistry(rpc, { sourceProjectId: context.source.id, acknowledge: true });
       context.acknowledged = true;
-      section.refresh(catalog, true);
+      showProjectMirrorNotice(document, "已启用跨机对话，重新打开 Agent 菜单即可使用");
     } catch (error) {
+      status.lastError = errorMessage(error);
       showProjectMirrorNotice(document, `启用跨机对话失败：${errorMessage(error)}`, "error");
     }
   };
 
   const runMirror = async (
     context: ProjectMirrorContext,
-    selection: CrossHostMenuSelection,
+    selection: CrossHostAgentSelection,
     services: ProjectMirrorDesktopServices,
     rpc: ProjectMirrorRpc,
   ): Promise<void> => {
@@ -460,15 +485,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         showProjectMirrorNotice(document, "该项目当前不可用（可能离线）", "error");
         return;
       }
-      pending.set(hostId, {
-        modelId: effectiveModelId(
-          selection.providerId,
-          selection.model.id,
-          selection.machine.defaultProviderId,
-        ),
-        reasoningEffort: selection.model.defaultReasoningEffort,
-        createdAt: Date.now(),
-      });
+      pending.set(hostId, { agentId: selection.harness.id, createdAt: Date.now() });
       button.click();
 
       const manager = localManager();
@@ -484,7 +501,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
             },
           });
           if (result === "skipped") {
-            const key = `${sourceId}\u0000${hostId}\u0000${existingProjectId}`;
+            const key = `${sourceId}\u0000${hostId}\u0000${projectId}`;
             if (!announcedConflicts.has(key)) {
               announcedConflicts.add(key);
               showProjectMirrorNotice(document, "该项目已在其他项目组，已跳过自动分组");
@@ -499,85 +516,70 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         }
       }
     } catch (error) {
+      status.lastError = errorMessage(error);
       showProjectMirrorNotice(document, `跨机对话创建失败：${errorMessage(error)}`, "error");
     } finally {
       inFlight.delete(sourceId);
     }
   };
 
-  const attachSection = (input: {
-    composer: Element;
-    menu: HTMLElement;
-    trigger: HTMLElement;
-    context: ProjectMirrorContext;
-    catalog: CrossHostModelCatalog;
-    services: ProjectMirrorDesktopServices;
-    rpc: ProjectMirrorRpc;
-  }): void => {
-    input.menu.querySelector("[data-codexhost-cross-host-model-menu]")?.remove();
-    let section: CrossHostModelSection | null = null;
-    section = createCrossHostModelSection({
-      document,
-      catalog: input.catalog,
-      acknowledged: input.context.acknowledged,
-      onAcknowledge: () => {
-        if (section) void acknowledge(section, input.context, input.catalog, input.rpc);
-      },
-      onClose: () => {
-        input.trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      },
-      onSelect: (selection) => {
-        void runMirror(input.context, selection, input.services, input.rpc);
-      },
-    });
-    input.menu.append(section.element);
-    const observer = new MutationObserver(() => {
-      if (!input.menu.isConnected) {
-        observer.disconnect();
-        section?.dispose();
+  const openForAgentPicker: RendererProjectMirrorApi["openForAgentPicker"] = (input) => {
+    if (disposed) return;
+    status.pickerDetected = true;
+    status.lastError = null;
+    void (async () => {
+      const result = await readContext(input.composer);
+      if (disposed) return;
+      status.projectEligible = result.context !== null;
+      status.projectSource = result.source;
+      if (result.error) status.lastError = result.error;
+      const menu = input.picker.menu;
+      const context = result.context;
+      if (!context || !menu.isConnected) {
+        menu.querySelector("[data-codexhost-cross-host-agent-menu]")?.remove();
         return;
       }
-      if (section && !section.element.isConnected) input.menu.append(section.element);
-    });
-    observer.observe(input.menu, { childList: true });
-  };
-
-  const openFor: RendererProjectMirrorApi["openFor"] = (input) => {
-    if (disposed || input.agent !== "codex" || !input.newThread) return;
-    void (async () => {
-      const context = await contextFor(input.composer);
-      if (!context) return;
       const [services, catalog] = await Promise.all([
         loadProjectMirrorDesktopServices(window),
-        loadCrossHostCatalog(context.catalog),
+        loadHarnessCatalog(context.catalog),
       ]);
-      if (!services) return;
+      if (disposed) return;
+      if (!services) {
+        status.lastError = "Desktop project services are unavailable";
+        return;
+      }
+      status.peersLoaded = catalog.loadedPeers;
+      status.machineCount = catalog.machines.length;
       const manager = localManager();
-      if (!manager) return;
+      if (!manager) {
+        status.lastError = "Host runtime is unavailable";
+        return;
+      }
       const rpc = createProjectMirrorRpc(manager);
-      observeNativeModelMenu({
+      menu.querySelector("[data-codexhost-cross-host-agent-menu]")?.remove();
+      const section = createCrossHostAgentSection({
         document,
-        window,
-        trigger: input.trigger,
-        timeoutMs: 2_000,
-        onOpen(menu) {
-          attachSection({
-            composer: input.composer,
-            menu,
-            trigger: input.trigger,
-            context,
-            catalog,
-            services,
-            rpc,
-          });
+        catalog,
+        acknowledged: context.acknowledged,
+        onAcknowledge: () => {
+          input.picker.close();
+          void acknowledge(context, rpc);
+        },
+        onClose: () => input.picker.close(),
+        onSelect: (selection) => {
+          input.picker.close();
+          void runMirror(context, selection, services, rpc);
         },
       });
-    })();
+      menu.append(section.element);
+    })().catch((error: unknown) => {
+      if (disposed) return;
+      status.lastError = errorMessage(error);
+    });
   };
 
   const api: RendererProjectMirrorApi = {
-    prepare,
-    openFor,
+    openForAgentPicker,
     consumePending(input) {
       if (disposed) return false;
       const entry = pending.get(input.hostId);
@@ -586,14 +588,28 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         pending.delete(input.hostId);
         return false;
       }
+      if (entry.agentId === "codex") {
+        pending.delete(input.hostId);
+        return true;
+      }
       if (entry.attemptedAt && Date.now() - entry.attemptedAt < PENDING_RETRY_MS) return false;
       entry.attemptedAt = Date.now();
-      const applied = input.applyModel(input.composer, entry.modelId, entry.reasoningEffort);
-      if (applied) pending.delete(input.hostId);
-      return applied;
+      void input
+        .applyHarness(input.composer, entry.agentId)
+        .then((applied) => {
+          if (applied && pending.get(input.hostId) === entry) pending.delete(input.hostId);
+        })
+        .catch((error: unknown) => {
+          status.lastError = errorMessage(error);
+        });
+      return true;
+    },
+    status() {
+      return { ...status };
     },
     dispose() {
       disposed = true;
+      pending.clear();
       delete window.__codexhostProjectMirrorV1;
     },
   };

@@ -1,6 +1,6 @@
 # 跨机同名项目（Cross-host Project Mirror）
 
-本功能让本机「只填名字」创建的原生项目，在模型选择器里提供「其他机器」入口：选中某台远程机器的服务商/模型后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该模型，最后尝试把两端项目加入同名项目组。
+本功能让本机「只填名字」创建的原生项目，在 Agent/Harness 选择器里提供「其他机器」入口：选中某台远程机器的 Harness 后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该 Harness（模型使用其默认值），最后尝试把两端项目加入同名项目组。
 
 对应 A 阶段调研与拍板见 [`docs/proposals/cross-host-project-mirror.md`](../proposals/cross-host-project-mirror.md)。本文只描述当前行为。
 
@@ -16,11 +16,16 @@
 ## 入口
 
 1. 用户点击原生项目行的「新对话」。
-2. Composer 的模型下拉由 Desktop React 管理；codexhost 在原生模型按钮的 `click` 后等待菜单出现。
-3. 在菜单末尾追加 `data-codexhost-cross-host-model-menu` 分组：
-   - 按机器分组，显示连接状态；离线/错误机器禁用。
-   - 展开机器后列出该机器的服务商（`model_providers`），再展开列出模型（`model/list`）。
-4. 该分组只在 `agent === "codex"` 且 Composer 的 model target 是 `default`（新对话）时尝试注入；任何一步失败都 fail-open，不影响原生模型菜单。
+2. 打开 Composer 右下角的 Agent/Harness 图标按钮（模型名右侧、麦克风左侧）。该按钮和弹框都由 codexhost 创建：
+   - 根：`[data-codexhost-agent-control]`
+   - 触发：`button[aria-haspopup="menu"][aria-controls="<composerId>-agent-menu"]`
+   - 菜单：`<div id="<composerId>-agent-menu" role="menu" popover="auto">`
+3. 菜单打开时在末尾追加 `data-codexhost-cross-host-agent-menu` 分组：
+   - 按机器分组，机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`）；离线置灰。
+   - 展开机器后列出该机器的 Harness：Codex 固定第一项，其余来自目标 Host 的 `codexhost/harness/plugins/list`，过滤 `kind === "usage"`。
+   - 列表加载失败时仍保留 Codex，并标注「列表不可用」。
+4. 已有对话中 Agent 触发按钮为 `disabled`，菜单不会打开；因此该分组只出现在新对话草稿里。
+5. 模型菜单不再注入任何分组。
 
 ## 只填名字识别
 
@@ -46,13 +51,13 @@
 - 兼容层：在目标 Host 调用 `project/create {name, roots:[{path}], metadata:{}, idempotencyKey:<remoteProjectId>}`；失败只写日志，不影响主流程。使用 remote project id 作为幂等键，未来 Desktop 迁移时不会重复建项目。
 - 创建后等待侧栏出现 `data-app-action-sidebar-project-id="<id>"`，再点击该项目行的原生新对话按钮。
 
-## 模型预选
+## Harness 预选
 
-- 选择时记录 `pending`：`hostId → {modelId, reasoningEffort}`，TTL 60 秒。
-- 新 Composer 挂载且 model target 为 `default` 时，通过 adapter 的 `applyCodexModel` 写入 draft：
-  - `findScopedDraftModelBinding` + `createScopedDraftModelWriter` 设置 `modelSettings.model`；
-  - `reasoningEffort` 使用模型 `defaultReasoningEffort`（为空时保留当前值）。
-- 写入失败时保留默认模型，不阻塞对话打开。
+- 选择时记录 `pending`：`hostId → {agentId}`，TTL 60 秒。
+- 新 Composer 挂载且 model target 为 `default` 时，调用现有 draft agent switch：
+  - 目标 Harness 是 `codex`：无需切换，默认对话已是 Codex。
+  - 其他 Harness：等待目标 Host 的 availability 变为 `ready`（按需刷新，最多约 2.5 秒），再执行 `switchComposerAgent`；模型与推理强度由 `inspectHarness` 的 catalog 默认值/新对话偏好自动应用。
+- 切换失败时保留默认 Codex 对话，不阻塞项目打开；之后再次渲染会按 800ms 间隔重试，直到 60 秒 TTL。
 
 ## 项目组
 
@@ -99,13 +104,30 @@ Host 只提供本地 RPC：
 | `createRemote` 返回 null（用户取消信任确认） | toast，结束 |
 | 项目已创建但侧栏未出现（5s） | toast「项目已创建，请稍后手动打开」 |
 | 原生新对话按钮不存在/禁用 | toast，项目保留 |
-| 模型写入失败 | 新对话保留默认模型 |
+| Harness 切换失败/超时 | 新对话保留默认 Codex，不阻塞 |
 | `project/create` 失败 | 仅日志，继续 |
 | 自动分组失败/冲突 | toast，项目与对话不受影响 |
 
+## 诊断
+
+`window.__codexhostProjectMirrorV1.status()` 返回：
+
+```ts
+{
+  pickerDetected: boolean;   // Agent 菜单打开钩子是否触发
+  projectEligible: boolean;  // 最近一次打开时是否判定为 name-only 新对话
+  peersLoaded: number;       // Harness 目录加载成功的机器数
+  lastError: string | null;  // 最近一次失败原因
+  projectSource: "composer" | "catalog" | null;
+  machineCount: number;
+}
+```
+
+项目判定优先读 Composer 根节点 React fiber 上的 `selectedProject`；只有缺失时才回退到 Host catalog 的 `selected-project`。因此 `projectSource` 可用于判断是否命中了稳定的 Composer 上下文。
+
 ## 已知限制
 
-- 原生模型菜单没有公开 DOM 契约；注入依赖「触发按钮附近的可见浮层」探测，Desktop 改版可能失效。失效时只隐藏「其他机器」，不影响原生菜单。
-- 菜单被 React 整体替换时可能丢失注入节点；当前只监听菜单自身 childList 并尽量重挂。
+- Agent 选择器由 codexhost 创建，DOM 契约稳定；但若未来重做该选择器，需要同步更新 `data-codexhost-agent-control` / `<composerId>-agent-menu`。
+- 目标 Host 的 `codexhost/harness/plugins/list` 需要 codexhost Host Runtime；旧版 Host 会显示「列表不可用」，仅保留 Codex。
 - 首台机器的目录会触发 Desktop 的文件夹信任确认（如果尚未信任）。
 - 不处理项目改名后的重新识别；登记表以 projectId 为准，改名不影响镜像，但启发式入口需要重新确认。
