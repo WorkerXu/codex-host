@@ -41,6 +41,15 @@ type HostRoute = {
 
 type ProjectSource = "composer" | "catalog";
 
+type ProjectEligibilityReason =
+  | "unknown"
+  | "eligible"
+  | "no-project"
+  | "remote-project"
+  | "missing-project"
+  | "not-name-only"
+  | "catalog-error";
+
 export interface ProjectMirrorContext {
   catalog: DesktopProjectsCatalog;
   source: DesktopLocalProject;
@@ -54,6 +63,7 @@ export interface ProjectMirrorStatus {
   peersLoaded: number;
   lastError: string | null;
   projectSource: ProjectSource | null;
+  projectReason: ProjectEligibilityReason;
   machineCount: number;
 }
 
@@ -103,12 +113,19 @@ function hostRoute(hostId: string): HostRoute | null {
 interface ContextResult {
   context: ProjectMirrorContext | null;
   source: ProjectSource | null;
+  reason: ProjectEligibilityReason;
   error: string | null;
 }
 
 async function readContext(composer: Element): Promise<ContextResult> {
   const manager = localManager();
-  if (!manager) return { context: null, source: null, error: "Host runtime is unavailable" };
+  if (!manager)
+    return {
+      context: null,
+      source: null,
+      reason: "catalog-error",
+      error: "Host runtime is unavailable",
+    };
   try {
     const [registry, catalogValue] = await Promise.all([
       createProjectMirrorRpc(manager).list(),
@@ -118,16 +135,19 @@ async function readContext(composer: Element): Promise<ContextResult> {
     const composerProject = readComposerProject(composer);
     const selected = composerProject ?? catalog.selectedProject ?? null;
     const source: ProjectSource | null = composerProject ? "composer" : selected ? "catalog" : null;
-    if (!selected || selected.type !== "local") return { context: null, source, error: null };
+    if (!selected) return { context: null, source, reason: "no-project", error: null };
+    if (selected.type !== "local")
+      return { context: null, source, reason: "remote-project", error: null };
     const project = catalog.localProjects[selected.projectId];
     if (!project)
       return {
         context: null,
         source,
+        reason: "missing-project",
         error: `Project ${selected.projectId} is missing from the Desktop catalog`,
       };
     if (!isNameOnlyProject(project, catalog.defaultProjectParent))
-      return { context: null, source, error: null };
+      return { context: null, source, reason: "not-name-only", error: null };
     return {
       context: {
         catalog,
@@ -136,10 +156,11 @@ async function readContext(composer: Element): Promise<ContextResult> {
         revision: registry.revision,
       },
       source,
+      reason: "eligible",
       error: null,
     };
   } catch (error) {
-    return { context: null, source: null, error: errorMessage(error) };
+    return { context: null, source: null, reason: "catalog-error", error: errorMessage(error) };
   }
 }
 
@@ -351,6 +372,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     peersLoaded: 0,
     lastError: null,
     projectSource: null,
+    projectReason: "unknown",
     machineCount: 0,
   };
   let disposed = false;
@@ -532,6 +554,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       if (disposed) return;
       status.projectEligible = result.context !== null;
       status.projectSource = result.source;
+      status.projectReason = result.reason;
       if (result.error) status.lastError = result.error;
       const menu = input.picker.menu;
       const context = result.context;

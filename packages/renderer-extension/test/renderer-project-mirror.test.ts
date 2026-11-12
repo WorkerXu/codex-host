@@ -21,6 +21,7 @@ describe("project mirror diagnostics", () => {
       peersLoaded: 0,
       lastError: null,
       projectSource: null,
+      projectReason: "unknown",
       machineCount: 0,
     });
     expect(

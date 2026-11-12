@@ -119,11 +119,12 @@ Host 只提供本地 RPC：
   peersLoaded: number;       // Harness 目录加载成功的机器数
   lastError: string | null;  // 最近一次失败原因
   projectSource: "composer" | "catalog" | null;
+  projectReason: "unknown" | "eligible" | "no-project" | "remote-project" | "missing-project" | "not-name-only" | "catalog-error";
   machineCount: number;
 }
 ```
 
-项目判定优先读 Composer 根节点 React fiber 上的 `selectedProject`；只有缺失时才回退到 Host catalog 的 `selected-project`。因此 `projectSource` 可用于判断是否命中了稳定的 Composer 上下文。
+项目判定优先读 Composer 根节点 React fiber 上的 `selectedProject`；只有缺失时才回退到 Host catalog 的 `selected-project`。因此 `projectSource` 可用于判断是否命中了稳定的 Composer 上下文；`projectReason` 给出不适用的具体原因（远程项目、非 name-only、目录读取失败等）。
 
 ## 已知限制
 
