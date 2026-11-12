@@ -13,6 +13,7 @@ import {
 } from "./renderer-cross-host-harness-catalog.js";
 import {
   createCrossHostAgentSection,
+  type CrossHostAgentSection,
   type CrossHostAgentSelection,
 } from "./renderer-cross-host-agent-section.js";
 import {
@@ -215,15 +216,21 @@ function loadHarnessCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostH
     Date.now() - harnessCatalogCache.at < HARNESS_CATALOG_TTL_MS
   )
     return harnessCatalogCache.value;
+  const probe = window.__codexhostRendererBindingProbeV1;
   const value = loadCrossHostHarnessCatalog({
     connections: catalog.codexManagedRemoteConnections,
     knownHostIds,
     remoteProjectHostIds: catalog.remoteProjects.map(({ hostId }) => hostId),
     isOnline: (hostId) => routing?.forHost(hostId) != null,
-    request: async (hostId, method, params) => {
-      const route = hostRoute(hostId);
-      if (!route) throw new Error("Host is offline");
-      return route.manager.sendRequest(method, params);
+    directory: (hostId) =>
+      probe?.harnessDirectory(hostId) ?? {
+        plugins: null,
+        availability: {},
+        error: "Renderer binding probe is unavailable",
+      },
+    refresh: async (hostId) => {
+      if (!probe?.refreshHarnessDirectory) throw new Error("Renderer binding probe is unavailable");
+      await probe.refreshHarnessDirectory(hostId);
     },
   });
   harnessCatalogCache = { key, at: Date.now(), value };
@@ -409,7 +416,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         showProjectMirrorNotice(document, `${selection.machine.label} 当前离线`, "error");
         return;
       }
-      const { homeDirectory } = await services.readHomeDirectory(hostId);
+      const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
       const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
       const remoteProjects = context.catalog.remoteProjects.filter(
         (project) => project.hostId === hostId,
@@ -443,13 +450,13 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
 
       if (!existingProjectId) {
         if ((await directoryState(route, chosenPath)) === "missing") {
-          await services.createDirectory({ hostId, path: chosenPath });
+          await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
           if ((await directoryState(route, chosenPath)) !== "directory") {
             showProjectMirrorNotice(document, "远程目录创建失败", "error");
             return;
           }
         }
-        const created = await services.createRemote({
+        const created = await services.projects.createRemote({
           appearance: null,
           hostId,
           label: name,
@@ -562,17 +569,6 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         menu.querySelector("[data-codexhost-cross-host-agent-menu]")?.remove();
         return;
       }
-      const [services, catalog] = await Promise.all([
-        loadProjectMirrorDesktopServices(window),
-        loadHarnessCatalog(context.catalog),
-      ]);
-      if (disposed) return;
-      if (!services) {
-        status.lastError = "Desktop project services are unavailable";
-        return;
-      }
-      status.peersLoaded = catalog.loadedPeers;
-      status.machineCount = catalog.machines.length;
       const manager = localManager();
       if (!manager) {
         status.lastError = "Host runtime is unavailable";
@@ -580,21 +576,53 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       }
       const rpc = createProjectMirrorRpc(manager);
       menu.querySelector("[data-codexhost-cross-host-agent-menu]")?.remove();
-      const section = createCrossHostAgentSection({
+      let services: ProjectMirrorDesktopServices | null = null;
+      const section: CrossHostAgentSection = createCrossHostAgentSection({
         document,
-        catalog,
+        catalog: { machines: [], loadedPeers: 0 },
         acknowledged: context.acknowledged,
+        loading: true,
         onAcknowledge: () => {
           input.picker.close();
           void acknowledge(context, rpc);
         },
         onClose: () => input.picker.close(),
         onSelect: (selection) => {
+          if (!services) {
+            showProjectMirrorNotice(document, "Desktop 项目服务尚未就绪，请稍后重试", "error");
+            return;
+          }
           input.picker.close();
           void runMirror(context, selection, services, rpc);
         },
       });
       menu.append(section.element);
+      try {
+        const [loadedServices, catalog] = await Promise.all([
+          loadProjectMirrorDesktopServices(window),
+          loadHarnessCatalog(context.catalog),
+        ]);
+        if (disposed || !section.element.isConnected) return;
+        services = loadedServices;
+        if (!services) {
+          status.lastError = "Desktop project services are unavailable";
+          section.refresh({ machines: [], loadedPeers: 0 }, context.acknowledged, {
+            loading: false,
+            error: "Desktop 项目服务不可用",
+          });
+          return;
+        }
+        status.peersLoaded = catalog.loadedPeers;
+        status.machineCount = catalog.machines.length;
+        section.refresh(catalog, context.acknowledged, { loading: false, error: null });
+      } catch (error) {
+        if (disposed || !section.element.isConnected) return;
+        status.lastError = errorMessage(error);
+        section.refresh({ machines: [], loadedPeers: 0 }, context.acknowledged, {
+          loading: false,
+          error: `其他机器不可用：${errorMessage(error)}`,
+        });
+      }
     })().catch((error: unknown) => {
       if (disposed) return;
       status.lastError = errorMessage(error);

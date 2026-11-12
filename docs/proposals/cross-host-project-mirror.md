@@ -77,9 +77,10 @@ appHost, appServices, setAppHost, setAppServices
    - 触发：`button[aria-haspopup="menu"][aria-controls="<composerId>-agent-menu"]`
    - 菜单：`<div id="<composerId>-agent-menu" role="menu" popover="auto">`，与触发同属一个 root
    - 已有对话中触发为 `disabled`，只有草稿/新对话可打开，天然满足“只在新对话显示”。
-4. **Harness 列表**。每台机器调用目标 Host 的 `codexhost/harness/plugins/list`，过滤 `kind === "usage"`，并始终把 Codex 放在第一位；机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`），离线置灰。
+4. **Harness 列表**。读取目标 Host 的插件目录与该 Host 的 availability，只保留 `ready`（未安装/不可用不显示），并始终把 Codex 放在第一位；机器名优先用 Desktop 的 `displayName`，离线整行置灰。
 5. **预选 Harness**。选中后仍复用现有 draft agent switch（`switchComposerAgent`）：等目标 Host 的 availability 就绪，切到该 Harness，模型由 `inspectHarness` 的默认值/新对话偏好自动应用；不再写 `modelSettings.model`。
-6. **诊断**。`window.__codexhostProjectMirrorV1.status()` 返回 `{pickerDetected, projectEligible, peersLoaded, lastError, projectSource, projectReason, machineCount}`，用于区分“入口没触发 / 不是 name-only 项目 / 对端目录没加载”。
+6. **第 2 轮实机修正**。Desktop renderer 服务是嵌套对象（`projects.createRemote` / `workspaceFiles.createDirectory` / `executionPaths.readHomeDirectory`），已按真实形状修正并用真实形状测试；Agent 菜单去掉「更多 Agent」折叠并过滤未安装/不可用项；「其他机器」行与原生 Agent 行统一高度、字体、图标和滚动。
+7. **诊断**。`window.__codexhostProjectMirrorV1.status()` 返回 `{pickerDetected, projectEligible, peersLoaded, lastError, projectSource, projectReason, machineCount}`，用于区分“入口没触发 / 不是 name-only 项目 / 对端目录没加载”。
 
 ---
 
