@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 13;
+const SKILL_VERSION = 14;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
@@ -28,6 +28,8 @@ const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
   "51ca77e7c3c91c4706822dc9c11e6f0cdb0ab5d8497c745b691cc40b72fd2886",
   // v12, before the direct-command and watch-first guidance.
   "dca27d38f5cc09e24638756d7131cb5388ed72af96db5f1e474f8b2ef3308d61",
+  // v13, before stating that thread list is local only.
+  "c54f0f11a66e7269aa0ca0a613a346a7650a6b16bb1a44b50eb514e46db6e0dd",
 ];
 
 export const CODEXHOST_DELEGATION_SKILL = `---
@@ -70,6 +72,10 @@ Run \`codexhost peer list\` to see configured machines and their Host IDs. Pass
 \`thread read|send|cancel|wait\` to operate on that machine. A task link with a
 \`hostId\` carries the machine; reuse the link for follow-up commands so routing
 is automatic. Use \`thread wait <thread> --host <peer>\` for a bounded wait.
+
+\`thread list\` lists only this machine's Threads and does not accept
+\`--host\`. To list another machine's Threads, run \`codexhost thread list\` on
+that machine.
 
 \`delegate start --host <peer> --watch true\` and
 \`thread watch <thread> --host <peer>\` register a watch on this machine. The
