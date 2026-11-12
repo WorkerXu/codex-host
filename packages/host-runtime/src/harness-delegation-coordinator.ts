@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type {
   HarnessAdapter,
+  HarnessInspection,
   HarnessModelRef,
   HarnessSession,
   HarnessSessionState,
@@ -54,6 +55,46 @@ import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-ru
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
+const AVAILABILITY_CACHE_TTL_MS = 60_000;
+const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
+const AVAILABILITY_CONCURRENCY = 6;
+const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | typeof AVAILABILITY_TIMEOUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof AVAILABILITY_TIMEOUT>((resolve) => {
+        timer = setTimeout(() => resolve(AVAILABILITY_TIMEOUT), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function forEachConcurrent<T>(
+  items: readonly T[],
+  limit: number,
+  action: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      const item = items[index];
+      if (item === undefined) return;
+      await action(item);
+    }
+  });
+  await Promise.all(workers);
+}
 
 type ParentMetadata = { cwd?: string; title?: string };
 
@@ -214,6 +255,10 @@ export class HarnessDelegationCoordinator {
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
   readonly #activeOfficialParents: () => string[];
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
+  readonly #availabilityCache = new Map<
+    RoutedHarnessId,
+    { status: HarnessInspection["status"]; checkedAt: number }
+  >();
 
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
@@ -266,25 +311,39 @@ export class HarnessDelegationCoordinator {
     const harnesses: RoutedHarnessId[] = ["codex", ...this.#adapters.keys()];
     if (!input.includeAvailability) return { harnesses };
     const availability: NonNullable<HarnessListResult["availability"]> = {};
-    await Promise.all(
-      harnesses.map(async (harnessId) => {
-        if (harnessId === "codex") {
-          availability[harnessId] = "ready";
-          return;
-        }
-        const adapter = this.#adapters.get(harnessId as ExternalHarnessId);
-        if (!adapter) {
-          availability[harnessId] = "unavailable";
-          return;
-        }
+    const pending: RoutedHarnessId[] = [];
+    const now = Date.now();
+    for (const harnessId of harnesses) {
+      if (harnessId === "codex") {
+        availability[harnessId] = "ready";
+        continue;
+      }
+      const cached = this.#availabilityCache.get(harnessId);
+      if (cached && now - cached.checkedAt < AVAILABILITY_CACHE_TTL_MS) {
+        availability[harnessId] = cached.status;
+      } else {
+        pending.push(harnessId);
+      }
+    }
+    await forEachConcurrent(pending, AVAILABILITY_CONCURRENCY, async (harnessId) => {
+      const adapter = this.#adapters.get(harnessId as ExternalHarnessId);
+      let status: HarnessInspection["status"];
+      if (!adapter) {
+        status = "unavailable";
+      } else {
         try {
-          const inspection = await adapter.inspect({ purpose: "availability" });
-          availability[harnessId] = inspection.status;
+          const inspection = await withTimeout(
+            adapter.inspect({ purpose: "availability" }),
+            AVAILABILITY_INSPECT_TIMEOUT_MS,
+          );
+          status = inspection === AVAILABILITY_TIMEOUT ? "unavailable" : inspection.status;
         } catch {
-          availability[harnessId] = "error";
+          status = "error";
         }
-      }),
-    );
+      }
+      this.#availabilityCache.set(harnessId, { status, checkedAt: Date.now() });
+      availability[harnessId] = status;
+    });
     return { harnesses, availability };
   }
 

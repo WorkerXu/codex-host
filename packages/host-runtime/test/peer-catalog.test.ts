@@ -107,6 +107,7 @@ describe("DelegationPeerCatalogService", () => {
         {
           name: "colab",
           hostIds: ["remote-ssh-discovered:colab"],
+          ssh: "colab",
           state: "unreachable",
           harnesses: [],
           error: expect.stringContaining("command failed"),
@@ -114,6 +115,7 @@ describe("DelegationPeerCatalogService", () => {
         {
           name: "mac",
           hostIds: ["remote-ssh-discovered:mac"],
+          ssh: "mac",
           state: "ready",
           harnesses: ["codex", "grok"],
         },

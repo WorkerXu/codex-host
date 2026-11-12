@@ -1,9 +1,10 @@
 import { consumesNextArgument } from "./delegation-cli-options.js";
 
 const COMMAND_HELP = {
-  "harness list": `codexhost harness list [--host <peer-or-host-id>] [--format json|compact]
+  "harness list": `codexhost harness list [--host <peer-or-host-id>] [--availability true|false] [--format json|compact]
 List Harnesses available in the active Runtime.
---host routes discovery to a configured SSH peer; omit it or use local for this machine.`,
+--host routes discovery to a configured SSH peer; omit it or use local for this machine.
+--availability true asks the Host to inspect each Harness and return its installation/availability status.`,
   "harness inspect": `codexhost harness inspect <harness> [--cwd <path>] [--refresh true|false] [--host <peer-or-host-id>] [--format json|compact]
 Read available Models, native defaults, Thinking options, and configuration capabilities.
 Use the returned Model and Thinking IDs for explicit selections.

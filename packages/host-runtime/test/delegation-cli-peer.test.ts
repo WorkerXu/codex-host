@@ -145,6 +145,19 @@ describe("delegation CLI peer routing", () => {
     expect(inputs).toEqual([{ route, body }]);
   });
 
+  it("requests Harness availability from a peer when asked", async () => {
+    const env = await environment();
+    const { spawnImpl, inputs } = peerSpawn([
+      { harnesses: ["codex", "pi"], availability: { codex: "ready", pi: "notInstalled" } },
+    ]);
+    const result = await run(["harness", "list", "--host", "mac", "--availability", "true"], {
+      environment: env,
+      spawnImpl,
+    });
+    expect(result.code).toBe(0);
+    expect(inputs).toEqual([{ route: "/v1/harness/list", body: { includeAvailability: true } }]);
+  });
+
   it("starts without a parent and returns host-qualified links", async () => {
     const env = await environment();
     env[DELEGATION_THREAD_ID_ENV] = "local-parent";

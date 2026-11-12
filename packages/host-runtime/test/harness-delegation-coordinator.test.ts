@@ -406,6 +406,32 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
+  it("times out a slow availability inspection and caches the result", async () => {
+    vi.useFakeTimers();
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi
+      .spyOn(adapter, "inspect")
+      .mockImplementation(() => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>);
+    const value = await fixture(adapter);
+    try {
+      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(pending).resolves.toMatchObject({
+        harnesses: ["codex", "pi"],
+        availability: { codex: "ready", pi: "unavailable" },
+      });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("creates a normal writable child Thread and publishes it only after initial delivery", async () => {
     const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
     const inspect = vi.spyOn(adapter, "inspect");

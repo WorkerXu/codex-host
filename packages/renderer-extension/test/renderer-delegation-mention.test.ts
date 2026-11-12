@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   delegationMentionPathForTarget,
+  delegationUnavailableReason,
   filterDelegationCommands,
   filterDelegationTargets,
   findDelegationTrigger,
@@ -72,6 +73,12 @@ describe("delegation target filtering", () => {
     expect(delegationMentionPathForTarget({ agent: "grok", label: "Grok" })).toBe(
       "subagent://codexhost.grok",
     );
+  });
+
+  it("hides raw English errors behind a short localized reason", () => {
+    expect(delegationUnavailableReason("Peer 'colab' timed out", "zh-CN")).toBe("连接超时");
+    expect(delegationUnavailableReason("Peer 'colab' command failed", "zh-CN")).toBe("连接失败");
+    expect(delegationUnavailableReason(undefined, "en")).toBe("Connection failed");
   });
 });
 

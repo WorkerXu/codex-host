@@ -7,7 +7,7 @@ import { DelegationControlError, type DelegationThreadSnapshot } from "./delegat
 import { readPeerConfig, resolvePeerTarget } from "./peer-config.js";
 import { requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
-const DEFAULT_CATALOG_TIMEOUT_MS = 8_000;
+const DEFAULT_CATALOG_TIMEOUT_MS = 15_000;
 const DEFAULT_READ_TIMEOUT_MS = 15_000;
 const DEFAULT_CACHE_TTL_MS = 30_000;
 
@@ -124,6 +124,7 @@ export class DelegationPeerCatalogService {
             return {
               name,
               hostIds: entry.hostIds,
+              ssh: entry.ssh,
               state: "ready",
               harnesses,
             };
@@ -131,6 +132,7 @@ export class DelegationPeerCatalogService {
             return {
               name,
               hostIds: entry.hostIds,
+              ssh: entry.ssh,
               state: "unreachable",
               harnesses: this.#harnessCache.get(name) ?? [],
               error: errorText(error),

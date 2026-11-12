@@ -56,7 +56,12 @@ export interface RendererConnectionDiagnostics {
   refresh(hostId?: string): Promise<void>;
   /** Apply an already-read native connection catalog so deleted Hosts stop being reported. */
   reconcileConnections?(
-    connections: readonly { readonly hostId: string; readonly displayName?: string }[],
+    connections: readonly {
+      readonly hostId: string;
+      readonly displayName?: string;
+      readonly sshAlias?: string | null;
+      readonly sshHost?: string | null;
+    }[],
   ): void;
   openWebUi?(hostId: string, agent: ExternalRendererAgent): Promise<void>;
   installation?(
