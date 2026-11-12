@@ -52,6 +52,46 @@ function imageFile(value: Record<string, unknown>): { contents: Blob; extension:
 }
 
 /**
+ * A `localImage` picked from disk or dropped carries a path on this machine. Copy
+ * it to the remote Host through the Manager's native upload (the same one native
+ * remote Threads use) and return local-to-remote path replacements. A path the
+ * upload cannot read here is already a target-Host path and stays unchanged.
+ */
+async function uploadLocalImagePaths(
+  target: Record<string, unknown>,
+  images: readonly Record<string, unknown>[],
+  assertCurrent: () => void,
+): Promise<Map<string, string>> {
+  const uploaded = new Map<string, string>();
+  if (typeof target.uploadLocalFileAttachments !== "function") return uploaded;
+  for (const image of images) {
+    if (image.type !== "localImage" || !filePath(image.path) || uploaded.has(image.path)) continue;
+    const path = image.path;
+    assertCurrent();
+    let saved: unknown;
+    try {
+      saved = await (target.uploadLocalFileAttachments as Method).call(target, {
+        attachments: [{ label: path.split(/[\\/]/u).at(-1) || "image", path, fsPath: path }],
+        allowSftpUpload: true,
+      });
+    } catch {
+      continue;
+    }
+    const first: unknown = Array.isArray(saved) ? saved[0] : undefined;
+    if (isRecord(first) && filePath(first.path) && first.path !== path) {
+      uploaded.set(path, first.path);
+    }
+  }
+  return uploaded;
+}
+
+function replacePaths(text: string, paths: ReadonlyMap<string, string>): string {
+  let next = text;
+  for (const [local, remote] of paths) next = next.split(local).join(remote);
+  return next;
+}
+
+/**
  * Desktop 26.930 carries remote images inline and fills file paths asynchronously.
  * Materialize missing paths through the same Manager's native attachment store,
  * before the outgoing Turn. Harness input remains text; images stay in the Desktop
@@ -97,19 +137,41 @@ export function createRemoteAttachmentSender(
     };
     const cached = prepared.get(params);
     if (cached) return cached.then(dispatch);
-    const input = params.input;
-    const text = input
-      .filter((item) => isRecord(item) && item.type === "text")
-      .map((item) => (isRecord(item) && typeof item.text === "string" ? item.text : ""))
-      .join("\n");
-    const existingPaths = desktopImageAttachmentPaths(text);
     const prepare = async () => {
+      const localPaths = await uploadLocalImagePaths(target, images, assertCurrent);
+      const input: unknown[] =
+        localPaths.size === 0
+          ? (params.input as unknown[])
+          : (params.input as unknown[]).map((item) => {
+              if (!isRecord(item)) return item;
+              if (item.type === "text" && typeof item.text === "string") {
+                return { ...item, text: replacePaths(item.text, localPaths) };
+              }
+              if (item.type === "localImage" && typeof item.path === "string") {
+                const remote = localPaths.get(item.path);
+                return remote ? { ...item, path: remote } : item;
+              }
+              return item;
+            });
+      const request = localPaths.size === 0 ? params : { ...params, input };
+      const pending =
+        localPaths.size === 0
+          ? images
+          : input.filter(
+              (item): item is Record<string, unknown> =>
+                isRecord(item) && (item.type === "image" || item.type === "localImage"),
+            );
+      const text = input
+        .filter((item) => isRecord(item) && item.type === "text")
+        .map((item) => (isRecord(item) && typeof item.text === "string" ? item.text : ""))
+        .join("\n");
+      const existingPaths = desktopImageAttachmentPaths(text);
       // Reuse native completed uploads. With partial context there is no reliable
       // image-to-path association, so do not guess which image is missing.
-      if (existingPaths.length === images.length) return params;
-      if (images.length > 20) throw new Error("Too many remote image attachments (maximum 20)");
+      if (existingPaths.length === pending.length) return request;
+      if (pending.length > 20) throw new Error("Too many remote image attachments (maximum 20)");
       let totalBytes = 0;
-      const files = images.map((image) => {
+      const files = pending.map((image) => {
         if (image.type === "localImage") {
           if (!filePath(image.path)) throw new Error("Remote image attachment path is invalid");
           return { path: image.path };
@@ -146,12 +208,12 @@ export function createRemoteAttachmentSender(
         }
         assertCurrent();
         const missing = [...new Set(paths)].filter((path) => !existingPaths.includes(path));
-        if (missing.length === 0) return params;
+        if (missing.length === 0) return request;
         const references = missing
           .map((path) => `\n## ${path.split(/[\\/]/u).at(-1)}: ${path}\nImage attachment: true\n`)
           .join("");
         return {
-          ...params,
+          ...request,
           input: [
             {
               type: "text",

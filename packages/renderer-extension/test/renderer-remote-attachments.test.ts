@@ -210,6 +210,65 @@ describe("remote external attachments through the native Desktop file store", ()
     }
   });
 
+  it("uploads a localImage picked on this machine and rewrites its path to the remote copy", async () => {
+    const f = fixture();
+    const uploadLocalFileAttachments = vi.fn(
+      async ({ attachments }: { attachments: { label: string; path: string }[] }) =>
+        attachments.map((attachment) => ({
+          ...attachment,
+          path: `/remote/.codex/attachments/up/${attachment.label}`,
+          fsPath: `/remote/.codex/attachments/up/${attachment.label}`,
+        })),
+    );
+    Object.assign(f.manager, { uploadLocalFileAttachments });
+    const local = "/Users/me/Downloads/shot.jpg";
+    try {
+      await f.manager.sendRequest(
+        "turn/start",
+        request([
+          {
+            type: "text",
+            text: `# Files mentioned by the user:\n\n## shot.jpg: ${local}\nImage attachment: true\n\n## My request:\nLook`,
+          },
+          { type: "localImage", path: local },
+        ]),
+      );
+      expect(uploadLocalFileAttachments).toHaveBeenCalledOnce();
+      expect(uploadLocalFileAttachments.mock.calls[0]?.[0]).toMatchObject({
+        attachments: [{ label: "shot.jpg", path: local, fsPath: local }],
+      });
+      expect(f.createFileAttachment).not.toHaveBeenCalled();
+      const text = submittedText(f.rpc);
+      expect(text).toContain("## shot.jpg: /remote/.codex/attachments/up/shot.jpg");
+      expect(text).not.toContain(local);
+      const sent = f.rpc.mock.calls.at(-1)?.[1] as { input: unknown[] };
+      expect(sent.input).toContainEqual({
+        type: "localImage",
+        path: "/remote/.codex/attachments/up/shot.jpg",
+      });
+    } finally {
+      f.dispose();
+    }
+  });
+
+  it("keeps a localImage path the native upload cannot read here", async () => {
+    const f = fixture();
+    Object.assign(f.manager, {
+      uploadLocalFileAttachments: vi.fn(async () => {
+        throw new Error("Unable to read local attachment");
+      }),
+    });
+    try {
+      await f.manager.sendRequest(
+        "turn/start",
+        request([{ type: "localImage", path: "/remote/picture.png" }]),
+      );
+      expect(submittedText(f.rpc)).toContain("## picture.png: /remote/picture.png");
+    } finally {
+      f.dispose();
+    }
+  });
+
   it.each([
     "https://example.com/image.png",
     "data:text/html;base64,aGVsbG8=",
