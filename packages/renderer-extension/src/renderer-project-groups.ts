@@ -90,11 +90,18 @@ function errorMessage(error: unknown): string {
 
 function insideOwnUi(node: Node | null): boolean {
   const element = node instanceof Element ? node : node?.parentElement;
-  return element
-    ? element.closest(
-        "[data-codexhost-project-groups-ui], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-toast]",
-      ) !== null
-    : false;
+  if (!element) return false;
+  if (
+    typeof HTMLStyleElement !== "undefined" &&
+    element instanceof HTMLStyleElement &&
+    element.hasAttribute("data-codexhost-project-groups")
+  )
+    return true;
+  return (
+    element.closest(
+      "[data-codexhost-project-groups-ui], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-toast]",
+    ) !== null
+  );
 }
 
 class RendererProjectGroups implements RendererProjectGroupsHandle {
@@ -308,26 +315,17 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #observe(): void {
     const target = this.#document.body ?? this.#document.documentElement;
     this.#observer = new MutationObserver((mutations) => {
-      if (
-        mutations.every((mutation) => {
-          if (insideOwnUi(mutation.target)) return true;
-          if (
-            mutation.target instanceof HTMLStyleElement &&
-            mutation.target.hasAttribute("data-codexhost-project-groups")
-          )
-            return true;
-          for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
-            if (insideOwnUi(node)) return true;
-            if (
-              node instanceof HTMLStyleElement &&
-              node.hasAttribute("data-codexhost-project-groups")
-            )
-              return true;
-          }
-          return false;
-        })
-      )
-        return;
+      // Ignore our own header/style DOM writes, but never ignore a batch that
+      // also removes native nodes: React may clear a list together with the
+      // foreign group headers inside it.
+      const relevant = mutations.some((mutation) => {
+        if (insideOwnUi(mutation.target)) return false;
+        if (mutation.type === "attributes") return true;
+        return [...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) => !insideOwnUi(node),
+        );
+      });
+      if (!relevant) return;
       this.#scheduleRefresh();
     });
     this.#observer.observe(target, {
