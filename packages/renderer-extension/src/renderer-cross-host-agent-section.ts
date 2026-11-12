@@ -1,3 +1,7 @@
+import createElement from "lucide/dist/esm/createElement.mjs";
+import Server from "lucide/dist/esm/icons/server.mjs";
+
+import { createRendererAgentIcon } from "./renderer-agent-icon.js";
 import type {
   CrossHostHarness,
   CrossHostHarnessCatalog,
@@ -13,16 +17,32 @@ export interface CrossHostAgentSectionOptions {
   document: Document;
   catalog: CrossHostHarnessCatalog;
   acknowledged: boolean;
+  loading?: boolean;
+  error?: string | null;
   onAcknowledge(): void;
   onSelect(selection: CrossHostAgentSelection): void;
   onClose(): void;
 }
 
+export interface CrossHostAgentSectionState {
+  loading?: boolean;
+  error?: string | null;
+}
+
 export interface CrossHostAgentSection {
   element: HTMLElement;
-  refresh(catalog: CrossHostHarnessCatalog, acknowledged: boolean): void;
+  refresh(
+    catalog: CrossHostHarnessCatalog,
+    acknowledged: boolean,
+    state?: CrossHostAgentSectionState,
+  ): void;
   dispose(): void;
 }
+
+const ROW_HEIGHT = "36px";
+const ROW_FONT = "500 13px/1 system-ui, sans-serif";
+const ROW_RADIUS = "4px";
+const TERTIARY = "var(--color-text-tertiary, #8b8b8b)";
 
 export function machineStatusLabel(state: CrossHostMachine["state"]): string {
   switch (state) {
@@ -44,7 +64,7 @@ function statusColor(state: CrossHostMachine["state"]): string {
     case "error":
       return "var(--color-chart-red, #f85149)";
     default:
-      return "var(--color-text-tertiary, #8b8b8b)";
+      return "#8b8b8b";
   }
 }
 
@@ -53,24 +73,27 @@ function style(element: HTMLElement, values: Record<string, string>): void {
     element.style.setProperty(property, value);
 }
 
-function rowButton(document: Document, depth: number): HTMLButtonElement {
+function rowButton(document: Document, depth: number, rightPadding: number): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.setAttribute("role", "menuitem");
-  button.style.display = "flex";
-  button.style.alignItems = "center";
-  button.style.gap = "6px";
-  button.style.width = "100%";
-  button.style.minWidth = "0";
-  button.style.height = "32px";
-  button.style.padding = `0 8px 0 ${8 + depth * 14}px`;
-  button.style.border = "0";
-  button.style.borderRadius = "4px";
-  button.style.background = "transparent";
-  button.style.color = "inherit";
-  button.style.font = "500 12px/1 system-ui, sans-serif";
-  button.style.textAlign = "left";
-  button.style.cursor = "pointer";
+  style(button, {
+    display: "flex",
+    "align-items": "center",
+    gap: "8px",
+    width: "100%",
+    "min-width": "0",
+    height: ROW_HEIGHT,
+    padding: `0 ${rightPadding}px 0 ${8 + depth * 20}px`,
+    border: "0",
+    "border-radius": ROW_RADIUS,
+    background: "transparent",
+    color: "inherit",
+    font: ROW_FONT,
+    "letter-spacing": "0",
+    "text-align": "left",
+    cursor: "pointer",
+  });
   button.addEventListener("pointerenter", () => {
     if (!button.disabled) button.style.background = "rgba(127, 127, 127, 0.1)";
   });
@@ -91,30 +114,66 @@ function text(document: Document, value: string, flex = true): HTMLSpanElement {
   return span;
 }
 
-function arrow(expanded: boolean): HTMLSpanElement {
-  const span = document.createElement("span");
-  span.textContent = expanded ? "▾" : "▸";
-  span.setAttribute("aria-hidden", "true");
-  span.style.flex = "none";
-  span.style.color = "var(--color-text-tertiary, #8b8b8b)";
-  return span;
+function chevron(document: Document, expanded: boolean): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "12");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.flex = "0 0 auto";
+  svg.style.color = TERTIARY;
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", expanded ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
 }
 
-function note(document: Document, message: string): HTMLElement {
-  const element = document.createElement("div");
-  element.textContent = message;
-  style(element, {
-    padding: "4px 8px",
-    color: "var(--color-text-secondary, #777)",
-    font: "400 12px/17px system-ui, sans-serif",
+function statusDot(document: Document, state: CrossHostMachine["state"]): HTMLSpanElement {
+  const dot = document.createElement("span");
+  style(dot, {
+    width: "5px",
+    height: "5px",
+    flex: "0 0 auto",
+    "border-radius": "999px",
+    background: statusColor(state),
   });
-  return element;
+  return dot;
+}
+
+function serverIcon(): Element {
+  const icon = createElement(Server, {
+    width: 18,
+    height: 18,
+    "aria-hidden": "true",
+    focusable: "false",
+    "stroke-width": 1.8,
+  });
+  icon.style.color = TERTIARY;
+  icon.style.flex = "0 0 auto";
+  return icon;
+}
+
+function secondaryLine(document: Document, message: string, depth = 0): HTMLElement {
+  const line = document.createElement("div");
+  line.textContent = message;
+  style(line, {
+    padding: `6px 8px 6px ${8 + depth * 20}px`,
+    color: TERTIARY,
+    font: "400 12px/17px system-ui, sans-serif",
+    "white-space": "normal",
+  });
+  return line;
 }
 
 /**
- * Appended to the codexhost Agent picker. The picker menu is React-owned but
- * its section list is replaced wholesale on regroup; this node stays at the
- * end and is re-rendered independently.
+ * Appended to the codexhost Agent picker. Rows intentionally reuse the native
+ * Agent row metrics so the cross-host section is visually part of the same
+ * menu; the menu itself, not this section, owns scrolling.
  */
 export function createCrossHostAgentSection(
   options: CrossHostAgentSectionOptions,
@@ -122,6 +181,8 @@ export function createCrossHostAgentSection(
   const { document } = options;
   let catalog = options.catalog;
   let acknowledged = options.acknowledged;
+  let loading = options.loading ?? false;
+  let error = options.error ?? null;
   let expandedHostId: string | null = null;
 
   const element = document.createElement("div");
@@ -131,7 +192,7 @@ export function createCrossHostAgentSection(
   style(element, {
     display: "flex",
     "flex-direction": "column",
-    gap: "1px",
+    gap: "2px",
     "padding-top": "4px",
   });
 
@@ -145,25 +206,24 @@ export function createCrossHostAgentSection(
 
   const heading = document.createElement("div");
   heading.textContent = "其他机器";
+  heading.setAttribute("role", "presentation");
   style(heading, {
-    padding: "4px 8px",
-    color: "var(--color-text-tertiary, #8b8b8b)",
-    font: "500 11px/16px system-ui, sans-serif",
+    padding: "6px 8px 4px",
+    color: TERTIARY,
+    font: "400 14px/20px system-ui, sans-serif",
   });
 
   const body = document.createElement("div");
   style(body, {
     display: "flex",
     "flex-direction": "column",
-    gap: "1px",
-    "max-height": "280px",
-    overflow: "auto",
+    gap: "2px",
   });
 
   const render = (): void => {
     body.replaceChildren();
     if (!acknowledged) {
-      const enable = rowButton(document, 0);
+      const enable = rowButton(document, 0, 8);
       enable.textContent = "启用跨机对话";
       enable.style.color = "#6d9fff";
       enable.addEventListener("click", (event) => {
@@ -171,42 +231,44 @@ export function createCrossHostAgentSection(
         options.onAcknowledge();
       });
       body.append(
-        note(document, "把对话放到另一台机器上运行；首次使用需要确认此项目是按名字自动创建的。"),
+        secondaryLine(
+          document,
+          "把对话放到另一台机器上运行；首次使用需要确认此项目是按名字自动创建的。",
+        ),
         enable,
       );
       return;
     }
+    if (loading) {
+      body.append(secondaryLine(document, "正在加载其他机器…"));
+      return;
+    }
+    if (error) {
+      body.append(secondaryLine(document, error || "其他机器不可用"));
+      return;
+    }
     if (catalog.machines.length === 0) {
-      body.append(note(document, "没有其他机器"));
+      body.append(secondaryLine(document, "没有其他机器"));
       return;
     }
     for (const machine of catalog.machines) {
       const expanded = expandedHostId === machine.hostId;
-      const button = rowButton(document, 0);
       const status = machineStatusLabel(machine.state);
+      const button = rowButton(document, 0, 8);
       button.setAttribute("aria-label", `${machine.label}${status ? ` ${status}` : ""}`);
       button.setAttribute("aria-expanded", String(expanded));
       if (machine.state === "offline") {
         button.disabled = true;
         button.setAttribute("aria-disabled", "true");
         button.style.cursor = "default";
+        button.style.opacity = "0.45";
       }
-      const dot = document.createElement("span");
-      style(dot, {
-        width: "6px",
-        height: "6px",
-        flex: "0 0 auto",
-        "border-radius": "999px",
-        background: statusColor(machine.state),
-      });
-      button.append(dot, text(document, machine.label));
-      if (status) {
-        const badge = text(document, status, false);
-        badge.style.color = "var(--color-text-tertiary, #8b8b8b)";
-        badge.style.fontSize = "11px";
-        button.append(badge);
-      }
-      button.append(arrow(expanded));
+      button.append(
+        serverIcon(),
+        text(document, machine.label),
+        statusDot(document, machine.state),
+        chevron(document, expanded),
+      );
       button.addEventListener("click", (event) => {
         event.preventDefault();
         if (machine.state === "offline") return;
@@ -215,12 +277,18 @@ export function createCrossHostAgentSection(
       });
       body.append(button);
       if (!expanded) continue;
-      if (machine.state === "error")
-        body.append(note(document, "Harness 列表不可用，仅可选择 Codex"));
+      if (machine.state === "error") body.append(secondaryLine(document, "Harness 列表不可用", 1));
+      if (machine.harnesses.length === 0) {
+        body.append(secondaryLine(document, "没有可用的 Harness", 1));
+        continue;
+      }
       for (const harness of machine.harnesses) {
-        const row = rowButton(document, 1);
+        const row = rowButton(document, 1, 34);
         row.setAttribute("aria-label", `${machine.label} · ${harness.label}`);
-        row.append(text(document, harness.label));
+        row.append(
+          createRendererAgentIcon(harness.id, 20, document, harness.plugin),
+          text(document, harness.label),
+        );
         row.addEventListener("click", (event) => {
           event.preventDefault();
           options.onClose();
@@ -236,9 +304,11 @@ export function createCrossHostAgentSection(
 
   return {
     element,
-    refresh(nextCatalog, nextAcknowledged) {
+    refresh(nextCatalog, nextAcknowledged, state) {
       catalog = nextCatalog;
       acknowledged = nextAcknowledged;
+      if (state?.loading !== undefined) loading = state.loading;
+      if (state?.error !== undefined) error = state.error;
       if (
         expandedHostId &&
         !catalog.machines.some(

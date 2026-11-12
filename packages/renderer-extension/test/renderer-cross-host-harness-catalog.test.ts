@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   crossHostMachineEntries,
   loadCrossHostHarnessCatalog,
-  parseHarnessPlugins,
+  readyHarnessPlugins,
 } from "../src/renderer-cross-host-harness-catalog.js";
+
+const claudeCode: HarnessPluginDescriptor = {
+  id: "claude-code",
+  name: "Claude Code",
+  version: "1",
+};
+const notInstalled: HarnessPluginDescriptor = { id: "grok", name: "Grok", version: "1" };
+const usageOnly: HarnessPluginDescriptor = {
+  id: "usage-only",
+  name: "Usage",
+  version: "1",
+  kind: "usage",
+};
 
 describe("cross-host harness catalog", () => {
   it("uses Desktop display names and deduplicates Host IDs", () => {
@@ -27,24 +41,20 @@ describe("cross-host harness catalog", () => {
     ]);
   });
 
-  it("always exposes Codex and hides capability-only plugins", () => {
+  it("keeps only ready Harnesses and always exposes Codex", () => {
     expect(
-      parseHarnessPlugins({
-        plugins: [
-          { id: "claude-code", name: "Claude Code" },
-          { id: "usage-only", name: "Usage", kind: "usage" },
-          { id: "claude-code", name: "Duplicate" },
-          { id: "codex", name: "Codex plugin" },
-        ],
+      readyHarnessPlugins([claudeCode, notInstalled, usageOnly], {
+        "claude-code": "ready",
+        grok: "notInstalled",
       }),
     ).toEqual([
       { id: "codex", label: "Codex" },
-      { id: "claude-code", label: "Claude Code" },
+      { id: "claude-code", label: "Claude Code", plugin: claudeCode },
     ]);
-    expect(() => parseHarnessPlugins({})).toThrow("Harness plugin list");
   });
 
-  it("marks offline machines and keeps Codex when discovery fails", async () => {
+  it("marks offline machines and keeps Codex when the directory fails", async () => {
+    const refresh = vi.fn(async () => undefined);
     const catalog = await loadCrossHostHarnessCatalog({
       connections: [
         { hostId: "remote-ssh-codex-managed:one", displayName: "oracle-sg" },
@@ -53,11 +63,18 @@ describe("cross-host harness catalog", () => {
       ],
       knownHostIds: [],
       isOnline: (hostId) => hostId !== "remote-ssh-codex-managed:three",
-      request: async (hostId) => {
-        if (hostId === "remote-ssh-codex-managed:two") throw new Error("unsupported");
-        return { plugins: [{ id: "claude-code", name: "Claude Code" }] };
+      refresh,
+      directory: (hostId) => {
+        if (hostId === "remote-ssh-codex-managed:two")
+          return { plugins: null, availability: {}, error: "unsupported" };
+        return {
+          plugins: [claudeCode, notInstalled],
+          availability: { "claude-code": "ready", grok: "notInstalled" },
+          error: null,
+        };
       },
     });
+    expect(refresh).toHaveBeenCalledTimes(2);
     expect(catalog.loadedPeers).toBe(1);
     expect(catalog.machines).toMatchObject([
       {

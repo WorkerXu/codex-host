@@ -62,9 +62,6 @@ type AgentAvailability = Partial<Record<ExternalRendererAgent, RendererAgentAvai
 
 export const CONTROL_ATTRIBUTE = "data-codexhost-agent-control";
 const AGENT_MENU_WIDTH = 224;
-// Below this many enabled Agents, the picker stays a flat list — grouping
-// only earns its keep once there are enough Harnesses to make scanning slow.
-const AGENT_GROUP_CTA_THRESHOLD = 5;
 
 interface AgentOptionControl {
   row: HTMLElement;
@@ -183,6 +180,14 @@ function setMenuPosition(control: RendererAgentPickerControl): void {
   );
   control.menu.style.left = `${placement.left}px`;
   control.menu.style.bottom = `${placement.bottom}px`;
+}
+
+/** The menu is a flat list of installed Agents; confirmed-missing entries stay hidden. */
+export function visiblePickerAgents(
+  ordered: readonly RendererAgent[],
+  notInstalled: ReadonlySet<RendererAgent>,
+): RendererAgent[] {
+  return ordered.filter((agent) => !notInstalled.has(agent));
 }
 
 function popoverOpen(menu: HTMLElement): boolean {
@@ -525,7 +530,6 @@ export function mountRendererAgentPicker(
 
   let notInstalled = new Set<RendererAgent>();
   let mainAgents: RendererAgent[] = [...enabledAgents];
-  let moreAgents: RendererAgent[] = [];
   const regroup = (): void => {
     const enabledSet = new Set(enabledAgents);
     const seen = new Set<RendererAgent>();
@@ -563,30 +567,19 @@ export function mountRendererAgentPicker(
       nextMain.push(agent);
     }
 
-    // Stable sorting preserves the default/custom order within each section.
-    // Only confirmed missing installations move back, not checking/error states.
-    const installationOrder = (a: RendererAgent, b: RendererAgent): number =>
-      Number(notInstalled.has(a)) - Number(notInstalled.has(b));
-    mainAgents = nextMain.sort(installationOrder);
-    moreAgents = nextMore.sort(installationOrder);
-    const mainChildren: HTMLElement[] = [];
-    for (const agent of mainAgents) {
-      const row = rowsByAgent.get(agent);
-      if (row) mainChildren.push(row);
-    }
-    mainGroup.replaceChildren(...mainChildren);
-    moreRows.replaceChildren(
-      ...moreAgents
+    // The old "More Agents" fold is intentionally gone: it only contained
+    // entries whose actions did not work. Installed Agents from both preference
+    // sections stay in one flat list; confirmed-missing ones are omitted.
+    mainAgents = visiblePickerAgents([...nextMain, ...nextMore], notInstalled);
+    mainGroup.replaceChildren(
+      ...mainAgents
         .map((agent) => rowsByAgent.get(agent))
         .filter((el): el is HTMLDivElement => !!el),
     );
-    const showMoreGroup = moreAgents.length > 0;
-    const showCta = !showMoreGroup && enabledAgents.length > AGENT_GROUP_CTA_THRESHOLD;
-    moreToggle.style.display = showMoreGroup ? "flex" : "none";
-    morePanel.style.display = showMoreGroup && moreOpen ? "flex" : "none";
-    cta.style.display = showCta ? "flex" : "none";
-    moreLabel.textContent = `${groupMessages.pickerMoreAgentsLabel} (${moreAgents.length})`;
-    moreArrow.textContent = moreOpen ? "▾" : "▸";
+    moreRows.replaceChildren();
+    moreToggle.style.display = "none";
+    morePanel.style.display = "none";
+    cta.style.display = "none";
   };
   moreToggle.addEventListener("click", () => {
     moreOpen = !moreOpen;
@@ -660,7 +653,9 @@ export function mountRendererAgentPicker(
     updateAvailability(availability) {
       const next = new Set(
         enabledAgents.filter(
-          (agent) => agent !== "codex" && availability[agent] === "notInstalled",
+          (agent) =>
+            agent !== "codex" &&
+            (availability[agent] === "notInstalled" || availability[agent] === "unavailable"),
         ),
       );
       if (next.size === notInstalled.size && [...next].every((agent) => notInstalled.has(agent))) {

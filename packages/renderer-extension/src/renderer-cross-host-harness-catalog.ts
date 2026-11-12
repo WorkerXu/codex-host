@@ -1,6 +1,9 @@
+import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
+
 export interface CrossHostHarness {
   id: string;
   label: string;
+  plugin?: HarnessPluginDescriptor;
 }
 
 export interface CrossHostMachine {
@@ -21,41 +24,23 @@ export interface CrossHostMachineEntry {
   label: string;
 }
 
+/** Snapshot from the renderer binding probe, which owns per-Host availability. */
+export interface CrossHostHarnessDirectory {
+  plugins: readonly HarnessPluginDescriptor[] | null;
+  availability: Readonly<Record<string, string | undefined>>;
+  error: string | null;
+}
+
 export interface CrossHostHarnessCatalogInput {
   connections: readonly { hostId: string; displayName: string }[];
   knownHostIds: readonly string[];
   remoteProjectHostIds?: readonly string[];
   isOnline(hostId: string): boolean;
-  request(hostId: string, method: string, params: unknown): Promise<unknown>;
+  directory(hostId: string): CrossHostHarnessDirectory;
+  refresh(hostId: string): Promise<void>;
 }
 
 export const CODEX_HARNESS: CrossHostHarness = { id: "codex", label: "Codex" };
-
-const HARNESS_PLUGIN_LIST_METHOD = "codexhost/harness/plugins/list";
-const HARNESS_PLUGIN_LIST_TIMEOUT_MS = 1_500;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("Host Harness directory timed out")),
-      timeoutMs,
-    );
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
 
 /** `remote-ssh-discovered:colab` → `colab`; managed Hosts rely on displayName. */
 export function fallbackHostLabel(hostId: string): string {
@@ -85,22 +70,25 @@ export function crossHostMachineEntries(
 }
 
 /**
- * The Host directory already lists installed plugins; `usage` entries are
- * capability-only and cannot host a Thread. Codex is always available and is
- * not a plugin, so every machine starts with it.
+ * Availability is authoritative: the plugin directory also lists Harnesses that
+ * are not installed on this Host. Only `ready` plugins can host a Thread. Codex
+ * is the native default and is never a plugin, so it is always present.
  */
-export function parseHarnessPlugins(value: unknown): CrossHostHarness[] {
-  if (!isRecord(value) || !Array.isArray(value.plugins))
-    throw new Error("Host did not return a Harness plugin list");
+export function readyHarnessPlugins(
+  plugins: readonly HarnessPluginDescriptor[] | null,
+  availability: Readonly<Record<string, string | undefined>>,
+): CrossHostHarness[] {
   const harnesses: CrossHostHarness[] = [CODEX_HARNESS];
+  if (!plugins) return harnesses;
   const seen = new Set<string>([CODEX_HARNESS.id]);
-  for (const plugin of value.plugins) {
-    if (!isRecord(plugin) || typeof plugin.id !== "string") continue;
+  for (const plugin of plugins) {
     if (plugin.kind === "usage" || seen.has(plugin.id)) continue;
+    if (availability[plugin.id] !== "ready") continue;
     seen.add(plugin.id);
     harnesses.push({
       id: plugin.id,
-      label: typeof plugin.name === "string" && plugin.name.trim() ? plugin.name.trim() : plugin.id,
+      label: plugin.name.trim() || plugin.id,
+      plugin,
     });
   }
   return harnesses;
@@ -113,14 +101,18 @@ export async function loadCrossHostHarnessCatalog(
     crossHostMachineEntries(input).map(async (entry): Promise<CrossHostMachine> => {
       if (!input.isOnline(entry.hostId)) return { ...entry, state: "offline", harnesses: [] };
       try {
-        const value = await withTimeout(
-          input.request(entry.hostId, HARNESS_PLUGIN_LIST_METHOD, {}),
-          HARNESS_PLUGIN_LIST_TIMEOUT_MS,
-        );
-        return { ...entry, state: "ready", harnesses: parseHarnessPlugins(value) };
+        await input.refresh(entry.hostId);
+        const directory = input.directory(entry.hostId);
+        if (directory.error || !directory.plugins)
+          return { ...entry, state: "error", harnesses: [CODEX_HARNESS] };
+        return {
+          ...entry,
+          state: "ready",
+          harnesses: readyHarnessPlugins(directory.plugins, directory.availability),
+        };
       } catch {
-        // The Host is reachable but could not enumerate plugins. Codex is still
-        // the native default, so keep the machine usable instead of hiding it.
+        // The Host is reachable but could not inspect its Harnesses. Codex is
+        // still the native default, so keep the machine usable.
         return { ...entry, state: "error", harnesses: [CODEX_HARNESS] };
       }
     }),
