@@ -7,9 +7,9 @@ import {
   mergeMachineState,
   projectGroupMachineSummary,
   projectHostKey,
+  resolveGroupProject,
   worseConnectionState,
   type NativeProjectSnapshot,
-  type ThreadSnapshot,
 } from "../src/renderer-project-groups-model.js";
 
 const catalog: DesktopProjectsCatalog = {
@@ -82,148 +82,97 @@ const snapshots: NativeProjectSnapshot[] = [
     label: "alpha",
     kind: "local",
     hostLabel: null,
-    collapsed: false,
-    hasList: true,
-    hasShowAllToggle: false,
     hasNewChatButton: true,
-    showAll: false,
   },
   {
     projectId: "project-beta",
     label: "beta",
     kind: "remote",
     hostLabel: "beta-host",
-    collapsed: false,
-    hasList: true,
-    hasShowAllToggle: false,
-    hasNewChatButton: true,
-    showAll: true,
+    hasNewChatButton: false,
   },
 ];
 
-const thread: ThreadSnapshot = {
-  threadId: "local:thread-1",
-  hostId: "local",
-  title: "Thread",
-  selected: false,
-  active: false,
-  pinned: false,
-};
-
-describe("Renderer project group model", () => {
-  it("merges Desktop catalog entries with native project rows", () => {
+describe("Project group model", () => {
+  it("resolves native snapshots and marks unmounted members", () => {
     const index = buildProjectIndex(catalog, snapshots);
-    expect(index.get("local-alpha")).toMatchObject({ kind: "local", label: "alpha" });
-    expect(index.get("project-beta")).toMatchObject({
-      kind: "remote",
-      hostId: "remote-ssh-discovered:beta",
-      hostLabel: "beta-host",
-    });
+    expect(index.get("local-alpha")?.native?.projectId).toBe("local-alpha");
+    expect(index.get("project-beta")?.hostId).toBe("remote-ssh-discovered:beta");
     expect(index.get("project-gamma")?.native).toBeNull();
+
+    const gamma = group().members[2];
+    if (!gamma) throw new Error("Missing member fixture");
+    const resolved = resolveGroupProject(gamma, index);
+    expect(resolved.missing).toBe("not-mounted");
+    expect(resolved.entry?.label).toBe("gamma");
   });
 
-  it("groups projects by machine and applies the worst connection state", () => {
+  it("falls back to rootPaths when a local project id changed", () => {
+    const index = buildProjectIndex(catalog, []);
+    const resolved = resolveGroupProject(
+      {
+        projectKind: "local",
+        projectId: "stale-id",
+        rootPaths: ["/Users/test/alpha"],
+        label: "alpha",
+      },
+      index,
+    );
+    expect(resolved.missing).toBe("not-mounted");
+    expect(resolved.entry?.projectId).toBe("local-alpha");
+  });
+
+  it("reports missing members that are not in the catalog", () => {
+    const resolved = resolveGroupProject(
+      {
+        projectKind: "remote",
+        projectId: "gone",
+        hostId: "host",
+        remotePath: "/gone",
+        label: "gone",
+      },
+      buildProjectIndex(catalog, snapshots),
+    );
+    expect(resolved.missing).toBe("missing");
+    expect(resolved.entry).toBeNull();
+  });
+
+  it("builds machine sections in catalog host order", () => {
     const views = buildProjectGroupViews({
       groups: [group()],
       catalog,
       snapshots,
-      threadsByProject: new Map([
-        ["local-alpha", [thread]],
-        ["project-beta", []],
-      ]),
       machineState: new Map([
         ["local", "connected"],
         ["remote-ssh-discovered:beta", "error"],
       ]),
     });
-    expect(views[0]?.machines).toHaveLength(2);
-    expect(views[0]?.machines[0]).toMatchObject({ label: "本机", state: "connected" });
-    expect(views[0]?.machines[1]).toMatchObject({ label: "beta-host", state: "error" });
-    expect(
-      views[0]?.machines[1]?.projects.map((project) => project.project.entry?.projectId),
-    ).toEqual(["project-beta", "project-gamma"]);
-    expect(views[0]?.unresolved).toEqual([expect.objectContaining({ projectId: "project-gamma" })]);
+    expect(views).toHaveLength(1);
+    expect(views[0]?.machines.map((machine) => machine.label)).toEqual(["本机", "beta-host"]);
+    expect(views[0]?.machines[1]?.state).toBe("error");
+    expect(views[0]?.machines[1]?.projects.map((project) => project.mounted)).toEqual([
+      true,
+      false,
+    ]);
+    expect(views[0]?.projects[1]?.newChatAvailable).toBe(false);
+    expect(views[0]?.unresolved.map((member) => member.projectId)).toEqual(["project-gamma"]);
   });
 
-  it("falls back to rootPaths and hostId/remotePath after a project ID change", () => {
-    const moved = {
-      ...group(),
-      members: [
-        {
-          projectKind: "local" as const,
-          projectId: "local-renamed",
-          rootPaths: ["/Users/test/alpha"],
-          label: "alpha",
-        },
-        {
-          projectKind: "remote" as const,
-          projectId: "project-renamed",
-          hostId: "remote-ssh-discovered:beta",
-          remotePath: "/srv/beta",
-          label: "beta",
-        },
-      ],
-    };
+  it("sorts groups by order and keeps configured member order", () => {
+    const second = { ...group(), id: "second", name: "Second", order: 1 };
+    const first = { ...group(), id: "first", name: "First", order: -1 };
     const views = buildProjectGroupViews({
-      groups: [moved],
+      groups: [second, first],
       catalog,
       snapshots,
-      threadsByProject: new Map(),
       machineState: new Map(),
     });
-    expect(views[0]?.projects.map((project) => project.project.entry?.projectId)).toEqual([
+    expect(views.map((view) => view.group.name)).toEqual(["First", "Second"]);
+    expect(views[0]?.projects.map((project) => project.project.member.projectId)).toEqual([
       "local-alpha",
       "project-beta",
+      "project-gamma",
     ]);
-  });
-
-  it("only exposes Show all when the native project has a Show all control", () => {
-    const local = snapshots[0];
-    if (!local) throw new Error("Missing snapshot fixture");
-    const without = buildProjectGroupViews({
-      groups: [group()],
-      catalog,
-      snapshots: [{ ...local, showAll: false, hasShowAllToggle: false }],
-      threadsByProject: new Map(),
-      machineState: new Map(),
-    });
-    expect(without[0]?.projects[0]?.canShowAll).toBe(false);
-    const withToggle = buildProjectGroupViews({
-      groups: [group()],
-      catalog,
-      snapshots: [{ ...local, showAll: false, hasShowAllToggle: true }],
-      threadsByProject: new Map(),
-      machineState: new Map(),
-    });
-    expect(withToggle[0]?.projects[0]?.canShowAll).toBe(true);
-  });
-
-  it("marks a member without a native new-chat button unavailable", () => {
-    const local = snapshots[0];
-    if (!local) throw new Error("Missing snapshot fixture");
-    const views = buildProjectGroupViews({
-      groups: [group()],
-      catalog,
-      snapshots: [{ ...local, hasNewChatButton: false }],
-      threadsByProject: new Map(),
-      machineState: new Map(),
-    });
-    expect(views[0]?.projects[0]?.newChatAvailable).toBe(false);
-  });
-
-  it("shortens the group row machine summary while keeping the full title", () => {
-    expect(projectGroupMachineSummary([])).toEqual({ text: "", title: "" });
-    expect(
-      projectGroupMachineSummary([
-        { key: "local", label: "本机", state: "connected", projects: [] },
-      ]),
-    ).toEqual({ text: "本机", title: "本机" });
-    expect(
-      projectGroupMachineSummary([
-        { key: "local", label: "本机", state: "connected", projects: [] },
-        { key: "remote", label: "colab", state: "connected", projects: [] },
-      ]),
-    ).toEqual({ text: "2 台", title: "本机 · colab" });
   });
 
   it("derives stable machine keys and connection ordering", () => {
@@ -239,5 +188,20 @@ describe("Renderer project group model", () => {
     expect(mergeMachineState("unknown", "error")).toBe("error");
     expect(mergeMachineState("connected", "disconnected")).toBe("disconnected");
     expect(mergeMachineState("disconnected", "error")).toBe("error");
+  });
+
+  it("shortens the group row machine summary while keeping the full title", () => {
+    expect(projectGroupMachineSummary([])).toEqual({ text: "", title: "" });
+    expect(
+      projectGroupMachineSummary([
+        { key: "local", label: "本机", state: "connected", projects: [] },
+      ]),
+    ).toEqual({ text: "本机", title: "本机" });
+    expect(
+      projectGroupMachineSummary([
+        { key: "local", label: "本机", state: "connected", projects: [] },
+        { key: "remote", label: "colab", state: "connected", projects: [] },
+      ]),
+    ).toEqual({ text: "2 台", title: "本机 · colab" });
   });
 });

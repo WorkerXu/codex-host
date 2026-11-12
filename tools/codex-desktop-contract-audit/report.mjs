@@ -432,9 +432,7 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
   const projectGroups = contracts.projectGroups ?? {
     sectionCount: 0,
     projectCount: 0,
-    threadRowCount: 0,
     missingNewChatCount: 0,
-    hasContextMenu: false,
     contractOk: false,
   };
   const projectGroupsActive = projectGroups.sectionCount > 0;
@@ -443,9 +441,7 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
     observed: {
       sectionCount: projectGroups.sectionCount,
       projectCount: projectGroups.projectCount,
-      threadRowCount: projectGroups.threadRowCount,
       missingNewChatCount: projectGroups.missingNewChatCount,
-      hasContextMenu: projectGroups.hasContextMenu,
       contractOk: projectGroups.contractOk,
     },
     live: projectGroupsActive ? (projectGroups.contractOk ? "pass" : "fail") : "inactive",

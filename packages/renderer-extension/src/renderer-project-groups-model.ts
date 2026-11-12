@@ -13,23 +13,7 @@ export interface NativeProjectSnapshot {
   label: string;
   kind: ProjectGroupProjectKind | null;
   hostLabel: string | null;
-  collapsed: boolean;
-  hasList: boolean;
-  hasShowAllToggle: boolean;
   hasNewChatButton: boolean;
-  showAll: boolean | null;
-}
-
-export interface ThreadSnapshot {
-  threadId: string;
-  hostId: string;
-  title: string;
-  selected: boolean;
-  active: boolean;
-  pinned: boolean;
-  providerIcon?: Element | null;
-  pinIcon?: Element | null;
-  archiveIcon?: Element | null;
 }
 
 export interface ProjectIndexEntry {
@@ -51,13 +35,9 @@ export interface ResolvedProject {
 
 export interface ProjectGroupProjectView {
   project: ResolvedProject;
-  threads: readonly ThreadSnapshot[];
-  collapsed: boolean;
-  hasList: boolean;
-  hasShowAllToggle: boolean;
+  /** The member currently has a native project unit in the Projects list. */
+  mounted: boolean;
   newChatAvailable: boolean;
-  showAll: boolean | null;
-  canShowAll: boolean;
 }
 
 export interface ProjectGroupMachineView {
@@ -115,20 +95,18 @@ export function projectGroupMachineSummary(machines: readonly ProjectGroupMachin
   return { text: `${machines.length} 台`, title };
 }
 
-export function projectHostLabel(
+/** Machine name used by group headers and native-row subtitles. */
+export function projectMachineName(
   entry: ProjectIndexEntry,
   catalog: DesktopProjectsCatalog,
 ): string {
   if (entry.kind === "local") return "本机";
-  if (entry.hostLabel) return entry.hostLabel;
   const connection = entry.hostId
     ? catalog.codexManagedRemoteConnections.find(({ hostId }) => hostId === entry.hostId)
     : undefined;
-  return connection?.displayName ?? connection?.alias ?? entry.hostId ?? "远程机器";
-}
-
-function memberKey(member: ProjectGroupMember): string {
-  return `${member.projectKind}\u0000${member.projectId}`;
+  return (
+    connection?.displayName ?? connection?.alias ?? entry.hostLabel ?? entry.hostId ?? "远程机器"
+  );
 }
 
 function sameRootPaths(left: readonly string[], right: readonly string[]): boolean {
@@ -221,20 +199,12 @@ export function resolveGroupProject(
   };
 }
 
-function projectView(
-  resolved: ResolvedProject,
-  threadsByProject: ReadonlyMap<string, readonly ThreadSnapshot[]>,
-): ProjectGroupProjectView {
+function projectView(resolved: ResolvedProject): ProjectGroupProjectView {
   const native = resolved.entry?.native ?? null;
   return {
     project: resolved,
-    threads: native ? (threadsByProject.get(native.projectId) ?? []) : [],
-    collapsed: native?.collapsed ?? true,
-    hasList: native?.hasList ?? false,
-    hasShowAllToggle: native?.hasShowAllToggle ?? false,
+    mounted: native !== null,
     newChatAvailable: native?.hasNewChatButton ?? false,
-    showAll: native?.showAll ?? null,
-    canShowAll: native?.hasList === true && native.showAll === false && native.hasShowAllToggle,
   };
 }
 
@@ -242,16 +212,15 @@ export function buildProjectGroupViews(input: {
   groups: readonly ProjectGroup[];
   catalog: DesktopProjectsCatalog;
   snapshots: readonly NativeProjectSnapshot[];
-  threadsByProject: ReadonlyMap<string, readonly ThreadSnapshot[]>;
   machineState: ReadonlyMap<string, MachineConnectionState>;
 }): ProjectGroupView[] {
   const index = buildProjectIndex(input.catalog, input.snapshots);
   return [...input.groups]
-    .map((group, index) => ({ group, index }))
-    .sort((left, right) => left.group.order - right.group.order || left.index - right.index)
+    .map((group, position) => ({ group, position }))
+    .sort((left, right) => left.group.order - right.group.order || left.position - right.position)
     .map(({ group }) => {
       const projects = group.members.map((member) =>
-        projectView(resolveGroupProject(member, index), input.threadsByProject),
+        projectView(resolveGroupProject(member, index)),
       );
       const unresolved = projects
         .filter((project) => project.project.missing !== null)
@@ -268,7 +237,7 @@ export function buildProjectGroupViews(input: {
         if (!machine) {
           machine = {
             key,
-            label: projectHostLabel(entry, input.catalog),
+            label: projectMachineName(entry, input.catalog),
             state: input.machineState.get(key) ?? "unknown",
             projects: [],
           };
@@ -284,12 +253,4 @@ export function buildProjectGroupViews(input: {
         unresolved,
       } satisfies ProjectGroupView;
     });
-}
-
-export function memberGroupKey(member: ProjectGroupMember): string {
-  return memberKey(member);
-}
-
-export function groupProjectIds(groups: readonly ProjectGroup[]): string[] {
-  return groups.flatMap((group) => group.members.map((member) => member.projectId));
 }

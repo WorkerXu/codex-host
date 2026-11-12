@@ -1,5 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+type LayoutMember = {
+  projectId: string;
+  label: string;
+  machineName: string;
+  kind: "local" | "remote";
+};
+type LayoutGroup = {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  members: readonly LayoutMember[];
+};
+type HeaderItem = {
+  id: string;
+  name: string;
+  machineSummary: string;
+  machineSummaryTitle: string;
+  projectIds: readonly string[];
+};
+type HeaderOptions = {
+  collapsedGroups: ReadonlySet<string>;
+  placeholders: ReadonlyMap<string, number>;
+};
+
 const mocks = vi.hoisted(() => {
   const group = {
     id: "5e5f0a4d-24bd-4af8-9e8e-2e7f2f8d4a1b",
@@ -13,6 +37,13 @@ const mocks = vi.hoisted(() => {
         rootPaths: ["/tmp/alpha"],
         label: "alpha",
       },
+      {
+        projectKind: "remote" as const,
+        projectId: "project-beta",
+        hostId: "remote-ssh-discovered:beta",
+        remotePath: "/srv/beta",
+        label: "beta",
+      },
     ],
     createdAt: "2026-11-11T10:00:00.000Z",
     updatedAt: "2026-11-11T10:00:00.000Z",
@@ -21,53 +52,65 @@ const mocks = vi.hoisted(() => {
     localProjects: {
       "local-alpha": { id: "local-alpha", name: "alpha", rootPaths: ["/tmp/alpha"] },
     },
-    remoteProjects: [],
+    remoteProjects: [
+      {
+        id: "project-beta",
+        hostId: "remote-ssh-discovered:beta",
+        remotePath: "/srv/beta",
+        label: "beta",
+      },
+    ],
     threadProjectAssignments: {},
-    codexManagedRemoteConnections: [],
-    projectOrder: ["local-alpha"],
+    codexManagedRemoteConnections: [
+      {
+        hostId: "remote-ssh-discovered:beta",
+        displayName: "oracle-sg",
+        alias: "beta",
+        source: "discovered",
+      },
+    ],
+    projectOrder: ["local-alpha", "project-beta"],
     readAt: "2026-11-11T10:00:00.000Z",
-  };
-  const thread = {
-    threadId: "local:thread-1",
-    hostId: "local",
-    title: "Thread",
-    selected: false,
-    active: false,
-    pinned: false,
   };
   const snapshot = {
     projectId: "local-alpha",
     label: "alpha",
     kind: "local" as const,
     hostLabel: null,
-    collapsed: false,
-    hasList: true,
-    hasShowAllToggle: false,
     hasNewChatButton: true,
-    showAll: false,
   };
   const contract = {
     ok: true,
     missing: [] as string[],
     hasHasSelector: true,
     projectCount: 1,
-    threadRowCount: 1,
     missingNewChatCount: 0,
-    hasContextMenu: true,
-    hasThreadActions: true,
   };
   return {
     group,
     catalog,
-    thread,
     snapshot,
+    snapshots: [snapshot] as Array<
+      | typeof snapshot
+      | {
+          projectId: string;
+          label: string;
+          kind: "remote";
+          hostLabel: null;
+          hasNewChatButton: boolean;
+        }
+    >,
     contract,
     warning: null as null | { kind: "quarantined"; backupName: string },
+    showMore: false,
+    rowOutside: false,
     calls: {
-      menuOpen: 0,
-      proxyMenuOpen: 0,
-      pinClicks: 0,
-      archiveClicks: 0,
+      layoutApply: [] as LayoutGroup[][],
+      layoutClear: 0,
+      layoutDispose: 0,
+      headerRender: [] as Array<{ items: readonly HeaderItem[]; options: HeaderOptions }>,
+      headerDispose: 0,
+      headers: [] as unknown[],
     },
   };
 });
@@ -77,98 +120,53 @@ vi.mock("../src/renderer-project-groups-bootstrap.js", () => ({
 }));
 
 vi.mock("../src/renderer-project-groups-dom.js", () => ({
-  PROVIDER_ICON_LOADED_EVENT: "codexhost:project-groups-icon-loaded",
-  findNativeThreadRow: () => ({ click: () => undefined }),
-  findProjectList: () => null,
+  PROJECT_COLLAPSED_ATTRIBUTE: "data-app-action-sidebar-project-collapsed",
+  SECTION_COLLAPSED_ATTRIBUTE: "data-app-action-sidebar-section-collapsed",
   findProjectsSection: () => ({}),
-  findProjectsShowMoreButton: () => null,
-  hasNativeContextMenu: () => true,
-  nativeThreadActionButton: (_row: unknown, action: "pin" | "archive") => ({
-    click: () => {
-      if (action === "pin") mocks.calls.pinClicks += 1;
-      else mocks.calls.archiveClicks += 1;
-    },
-  }),
+  findProjectsShowMoreButton: () => (mocks.showMore ? {} : null),
   newChatButton: () => null,
   probeProjectGroupsContract: () => mocks.contract,
-  projectListForUnit: () => ({}),
   projectRowForUnit: () => ({}),
+  projectRowOutsideSection: () => (mocks.rowOutside ? {} : null),
   projectUnitForId: () => ({}),
-  projectUnits: () => [],
-  readNativeProjectSnapshots: () => [mocks.snapshot],
-  readThreadSnapshots: () => [mocks.thread],
-  restoreSidebarScrollAfterThreadClick: () => () => undefined,
-  sectionCollapsed: () => false,
-  showAllToggle: () => null,
-  sidebarScrollContainer: () => null,
+  readNativeProjectSnapshots: () => mocks.snapshots,
   statusIconState: () => "connected",
 }));
 
-vi.mock("../src/renderer-project-groups-hide.js", () => ({
-  ProjectGroupHider: class {
-    apply(): void {}
-    clear(): void {}
-    dispose(): void {}
+vi.mock("../src/renderer-project-groups-layout.js", () => ({
+  ProjectGroupLayoutStyle: class {
+    apply(groups: LayoutGroup[]): void {
+      mocks.calls.layoutApply.push(groups);
+    }
+
+    clear(): void {
+      mocks.calls.layoutClear += 1;
+    }
+
+    dispose(): void {
+      mocks.calls.layoutDispose += 1;
+    }
   },
 }));
 
-vi.mock("../src/renderer-project-groups-menu.js", () => ({
-  ProjectGroupMenuProxy: class {
-    state(): string {
-      return "unknown";
-    }
-
-    isOpen(): boolean {
-      return false;
-    }
-
-    isAvailable(): boolean {
-      return true;
-    }
-
-    async open(): Promise<boolean> {
-      mocks.calls.menuOpen += 1;
-      return true;
-    }
-
-    reprobe(): void {}
-    dispose(): void {}
-  },
-}));
-
-vi.mock("../src/renderer-project-groups-thread-menu.js", () => ({
-  collectNativeThreadMenuActions: () => [
-    { id: "pin", label: "置顶聊天", icon: null, button: { click: () => undefined } },
-  ],
-  ProjectGroupThreadMenu: class {
-    isOpen(): boolean {
-      return false;
-    }
-
-    open(): void {
-      mocks.calls.proxyMenuOpen += 1;
-    }
-
-    close(): void {}
-    dispose(): void {}
-  },
-}));
-
-vi.mock("../src/renderer-project-groups-view.js", () => {
-  class FakeView {
-    static last: FakeView | null = null;
+vi.mock("../src/renderer-project-groups-header.js", () => ({
+  ProjectGroupHeaders: class {
     readonly handlers: Record<string, (...args: unknown[]) => void>;
 
     constructor(_document: unknown, handlers: Record<string, (...args: unknown[]) => void>) {
       this.handlers = handlers;
-      FakeView.last = this;
+      mocks.calls.headers.push(this);
     }
 
-    render(): void {}
-    dispose(): void {}
-  }
-  return { ProjectGroupView: FakeView };
-});
+    render(items: readonly HeaderItem[], options: HeaderOptions): void {
+      mocks.calls.headerRender.push({ items, options });
+    }
+
+    dispose(): void {
+      mocks.calls.headerDispose += 1;
+    }
+  },
+}));
 
 vi.mock("../src/renderer-project-groups-dialog.js", () => ({
   ProjectGroupsDialog: class {
@@ -199,16 +197,12 @@ vi.mock("../src/renderer-project-groups-rpc.js", () => ({
 }));
 
 import { installRendererProjectGroups } from "../src/renderer-project-groups.js";
-import { ProjectGroupView } from "../src/renderer-project-groups-view.js";
 
-interface ViewHandlers {
-  openThreadMenu(
-    thread: typeof mocks.thread,
-    anchor: unknown,
-    nativeFirst?: boolean,
-  ): void | Promise<void>;
-  toggleThreadPin(thread: typeof mocks.thread): void;
-  archiveThread(thread: typeof mocks.thread): void;
+interface FakeHandlers {
+  toggleGroup(groupId: string): void;
+  openNewChat(groupId: string, anchor: unknown): void;
+  openManager(groupId?: string): void;
+  showMoreProjects(): void;
 }
 
 function fakeDocument(): Document {
@@ -235,13 +229,32 @@ function fakeWindow(): Window {
   } as unknown as Window;
 }
 
-describe("project group controller menu wiring", () => {
+function install() {
+  return installRendererProjectGroups({
+    document: fakeDocument(),
+    window: fakeWindow(),
+    routing: () => ({ forHost: () => ({ manager: { sendRequest: async () => ({}) } }) }),
+  });
+}
+
+function lastHandlers(): FakeHandlers {
+  return (mocks.calls.headers.at(-1) as { handlers: FakeHandlers }).handlers;
+}
+
+describe("project group controller", () => {
   beforeEach(() => {
     mocks.warning = null;
-    mocks.calls.menuOpen = 0;
-    mocks.calls.proxyMenuOpen = 0;
-    mocks.calls.pinClicks = 0;
-    mocks.calls.archiveClicks = 0;
+    mocks.snapshots = [mocks.snapshot];
+    mocks.showMore = false;
+    mocks.rowOutside = false;
+    mocks.contract.ok = true;
+    mocks.contract.missing = [];
+    mocks.calls.layoutApply.length = 0;
+    mocks.calls.layoutClear = 0;
+    mocks.calls.layoutDispose = 0;
+    mocks.calls.headerRender.length = 0;
+    mocks.calls.headerDispose = 0;
+    mocks.calls.headers.length = 0;
     vi.stubGlobal(
       "MutationObserver",
       class {
@@ -255,40 +268,140 @@ describe("project group controller menu wiring", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reports native menu and thread actions and forwards both to the native row", async () => {
-    const handle = installRendererProjectGroups({
-      document: fakeDocument(),
-      window: fakeWindow(),
-      routing: () => ({ forHost: () => ({ manager: { sendRequest: async () => ({}) } }) }),
-    });
+  it("renders native member order and group headers", async () => {
+    const handle = install();
     await vi.waitFor(() => expect(handle.status().state).toBe("active"));
     expect(handle.status()).toMatchObject({
       state: "active",
-      menu: "proxy-menu",
-      threadActions: "native",
+      groupCount: 1,
+      projectCount: 2,
+      missingMembers: 0,
     });
-    const view = (ProjectGroupView as unknown as { last: { handlers: ViewHandlers } }).last;
-    expect(view).toBeDefined();
-    view.handlers.openThreadMenu(mocks.thread, {}, true);
-    await vi.waitFor(() => expect(handle.status().menu).toBe("native-context"));
-    expect(mocks.calls.menuOpen).toBe(1);
-    view.handlers.openThreadMenu(mocks.thread, {});
-    await vi.waitFor(() => expect(handle.status().menu).toBe("proxy-menu"));
-    expect(mocks.calls.proxyMenuOpen).toBe(1);
-    view.handlers.toggleThreadPin(mocks.thread);
-    expect(mocks.calls.pinClicks).toBe(1);
-    view.handlers.archiveThread(mocks.thread);
-    expect(mocks.calls.archiveClicks).toBe(1);
+    expect(
+      mocks.calls.layoutApply.at(-1)?.map((group) => ({
+        id: group.id,
+        name: group.name,
+        collapsed: group.collapsed,
+        projectIds: group.members.map((member) => member.projectId),
+      })),
+    ).toEqual([
+      {
+        id: mocks.group.id,
+        name: "Cross-host",
+        collapsed: false,
+        projectIds: ["local-alpha"],
+      },
+    ]);
+    const render = mocks.calls.headerRender.at(-1);
+    expect(render?.items).toEqual([
+      {
+        id: mocks.group.id,
+        name: "Cross-host",
+        machineSummary: "2 台",
+        machineSummaryTitle: "本机 · oracle-sg",
+        projectIds: ["local-alpha"],
+      },
+    ]);
+    expect(render?.options.collapsedGroups.size).toBe(0);
+    expect(render?.options.placeholders.size).toBe(0);
+    expect(mocks.calls.layoutApply.at(-1)?.[0]?.members).toEqual([
+      {
+        projectId: "local-alpha",
+        label: "alpha",
+        machineName: "本机",
+        kind: "local",
+      },
+    ]);
+    handle.dispose();
+  });
+
+  it("follows the native project order inside a group", async () => {
+    mocks.snapshots = [
+      {
+        projectId: "project-beta",
+        label: "beta",
+        kind: "remote",
+        hostLabel: null,
+        hasNewChatButton: true,
+      },
+      mocks.snapshot,
+    ];
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    expect(
+      mocks.calls.layoutApply.at(-1)?.[0]?.members.map((member) => ({
+        projectId: member.projectId,
+        label: member.label,
+        machineName: member.machineName,
+        kind: member.kind,
+      })),
+    ).toEqual([
+      {
+        projectId: "project-beta",
+        label: "beta",
+        machineName: "oracle-sg",
+        kind: "remote",
+      },
+      {
+        projectId: "local-alpha",
+        label: "alpha",
+        machineName: "本机",
+        kind: "local",
+      },
+    ]);
+    expect(mocks.calls.headerRender.at(-1)?.items[0]?.projectIds).toEqual([
+      "project-beta",
+      "local-alpha",
+    ]);
+    handle.dispose();
+  });
+
+  it("toggles collapse through the header handlers", async () => {
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    lastHandlers().toggleGroup(mocks.group.id);
+    expect(mocks.calls.layoutApply.at(-1)?.[0]?.collapsed).toBe(true);
+    expect([...(mocks.calls.headerRender.at(-1)?.options.collapsedGroups ?? [])]).toEqual([
+      mocks.group.id,
+    ]);
+    lastHandlers().toggleGroup(mocks.group.id);
+    expect(mocks.calls.layoutApply.at(-1)?.[0]?.collapsed).toBe(false);
+    handle.dispose();
+  });
+
+  it("adds a placeholder for members missing from a compacted list", async () => {
+    mocks.showMore = true;
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    expect([...(mocks.calls.headerRender.at(-1)?.options.placeholders ?? [])]).toEqual([
+      [mocks.group.id, 1],
+    ]);
+    handle.dispose();
+  });
+
+  it("skips the placeholder when the member is shown natively elsewhere", async () => {
+    mocks.showMore = true;
+    mocks.rowOutside = true;
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("active"));
+    expect(mocks.calls.headerRender.at(-1)?.options.placeholders.size).toBe(0);
+    handle.dispose();
+  });
+
+  it("fails open when the native contract breaks", async () => {
+    mocks.contract.ok = false;
+    mocks.contract.missing = ["projects-list"];
+    const handle = install();
+    await vi.waitFor(() => expect(handle.status().state).toBe("disabled"));
+    expect(handle.status().reason).toBe("contract-missing:projects-list");
+    expect(mocks.calls.layoutDispose).toBeGreaterThan(0);
+    expect(mocks.calls.headerDispose).toBeGreaterThan(0);
     handle.dispose();
   });
 
   it("shows a one-time warning when the Host quarantined the config", async () => {
     mocks.warning = { kind: "quarantined", backupName: "groups.json.1.invalid" };
-    const handle = installRendererProjectGroups({
-      document: fakeDocument(),
-      window: fakeWindow(),
-      routing: () => ({ forHost: () => ({ manager: { sendRequest: async () => ({}) } }) }),
-    });
+    const handle = install();
     await vi.waitFor(() => expect(handle.status().state).toBe("active"));
     expect(handle.status().lastError).toContain("groups.json.1.invalid");
     handle.dispose();

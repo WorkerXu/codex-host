@@ -2,43 +2,40 @@ import type { DesktopProjectsCatalog, ProjectGroup } from "@codexhost/shared-con
 
 import { readBootstrapCatalog } from "./renderer-project-groups-bootstrap.js";
 import {
-  findNativeThreadRow,
   findProjectsSection,
   findProjectsShowMoreButton,
-  nativeThreadActionButton,
   newChatButton,
   probeProjectGroupsContract,
-  projectListForUnit,
   projectRowForUnit,
+  projectRowOutsideSection,
   projectUnitForId,
   readNativeProjectSnapshots,
-  readThreadSnapshots,
-  restoreSidebarScrollAfterThreadClick,
-  PROVIDER_ICON_LOADED_EVENT,
-  sectionCollapsed,
-  sidebarScrollContainer,
-  showAllToggle,
   statusIconState,
+  PROJECT_COLLAPSED_ATTRIBUTE,
+  SECTION_COLLAPSED_ATTRIBUTE,
 } from "./renderer-project-groups-dom.js";
 import {
   buildProjectGroupViews,
   buildProjectIndex,
   mergeMachineState,
+  projectGroupMachineSummary,
   projectHostKey,
+  projectMachineName,
   type MachineConnectionState,
   type ProjectGroupProjectView,
   type ProjectGroupView,
-  type ThreadSnapshot,
 } from "./renderer-project-groups-model.js";
-import { ProjectGroupHider } from "./renderer-project-groups-hide.js";
-import { ProjectGroupMenuProxy } from "./renderer-project-groups-menu.js";
-import { ProjectGroupsDialog } from "./renderer-project-groups-dialog.js";
 import {
-  collectNativeThreadMenuActions,
-  ProjectGroupThreadMenu,
-} from "./renderer-project-groups-thread-menu.js";
+  ProjectGroupHeaders,
+  type ProjectGroupHeaderItem,
+} from "./renderer-project-groups-header.js";
+import {
+  ProjectGroupLayoutStyle,
+  type ProjectGroupLayoutGroup,
+  type ProjectGroupLayoutMember,
+} from "./renderer-project-groups-layout.js";
+import { ProjectGroupsDialog } from "./renderer-project-groups-dialog.js";
 import { ProjectGroupNewChatPicker } from "./renderer-project-groups-new-chat.js";
-import { ProjectGroupView as ProjectGroupDomView } from "./renderer-project-groups-view.js";
 import {
   createProjectGroupsRpc,
   localProjectGroupsManager,
@@ -50,6 +47,7 @@ const PROJECT_STATE_KEYS = new Set([
   "remote-projects",
   "thread-project-assignments",
   "project-order",
+  "pinned-project-ids",
   "selected-project",
 ]);
 const HOST_FAILURE_GRACE_MS = 5_000;
@@ -63,8 +61,6 @@ export interface RendererProjectGroupsStatus {
   groupCount: number;
   projectCount: number;
   missingMembers: number;
-  menu: "native-context" | "proxy-menu" | "unavailable" | "unknown";
-  threadActions: "native" | "unavailable";
   lastError: string | null;
 }
 
@@ -96,11 +92,18 @@ function errorMessage(error: unknown): string {
 
 function insideOwnUi(node: Node | null): boolean {
   const element = node instanceof Element ? node : node?.parentElement;
-  return element
-    ? element.closest(
-        "[data-codexhost-project-groups-root], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-thread-menu], [data-codexhost-project-groups-toast]",
-      ) !== null
-    : false;
+  if (!element) return false;
+  if (
+    typeof HTMLStyleElement !== "undefined" &&
+    element instanceof HTMLStyleElement &&
+    element.hasAttribute("data-codexhost-project-groups")
+  )
+    return true;
+  return (
+    element.closest(
+      "[data-codexhost-project-groups-ui], [data-codexhost-project-groups-dialog], [data-codexhost-project-groups-new-chat], [data-codexhost-project-groups-toast]",
+    ) !== null
+  );
 }
 
 class RendererProjectGroups implements RendererProjectGroupsHandle {
@@ -109,17 +112,17 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   readonly #readRouting: () => Routing | undefined;
   readonly #now: () => Date;
   readonly #onStatus: ((status: RendererProjectGroupsStatus) => void) | undefined;
-  readonly #hider: ProjectGroupHider;
-  readonly #menu: ProjectGroupMenuProxy;
-  readonly #threadMenu: ProjectGroupThreadMenu;
+  readonly #layout: ProjectGroupLayoutStyle;
+  readonly #headers: ProjectGroupHeaders;
   readonly #picker: ProjectGroupNewChatPicker;
   readonly #dialog: ProjectGroupsDialog;
-  readonly #view: ProjectGroupDomView;
   #groups: ProjectGroup[] = [];
   #revision = 0;
   #catalog: DesktopProjectsCatalog | null = null;
   #bootstrapCatalog: DesktopProjectsCatalog | null = null;
   #views: ProjectGroupView[] = [];
+  #nativeOrder = new Map<string, number>();
+  #placeholders = new Map<string, number>();
   #collapsed = new Set<string>();
   #status: RendererProjectGroupsStatus = {
     state: "probing",
@@ -127,8 +130,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     groupCount: 0,
     projectCount: 0,
     missingMembers: 0,
-    menu: "unavailable",
-    threadActions: "unavailable",
     lastError: null,
   };
   #observer: MutationObserver | null = null;
@@ -138,16 +139,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #queued = false;
   #hostFailureAt: number | null = null;
   #disposed = false;
-  #hasContextMenu = false;
-  #hasThreadActions = false;
-  #threadActionsUnsupported = false;
-  #lastThreadActionNotice = false;
-  #lastHasContextMenu = false;
-  #lastSection: HTMLElement | null = null;
-  #lastReprobedRevision = -1;
-  #nativeContextUnsupported = false;
-  #menuPending = false;
-  #lastMenuMode: RendererProjectGroupsStatus["menu"] = "unknown";
   #shownConfigWarnings = new Set<string>();
 
   constructor(options: RendererProjectGroupsOptions) {
@@ -160,14 +151,12 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#now = options.now ?? (() => new Date());
     this.#onStatus = options.onStatus;
     this.#bootstrapCatalog = readBootstrapCatalog(this.#window, this.#now);
-    this.#hider = new ProjectGroupHider(this.#document);
-    this.#threadMenu = new ProjectGroupThreadMenu(this.#document, this.#window);
-    this.#menu = new ProjectGroupMenuProxy({
-      document: this.#document,
-      window: this.#window,
-      onUnsupported: (reason) => this.#onNativeContextUnsupported(reason),
-      onFailure: (reason) => this.#recordError(new Error(reason)),
-      onClosed: () => this.#scheduleRefresh(0),
+    this.#layout = new ProjectGroupLayoutStyle(this.#document);
+    this.#headers = new ProjectGroupHeaders(this.#document, {
+      toggleGroup: (groupId) => this.#toggleGroup(groupId),
+      openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
+      openManager: (groupId) => this.#openManager(groupId),
+      showMoreProjects: () => this.#showMoreProjects(),
     });
     this.#picker = new ProjectGroupNewChatPicker({
       document: this.#document,
@@ -180,19 +169,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       catalog: () => this.#catalog,
       groups: () => this.#groups,
       save: (groups) => this.#saveGroups(groups),
-    });
-    this.#view = new ProjectGroupDomView(this.#document, {
-      toggleGroup: (groupId) => this.#toggleGroup(groupId),
-      openThread: (thread) => this.#openThread(thread),
-      openThreadMenu: (thread, anchor, nativeFirst) =>
-        void this.#openThreadMenu(thread, anchor, nativeFirst),
-      toggleThreadPin: (thread) => void this.#proxyThreadAction(thread, "pin"),
-      archiveThread: (thread) => void this.#proxyThreadAction(thread, "archive"),
-      openNewChat: (groupId, anchor) => this.#openNewChat(groupId, anchor),
-      openManager: (groupId) => this.#openManager(groupId),
-      expandProject: (projectId) => this.#expandProject(projectId),
-      showAll: (projectId) => this.#showAll(projectId),
-      showMoreProjects: () => this.#showMoreProjects(),
     });
     this.#installListeners();
     this.#observe();
@@ -219,8 +195,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         return;
       }
       const contract = probeProjectGroupsContract(section);
-      this.#hasContextMenu = contract.hasContextMenu;
-      this.#hasThreadActions = contract.hasThreadActions;
       if (!contract.ok) {
         this.#failOpen(`contract-missing:${contract.missing.join(",")}`);
         this.#scheduleRetry(2_000);
@@ -267,18 +241,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         return;
       }
 
-      const sectionChanged = section !== this.#lastSection;
-      const menuAppeared = contract.hasContextMenu && !this.#lastHasContextMenu;
-      const revisionChanged = this.#revision !== this.#lastReprobedRevision;
-      if (contract.hasContextMenu && (sectionChanged || menuAppeared || revisionChanged)) {
-        this.#menu.reprobe();
-        this.#nativeContextUnsupported = false;
-        this.#threadActionsUnsupported = false;
-        this.#lastMenuMode = "unknown";
-        this.#lastReprobedRevision = this.#revision;
-      }
-      this.#lastSection = section;
-      this.#lastHasContextMenu = contract.hasContextMenu;
       this.#hostFailureAt = null;
       this.#groups = config.groups;
       this.#revision = config.revision;
@@ -310,16 +272,14 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.removeEventListener("focus", this.#onFocus);
     this.#document.removeEventListener("visibilitychange", this.#onFocus);
     this.#window.removeEventListener("codexhost:renderer-adapter-status", this.#onFocus);
-    this.#window.removeEventListener(PROVIDER_ICON_LOADED_EVENT, this.#onFocus);
-    this.#hider.dispose();
-    this.#menu.dispose();
+    this.#picker.dispose();
+    this.#dialog.close();
+    this.#headers.dispose();
+    this.#layout.dispose();
     const target = this.#window as Window & {
       __codexhostProjectGroupsV1?: RendererProjectGroupsHandle;
     };
     if (target.__codexhostProjectGroupsV1 === this) delete target.__codexhostProjectGroupsV1;
-    this.#picker.dispose();
-    this.#dialog.close();
-    this.#view.dispose();
     delete this.#document.documentElement.dataset.codexhostProjectGroupsState;
   }
 
@@ -332,7 +292,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#window.addEventListener("focus", this.#onFocus);
     this.#document.addEventListener("visibilitychange", this.#onFocus);
     this.#window.addEventListener("codexhost:renderer-adapter-status", this.#onFocus);
-    this.#window.addEventListener(PROVIDER_ICON_LOADED_EVENT, this.#onFocus);
   }
 
   readonly #onWindowMessage = (event: MessageEvent): void => {
@@ -359,27 +318,26 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #observe(): void {
     const target = this.#document.body ?? this.#document.documentElement;
     this.#observer = new MutationObserver((mutations) => {
-      if (this.#menu.isOpen() || this.#menuPending) return;
-      if (
-        mutations.every((mutation) => {
-          if (insideOwnUi(mutation.target)) return true;
-          if (
-            mutation.target instanceof HTMLStyleElement &&
-            mutation.target.hasAttribute("data-codexhost-project-groups")
-          )
-            return true;
-          for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
-            if (insideOwnUi(node)) return true;
-            if (
-              node instanceof HTMLStyleElement &&
-              node.hasAttribute("data-codexhost-project-groups")
-            )
-              return true;
-          }
-          return false;
-        })
-      )
-        return;
+      // Ignore our own header/style DOM writes, but never ignore a batch that
+      // also removes native nodes: React may clear a list together with the
+      // foreign group headers inside it. Ignore unrelated transcript and portal
+      // mutations so streaming does not re-run the Host RPC on every frame.
+      const section = findProjectsSection(this.#document);
+      const relevant = mutations.some((mutation) => {
+        if (insideOwnUi(mutation.target)) return false;
+        if (section) {
+          const inSection =
+            mutation.target === section ||
+            section.contains(mutation.target) ||
+            mutation.target.contains(section);
+          if (!inSection) return false;
+        }
+        if (mutation.type === "attributes") return true;
+        return [...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) => !insideOwnUi(node),
+        );
+      });
+      if (!relevant) return;
       this.#scheduleRefresh();
     });
     this.#observer.observe(target, {
@@ -387,13 +345,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       subtree: true,
       attributes: true,
       attributeFilter: [
-        "data-app-action-sidebar-project-collapsed",
+        PROJECT_COLLAPSED_ATTRIBUTE,
         "data-app-action-sidebar-project-show-all",
-        "data-app-action-sidebar-thread-title",
-        "data-app-action-sidebar-thread-selected",
-        "data-app-action-sidebar-thread-active",
-        "data-app-action-sidebar-thread-pinned",
-        "data-app-action-sidebar-section-collapsed",
+        SECTION_COLLAPSED_ATTRIBUTE,
         "aria-label",
       ],
     });
@@ -420,13 +374,10 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     const catalog = this.#catalog;
     if (!catalog) return;
     const snapshots = readNativeProjectSnapshots(section);
-    const threadsByProject = new Map<string, readonly ThreadSnapshot[]>();
     const projectStatus = new Map<string, MachineConnectionState>();
     for (const snapshot of snapshots) {
       const unit = projectUnitForId(section, snapshot.projectId);
       const row = unit ? projectRowForUnit(unit) : null;
-      const list = unit ? projectListForUnit(unit) : null;
-      if (list) threadsByProject.set(snapshot.projectId, readThreadSnapshots(list));
       if (row) projectStatus.set(snapshot.projectId, statusIconState(row));
     }
     const index = buildProjectIndex(catalog, snapshots);
@@ -443,21 +394,18 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       groups: this.#groups,
       catalog,
       snapshots,
-      threadsByProject,
       machineState,
     });
-    const hidden = this.#views.flatMap((view) =>
-      view.projects.flatMap((project) =>
-        project.project.entry?.native ? [project.project.entry.projectId] : [],
-      ),
+    this.#nativeOrder = new Map(
+      snapshots.map((snapshot, position) => [snapshot.projectId, position]),
     );
-    this.#hider.apply(section, hidden);
-    this.#view.render(this.#views, {
-      collapsedGroups: this.#collapsed,
-      menuAvailable: this.#menuEnabled(),
-      threadActionsAvailable: this.#threadActionsEnabled(),
-    });
-    const missingMembers = this.#views.reduce((count, view) => count + view.unresolved.length, 0);
+    this.#placeholders = this.#computePlaceholders(section, this.#views);
+    this.#paint();
+    const missingMembers = this.#views.reduce(
+      (count, view) =>
+        count + view.projects.filter((project) => project.project.missing === "missing").length,
+      0,
+    );
     this.#status = {
       ...this.#status,
       state: "active",
@@ -471,132 +419,84 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
         ),
       ).size,
       missingMembers,
-      menu: this.#lastMenuMode === "unknown" ? this.#defaultMenuMode() : this.#lastMenuMode,
-      threadActions: this.#threadActionsEnabled() ? "native" : "unavailable",
     };
     this.#publishStatus();
+  }
+
+  #computePlaceholders(
+    section: HTMLElement,
+    views: readonly ProjectGroupView[],
+  ): Map<string, number> {
+    const placeholders = new Map<string, number>();
+    if (!findProjectsShowMoreButton(section)) return placeholders;
+    for (const view of views) {
+      let count = 0;
+      for (const project of view.projects) {
+        if (project.project.missing !== "not-mounted") continue;
+        const projectId = project.project.entry?.projectId ?? project.project.member.projectId;
+        if (projectRowOutsideSection(this.#document, section, projectId)) continue;
+        count += 1;
+      }
+      if (count > 0) placeholders.set(view.group.id, count);
+    }
+    return placeholders;
+  }
+
+  #layoutMembers(view: ProjectGroupView): ProjectGroupLayoutMember[] {
+    const catalog = this.#catalog;
+    if (!catalog) return [];
+    return view.projects
+      .flatMap((project) => {
+        const entry = project.project.entry;
+        if (!entry?.native) return [];
+        return [
+          {
+            member: {
+              projectId: entry.projectId,
+              label: entry.label,
+              machineName: projectMachineName(entry, catalog),
+              kind: entry.kind,
+            } satisfies ProjectGroupLayoutMember,
+            position: this.#nativeOrder.get(entry.projectId) ?? Number.MAX_SAFE_INTEGER,
+          },
+        ];
+      })
+      .sort((left, right) => left.position - right.position)
+      .map(({ member }) => member);
+  }
+
+  #paint(): void {
+    const layoutGroups: ProjectGroupLayoutGroup[] = [];
+    const items: ProjectGroupHeaderItem[] = this.#views.map((view) => {
+      const summary = projectGroupMachineSummary(view.machines);
+      // Follow the native DOM order so Desktop's own drag-to-reorder keeps
+      // working inside a group instead of being overridden by config order.
+      const members = this.#layoutMembers(view);
+      layoutGroups.push({
+        id: view.group.id,
+        name: view.group.name,
+        collapsed: this.#collapsed.has(view.group.id),
+        members,
+      });
+      return {
+        id: view.group.id,
+        name: view.group.name,
+        machineSummary: summary.text,
+        machineSummaryTitle: summary.title,
+        projectIds: members.map((member) => member.projectId),
+      };
+    });
+    this.#layout.apply(layoutGroups);
+    this.#headers.render(items, {
+      collapsedGroups: this.#collapsed,
+      placeholders: this.#placeholders,
+    });
   }
 
   #toggleGroup(groupId: string): void {
     if (this.#collapsed.has(groupId)) this.#collapsed.delete(groupId);
     else this.#collapsed.add(groupId);
-    this.#view.render(this.#views, {
-      collapsedGroups: this.#collapsed,
-      menuAvailable: this.#menuEnabled(),
-      threadActionsAvailable: this.#threadActionsEnabled(),
-    });
-  }
-
-  #openThread(thread: ThreadSnapshot): void {
-    const section = findProjectsSection(this.#document);
-    const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
-    if (!row) {
-      void this.refresh();
-      return;
-    }
-    const scroll = sidebarScrollContainer(this.#document);
-    const top = scroll?.scrollTop ?? null;
-    row.click();
-    if (top !== null)
-      restoreSidebarScrollAfterThreadClick({
-        document: this.#document,
-        window: this.#window,
-        target: row,
-        top,
-      });
-  }
-
-  #menuEnabled(): boolean {
-    return this.#hasThreadActions || this.#hasContextMenu;
-  }
-
-  #defaultMenuMode(): RendererProjectGroupsStatus["menu"] {
-    if (this.#hasThreadActions) return "proxy-menu";
-    if (this.#hasContextMenu) return "native-context";
-    return "unavailable";
-  }
-
-  #setMenuMode(mode: RendererProjectGroupsStatus["menu"]): void {
-    this.#lastMenuMode = mode;
-    this.#status = { ...this.#status, menu: mode };
-    this.#publishStatus();
-  }
-
-  #onNativeContextUnsupported(reason: string): void {
-    if (this.#nativeContextUnsupported) return;
-    this.#nativeContextUnsupported = true;
-    this.#recordError(new Error(reason));
-    this.#setMenuMode(this.#defaultMenuMode());
-  }
-
-  async #openThreadMenu(
-    thread: ThreadSnapshot,
-    anchor: HTMLElement,
-    nativeFirst = false,
-  ): Promise<void> {
-    if (this.#menu.isOpen() || this.#threadMenu.isOpen()) return;
-    const section = findProjectsSection(this.#document);
-    const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
-    if (!row) {
-      await this.refresh();
-      return;
-    }
-    if (nativeFirst && !this.#nativeContextUnsupported) {
-      this.#menuPending = true;
-      try {
-        if (await this.#menu.open(row, anchor, 600)) {
-          this.#setMenuMode("native-context");
-          return;
-        }
-        this.#nativeContextUnsupported = true;
-      } finally {
-        this.#menuPending = false;
-      }
-    }
-    const actions = collectNativeThreadMenuActions(row);
-    if (actions.length === 0) {
-      this.#setMenuMode("unavailable");
-      this.#notify("该对话没有可用的原生操作。");
-      return;
-    }
-    this.#threadMenu.open(anchor, actions, (action) => {
-      action.button.click();
-      this.#scheduleRefresh(200);
-    });
-    this.#setMenuMode("proxy-menu");
-  }
-
-  #threadActionsEnabled(): boolean {
-    return !this.#threadActionsUnsupported && this.#hasThreadActions;
-  }
-
-  #onThreadActionsUnsupported(reason: string): void {
-    if (this.#threadActionsUnsupported) return;
-    this.#threadActionsUnsupported = true;
-    this.#recordError(new Error(reason));
-    this.#status = { ...this.#status, threadActions: "unavailable" };
-    this.#publishStatus();
-    this.#view.render(this.#views, {
-      collapsedGroups: this.#collapsed,
-      menuAvailable: this.#menuEnabled(),
-      threadActionsAvailable: this.#threadActionsEnabled(),
-    });
-    if (!this.#lastThreadActionNotice) {
-      this.#lastThreadActionNotice = true;
-      this.#notify("该 Desktop 版本无法直接代理置顶/归档，已隐藏快捷按钮。");
-    }
-  }
-
-  async #proxyThreadAction(thread: ThreadSnapshot, action: "pin" | "archive"): Promise<void> {
-    const section = findProjectsSection(this.#document);
-    const row = section ? findNativeThreadRow(section, thread.threadId, thread.hostId) : null;
-    const button = row ? nativeThreadActionButton(row, action) : null;
-    if (!button) {
-      this.#onThreadActionsUnsupported("native-thread-action-missing");
-      return;
-    }
-    button.click();
-    this.#scheduleRefresh(200);
+    this.#paint();
   }
 
   #notify(message: string): void {
@@ -688,24 +588,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     this.#scheduleRefresh(200);
   }
 
-  #expandProject(projectId: string): void {
-    const section = findProjectsSection(this.#document);
-    if (!section) return;
-    const unit = projectUnitForId(section, projectId);
-    const button = unit ? projectRowForUnit(unit) : null;
-    if (!button) return;
-    if (sectionCollapsed(section)) {
-      section.querySelector<HTMLElement>("[data-app-action-sidebar-section-toggle]")?.click();
-      this.#window.setTimeout(() => {
-        button.click();
-        this.#scheduleRefresh(120);
-      }, 120);
-      return;
-    }
-    button.click();
-    this.#scheduleRefresh(120);
-  }
-
   #showMoreProjects(): void {
     const section = findProjectsSection(this.#document);
     const button = section ? findProjectsShowMoreButton(section) : null;
@@ -714,20 +596,6 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       return;
     }
     button.click();
-    this.#scheduleRefresh(300);
-  }
-
-  #showAll(projectId: string): void {
-    const section = findProjectsSection(this.#document);
-    if (!section) return;
-    const unit = projectUnitForId(section, projectId);
-    if (!unit) return;
-    const toggle = showAllToggle(unit);
-    if (!toggle) {
-      this.#notify("该项目没有原生的「查看全部」控制。");
-      return;
-    }
-    toggle.click();
     this.#scheduleRefresh(300);
   }
 
@@ -745,14 +613,14 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #failOpen(reason: string): void {
     this.#dialog.close();
     this.#picker.close();
-    this.#hider.clear();
-    this.#view.dispose();
+    this.#headers.dispose();
+    this.#layout.dispose();
+    this.#placeholders.clear();
     this.#views = [];
     this.#status = {
       ...this.#status,
       state: "disabled",
       reason,
-      menu: "unavailable",
     };
     this.#publishStatus();
   }
