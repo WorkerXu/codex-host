@@ -321,7 +321,9 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
 
   const contextFor = async (composer: Element): Promise<ProjectMirrorContext | null> => {
     const cached = contexts.get(composer);
-    if (cached && Date.now() - cached.at < CONTEXT_TTL_MS) return cached.value;
+    // A null snapshot may predate the project selection that opened this
+    // Composer; never let it hide the entry for the whole TTL.
+    if (cached?.value && Date.now() - cached.at < CONTEXT_TTL_MS) return cached.value;
     const value = await readContext();
     if (!disposed) contexts.set(composer, { value, at: Date.now() });
     return value;
