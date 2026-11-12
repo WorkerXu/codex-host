@@ -63,6 +63,7 @@ describe("delegation Skill installation", () => {
     ["v8 Skill that ran codexhost from PATH", "codexhost-delegation-v8.md"],
     ["v9 Skill without child-session name guidance", "codexhost-delegation-v9.md"],
     ["v10 Skill before cross-machine delegation guidance", "codexhost-delegation-v10.md"],
+    ["upstream v0.18 beta v11 Skill", "codexhost-delegation-upstream-v11.md"],
   ])("updates the %s", async (_name, fixture) => {
     const root = await home();
     const shipped = await readFile(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8");
@@ -100,7 +101,7 @@ describe("delegation Skill installation", () => {
   });
 
   it("routes natural agent requests and points execution to the authoritative help", () => {
-    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 11");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 12");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("@agent) to independently perform a task");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("session's content, progress, or results");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("Not for recapping the current conversation");
