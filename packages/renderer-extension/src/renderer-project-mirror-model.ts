@@ -25,9 +25,10 @@ export function isNameOnlyProject(
   if (!defaultProjectParent || project.rootPaths.length !== 1) return false;
   const root = project.rootPaths[0];
   if (!root) return false;
-  const parent = root.slice(0, Math.max(0, root.lastIndexOf("/")));
-  const basename = root.slice(root.lastIndexOf("/") + 1);
-  if (parent !== defaultProjectParent.replace(/\/+$/u, "")) return false;
+  const separator = Math.max(root.lastIndexOf("/"), root.lastIndexOf("\\"));
+  const parent = separator >= 0 ? root.slice(0, separator) : root;
+  const basename = separator >= 0 ? root.slice(separator + 1) : root;
+  if (parent !== defaultProjectParent.replace(/[\\/]+$/u, "")) return false;
   const expected = sanitizeMirrorDirectoryName(project.name);
   if (basename === expected) return true;
   return /^\d+$/u.test(basename.slice(expected.length + 1)) && basename.startsWith(`${expected} `);

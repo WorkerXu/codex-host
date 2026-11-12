@@ -127,24 +127,37 @@ function containsExtensionMenu(element: HTMLElement): boolean {
 export function findNativeModelMenu(document: Document, trigger: HTMLElement): HTMLElement | null {
   const triggerRect = trigger.getBoundingClientRect();
   const candidates: HTMLElement[] = [];
+  const near = (element: HTMLElement): boolean => {
+    const rect = element.getBoundingClientRect();
+    return (
+      Math.abs(rect.left - triggerRect.left) <= 900 && Math.abs(rect.top - triggerRect.top) <= 900
+    );
+  };
+  const acceptable = (element: HTMLElement): boolean =>
+    !containsExtensionMenu(element) &&
+    !element.closest("[data-codexhost-cross-host-model-menu]") &&
+    visible(element) &&
+    near(element) &&
+    element.querySelectorAll('button, [role="menuitem"], [role="option"]').length >= 2;
   for (const selector of MENU_CANDIDATES) {
     for (const element of document.querySelectorAll<HTMLElement>(selector)) {
-      if (
-        containsExtensionMenu(element) ||
-        element.closest("[data-codexhost-cross-host-model-menu]") ||
-        !visible(element)
-      )
-        continue;
-      const rect = element.getBoundingClientRect();
-      const horizontal = Math.abs(rect.left - triggerRect.left);
-      const vertical = Math.abs(rect.top - triggerRect.top);
-      if (horizontal > 900 || vertical > 900) continue;
-      if (element.querySelectorAll('button, [role="menuitem"], [role="option"]').length < 2)
-        continue;
-      candidates.push(element);
+      if (acceptable(element)) candidates.push(element);
     }
   }
-  return candidates.at(-1) ?? null;
+  if (candidates.length === 0) {
+    // Custom popovers without Radix/ARIA landmarks: keep floating layers near
+    // the trigger that contain interactive rows.
+    for (const element of document.body.querySelectorAll<HTMLElement>("div")) {
+      const style = document.defaultView?.getComputedStyle(element);
+      if (style?.position !== "fixed" && style?.position !== "absolute") continue;
+      if (Number(style?.zIndex ?? 0) < 20) continue;
+      if (acceptable(element)) candidates.push(element);
+    }
+  }
+  const outer = candidates.filter(
+    (candidate) => !candidates.some((other) => other !== candidate && other.contains(candidate)),
+  );
+  return (outer.length > 0 ? outer : candidates).at(-1) ?? null;
 }
 
 /** Wait for the native menu React mounts after the trigger click. */

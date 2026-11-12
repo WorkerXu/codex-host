@@ -146,14 +146,18 @@ async function upsertRegistry(
   }
 }
 
-async function loadCrossHostCatalog(
-  catalog: DesktopProjectsCatalog,
-): Promise<CrossHostModelCatalog> {
+let crossHostCache: { key: string; at: number; value: Promise<CrossHostModelCatalog> } | null =
+  null;
+
+function loadCrossHostCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostModelCatalog> {
   const routing = window.__codexhostHostRoutingV1;
   const hostIds = (routing?.knownHostIds?.() ?? []).filter(
     (hostId) => hostId !== "local" && hostId !== "durable" && hostId.includes(":"),
   );
-  return loadCrossHostModelCatalog({
+  const key = `${hostIds.join("|")}\u0000${catalog.codexManagedRemoteConnections.length}`;
+  if (crossHostCache && crossHostCache.key === key && Date.now() - crossHostCache.at < 15_000)
+    return crossHostCache.value;
+  const value = loadCrossHostModelCatalog({
     hostIds,
     connections: catalog.codexManagedRemoteConnections,
     isOnline: (hostId) => routing?.forHost(hostId) != null,
@@ -163,6 +167,11 @@ async function loadCrossHostCatalog(
       return route.manager.sendRequest(method, params);
     },
   });
+  crossHostCache = { key, at: Date.now(), value };
+  value.catch(() => {
+    if (crossHostCache?.value === value) crossHostCache = null;
+  });
+  return value;
 }
 
 async function listAppProjects(
@@ -386,6 +395,10 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       if (!existingProjectId) {
         if ((await directoryState(route, chosenPath)) === "missing") {
           await services.createDirectory({ hostId, path: chosenPath });
+          if ((await directoryState(route, chosenPath)) !== "directory") {
+            showProjectMirrorNotice(document, "远程目录创建失败", "error");
+            return;
+          }
         }
         const created = await services.createRemote({
           appearance: null,
@@ -417,7 +430,9 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
             metadata: {},
             idempotencyKey: projectId,
           })
-          .catch(() => undefined);
+          .catch((error: unknown) =>
+            console.warn("codexhost project mirror: project/create failed", error),
+          );
       }
 
       const now = new Date().toISOString();

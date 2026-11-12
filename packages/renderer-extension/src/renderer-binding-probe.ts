@@ -284,6 +284,12 @@ type ApplyAdapterAgent = (
   reasoningEffort?: string | null,
 ) => boolean;
 
+type ApplyCodexModel = (
+  composer: Element,
+  model: HarnessModelRef,
+  reasoningEffort?: string | null,
+) => boolean;
+
 export interface RendererBindingProbeApi {
   remoteConnections(request: unknown): Promise<unknown>;
   status(): RendererBindingProbeStatus;
@@ -294,6 +300,7 @@ export interface RendererBindingProbeApi {
     dispose?: () => void,
     applyAgent?: ApplyAdapterAgent,
     modelControl?: RendererModelClient | null,
+    applyCodexModel?: ApplyCodexModel,
   ): void;
   dispose(): void;
 }
@@ -782,6 +789,7 @@ export function installRendererBindingProbe(
   let adapterDispose: (() => void) | null = null;
   let applyAdapterAgent: ApplyAdapterAgent | null = null;
   let modelControl: RendererModelClient | null = null;
+  let applyCodexModel: ApplyCodexModel | null = null;
   const activeModelHostId = (composer?: Element): string | null => {
     if (!modelControl) return null;
     return modelControl.currentHostId ? modelControl.currentHostId(composer) : "local";
@@ -1135,15 +1143,14 @@ export function installRendererBindingProbe(
       window.__codexhostProjectMirrorV1?.consumePending({
         composer: mounted.composer,
         hostId,
-        applyModel: (composer, modelId, reasoningEffort) =>
-          applyAdapterAgent?.(
-            "codex",
-            { id: modelId } as HarnessModelRef,
-            undefined,
-            undefined,
-            composer,
-            reasoningEffort,
-          ) ?? false,
+        applyModel: (composer, modelId, reasoningEffort) => {
+          const model = { id: modelId } as HarnessModelRef;
+          if (applyCodexModel) return applyCodexModel(composer, model, reasoningEffort);
+          return (
+            applyAdapterAgent?.("codex", model, undefined, undefined, composer, reasoningEffort) ??
+            false
+          );
+        },
       });
     }
     if (mounted.control.usage) {
@@ -3517,12 +3524,13 @@ export function installRendererBindingProbe(
         ...(permissionModeId ? { permissionModeId } : {}),
       };
     },
-    setAdapter(status, dispose, applyAgent, nextModelControl) {
+    setAdapter(status, dispose, applyAgent, nextModelControl, nextApplyCodexModel) {
       usageNotificationDispose();
       adapterDispose?.();
       adapterDispose = dispose ?? null;
       applyAdapterAgent = applyAgent ?? null;
       modelControl = nextModelControl ?? null;
+      applyCodexModel = nextApplyCodexModel ?? null;
       adapterStatus = status;
       publishConnectionStatus();
       const installedModelControl = modelControl;

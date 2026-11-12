@@ -170,8 +170,8 @@ export function createCrossHostModelSection(
       if (row.kind === "machine") {
         const button = rowButton(document, 0);
         button.setAttribute("aria-label", `${row.label}${machineStatusLabel(row.state)}`);
-        button.disabled = row.state === "offline";
-        if (row.state === "offline") button.setAttribute("aria-disabled", "true");
+        button.disabled = row.state !== "ready";
+        if (row.state !== "ready") button.setAttribute("aria-disabled", "true");
         const dot = document.createElement("span");
         style(dot, {
           width: "6px",
