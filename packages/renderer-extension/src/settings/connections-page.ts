@@ -55,7 +55,9 @@ export interface RendererConnectionDiagnostics {
   /** With a Host, wait for existing diagnostics and start a fresh post-mutation inspection. */
   refresh(hostId?: string): Promise<void>;
   /** Apply an already-read native connection catalog so deleted Hosts stop being reported. */
-  reconcileConnections?(connections: readonly { readonly hostId: string }[]): void;
+  reconcileConnections?(
+    connections: readonly { readonly hostId: string; readonly displayName?: string }[],
+  ): void;
   openWebUi?(hostId: string, agent: ExternalRendererAgent): Promise<void>;
   installation?(
     hostId: string,

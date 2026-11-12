@@ -16,6 +16,10 @@ function errorText(error: unknown): string {
   return text.length > 1024 ? `${text.slice(0, 1021)}...` : text;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Peer names, Host IDs and live Harness catalogs for the `#` picker. The
  * Host Runtime owns peers.json and the SSH transport, so the Renderer never
@@ -105,13 +109,17 @@ export class DelegationPeerCatalogService {
               environment: this.#environment,
               peer: { name, ...entry, linkHostId: entry.hostIds[0] ?? name },
               route: "/v1/harness/list",
-              body: {},
+              body: { includeAvailability: true },
               timeoutMs: this.#catalogTimeoutMs,
               ...(this.#spawnImpl ? { spawnImpl: this.#spawnImpl } : {}),
             });
-            const harnesses = Array.isArray(result.harnesses)
+            const listed = Array.isArray(result.harnesses)
               ? result.harnesses.filter((value): value is string => typeof value === "string")
               : [];
+            const availability = isRecord(result.availability) ? result.availability : undefined;
+            const harnesses = availability
+              ? listed.filter((harnessId) => availability[harnessId] === "ready")
+              : listed;
             this.#harnessCache.set(name, harnesses);
             return {
               name,

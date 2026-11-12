@@ -128,6 +128,37 @@ describe("DelegationPeerCatalogService", () => {
     expect(fake.calls).toHaveLength(4);
   });
 
+  it("drops Harnesses the peer reports as not installed or unavailable", async () => {
+    const env = await environment();
+    const fake = fakeSpawn(({ ssh }) =>
+      ssh === "mac"
+        ? {
+            code: 0,
+            stdout: `${JSON.stringify({
+              harnesses: ["codex", "grok", "qwen"],
+              availability: { codex: "ready", grok: "notInstalled", qwen: "unavailable" },
+            })}\n`,
+          }
+        : {
+            code: 0,
+            stdout: `${JSON.stringify({
+              harnesses: ["grok"],
+              availability: { grok: "notInstalled" },
+            })}\n`,
+          },
+    );
+    const service = new DelegationPeerCatalogService(env, { spawnImpl: fake.spawnImpl });
+    const result = await service.listPeers();
+    expect(result.peers.find((peer) => peer.name === "mac")).toMatchObject({
+      state: "ready",
+      harnesses: ["codex"],
+    });
+    expect(result.peers.find((peer) => peer.name === "colab")).toMatchObject({
+      state: "ready",
+      harnesses: [],
+    });
+  });
+
   it("keeps known Harnesses when a previously reachable peer goes offline", async () => {
     const env = await environment();
     let offline = false;

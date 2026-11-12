@@ -1,8 +1,6 @@
 import { stripDelegationMentions, type DelegationMention } from "@codexhost/shared-contracts";
 import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
 
-import { DELEGATION_SKILL_NAME } from "./delegation-skill.js";
-
 /** Native Codex `skill` UserInput pointing at the managed delegation Skill. */
 export interface DelegationSkillReference {
   name: string;
@@ -11,6 +9,15 @@ export interface DelegationSkillReference {
 
 function code(value: string): string {
   return `\`${value.replace(/[`\n\r]/gu, "")}\``;
+}
+
+function shellArgument(value: string): string {
+  return /^[A-Za-z0-9._:/@%+=,-]+$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function delegationCommand(mention: DelegationMention): string {
+  const host = mention.hostId ? ` --host ${shellArgument(mention.hostId)}` : "";
+  return `codexhost delegate start --harness ${shellArgument(mention.harnessId)}${host} --task-name "<short-name>" --task "<task>" --watch true --format compact`;
 }
 
 function describeTargets(mentions: readonly DelegationMention[]): string {
@@ -26,16 +33,21 @@ function describeTargets(mentions: readonly DelegationMention[]): string {
 /**
  * Explicit, model-facing delegation request derived from `#` mention chips.
  * The target Harness and optional machine are resolved by the Host, so the
- * model does not guess them.
+ * model does not guess them, and the exact command avoids a help/discovery
+ * round trip before the delegation starts.
  */
 export function delegationMentionInstruction(mentions: readonly DelegationMention[]): string {
-  const plural = mentions.length > 1;
+  const lines = mentions.map((mention) => delegationCommand(mention));
   return [
     `[codexhost delegation] The user mentioned ${describeTargets(mentions)}.`,
-    `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
-    "with `delegate start --harness <id>` through the executable in CODEXHOST_CLI_PATH, instead of doing the task yourself.",
-    "When a target names a machine, pass its `--host` value; otherwise omit `--host`.",
-  ].join(" ");
+    "Execute the matching command below directly; do not run `--help` or `peer list` first.",
+    "Replace `<task>` with the user's request and `<short-name>` with a 1-120 character task name.",
+    "Keep `--watch true`: the Host notifies this Thread once when the child stops, so do not poll or loop on `thread wait`.",
+    "Do not do the task yourself.",
+    "```sh",
+    ...lines,
+    "```",
+  ].join("\n");
 }
 
 function appendInstruction(text: string, mentions: readonly DelegationMention[]): string {

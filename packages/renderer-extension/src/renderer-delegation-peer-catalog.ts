@@ -1,4 +1,7 @@
-import type { DelegationPeerCatalog } from "@codexhost/shared-contracts";
+import type {
+  DelegationPeerCatalog,
+  DelegationPeerCatalogEntry,
+} from "@codexhost/shared-contracts";
 
 import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
 
@@ -21,15 +24,17 @@ export function delegationPeerTargets(
   catalog: DelegationPeerCatalog | null,
   pluginFor: (harnessId: string) => HarnessPluginDescriptor | undefined,
   labelFor: (harnessId: string, plugin?: HarnessPluginDescriptor) => string,
+  displayNameForPeer?: (peer: DelegationPeerCatalogEntry) => string | undefined,
 ): RendererDelegationPeerTargets {
   if (!catalog) return { targets: [], notices: [] };
   const targets: RendererDelegationTarget[] = [];
   const notices: RendererDelegationPeerNotice[] = [];
   for (const peer of catalog.peers) {
+    const hostLabel = displayNameForPeer?.(peer) ?? peer.name;
     if (peer.harnesses.length === 0) {
       if (peer.state !== "ready") {
         notices.push({
-          name: peer.name,
+          name: hostLabel,
           reason: peer.error ?? "Machine is unreachable",
         });
       }
@@ -42,7 +47,7 @@ export function delegationPeerTargets(
         label: labelFor(harnessId, plugin),
         ...(plugin ? { plugin } : {}),
         hostId: peer.name,
-        hostLabel: peer.name,
+        hostLabel,
         ...(peer.state === "ready"
           ? {}
           : { disabledReason: peer.error ?? "Machine is unreachable" }),

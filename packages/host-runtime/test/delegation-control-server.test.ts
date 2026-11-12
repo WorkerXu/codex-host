@@ -300,4 +300,38 @@ describe("delegation control server", () => {
       await unsupported.close();
     }
   });
+
+  it("forwards Harness availability requests", async () => {
+    const listHarnesses = vi.fn(async () => ({
+      harnesses: ["codex" as const],
+      availability: { codex: "ready" as const },
+    }));
+    const server = await startDelegationControlServer({
+      token,
+      api: {
+        listHarnesses,
+        inspect: vi.fn(),
+        start: vi.fn(),
+        send: vi.fn(),
+        cancel: vi.fn(),
+        read: vi.fn(),
+        wait: vi.fn(),
+        list: vi.fn(),
+      },
+    });
+    try {
+      const response = await fetch(
+        `${server.endpoint}/v1/harness/list`,
+        authorized({ includeAvailability: true }),
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        harnesses: ["codex"],
+        availability: { codex: "ready" },
+      });
+      expect(listHarnesses).toHaveBeenCalledWith({ includeAvailability: true });
+    } finally {
+      await server.close();
+    }
+  });
 });

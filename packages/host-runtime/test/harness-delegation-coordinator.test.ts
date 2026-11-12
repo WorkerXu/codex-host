@@ -385,6 +385,27 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
+  it("lists Harness availability only when requested", async () => {
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi.spyOn(adapter, "inspect");
+    const value = await fixture(adapter);
+    try {
+      await expect(value.coordinator.listHarnesses()).resolves.toEqual({
+        harnesses: ["codex", "pi"],
+      });
+      expect(inspect).not.toHaveBeenCalled();
+      await expect(value.coordinator.listHarnesses({ includeAvailability: true })).resolves.toEqual(
+        {
+          harnesses: ["codex", "pi"],
+          availability: { codex: "ready", pi: "ready" },
+        },
+      );
+      expect(inspect).toHaveBeenCalledWith({ purpose: "availability" });
+    } finally {
+      await value.close();
+    }
+  });
+
   it("creates a normal writable child Thread and publishes it only after initial delivery", async () => {
     const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"));
     const inspect = vi.spyOn(adapter, "inspect");

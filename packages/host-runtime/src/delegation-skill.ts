@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 12;
+const SKILL_VERSION = 13;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
@@ -24,6 +24,10 @@ const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
   "242a07e7521949e5d651102f6b353c48e7575a679e3403c5c5db295abad9896b",
   // Upstream v0.18 beta v11, a different text that shares the version number.
   "e762e3dea2633656dec27ea568b95f005e7f5c13a21b029dd149813f49c1330c",
+  // v11 cross-host guidance on this branch, before the direct-command guidance.
+  "51ca77e7c3c91c4706822dc9c11e6f0cdb0ab5d8497c745b691cc40b72fd2886",
+  // v12, before the direct-command and watch-first guidance.
+  "dca27d38f5cc09e24638756d7131cb5388ed72af96db5f1e474f8b2ef3308d61",
 ];
 
 export const CODEXHOST_DELEGATION_SKILL = `---
@@ -40,8 +44,8 @@ description: >
 
 # Execute the task
 
-Run the CLI through the executable in CODEXHOST_CLI_PATH. Before acting, run
-help with the form for your shell:
+Run the CLI through the executable in CODEXHOST_CLI_PATH. If you need command
+details, run help with the form for your shell:
 
 - POSIX: \`"$CODEXHOST_CLI_PATH" delegate --help\`
 - PowerShell: \`& $env:CODEXHOST_CLI_PATH delegate --help\`
@@ -52,10 +56,12 @@ user to add CODEXHOST_CLI_PATH to shell_environment_policy.include_only.
 Commands shown by help and in \`next\` begin with \`codexhost\`; run them the
 same way.
 
-Use CLI help as the authoritative source for commands and behavior. Consult
-command-specific help for options and the Harness listing command when the
-target is unknown. Prefer compact output when supported, and use its task links
-directly for subsequent commands.
+A delegation mention may contain complete \`codexhost delegate start\` commands.
+Execute them directly, replacing \`<task>\` and \`<short-name>\`; do not run
+\`--help\` or \`peer list\` first. Otherwise, use CLI help as the authoritative
+source for commands and behavior, and consult the Harness listing command when
+the target is unknown. Prefer compact output when supported, and use its task
+links directly for subsequent commands.
 
 ## Cross-machine targets
 
@@ -97,6 +103,11 @@ user’s request and the task:
 - watch it, so the Host notifies this Thread once when the watched Thread stops
   and no waiting or polling is needed meanwhile;
 - leave it running in the background.
+
+For a new delegation, prefer \`delegate start --watch true\` and then end this
+Turn. Do not poll with repeated \`thread wait\`; the watch notification starts a
+new Turn. Use a bounded wait only when the user asked to wait or watch
+registration is unavailable.
 
 A watch notification reports execution state only. Read the Thread before
 judging or reporting its work.
