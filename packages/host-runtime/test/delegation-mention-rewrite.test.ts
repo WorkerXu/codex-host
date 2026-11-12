@@ -61,4 +61,14 @@ describe("delegation mention rewrite", () => {
     expect(text).not.toContain("`codexhost delegate");
     expect(rewriteDelegationMentionText("plain")).toBe("plain");
   });
+
+  it("includes the machine and --host for a remote mention", () => {
+    const remote =
+      "[@Grok](subagent://codexhost.grok?host=oracle-sg) and [@Claude Code](subagent://codexhost.claude-code)";
+    const text = rewriteDelegationMentionText(remote);
+    expect(text).toContain("@Grok on machine `oracle-sg`");
+    expect(text).toContain("Harness `grok`, pass `--host oracle-sg`");
+    expect(text).toContain("@Claude Code (Harness `claude-code`)");
+    expect(text).toContain("When a target names a machine");
+  });
 });
