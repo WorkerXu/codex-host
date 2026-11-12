@@ -7,9 +7,9 @@ import { DelegationControlError, type DelegationThreadSnapshot } from "./delegat
 import { readPeerConfig, resolvePeerTarget } from "./peer-config.js";
 import { requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
-const DEFAULT_CATALOG_TIMEOUT_MS = 8_000;
+const DEFAULT_CATALOG_TIMEOUT_MS = 15_000;
 const DEFAULT_READ_TIMEOUT_MS = 15_000;
-const DEFAULT_CACHE_TTL_MS = 30_000;
+const DEFAULT_CACHE_TTL_MS = 60 * 60_000;
 
 function errorText(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -32,7 +32,7 @@ export class DelegationPeerCatalogService {
   readonly #cacheTtlMs: number;
   readonly #now: () => number;
   readonly #spawnImpl: PeerSpawn | undefined;
-  #cache: { expiresAt: number; value: DelegationPeerCatalog } | undefined;
+  #cache: { loadedAt: number; value: DelegationPeerCatalog } | undefined;
   #inflight: Promise<DelegationPeerCatalog> | undefined;
   /** Last successful Harness list, so an offline machine keeps greyed-out rows. */
   readonly #harnessCache = new Map<string, string[]>();
@@ -56,8 +56,18 @@ export class DelegationPeerCatalogService {
   }
 
   async listPeers(input: { refresh?: boolean | undefined } = {}): Promise<DelegationPeerCatalog> {
-    const now = this.#now();
-    if (!input.refresh && this.#cache && now < this.#cache.expiresAt) return this.#cache.value;
+    if (this.#cache && !input.refresh) {
+      const stale = this.#now() - this.#cache.loadedAt >= this.#cacheTtlMs;
+      if (stale) {
+        // Stale-while-revalidate: the menu gets the cached catalog immediately.
+        void this.#refresh().catch(() => undefined);
+      }
+      return this.#cache.value;
+    }
+    return this.#refresh();
+  }
+
+  #refresh(): Promise<DelegationPeerCatalog> {
     if (this.#inflight) return this.#inflight;
     const request = this.#load().finally(() => {
       if (this.#inflight === request) this.#inflight = undefined;
@@ -124,6 +134,7 @@ export class DelegationPeerCatalogService {
             return {
               name,
               hostIds: entry.hostIds,
+              ssh: entry.ssh,
               state: "ready",
               harnesses,
             };
@@ -131,6 +142,7 @@ export class DelegationPeerCatalogService {
             return {
               name,
               hostIds: entry.hostIds,
+              ssh: entry.ssh,
               state: "unreachable",
               harnesses: this.#harnessCache.get(name) ?? [],
               error: errorText(error),
@@ -142,7 +154,7 @@ export class DelegationPeerCatalogService {
       peers,
       ...(config.self ? { self: { hostIds: config.self.hostIds } } : {}),
     };
-    this.#cache = { expiresAt: this.#now() + this.#cacheTtlMs, value };
+    this.#cache = { loadedAt: this.#now(), value };
     return value;
   }
 }

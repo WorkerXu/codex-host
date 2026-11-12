@@ -17,6 +17,8 @@ export const delegationPeerCatalogEntrySchema = z
     /** Peer name used in --host and in a mention's hostId. */
     name: z.string().min(1).max(256),
     hostIds: z.array(z.string().min(1).max(1024)),
+    /** SSH alias from peers.json, used only to match a Desktop display name. */
+    ssh: z.string().min(1).max(256).optional(),
     state: delegationPeerStateSchema,
     /** Harness IDs reported by the peer's `harness list`. */
     harnesses: z.array(z.string().min(1).max(256)),

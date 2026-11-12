@@ -41,7 +41,6 @@ import type { RendererSettingsLocale } from "./settings/localization.js";
 const MENU_ATTRIBUTE = "data-codexhost-delegation-mention-menu";
 const STYLE_ATTRIBUTE = "data-codexhost-delegation-mention-style";
 const MENU_MAX_HEIGHT = 320;
-const SOURCE_TAG = "codexhost";
 // Class lists mirror Desktop's composer suggestion menu (measured from the
 // native `@` menu), so density, colors and light/dark theming follow Desktop.
 const MENU_CLASS =
@@ -127,6 +126,18 @@ export function filterDelegationTargets(
   return scored
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(({ target }) => target);
+}
+
+/** Keep machine failures short and localized instead of exposing SSH errors. */
+export function delegationUnavailableReason(
+  reason: string | undefined,
+  locale: RendererSettingsLocale,
+): string {
+  const text = (reason ?? "").toLowerCase();
+  if (/timed?\s*out|timeout|deadline|超时/u.test(text)) {
+    return locale === "zh-CN" ? "连接超时" : "Connection timed out";
+  }
+  return locale === "zh-CN" ? "连接失败" : "Connection failed";
 }
 
 /** Keep machine groups contiguous while preserving the local group first. */
@@ -422,18 +433,14 @@ export function installRendererDelegationMention(
       : `${Math.min(view.innerHeight - height - VIEWPORT_MARGIN, rect.bottom + MENU_GAP)}px`;
   };
 
-  /** Every section carries a quiet source tag, like Desktop's "Personal". */
+  /** Native-style section heading; no source/project tag. */
   const sectionHeader = (title: string): HTMLElement => {
     const header = ownerDocument.createElement("div");
-    header.className = `${HEADER_CLASS} flex items-center justify-between gap-2`;
+    header.className = HEADER_CLASS;
     const label = ownerDocument.createElement("span");
     label.className = "min-w-0 truncate";
     label.textContent = title;
-    const source = ownerDocument.createElement("span");
-    source.className = "shrink-0 text-sm text-codex-description";
-    source.setAttribute("data-codexhost-source", "");
-    source.textContent = SOURCE_TAG;
-    header.append(label, source);
+    header.append(label);
     return header;
   };
 
@@ -506,7 +513,7 @@ export function installRendererDelegationMention(
         const content = rowContent(
           createRendererAgentIcon(target.agent, 16, ownerDocument, target.plugin),
           target.label,
-          target.disabledReason ?? "",
+          target.disabledReason ? delegationUnavailableReason(target.disabledReason, locale) : "",
         );
         rows.push(
           target.disabledReason
@@ -516,8 +523,12 @@ export function installRendererDelegationMention(
       }
     }
     for (const notice of peerNotices) {
-      rows.push(sectionHeader(notice.name));
-      rows.push(disabledRow(rowContent(null, notice.name, notice.reason)));
+      // One grey row per unavailable machine; a separate heading would repeat it.
+      rows.push(
+        disabledRow(
+          rowContent(null, notice.name, delegationUnavailableReason(notice.reason, locale)),
+        ),
+      );
     }
     if (commands) {
       // Harnesses that report the distinction get separate Skills; everything
