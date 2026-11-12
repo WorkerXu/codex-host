@@ -79,7 +79,7 @@ appHost, appServices, setAppHost, setAppServices
    - 已有对话中触发为 `disabled`，只有草稿/新对话可打开，天然满足“只在新对话显示”。
 4. **Harness 列表**。每台机器调用目标 Host 的 `codexhost/harness/plugins/list`，过滤 `kind === "usage"`，并始终把 Codex 放在第一位；机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`），离线置灰。
 5. **预选 Harness**。选中后仍复用现有 draft agent switch（`switchComposerAgent`）：等目标 Host 的 availability 就绪，切到该 Harness，模型由 `inspectHarness` 的默认值/新对话偏好自动应用；不再写 `modelSettings.model`。
-6. **诊断**。`window.__codexhostProjectMirrorV1.status()` 返回 `{pickerDetected, projectEligible, peersLoaded, lastError, projectSource, machineCount}`，用于区分“入口没触发 / 不是 name-only 项目 / 对端目录没加载”。
+6. **诊断**。`window.__codexhostProjectMirrorV1.status()` 返回 `{pickerDetected, projectEligible, peersLoaded, lastError, projectSource, projectReason, machineCount}`，用于区分“入口没触发 / 不是 name-only 项目 / 对端目录没加载”。
 
 ---
 
