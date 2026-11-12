@@ -67,3 +67,11 @@ Desktop 发送带图片的消息时，请求里既有 `localImage` 条目，也�
 - 只认附件清单中的绝对路径；用户在请求正文里写的路径不算附件。附件清单必须位于消息开头（前面只允许空行），遇到单独成行的 `## My request:` 时结束；纯图片消息没有该标题时，清单延伸到文本末尾。清单前有其他文字时不读取附件。
 - 不读取、不复制图片。剪贴板截图通常保存在系统临时目录，文件被清理后缩略图无法加载。
 - 远程外部会话的图片路径位于远程主机，其缩略图显示尚未单独验证。
+
+### 远程外部会话的附件上传
+
+Desktop 在本机写附件清单，路径是 Desktop 所在机器的路径；远程主机上的 Harness 读不到。Desktop 26.1027 起在主进程准备并提交消息（`main-process-rpc`），Renderer 只在 `getTurnCoordinator().sendMessage` 的准备回调里看到准备好的请求，因此上传放在这里（`renderer-rpc-remote-attachments.ts`）：
+
+- 只处理远程 Host 上 `modelProvider === "codexhost"` 的 Thread；官方 Thread 与本机 Thread 不动。
+- 收集 `steer.input` 与 `start.request.input` 中附件清单里的全部绝对路径（图片与普通文件，含 ` (lines a-b)` 范围）以及 `localImage` 路径，逐个经原生 `uploadLocalFileAttachments`（与原生远程 Thread 相同的复制，落在远端 `~/.codex/attachments/<uuid>/`）上传，再把清单与 `localImage` 指向远端副本。用户请求正文中的路径不改。
+- 同一次提交先按 `steer` 再按 `start` 准备，同一路径只上传一次。原生上传读不到的路径（已经是远端路径）保持原样。

@@ -1,4 +1,8 @@
 import { THREAD_STEERING_CONTEXT_PARAM } from "@codexhost/shared-contracts";
+import {
+  uploadPreparedRemoteAttachments,
+  type RemoteAttachmentUploads,
+} from "./renderer-rpc-remote-attachments.js";
 import { prepareRpcSteeringQueue } from "./renderer-rpc-steering-queue.js";
 import { inspectRendererSteeringDelivery } from "./renderer-steering-delivery.js";
 
@@ -146,7 +150,16 @@ export function installRendererRpcSteering(value: unknown): (() => void) | null 
                 },
               };
             };
-            const prepare: Method = async (...input) => {
+            const uploads: RemoteAttachmentUploads = new Map();
+            const prepare: Method = async (...input) =>
+              uploadPreparedRemoteAttachments(
+                rpc,
+                hostId,
+                (await prepareNative(...input)) as Record<string, unknown>,
+                uploads,
+                current,
+              );
+            const prepareNative: Method = async (...input) => {
               current();
               const prepared: unknown = await callback(...input);
               current();
