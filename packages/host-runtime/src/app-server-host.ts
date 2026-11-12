@@ -17,7 +17,10 @@ import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
   PROJECT_GROUPS_LIST_METHOD,
   PROJECT_GROUPS_REPLACE_METHOD,
+  PROJECT_MIRROR_LIST_METHOD,
+  PROJECT_MIRROR_UPSERT_METHOD,
   projectGroupsReplaceParamsSchema,
+  projectMirrorUpsertParamsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -25,6 +28,10 @@ import {
   ProjectGroupRevisionConflictError,
   type ProjectGroupsService,
 } from "./project-groups-service.js";
+import {
+  ProjectMirrorRevisionConflictError,
+  type ProjectMirrorService,
+} from "./project-mirror-service.js";
 import { ExternalThreadPrewarms } from "./external-thread-prewarms.js";
 import { externalTurnInputText } from "./external-turn-input.js";
 import { HarnessLaunchSettingsStore } from "@codexhost/harness-plugin-files";
@@ -382,6 +389,8 @@ export interface AppServerHostOptions {
   consoleOpener?: HostConsoleOpener;
   /** Local-only project-group configuration and Desktop project catalog reads. */
   projectGroups?: ProjectGroupsService;
+  /** Local-only registry of remote projects created for local source projects. */
+  projectMirror?: ProjectMirrorService;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Shared by all Hosts of one runtime; defaults to the bundled snapshot only. */
   modelPrices?: ModelPriceCatalog;
@@ -1389,6 +1398,19 @@ export class AppServerHost {
         return;
       }
       this.#dispatchDesktopReply(request, () => this.#handleProjectGroupsRequest(request));
+      return;
+    }
+    if (
+      request.method === PROJECT_MIRROR_LIST_METHOD ||
+      request.method === PROJECT_MIRROR_UPSERT_METHOD
+    ) {
+      if (this.#options.externalOnly || !this.#options.projectMirror) {
+        await this.#writer.json(
+          rpcError(request, -32601, "Project mirror is available on the local Host only"),
+        );
+        return;
+      }
+      this.#dispatchDesktopReply(request, () => this.#handleProjectMirrorRequest(request));
       return;
     }
     if (this.#options.externalOnly && request.method === "codexhost/shared-threads/placements") {
@@ -3362,6 +3384,37 @@ export class AppServerHost {
         return;
       }
       await this.#writer.json(rpcError(request, -32083, "Project groups request failed"));
+      this.#diagnose(error);
+    }
+  }
+
+  async #handleProjectMirrorRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.projectMirror;
+    if (!service) {
+      await this.#writer.json(
+        rpcError(request, -32601, "Project mirror is available on the local Host only"),
+      );
+      return;
+    }
+    try {
+      if (request.method === PROJECT_MIRROR_LIST_METHOD) {
+        const result = await service.list();
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        return;
+      }
+      const parsed = projectMirrorUpsertParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        await this.#writer.json(rpcError(request, -32602, "Invalid project mirror update"));
+        return;
+      }
+      const result = await service.upsert(parsed.data);
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof ProjectMirrorRevisionConflictError) {
+        await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
+        return;
+      }
+      await this.#writer.json(rpcError(request, -32083, "Project mirror request failed"));
       this.#diagnose(error);
     }
   }

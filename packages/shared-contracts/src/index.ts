@@ -386,3 +386,4 @@ export {
   type CodexSshDraft,
 } from "./remote-connections.js";
 export * from "./project-groups.js";
+export * from "./project-mirror.js";

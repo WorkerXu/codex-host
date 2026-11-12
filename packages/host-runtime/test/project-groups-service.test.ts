@@ -63,6 +63,7 @@ function stateFile(): Record<string, unknown> {
       },
     ],
     "project-order": ["local-alpha", "project-beta"],
+    "selected-project": { type: "local", projectId: "local-alpha" },
   };
 }
 
@@ -112,6 +113,9 @@ describe("Desktop project catalog reader", () => {
       source: "discovered",
     });
     expect(catalog.projectOrder).toEqual(["local-alpha", "project-beta"]);
+    expect(catalog.selectedProject).toEqual({ type: "local", projectId: "local-alpha" });
+    expect(catalog.homeDirectory).toBe(os.homedir());
+    expect(catalog.defaultProjectParent).toBe(path.join(os.homedir(), "Documents", "ChatGPT"));
   });
 
   it("falls back to the persisted atom bucket", async () => {

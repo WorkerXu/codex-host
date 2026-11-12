@@ -132,6 +132,7 @@
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
 | [`product/harness-schedules.md`](product/harness-schedules.md) | 设置侧栏直达官方任务页，原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
 | [`architecture/cross-host-project-groups.md`](architecture/cross-host-project-groups.md) | 跨机项目组：组配置、本地 Desktop 项目目录读取、原生项目块排序/缩进、组标题与新对话；修改侧边栏组功能时阅读。 |
+| [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | 跨机同名项目：只填名字项目识别、远程同名目录与项目创建、模型菜单「其他机器」入口、模型预选与自动分组；修改跨机项目入口时阅读。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |
 | [`product/usage-metering.md`](product/usage-metering.md) | 外部 Harness 与官方 Codex 的会话用量、插件可选能力、实时刷新、费用、缓存命中、首字延迟及速度限制；修改计量、价格表或 `pricing.json` 时阅读。 |
 | [`product/usage-statistics.md`](product/usage-statistics.md) | 控制台与 Desktop 内置设置的全局用量统计：独立 Codex 统计插件、各 Harness 原生会话去重、按模型 ID 读时计价与缓存；新增读取器或修改统计口径时阅读。 |

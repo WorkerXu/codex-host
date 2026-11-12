@@ -864,6 +864,11 @@ export function installCurrentRendererAdapter(): {
     permissionModeId?: HarnessPermissionModeId,
     composer?: Element,
   ): boolean;
+  applyCodexModel(
+    composer: Element,
+    model: HarnessModelRef,
+    reasoningEffort?: string | null,
+  ): boolean;
   dispose(): void;
 } {
   let disposed = false;
@@ -1081,6 +1086,7 @@ export function installCurrentRendererAdapter(): {
     thinkingOptionId?: HarnessThinkingOptionId,
     permissionModeId?: HarnessPermissionModeId,
     composer?: Element,
+    reasoningEffort?: string | null,
   ): boolean => {
     if (disposed || (composer && isOrbitComposer(composer))) return false;
     const selection = modelSelectionForAgent(
@@ -1108,7 +1114,12 @@ export function installCurrentRendererAdapter(): {
       const previous = draftModels.model(draftKey);
       const policyChanged = route.policy.select(carrier ?? null, draftKey, binding.creationModes);
       try {
-        draftModels.apply(draftKey, binding, carrier ?? null);
+        draftModels.apply(
+          draftKey,
+          binding,
+          carrier ?? null,
+          agent === "codex" && reasoningEffort != null ? reasoningEffort : undefined,
+        );
       } catch (error) {
         // The draft keeps its previous model, so its selection must name that model again.
         try {
@@ -1129,10 +1140,32 @@ export function installCurrentRendererAdapter(): {
     }
     return true;
   };
+  const applyCodexModel = (
+    composer: Element,
+    model: HarnessModelRef,
+    reasoningEffort?: string | null,
+  ): boolean => {
+    if (disposed || isOrbitComposer(composer)) return false;
+    const route = window.__codexhostHostRoutingV1?.forComposer(composer);
+    if (!route) return false;
+    const target = findComposerModelTarget(composer);
+    if (target?.[0] !== "default" || typeof target[1] !== "string") return false;
+    const binding = findScopedDraftModelBinding(composer, target[1]);
+    if (!binding || !route.policy.scopedCreation) return false;
+    try {
+      route.policy.select(model.id, target[1], binding.creationModes);
+      draftModels.apply(target[1], binding, model.id, reasoningEffort ?? undefined);
+    } catch {
+      return false;
+    }
+    return true;
+  };
+
   return {
     status: liveStatus,
     modelControl,
     applyAgent,
+    applyCodexModel,
     dispose() {
       if (disposed) return;
       disposed = true;
