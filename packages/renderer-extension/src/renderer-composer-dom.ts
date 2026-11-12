@@ -698,7 +698,13 @@ export function mountComposerAgentControl(
     nativeModelControl && onNativeModelOpen
       ? {
           element: nativeModelControl.element,
-          listener: () => onNativeModelOpen(nativeModelControl.element),
+          listener: () => {
+            try {
+              onNativeModelOpen(nativeModelControl.element);
+            } catch {
+              // The mirror entry is optional; never break the native model menu.
+            }
+          },
         }
       : undefined;
   nativeModelOpen?.element.addEventListener("click", nativeModelOpen.listener);
