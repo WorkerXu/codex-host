@@ -40,7 +40,9 @@ const catalog: CrossHostModelCatalog = {
 describe("cross-host model menu rows", () => {
   it("lists machines only until one is expanded", () => {
     expect(crossHostMenuRows(catalog, {}).map((row) => row.kind)).toEqual(["machine", "machine"]);
-    expect(crossHostMenuRows(catalog, { hostId: catalog.machines[0]?.hostId })).toHaveLength(4);
+    expect(
+      crossHostMenuRows(catalog, { hostId: catalog.machines[0]?.hostId ?? null }),
+    ).toHaveLength(4);
   });
 
   it("expands one provider into models", () => {
