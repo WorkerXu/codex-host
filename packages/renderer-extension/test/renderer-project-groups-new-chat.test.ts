@@ -23,27 +23,21 @@ function project(
         hostLabel: null,
         rootPaths: ["/tmp/a"],
         remotePath: null,
-        native: {
-          projectId: "local-alpha",
-          label: "alpha",
-          kind: "local",
-          hostLabel: null,
-          collapsed: false,
-          hasList: true,
-          hasShowAllToggle: false,
-          hasNewChatButton: true,
-          showAll: false,
-        },
+        native:
+          missing === null
+            ? {
+                projectId: "local-alpha",
+                label: "alpha",
+                kind: "local",
+                hostLabel: null,
+                hasNewChatButton: newChatAvailable,
+              }
+            : null,
       },
       missing,
     },
-    threads: [],
-    collapsed: false,
-    hasList: true,
-    hasShowAllToggle: false,
+    mounted: missing === null,
     newChatAvailable,
-    showAll: false,
-    canShowAll: false,
   };
 }
 
