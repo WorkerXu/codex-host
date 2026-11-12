@@ -66,9 +66,7 @@ describe("Codex Desktop contract audit report", () => {
       projectGroups: {
         sectionCount: 1,
         projectCount: 12,
-        threadRowCount: 4,
         missingNewChatCount: 0,
-        hasContextMenu: true,
         contractOk: true,
       },
     }).find(({ id }) => id === "project-groups");
@@ -78,9 +76,7 @@ describe("Codex Desktop contract audit report", () => {
       projectGroups: {
         sectionCount: 1,
         projectCount: 12,
-        threadRowCount: 4,
         missingNewChatCount: 1,
-        hasContextMenu: false,
         contractOk: false,
       },
     }).find(({ id }) => id === "project-groups");
