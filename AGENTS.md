@@ -90,6 +90,18 @@ Existing Harness integration and Desktop update audit skills remain applicable t
 - For core logic or major feature changes, update the corresponding feature document in `docs/`, creating one only when needed. Describe current behavior and key constraints; prefer maintaining an existing document over adding a change report. Minor fixes and local refactors need no documentation changes.
 - Keep `docs/index.md` links and one-line descriptions current when adding, moving, or removing documents. Introduce feature-based subdirectories as navigation needs grow.
 
+### Practical Notes
+
+- Focused test: `npx vitest run --config tests/vitest.config.js <path>`. Run `npm run build:typescript` first; tests import built `dist` outputs of sibling packages and otherwise see stale code. On small machines add `--maxWorkers=2 --testTimeout=15000`.
+- Known noise: `tests/release/release-version.test.mjs` has 2 failures on `main` already; `harness-plugin-loader.test.ts` and `renderer-host-rpc-routing.test.ts` can time out under high load and pass when run alone.
+- The pre-commit hook runs Prettier on staged files; a formatting issue aborts the commit (`npx prettier --write <file>`, then re-stage).
+- Delegation Skill upgrades (`packages/host-runtime/src/delegation-skill.ts`): when bumping `SKILL_VERSION`, add the digest of the previously shipped text to `PREVIOUS_MANAGED_DIGESTS`, computed from a real installed `SKILL.md` (e.g. `sha256sum ~/.claude/skills/codexhost-delegation/SKILL.md`), never from the escaped template literal. Store that real text as a `test/fixtures/codexhost-delegation-v<N>.md` fixture. A wrong digest makes every installed copy report `conflict` and silently stop updating.
+
+### Fork Builds
+
+- Linux Host Runtime bundle: `node packages/host-runtime/scripts/build-release.mjs --output <dir>/host-runtime.mjs` (after `npm run build:typescript`). It replaces `node_modules/@codexhost/cli-linux-*/app/host-runtime.mjs` of an installed CLI.
+- macOS DMG (fork-only workflow): `gh workflow run build-macos-dmg.yml -R WorkerXu/codex-host --ref <branch>`, wait with `gh run watch <id> --exit-status`, then `gh run download <id> -n codexhost-macos-arm64-dmg -D <dir>` and verify with the bundled `SHA256SUMS`. Push the branch before triggering; the run builds the pushed head, not the local tree.
+
 ## Commit & Pull Request Guidelines
 
 - Use concise, imperative commit subjects. Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `test:` are preferred.
