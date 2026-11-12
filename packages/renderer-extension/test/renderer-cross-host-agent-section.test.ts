@@ -139,8 +139,7 @@ describe("cross-host Agent section", () => {
     });
     expect(section.element.textContent).toContain("启用跨机对话");
     expect(section.element.textContent).not.toContain("oracle-sg");
-    section.element
-      .querySelectorAll("button")
+    [...section.element.querySelectorAll("button")]
       .find((candidate) => candidate.textContent === "启用跨机对话")
       ?.click();
     expect(onAcknowledge).toHaveBeenCalledOnce();
