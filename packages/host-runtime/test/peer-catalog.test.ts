@@ -130,6 +130,26 @@ describe("DelegationPeerCatalogService", () => {
     expect(fake.calls).toHaveLength(4);
   });
 
+  it("serves a stale catalog immediately and revalidates in the background", async () => {
+    const env = await environment();
+    let now = 1_000;
+    const fake = fakeSpawn(() => ({
+      code: 0,
+      stdout: `${JSON.stringify({ harnesses: ["codex"] })}\n`,
+    }));
+    const service = new DelegationPeerCatalogService(env, {
+      spawnImpl: fake.spawnImpl,
+      cacheTtlMs: 1_000,
+      now: () => now,
+    });
+
+    const first = await service.listPeers();
+    expect(fake.calls).toHaveLength(2);
+    now = 2_000;
+    await expect(service.listPeers()).resolves.toEqual(first);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(4));
+  });
+
   it("drops Harnesses the peer reports as not installed or unavailable", async () => {
     const env = await environment();
     const fake = fakeSpawn(({ ssh }) =>

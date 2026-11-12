@@ -342,7 +342,7 @@ export async function runDelegationCli(input: {
     ): void =>
       writeJson(output, format === "json" ? body : compactDelegationOutput(name, body, view));
     if (group === "harness" && command === "list") {
-      rejectUnknown(parsed, ["--host", "--availability"]);
+      rejectUnknown(parsed, ["--host", "--availability", "--refresh"]);
       if (parsed.positionals.length > 0) {
         throw new DelegationControlError(
           "INVALID_ARGUMENT",
@@ -355,6 +355,14 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "--availability must be true or false",
         );
+      const refresh = value(parsed, "--refresh");
+      if (refresh !== undefined && refresh !== "true" && refresh !== "false")
+        throw new DelegationControlError("INVALID_ARGUMENT", "--refresh must be true or false");
+      if (refresh === "true" && availability !== "true")
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "--refresh true requires --availability true",
+        );
       const host = value(parsed, "--host");
       writeResult(
         "harness list",
@@ -363,7 +371,10 @@ export async function runDelegationCli(input: {
           target: await resolveHostTarget(environment, host),
           ...(host ? { host } : {}),
           path: "/v1/harness/list",
-          body: availability === "true" ? { includeAvailability: true } : {},
+          body: {
+            ...(availability === "true" ? { includeAvailability: true } : {}),
+            ...(refresh === "true" ? { refresh: true } : {}),
+          },
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
           ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
         }),

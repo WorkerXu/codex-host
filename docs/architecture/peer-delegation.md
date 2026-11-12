@@ -140,7 +140,7 @@ ssh \
 ## `#` 选择器与 mention
 
 - Renderer 通过 Host Runtime 的 `codexhost/delegation/peers/list` RPC 获取机器目录。选择这个来源而不是复用 Desktop 的 Host 连接，是因为 `peers.json` 才是 CLI 实际路由的权威配置；RPC 还能在 Desktop 没有对应 SSH 连接时列出机器，并复用同一套 peer 传输验证连通性。
-- Host Runtime 读取 `peers.json`，并发调用每个 peer 的 `harness list`（`includeAvailability: true`，catalog 超时 15 秒）。远端按 60 秒缓存 availability，每个 Harness 的 inspect 最多 2 秒、最多 6 个并发；超时按 `unavailable` 处理。只保留 `ready` 的 Harness，整台机器没有可用 Harness 时不显示该组。结果缓存 30 秒；某台机器失败时返回 `state: "unreachable"` 和错误摘要，并保留上一次成功的可用 Harness 列表用于置灰展示。
+- Host Runtime 读取 `peers.json`，并发调用每个 peer 的 `harness list`（`includeAvailability: true`，catalog 超时 15 秒）。远端把 availability 持久化到 `~/.codexhost/cache/harness-availability.json`（不是 `runtime/`，与 token 无关），默认 24 小时；记录 `checkedAt`。每个 Harness 的 inspect 最多 2 秒、最多 6 个并发，超时按 `unavailable` 处理；只有无缓存或缓存失效时才走这条检查路径。缓存带插件版本/目录指纹，插件安装、卸载、升级或 `delegate start` 报告未安装/不可用时会立即失效对应项；`harness list --availability true --refresh true` 强制同步刷新。只保留 `ready` 的 Harness，整台机器没有可用 Harness 时不显示该组。peer catalog 内存缓存 1 小时并 stale-while-revalidate；某台机器失败时返回 `state: "unreachable"` 和错误摘要，并保留上一次成功的可用 Harness 列表用于置灰展示。
 - 选择器先列本机 Harness，再按 peer 分组列出远端 Harness；行文本形如 `Grok · oracle-sg`。分组标题优先使用 Desktop 连接目录中该 peer `hostIds` 对应的 `displayName`（与侧边栏 remote host 名一致）；hostId 对不上时再用 peer 的 SSH 别名/主机名匹配，最后回退 `peers.json` 的 peer 名。不可达但已知 Harness 的机器显示为置灰行；从未成功获取过 Harness 的机器显示为单个置灰行（不重复标题），错误文案本地化为「连接超时」/「连接失败」。输入查询可以匹配 Harness 名、ID 或机器名。
 - 选中远端 Harness 后，mention 链接为 `[@Grok](subagent://codexhost.grok?host=oracle-sg)`；`host` 是 peer 名。旧的无 `host` 链接继续按本机处理。
 - Host 端的 mention rewrite 会生成可直接执行的完整命令，包含 `--host`、`--task-name`、`--task`、`--watch true` 和 `--format compact`，并明确要求不要先跑 `--help` 或 `peer list`；本机 mention 不带 host，行为不变。
@@ -219,7 +219,7 @@ ssh \
 - CLI 的 `--host` 路由、self Host ID 本地路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
 - 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
 - mention 的 host 序列化/解析、旧格式兼容，以及 rewrite 指令里的 `--host`。
-- peer catalog 的缓存、可用性过滤（只保留 `ready`）、单 Harness 2 秒超时与 60 秒 availability 缓存、不可达状态、上次成功 Harness 的置灰保留，以及 Renderer 的机器分组、Desktop 显示名/SSH 别名回退、单行本地化错误和 host-qualified mention。
+- peer catalog 的缓存、可用性过滤（只保留 `ready`）、单 Harness 2 秒超时、24 小时持久化与 stale-while-revalidate、插件指纹/启动失败失效、`--refresh` 强制刷新、不可达状态、上次成功 Harness 的置灰保留，以及 Renderer 的 1 小时 stale-while-revalidate、机器分组、Desktop 显示名/SSH 别名回退、单行本地化错误和 host-qualified mention。
 - mention 重写生成可直接执行的完整命令（含 `--watch true` 和 `--format compact`），并明确不先跑 `--help` / `peer list`。
 - 跨机 watch 的轮询间隔、指数退避、终态只通知一次、超时、取消、watching 列表、peer 首次不可达和运行中失联。
 - `delegation-skill` 内容包含 `peer list`、`--host`、跨机 watch 和禁止读取 `~/.codexhost/runtime/` 的约束。

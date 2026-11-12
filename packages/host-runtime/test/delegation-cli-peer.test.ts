@@ -158,6 +158,30 @@ describe("delegation CLI peer routing", () => {
     expect(inputs).toEqual([{ route: "/v1/harness/list", body: { includeAvailability: true } }]);
   });
 
+  it("forces a peer availability refresh when asked", async () => {
+    const env = await environment();
+    const { spawnImpl, inputs } = peerSpawn([
+      { harnesses: ["codex"], availability: { codex: "ready" } },
+    ]);
+    const result = await run(
+      ["harness", "list", "--host", "mac", "--availability", "true", "--refresh", "true"],
+      { environment: env, spawnImpl },
+    );
+    expect(result.code).toBe(0);
+    expect(inputs).toEqual([
+      { route: "/v1/harness/list", body: { includeAvailability: true, refresh: true } },
+    ]);
+  });
+
+  it("rejects --refresh without --availability", async () => {
+    const env = await environment();
+    const result = await run(["harness", "list", "--refresh", "true"], { environment: env });
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.diagnostics)).toMatchObject({
+      error: { code: "INVALID_ARGUMENT", message: expect.stringContaining("--availability") },
+    });
+  });
+
   it("starts without a parent and returns host-qualified links", async () => {
     const env = await environment();
     env[DELEGATION_THREAD_ID_ENV] = "local-parent";

@@ -52,13 +52,26 @@ import {
   type ExternalThreadRepository,
 } from "./external-thread-repository.js";
 import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-runtime.js";
+import { HarnessAvailabilityStore } from "./harness-availability-store.js";
+import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
-const AVAILABILITY_CACHE_TTL_MS = 60_000;
+const AVAILABILITY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
 const AVAILABILITY_CONCURRENCY = 6;
 const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
+
+function isAvailabilityFailure(error: unknown): boolean {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code: unknown }).code)
+      : "";
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /not.?installed|not.?found|unavailable|missing|enoent|no such file|command not found|not available/iu.test(
+    `${code} ${text}`,
+  );
+}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -255,10 +268,9 @@ export class HarnessDelegationCoordinator {
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
   readonly #activeOfficialParents: () => string[];
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
-  readonly #availabilityCache = new Map<
-    RoutedHarnessId,
-    { status: HarnessInspection["status"]; checkedAt: number }
-  >();
+  readonly #pluginRoots: readonly string[];
+  readonly #availabilityStore: HarnessAvailabilityStore;
+  readonly #availabilityRefreshing = new Set<RoutedHarnessId>();
 
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
@@ -288,9 +300,12 @@ export class HarnessDelegationCoordinator {
     officialThreadMetadata(threadId: string): Promise<ParentMetadata>;
     activeOfficialParents(): string[];
     externalThreadBusy(thread: ExternalThread): boolean;
+    pluginRoots?: readonly string[];
   }) {
     this.#adapters = input.adapters;
     this.#environment = input.environment;
+    this.#pluginRoots = input.pluginRoots ?? [];
+    this.#availabilityStore = new HarnessAvailabilityStore(input.environment);
     this.#externalRuntime = input.externalRuntime;
     this.#repository = input.repository;
     this.#registerExternalThread = input.registerExternalThread;
@@ -310,41 +325,97 @@ export class HarnessDelegationCoordinator {
   async listHarnesses(input: HarnessListInput = {}): Promise<HarnessListResult> {
     const harnesses: RoutedHarnessId[] = ["codex", ...this.#adapters.keys()];
     if (!input.includeAvailability) return { harnesses };
+    const fingerprints = await harnessPluginFingerprints(this.#pluginRoots);
+    const hasFingerprints = this.#pluginRoots.length > 0;
+    const fingerprintFor = (harnessId: RoutedHarnessId): string | undefined =>
+      hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined;
     const availability: NonNullable<HarnessListResult["availability"]> = {};
     const pending: RoutedHarnessId[] = [];
-    const now = Date.now();
+    const stale: RoutedHarnessId[] = [];
     for (const harnessId of harnesses) {
       if (harnessId === "codex") {
         availability[harnessId] = "ready";
         continue;
       }
-      const cached = this.#availabilityCache.get(harnessId);
-      if (cached && now - cached.checkedAt < AVAILABILITY_CACHE_TTL_MS) {
-        availability[harnessId] = cached.status;
-      } else {
+      const cached = await this.#availabilityStore.get(harnessId);
+      const fingerprint = fingerprintFor(harnessId);
+      if (!cached || (fingerprint !== undefined && cached.fingerprint !== fingerprint)) {
+        if (cached) await this.#availabilityStore.invalidate(harnessId);
         pending.push(harnessId);
+        continue;
       }
+      availability[harnessId] = cached.status;
+      if (input.refresh) pending.push(harnessId);
+      else if (Date.now() - cached.checkedAt >= AVAILABILITY_CACHE_TTL_MS) stale.push(harnessId);
     }
     await forEachConcurrent(pending, AVAILABILITY_CONCURRENCY, async (harnessId) => {
-      const adapter = this.#adapters.get(harnessId as ExternalHarnessId);
-      let status: HarnessInspection["status"];
-      if (!adapter) {
-        status = "unavailable";
-      } else {
-        try {
-          const inspection = await withTimeout(
-            adapter.inspect({ purpose: "availability" }),
-            AVAILABILITY_INSPECT_TIMEOUT_MS,
-          );
-          status = inspection === AVAILABILITY_TIMEOUT ? "unavailable" : inspection.status;
-        } catch {
-          status = "error";
-        }
-      }
-      this.#availabilityCache.set(harnessId, { status, checkedAt: Date.now() });
-      availability[harnessId] = status;
+      availability[harnessId] = await this.#inspectAvailability(
+        harnessId,
+        fingerprintFor(harnessId),
+      );
     });
+    if (stale.length > 0) {
+      // Stale-while-revalidate: the menu gets the cached answer immediately.
+      void this.#refreshAvailability(stale, fingerprints, hasFingerprints).catch(() => undefined);
+    }
     return { harnesses, availability };
+  }
+
+  async #inspectAvailability(
+    harnessId: RoutedHarnessId,
+    fingerprint: string | undefined,
+  ): Promise<HarnessInspection["status"]> {
+    const adapter = this.#adapters.get(harnessId as ExternalHarnessId);
+    let status: HarnessInspection["status"];
+    if (!adapter) {
+      status = "unavailable";
+    } else {
+      try {
+        const inspection = await withTimeout(
+          adapter.inspect({ purpose: "availability" }),
+          AVAILABILITY_INSPECT_TIMEOUT_MS,
+        );
+        status = inspection === AVAILABILITY_TIMEOUT ? "unavailable" : inspection.status;
+      } catch {
+        status = "error";
+      }
+    }
+    await this.#availabilityStore.set(harnessId, {
+      status,
+      checkedAt: Date.now(),
+      ...(fingerprint ? { fingerprint } : {}),
+    });
+    return status;
+  }
+
+  async #refreshAvailability(
+    harnessIds: readonly RoutedHarnessId[],
+    fingerprints: Map<string, string>,
+    hasFingerprints: boolean,
+  ): Promise<void> {
+    const targets = harnessIds.filter((harnessId) => {
+      if (this.#availabilityRefreshing.has(harnessId)) return false;
+      this.#availabilityRefreshing.add(harnessId);
+      return true;
+    });
+    try {
+      await forEachConcurrent(targets, AVAILABILITY_CONCURRENCY, async (harnessId) => {
+        try {
+          await this.#inspectAvailability(
+            harnessId,
+            hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined,
+          );
+        } finally {
+          this.#availabilityRefreshing.delete(harnessId);
+        }
+      });
+    } catch {
+      for (const harnessId of targets) this.#availabilityRefreshing.delete(harnessId);
+    }
+  }
+
+  async invalidateAvailability(harnessId: RoutedHarnessId): Promise<void> {
+    await this.#availabilityStore.invalidate(harnessId);
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {
@@ -393,6 +464,7 @@ export class HarnessDelegationCoordinator {
     }
     const startInput = { ...input, parentThreadId, cwd: path.resolve(selectedCwd) };
     if (!this.#adapters.has(input.harnessId)) {
+      await this.invalidateAvailability(input.harnessId).catch(() => undefined);
       throw new DelegationControlError(
         "HARNESS_NOT_FOUND",
         `Harness '${input.harnessId}' is unavailable`,
@@ -482,7 +554,12 @@ export class HarnessDelegationCoordinator {
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
         });
-        if (!opened.ok) throw new DelegationControlError("DELEGATION_FAILED", opened.error.message);
+        if (!opened.ok) {
+          if (isAvailabilityFailure(opened.error)) {
+            await this.invalidateAvailability(targetHarnessId).catch(() => undefined);
+          }
+          throw new DelegationControlError("DELEGATION_FAILED", opened.error.message);
+        }
         session = opened.value;
         if (session.initialState.nativeRef) {
           record = await this.#repository.commitNative(
@@ -568,6 +645,9 @@ export class HarnessDelegationCoordinator {
           ...(origin ? {} : { parentThreadId }),
         };
       } catch (error) {
+        if (isAvailabilityFailure(error)) {
+          await this.invalidateAvailability(targetHarnessId).catch(() => undefined);
+        }
         if (session) await session.close().catch(() => undefined);
         this.#externalRuntime.remove(childThreadId);
         if (delegation)
