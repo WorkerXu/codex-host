@@ -147,12 +147,7 @@ export function createScopedDraftModelWriter() {
     model(key: string): string | null {
       return captured.get(key)?.model ?? null;
     },
-    apply(
-      key: string,
-      binding: ScopedDraftModelBinding,
-      model: string | null,
-      reasoningEffort?: string | null,
-    ): void {
+    apply(key: string, binding: ScopedDraftModelBinding, model: string | null): void {
       if (model === null) {
         restore(key);
         return;
@@ -177,8 +172,7 @@ export function createScopedDraftModelWriter() {
           modelSettings: {
             ...settings,
             model,
-            reasoningEffort:
-              reasoningEffort !== undefined ? reasoningEffort : (settings?.reasoningEffort ?? null),
+            reasoningEffort: settings?.reasoningEffort ?? null,
             profile: settings?.profile ?? null,
             usesAccountPreferences,
           },
