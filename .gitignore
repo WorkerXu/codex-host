@@ -43,6 +43,7 @@ test-results/
 *.rs.bk
 *.chp
 /tests/differential/output/
+/tools/ui-preview/captures/
 
 # Logs and process state
 *.log

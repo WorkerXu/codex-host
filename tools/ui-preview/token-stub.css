@@ -1,0 +1,70 @@
+/* Fallback values only. The real Codex Desktop stylesheet is linked after this file. */
+:root {
+  color-scheme: light;
+  --color-token-foreground: #0d0d0d;
+  --color-token-text-primary: #0d0d0d;
+  --color-token-text-secondary: rgba(13, 13, 13, 0.65);
+  --color-token-text-tertiary: rgba(13, 13, 13, 0.5);
+  --color-token-description-foreground: rgba(13, 13, 13, 0.5);
+  --color-token-main-surface-primary: #ffffff;
+  --color-token-bg-primary: #f5f5f5;
+  --color-token-bg-secondary: rgba(245, 245, 245, 0.92);
+  --color-token-border-default: rgba(13, 13, 13, 0.08);
+  --color-token-border-light: rgba(13, 13, 13, 0.05);
+  --color-token-list-hover-background: rgba(13, 13, 13, 0.053);
+  --color-token-interactive-bg-secondary-hover: rgba(13, 13, 13, 0.053);
+  --color-token-interactive-bg-secondary-selected: rgba(13, 13, 13, 0.08);
+  --color-token-text-link-foreground: #0169cc;
+  --color-token-side-bar-background: #f5f5f5;
+  --color-token-dropdown-background: #ffffff;
+  --color-token-charts-blue: #0285ff;
+  --color-token-charts-green: #12a150;
+  --color-token-charts-yellow: #d29922;
+  --color-token-charts-orange: #e0721a;
+  --color-token-charts-purple: #8b5cf6;
+  --color-token-charts-red: #e5484d;
+  --color-token-on-accent: #ffffff;
+  --font-text-xs-size: 0.75rem;
+  --font-text-xs-line-height: 1.125rem;
+  --font-text-xs-weight: 400;
+  --font-text-sm-size: 0.875rem;
+  --font-text-sm-line-height: 1.25rem;
+  --font-text-sm-weight: 400;
+  --font-text-md-size: 1rem;
+  --font-text-md-line-height: 1.5rem;
+  --font-text-md-weight: 400;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 999px;
+  --menu-radius: 12px;
+  --composer-radius: 22px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-token-foreground: #ffffff;
+  --color-token-text-primary: #ececec;
+  --color-token-text-secondary: rgba(236, 236, 236, 0.65);
+  --color-token-text-tertiary: rgba(236, 236, 236, 0.5);
+  --color-token-description-foreground: rgba(236, 236, 236, 0.5);
+  --color-token-main-surface-primary: #181818;
+  --color-token-bg-primary: #111111;
+  --color-token-bg-secondary: rgba(24, 24, 24, 0.92);
+  --color-token-border-default: rgba(255, 255, 255, 0.09);
+  --color-token-border-light: rgba(255, 255, 255, 0.05);
+  --color-token-list-hover-background: rgba(255, 255, 255, 0.06);
+  --color-token-interactive-bg-secondary-hover: rgba(255, 255, 255, 0.06);
+  --color-token-interactive-bg-secondary-selected: rgba(255, 255, 255, 0.1);
+  --color-token-text-link-foreground: #66aaf9;
+  --color-token-side-bar-background: #111111;
+  --color-token-dropdown-background: #232323;
+  --color-token-charts-blue: #3a83f7;
+  --color-token-charts-green: #4ade80;
+  --color-token-charts-yellow: #f5c96a;
+  --color-token-charts-orange: #ff9f5a;
+  --color-token-charts-purple: #b08cff;
+  --color-token-charts-red: #f87171;
+  --color-token-on-accent: #ffffff;
+}
