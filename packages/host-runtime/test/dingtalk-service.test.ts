@@ -314,3 +314,28 @@ describe("DingTalk search routing", () => {
     service.dispose();
   });
 });
+
+describe("DingTalk change notifications", () => {
+  it("does not push a notification for a pull refresh", async () => {
+    const env = await environment();
+    const changes: unknown[] = [];
+    const state: FakeState = {
+      unread: [conversation("a", 100)],
+      sent: [],
+      messages: [],
+      messageCalls: 0,
+      info: {},
+    };
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(state),
+      onChange: (event) => changes.push(event),
+    });
+    await service.conversations();
+    await service.conversations(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(changes).toHaveLength(0);
+    service.dispose();
+  });
+});
