@@ -173,6 +173,10 @@ for (const scenario of scenarios) {
         const editor = query(".agent-editor");
         check("editor-open", Boolean(editor) && !editor.hidden);
         check("editor-instructions", Boolean(query(".agent-instructions")));
+        check(
+          "instruction-character-count",
+          Boolean(query(".agent-character-count")?.textContent?.includes("字")),
+        );
       }
       if (
         document.body.dataset.scenario === "agents-dingtalk-settings" ||
@@ -201,7 +205,9 @@ for (const scenario of scenarios) {
         check(
           "machine-row-error",
           Boolean(
-            query("[data-codexhost-add-machine-menu]")?.textContent?.includes("该机器当前离线。"),
+            query("[data-codexhost-add-machine-menu]")?.textContent?.includes(
+              "创建目录失败：权限不足。",
+            ),
           ),
         );
       }

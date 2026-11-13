@@ -227,10 +227,15 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "agents-dingtalk-settings"() {
     const { query, shell } = mountSettings("codex-agents");
     await waitFor(() => query(".dingtalk-listener"));
+    await waitFor(() => query(".dingtalk-agent-list .dingtalk-agent-name"));
+    await waitFor(() => query<HTMLInputElement>(".dingtalk-switch")?.checked === true);
     const page = shell.root.shadowRoot?.querySelector<HTMLElement>(".settings-page");
     if (!page) throw new Error("Settings page scroller is missing");
+    await delay(100);
     page.scrollTop = page.scrollHeight;
-    await delay(180);
+    await delay(100);
+    page.scrollTop = page.scrollHeight;
+    await delay(120);
   },
 
   async "group-plus-menu"() {
@@ -253,7 +258,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "group-add-machine-error"() {
-    await openMachineMenu(async () => ({ ok: false, message: "该机器当前离线。" }));
+    await openMachineMenu(async () => ({ ok: false, message: "创建目录失败：权限不足。" }));
     const row = await waitFor(() =>
       document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
     );
@@ -261,7 +266,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() =>
       document
         .querySelector("[data-codexhost-add-machine-menu]")
-        ?.textContent?.includes("该机器当前离线。"),
+        ?.textContent?.includes("创建目录失败：权限不足。"),
     );
     await delay(120);
   },
