@@ -91,7 +91,12 @@ export function createCodexAgentsSettingsPage(
       issues.hidden = true;
       page.append(status, list, issues);
 
-      const dingtalk = createDingTalkDispatchSection(document, client, text.dingtalk);
+      const dingtalk = createDingTalkDispatchSection(
+        document,
+        client,
+        text.dingtalk,
+        (id) => text.effortLabels[id] ?? id,
+      );
       page.append(dingtalk.root);
 
       let idCounter = 0;
@@ -108,6 +113,8 @@ export function createCodexAgentsSettingsPage(
       let effortValue = "";
       let effortControl: HTMLInputElement | null = null;
       let rowMenu: AgentRowMenu | null = null;
+
+      const effortLabel = (id: string): string => text.effortLabels[id] ?? id;
 
       const setStatus = (value: string | null, failed = false): void => {
         status.hidden = value === null;
@@ -168,7 +175,12 @@ export function createCodexAgentsSettingsPage(
         name.textContent = agent.name;
         const meta = document.createElement("span");
         meta.className = "agent-row-meta";
-        meta.textContent = [agent.model, agent.reasoningEffort].filter(Boolean).join(" · ");
+        meta.textContent = [
+          agent.model ?? text.defaultModel,
+          agent.reasoningEffort ? effortLabel(agent.reasoningEffort) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
         headingLine.append(name, meta);
         const copy = document.createElement("div");
         copy.className = "agent-row-description";
@@ -390,7 +402,7 @@ export function createCodexAgentsSettingsPage(
           { value: "", label: text.effortInherit, title: text.effortInherit },
           ...options.map((option) => ({
             value: option.id,
-            label: option.id,
+            label: effortLabel(option.id),
             title: option.description,
           })),
         ];
@@ -466,13 +478,16 @@ export function createCodexAgentsSettingsPage(
         modelInput.placeholder = text.modelInherit;
         modelInput.setAttribute("aria-label", text.model);
         modelInput.hidden = true;
-        const modelField = labeledField(text.model, text.modelHint, model);
+        const modelControls = document.createElement("div");
+        modelControls.className = "agent-model-controls";
+        modelControls.append(model, modelInput);
+        const modelField = labeledField(null, text.modelHint, modelControls);
         const catalogHint = document.createElement("p");
         catalogHint.className = "agent-field-hint";
         catalogHint.textContent = text.catalogUnavailable;
         catalogHint.hidden = true;
         catalogHint.dataset.role = "catalog-hint";
-        modelField.append(modelInput, catalogHint);
+        modelField.append(catalogHint);
         const effortSlot = document.createElement("div");
         effortSlot.className = "agent-effort-slot";
         const effortField = labeledField(text.effort, text.effortHint, effortSlot);
@@ -483,9 +498,8 @@ export function createCodexAgentsSettingsPage(
         instructions.maxLength = 200_000;
         instructions.spellcheck = false;
         instructions.className = "agent-input agent-instructions";
-        instructionsGroup.append(
-          labeledField(text.instructions, text.instructionsHint, instructions),
-        );
+        instructions.setAttribute("aria-label", text.instructions);
+        instructionsGroup.append(labeledField(null, text.instructionsHint, instructions));
 
         const error = document.createElement("p");
         error.className = "agent-editor-error";
@@ -528,22 +542,25 @@ export function createCodexAgentsSettingsPage(
         };
       }
 
-      function labeledField(title: string, hint: string, control: HTMLElement): HTMLElement {
+      function labeledField(title: string | null, hint: string, control: HTMLElement): HTMLElement {
         const wrapper = document.createElement("div");
         wrapper.className = "agent-field";
-        const heading = document.createElement("span");
-        heading.className = "agent-field-label";
-        heading.textContent = title;
-        if (control.id) {
-          const label = document.createElement("label");
-          label.htmlFor = control.id;
-          label.textContent = title;
-          heading.replaceChildren(label);
+        if (title !== null) {
+          const heading = document.createElement("span");
+          heading.className = "agent-field-label";
+          heading.textContent = title;
+          if (control.id) {
+            const label = document.createElement("label");
+            label.htmlFor = control.id;
+            label.textContent = title;
+            heading.replaceChildren(label);
+          }
+          wrapper.append(heading);
         }
         const hintNode = document.createElement("p");
         hintNode.className = "agent-field-hint";
         hintNode.textContent = hint;
-        wrapper.append(heading, hintNode, control);
+        wrapper.append(control, hintNode);
         return wrapper;
       }
 
