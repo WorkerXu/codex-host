@@ -138,6 +138,11 @@ export function mountRendererSettingsShell(
   page.append(pageContent);
   sidebar.append(navigation);
   layout.append(sidebar, page);
+
+  const setActivePage = (pageId: string): void => {
+    page.dataset.activePage = pageId;
+    pageContent.dataset.pageId = pageId;
+  };
   frame.append(header, layout);
   surface.append(frame);
   surface.setAttribute("aria-labelledby", brandTitle.id);
@@ -179,6 +184,7 @@ export function mountRendererSettingsShell(
     navigationState.select(pageId);
     disposeActivePage();
     setActiveNavigation(navigationButtons, pageId);
+    setActivePage(pageId);
     pageContent.replaceChildren();
     const scope = new RendererSettingsPageScope();
     activeScope = scope;
