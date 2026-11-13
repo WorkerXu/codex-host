@@ -56,7 +56,7 @@ describe("Project group new chat selection", () => {
 });
 
 describe("Project group add-machine targets", () => {
-  it("lists ready peers that are not in the group, one row per Harness", () => {
+  it("lists one row per machine, preferring Codex and keeping offline machines", () => {
     const targets = projectGroupAddMachineTargets(
       {
         machines: [
@@ -65,11 +65,16 @@ describe("Project group add-machine targets", () => {
             label: "tencent",
             state: "ready",
             harnesses: [
-              { id: "codex", label: "Codex" },
               { id: "claude", label: "Claude Code" },
+              { id: "codex", label: "Codex" },
             ],
           },
-          { hostId: "remote-b", label: "offline", state: "offline", harnesses: [] },
+          {
+            hostId: "remote-b",
+            label: "offline",
+            state: "offline",
+            harnesses: [{ id: "codex", label: "Codex" }],
+          },
           {
             hostId: "remote-c",
             label: "existing",
@@ -81,12 +86,19 @@ describe("Project group add-machine targets", () => {
       new Set(["remote-c"]),
     );
     expect(targets).toEqual([
-      { hostId: "remote-a", machineLabel: "tencent", harnessId: "codex", harnessLabel: "Codex" },
       {
         hostId: "remote-a",
         machineLabel: "tencent",
-        harnessId: "claude",
-        harnessLabel: "Claude Code",
+        state: "ready",
+        harnessId: "codex",
+        harnessLabel: "Codex",
+      },
+      {
+        hostId: "remote-b",
+        machineLabel: "offline",
+        state: "offline",
+        harnessId: "codex",
+        harnessLabel: "Codex",
       },
     ]);
   });
