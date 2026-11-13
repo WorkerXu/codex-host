@@ -112,6 +112,11 @@ import {
   installRendererDelegationMention,
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
+import { createRendererJarvisClient } from "./renderer-jarvis-client.js";
+import {
+  installRendererJarvisMention,
+  type RendererJarvisMentionControl,
+} from "./renderer-jarvis-mention.js";
 import { delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
 import {
@@ -850,6 +855,35 @@ export function installRendererBindingProbe(
   });
   let connectionDiagnostics: RendererConnectionDiagnostics | null = null;
   const remoteConnections = createRemoteConnectionsControl(window, modelClientForHost);
+  const jarvisClient = createRendererJarvisClient({
+    forHost(hostId) {
+      const route = window.__codexhostHostRoutingV1?.forHost(hostId);
+      return route ? { hostId: route.hostId, manager: route.manager } : null;
+    },
+    async listHosts() {
+      const hosts = [
+        {
+          hostId: "local",
+          displayName: "Local",
+          local: true,
+          reachable: window.__codexhostHostRoutingV1?.forHost("local") != null,
+        },
+      ];
+      const connections = await remoteConnections.ssh.list().catch(() => []);
+      for (const connection of connections) {
+        hosts.push({
+          hostId: connection.hostId,
+          displayName: connection.displayName,
+          local: false,
+          reachable: window.__codexhostHostRoutingV1?.forHost(connection.hostId) != null,
+        });
+      }
+      return hosts;
+    },
+    openExternal(url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  });
   const usageStatistics = createRendererUsageStatisticsSource({
     routing: () => window.__codexhostHostRoutingV1,
     listConnections: () => remoteConnections.ssh.list(),
@@ -883,6 +917,7 @@ export function installRendererBindingProbe(
     },
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
+    jarvis: { createClient: () => jarvisClient },
     onLocaleChange() {
       for (const mounted of mountedByComposer.values()) renderMounted(mounted);
     },
@@ -1183,6 +1218,7 @@ export function installRendererBindingProbe(
   };
 
   let delegationMention: RendererDelegationMentionControl | null = null;
+  let jarvisMention: RendererJarvisMentionControl | null = null;
   let peerDelegationCatalog: DelegationPeerCatalog | null = null;
   let peerDelegationCatalogAt = 0;
   let peerDelegationCatalogRequest: Promise<void> | null = null;
@@ -3560,6 +3596,21 @@ export function installRendererBindingProbe(
       };
     },
   });
+  jarvisMention = installRendererJarvisMention(document, {
+    isComposerEditor: (editor) => {
+      const composer = composerForElement(editor);
+      return composer !== null && isMountedComposer(composer);
+    },
+    readHostId: (editor) => {
+      const composer = composerForElement(editor);
+      const mounted = composer ? mountedByComposer.get(composer) : undefined;
+      return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
+    },
+    suggest: (hostId, query) => jarvisClient.suggest(hostId, query),
+    readLocale: () => settingsLifecycle.locale,
+    anchorForEditor: (editor) =>
+      editor.closest("[data-composer-body]") ?? composerForElement(editor),
+  });
   refreshPeerDelegationCatalog();
 
   const connectedComposers = (): MountedComposer[] =>
@@ -3714,6 +3765,7 @@ export function installRendererBindingProbe(
       mutationObserver.disconnect();
       disposeReasoningSoftWrap();
       delegationMention?.dispose();
+      jarvisMention?.dispose();
       sidebarAgentIcons.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();

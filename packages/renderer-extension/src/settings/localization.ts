@@ -282,6 +282,44 @@ export interface RendererSettingsMessages {
   readonly aboutConsoleOpen: string;
   readonly aboutConsoleOpening: string;
   readonly aboutConsoleFailed: string;
+  readonly jarvis: {
+    description: string;
+    geminiSection: string;
+    geminiDescription: string;
+    geminiKeyPlaceholder: string;
+    geminiKeyConfigured: string;
+    geminiKeyMissing: string;
+    geminiSave: string;
+    geminiSaving: string;
+    geminiSaved: string;
+    geminiClear: string;
+    geminiTesting: string;
+    geminiTest: string;
+    geminiTestOk: string;
+    geminiTestFailed: string;
+    thresholdSection: string;
+    thresholdDescription: string;
+    thresholdSave: string;
+    thresholdInvalid: string;
+    machinesSection: string;
+    machinesDescription: string;
+    refresh: string;
+    refreshing: string;
+    install: string;
+    installing: string;
+    login: string;
+    loggingIn: string;
+    installed: string;
+    notInstalled: string;
+    notLoggedIn: string;
+    signedInAs: string;
+    cliVersion: string;
+    unreachable: string;
+    localMachine: string;
+    waitingForBrowser: string;
+    installProgress: string;
+    actionFailed: string;
+  };
   readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
 }
 
@@ -585,6 +623,48 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "Open console",
   aboutConsoleOpening: "Opening…",
   aboutConsoleFailed: "The console could not be opened",
+  jarvis: {
+    description:
+      "Find and reference Jarvis projects, requirements, tasks and bugs from Codex's @ menu. The Gemini API key stays on this machine.",
+    geminiSection: "Gemini Decision",
+    geminiDescription:
+      "Classifies whether the query refers to Jarvis items and ranks candidates. The key is stored on the local Host; remote machines never need it.",
+    geminiKeyPlaceholder: "Enter a Gemini API key",
+    geminiKeyConfigured: "API key is saved",
+    geminiKeyMissing: "No API key configured",
+    geminiSave: "Save",
+    geminiSaving: "Saving…",
+    geminiSaved: "Saved",
+    geminiClear: "Clear",
+    geminiTesting: "Testing…",
+    geminiTest: "Test",
+    geminiTestOk: "Connection works in {latency} ms",
+    geminiTestFailed: "Connection failed: {reason}",
+    thresholdSection: "Recognition threshold",
+    thresholdDescription:
+      "Minimum confidence (0–1) for treating input as a Jarvis item. Defaults to 0.5; higher is more conservative.",
+    thresholdSave: "Save threshold",
+    thresholdInvalid: "Enter a number between 0 and 1",
+    machinesSection: "Machines",
+    machinesDescription:
+      "Each machine running a Thread reads Jarvis through its own CLI. Remote login callbacks are forwarded over the existing SSH connection.",
+    refresh: "Refresh",
+    refreshing: "Refreshing…",
+    install: "Install",
+    installing: "Installing…",
+    login: "Sign in",
+    loggingIn: "Waiting for the browser…",
+    installed: "Installed",
+    notInstalled: "Not installed",
+    notLoggedIn: "Not signed in",
+    signedInAs: "Signed in as {name}",
+    cliVersion: "Version {version}",
+    unreachable: "This machine is unreachable",
+    localMachine: "This machine",
+    waitingForBrowser: "Browser opened; complete authorization there…",
+    installProgress: "Transferring installer: {received} / {total}",
+    actionFailed: "Action failed: {reason}",
+  },
   pageLabels: Object.freeze({
     connections: "Connections",
     "remote-connections": "Remote connections",
@@ -592,6 +672,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     accounts: "Accounts",
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
+    jarvis: "Jarvis",
     updates: "Updates",
     about: "About",
   }),
@@ -879,6 +960,47 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "打开控制台",
   aboutConsoleOpening: "正在打开…",
   aboutConsoleFailed: "控制台打开失败",
+  jarvis: {
+    description:
+      "在 Codex 的 @ 菜单中查找并引用 Jarvis 项目、需求、任务和 Bug。Gemini API Key 只保存在本机。",
+    geminiSection: "Gemini 判定",
+    geminiDescription:
+      "用于判断输入是否指向 Jarvis 条目并排序候选。Key 保存在本机 Host，远程机器不需要也无法读取。",
+    geminiKeyPlaceholder: "输入 Gemini API Key",
+    geminiKeyConfigured: "已保存 API Key",
+    geminiKeyMissing: "尚未配置 API Key",
+    geminiSave: "保存",
+    geminiSaving: "正在保存…",
+    geminiSaved: "已保存",
+    geminiClear: "清除",
+    geminiTesting: "正在测试…",
+    geminiTest: "测试",
+    geminiTestOk: "连接正常，耗时 {latency} ms",
+    geminiTestFailed: "连接失败：{reason}",
+    thresholdSection: "识别阈值",
+    thresholdDescription: "输入判定为 Jarvis 条目的最低置信度（0–1），默认 0.5。越高越保守。",
+    thresholdSave: "保存阈值",
+    thresholdInvalid: "请输入 0 到 1 之间的数字",
+    machinesSection: "机器状态",
+    machinesDescription:
+      "每台运行 Thread 的机器都通过本机的 jarvis CLI 读取数据；远程登录回调可通过现有 SSH 连接转发。",
+    refresh: "刷新",
+    refreshing: "正在刷新…",
+    install: "安装",
+    installing: "正在安装…",
+    login: "登录",
+    loggingIn: "等待浏览器完成登录…",
+    installed: "已安装",
+    notInstalled: "未安装",
+    notLoggedIn: "未登录",
+    signedInAs: "已登录：{name}",
+    cliVersion: "版本 {version}",
+    unreachable: "无法连接该机器",
+    localMachine: "本机",
+    waitingForBrowser: "已打开浏览器，请完成授权…",
+    installProgress: "正在传输安装包：{received} / {total}",
+    actionFailed: "操作失败：{reason}",
+  },
   pageLabels: Object.freeze({
     connections: "连接",
     "remote-connections": "远程连接",
@@ -886,6 +1008,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     accounts: "账号",
     "session-import": "会话导入",
     "usage-statistics": "用量统计",
+    jarvis: "Jarvis",
     updates: "更新",
     about: "关于",
   }),

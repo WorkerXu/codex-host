@@ -42,6 +42,7 @@ import {
   createHarnessSchedulesPage,
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
+import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -89,6 +90,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "accounts",
   "session-import",
   "usage-statistics",
+  "jarvis",
   "appearance",
   "updates",
   "about",
@@ -699,6 +701,7 @@ export function createDefaultRendererSettingsPages(
     Promise.reject(new Error("Local Host connection is unavailable")),
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
+  jarvis?: RendererJarvisSettingsOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -717,6 +720,7 @@ export function createDefaultRendererSettingsPages(
       messages.locale,
       usageStatisticsHosts,
     ),
+    createJarvisSettingsPage(messages, jarvis ?? { createClient: () => null }),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),

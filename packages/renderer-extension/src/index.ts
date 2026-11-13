@@ -185,6 +185,34 @@ export type {
   RendererPermissionModePickerControl,
 } from "./renderer-permission-mode-picker.js";
 export {
+  createRendererJarvisClient,
+  jarvisCodeFromError,
+  jarvisErrorText,
+} from "./renderer-jarvis-client.js";
+export type {
+  RendererJarvisClient,
+  RendererJarvisClientOptions,
+  RendererJarvisHost,
+  RendererJarvisInstallProgress,
+  RendererJarvisLoginSession,
+} from "./renderer-jarvis-client.js";
+export {
+  findJarvisTrigger,
+  groupJarvisSuggestions,
+  installRendererJarvisMention,
+  jarvisKindLabel,
+  jarvisStatusText,
+  jarvisSuggestionLabel,
+  truncateJarvisText,
+} from "./renderer-jarvis-mention.js";
+export type {
+  RendererJarvisMentionControl,
+  RendererJarvisMentionOptions,
+  RendererJarvisTrigger,
+} from "./renderer-jarvis-mention.js";
+export { createJarvisSettingsPage } from "./settings/jarvis-page.js";
+export type { RendererJarvisSettingsOptions } from "./settings/jarvis-page.js";
+export {
   RendererSettingsNavigationState,
   RendererSettingsPageScope,
   createRendererSettingsPageRegistry,
