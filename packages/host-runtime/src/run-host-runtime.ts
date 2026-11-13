@@ -302,15 +302,16 @@ export async function runHostRuntime(input: {
           accountControl: official.accountControl,
         };
         if (!remoteControlPlan) {
+          const jarvis = createJarvisService({
+            environment: delegationEnvironment,
+            isLocalHost: true,
+          });
           try {
             const host = new AppServerHost({
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
-              jarvis: createJarvisService({
-                environment: delegationEnvironment,
-                isLocalHost: true,
-              }),
+              jarvis,
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -344,16 +345,22 @@ export async function runHostRuntime(input: {
               delegationEnvironment,
             );
           } finally {
+            jarvis.dispose();
             await official.close();
           }
         }
         const mappingStore = createProductionExternalThreadStore(delegationEnvironment);
         let listener: ReturnType<typeof createRemoteAppServerWebSocketListener> | undefined;
+        const jarvis = createJarvisService({
+          environment: delegationEnvironment,
+          isLocalHost: true,
+        });
         try {
           await mappingStore.initialize();
           const common = {
             stockCodexPath,
             environment: delegationEnvironment,
+            jarvis,
             ...shared,
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
@@ -372,10 +379,6 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
-            jarvis: createJarvisService({
-              environment: delegationEnvironment,
-              isLocalHost: true,
-            }),
             ...common,
             arguments: input.arguments,
             delegationPeers: registry,
@@ -390,10 +393,6 @@ export async function runHostRuntime(input: {
                 ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
                 modelPrices,
                 usageStatistics,
-                jarvis: createJarvisService({
-                  environment: delegationEnvironment,
-                  isLocalHost: true,
-                }),
                 ...common,
                 arguments: [],
                 desktopInput,
@@ -420,6 +419,7 @@ export async function runHostRuntime(input: {
             } finally {
               await mappingStore.close();
             }
+            jarvis.dispose();
           }
         }
       },
@@ -465,14 +465,15 @@ export async function runHostRuntime(input: {
       await mappingStore.initialize();
       const sharedOwner = new SharedThreadOwner();
       let sharedDelegation: DelegationControlRegistration | undefined;
+      const jarvis = createJarvisService({
+        environment: delegationEnvironment,
+        isLocalHost: false,
+      });
       const externalHost = new AppServerHost({
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
-        jarvis: createJarvisService({
-          environment: delegationEnvironment,
-          isLocalHost: false,
-        }),
+        jarvis,
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
@@ -505,10 +506,7 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
-            jarvis: createJarvisService({
-              environment: delegationEnvironment,
-              isLocalHost: false,
-            }),
+            jarvis,
             ...(sharedDelegation ? { sharedDelegation } : {}),
             sharedThreads: new SharedThreadBridge({
               connect: async () => sharedOwner.connect(),
@@ -590,6 +588,7 @@ export async function runHostRuntime(input: {
             } finally {
               await mappingStore.close();
             }
+            jarvis.dispose();
           }
         }
       }
