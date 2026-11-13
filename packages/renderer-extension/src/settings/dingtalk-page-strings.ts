@@ -2,129 +2,165 @@ import type { RendererSettingsLocale } from "./localization.js";
 
 /** Page copy kept apart from DOM construction. */
 export interface DingTalkPageText {
-  connecting: string;
-  connected: string;
   brand: string;
-  hostLabel: string;
+  moreActions: string;
+  menuConnected: string;
+  menuUnavailable: string;
+  menuLoginLabel: string;
   hostAuto: string;
   hostLocal: string;
   hostEffective: string;
   hostChangeFailed: string;
+  refreshConversations: string;
   unavailable: string;
-  refresh: string;
   searchPlaceholder: string;
-  searching: string;
-  searchResults: string;
   clearSearch: string;
+  searching: string;
+  searchConversations: string;
+  searchMessages: string;
+  searchMore: string;
+  searchKeyboardHint: string;
   noSearchResults: string;
+  searchFailed: string;
   searchFallback: string;
   recentReplied: string;
   unread: string;
-  recentRepliedNotice: string;
   noConversations: string;
+  noUnreadConversations: string;
   listFailed: string;
+  listFailedReason: string;
+  retry: string;
   selectConversation: string;
   emptyMessages: string;
-  loading: string;
+  loadingMessages: string;
   messagesFailed: string;
   notLoaded: string;
   direct: string;
   group: string;
-  muted: string;
   unnamed: string;
   selectMessage: string;
-  mobileOnly: string;
+  unsupported: string;
   embedConversation: string;
-  embedSelected: string;
   embedFailed: string;
+  refreshMessages: string;
+  selectedCount: string;
+  embedToConversation: string;
+  cancelSelection: string;
   send: string;
   sending: string;
   sendFailed: string;
+  retrySend: string;
   sendPlaceholder: string;
+  newMessages: string;
+  loadMoreFailed: string;
 }
 
 const ZH: DingTalkPageText = {
-  connecting: "连接中…",
-  connected: "已连接 · {host}",
   brand: "钉钉",
-  hostLabel: "钉钉登录",
-  hostAuto: "自动（优先 tencent）",
+  moreActions: "更多操作",
+  menuConnected: "已连接 · {host}",
+  menuUnavailable: "钉钉连接不可用",
+  menuLoginLabel: "钉钉登录",
+  hostAuto: "自动选择",
   hostLocal: "本机",
   hostEffective: "当前使用 {name} 的钉钉登录",
-  hostChangeFailed: "切换钉钉 Host 失败",
-  unavailable: "不可用",
-  refresh: "刷新",
-  searchPlaceholder: "搜索会话或聊天记录",
-  searching: "搜索中…",
-  searchResults: "搜索结果",
+  hostChangeFailed: "切换钉钉登录失败，请稍后重试",
+  refreshConversations: "刷新会话",
+  unavailable: "钉钉暂不可用",
+  searchPlaceholder: "搜索",
   clearSearch: "清除搜索",
-  noSearchResults: "没有匹配的会话或消息",
+  searching: "正在搜索…",
+  searchConversations: "会话",
+  searchMessages: "聊天记录",
+  searchMore: "查看更多（{count}）",
+  searchKeyboardHint: "↑↓ 移动 · ↵ 打开 · Esc 退出",
+  noSearchResults: "没有找到相关会话或消息",
+  searchFailed: "搜索失败，请稍后重试",
   searchFallback: "搜索分类不可用，已按关键词搜索",
   recentReplied: "最近回复",
-  unread: "未读会话",
-  recentRepliedNotice: "当前没有未读会话，显示你最近回复的会话。",
+  unread: "未读",
   noConversations: "暂无会话",
+  noUnreadConversations: "暂无未读会话",
   listFailed: "会话列表读取失败",
+  listFailedReason: "钉钉连接不可用，请稍后重试",
+  retry: "重试",
   selectConversation: "选择一个会话",
-  emptyMessages: "选择左侧会话查看消息",
-  loading: "加载中…",
-  messagesFailed: "消息读取失败",
-  notLoaded: "该消息还未加载，请继续向上滚动",
+  emptyMessages: "从左侧选择会话开始查看消息",
+  loadingMessages: "正在加载消息…",
+  messagesFailed: "消息加载失败，请稍后重试",
+  notLoaded: "这条消息还没有加载，请继续向上滚动",
   direct: "单聊",
   group: "群聊",
-  muted: "免打扰",
   unnamed: "未命名会话",
   selectMessage: "选择消息",
-  mobileOnly: "非文本消息，请在手机上查看",
-  embedConversation: "嵌入整个会话",
-  embedSelected: "嵌入所选消息",
+  unsupported: "在手机上查看",
+  embedConversation: "嵌入会话到对话",
   embedFailed: "无法嵌入：请重新打开该对话的输入框",
+  refreshMessages: "刷新消息",
+  selectedCount: "已选 {count} 条",
+  embedToConversation: "嵌入到对话",
+  cancelSelection: "取消",
   send: "发送",
   sending: "发送中…",
-  sendFailed: "发送失败",
-  sendPlaceholder: "以我的身份发送钉钉消息（Enter 发送，Shift+Enter 换行）",
+  sendFailed: "发送失败，点击重试",
+  retrySend: "重试发送",
+  sendPlaceholder: "发送给 {name}",
+  newMessages: "{count} 条新消息",
+  loadMoreFailed: "更早的消息加载失败，请重试",
 };
 
 const EN: DingTalkPageText = {
-  connecting: "Connecting…",
-  connected: "Connected · {host}",
   brand: "DingTalk",
-  hostLabel: "DingTalk login",
-  hostAuto: "Auto (prefer tencent)",
+  moreActions: "More actions",
+  menuConnected: "Connected · {host}",
+  menuUnavailable: "DingTalk is unavailable",
+  menuLoginLabel: "DingTalk login",
+  hostAuto: "Choose automatically",
   hostLocal: "This machine",
   hostEffective: "Using the DingTalk login on {name}",
-  hostChangeFailed: "Could not switch the DingTalk Host",
-  unavailable: "Unavailable",
-  refresh: "Refresh",
-  searchPlaceholder: "Search conversations or messages",
-  searching: "Searching…",
-  searchResults: "Search results",
+  hostChangeFailed: "Could not switch the DingTalk login. Try again.",
+  refreshConversations: "Refresh conversations",
+  unavailable: "DingTalk is unavailable",
+  searchPlaceholder: "Search",
   clearSearch: "Clear search",
+  searching: "Searching…",
+  searchConversations: "Conversations",
+  searchMessages: "Messages",
+  searchMore: "Show more ({count})",
+  searchKeyboardHint: "↑↓ Move · ↵ Open · Esc Exit",
   noSearchResults: "No matching conversations or messages",
+  searchFailed: "Search failed. Try again.",
   searchFallback: "Classification is unavailable; searched by keyword",
   recentReplied: "Recently replied",
   unread: "Unread",
-  recentRepliedNotice: "No unread conversations; showing conversations you recently replied to.",
   noConversations: "No conversations",
+  noUnreadConversations: "No unread conversations",
   listFailed: "Could not read conversations",
+  listFailedReason: "DingTalk is unavailable. Try again.",
+  retry: "Retry",
   selectConversation: "Select a conversation",
-  emptyMessages: "Select a conversation on the left",
-  loading: "Loading…",
-  messagesFailed: "Could not read messages",
+  emptyMessages: "Choose a conversation on the left",
+  loadingMessages: "Loading messages…",
+  messagesFailed: "Could not load messages. Try again.",
   notLoaded: "This message is not loaded yet; scroll up",
   direct: "Direct",
   group: "Group",
-  muted: "Muted",
   unnamed: "Untitled conversation",
   selectMessage: "Select message",
-  mobileOnly: "Non-text message; view it on your phone",
-  embedConversation: "Embed conversation",
-  embedSelected: "Embed selected",
+  unsupported: "View on your phone",
+  embedConversation: "Embed conversation in chat",
   embedFailed: "Could not embed: reopen the Composer that opened this page",
+  refreshMessages: "Refresh messages",
+  selectedCount: "{count} selected",
+  embedToConversation: "Embed in conversation",
+  cancelSelection: "Cancel",
   send: "Send",
   sending: "Sending…",
-  sendFailed: "Send failed",
-  sendPlaceholder: "Send as me (Enter to send, Shift+Enter for a new line)",
+  sendFailed: "Send failed. Click to retry.",
+  retrySend: "Retry sending",
+  sendPlaceholder: "Send to {name}",
+  newMessages: "{count} new messages",
+  loadMoreFailed: "Could not load older messages. Try again.",
 };
 
 export function dingtalkPageStrings(locale: RendererSettingsLocale): DingTalkPageText {
