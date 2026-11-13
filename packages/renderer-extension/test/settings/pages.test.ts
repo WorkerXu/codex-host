@@ -3031,7 +3031,7 @@ describe("Renderer Updates page", () => {
     );
     expect(visibleText(content)).toContain("Claude Code 和 Pi Agent");
     expect(visibleText(content)).toContain("codexhost 是一个开源项目");
-    expect(visibleText(content)).toContain("请给我们一个 Star");
+    expect(visibleText(content)).not.toMatch(/Star|GitHub 点个/u);
     const repository = descendants(content).find(
       ({ tagName, href }) =>
         tagName === "a" && href === "https://github.com/BytePioneer-AI/codex-host",
@@ -3140,18 +3140,10 @@ describe("Renderer Updates page", () => {
     // Status and the update action come first; the manual fallback stays visible
     // right below it, and release notes render last.
     expect(content.children.indexOf(panel)).toBeLessThan(content.children.indexOf(controls));
-    const starBanner = elementWithClass(content, "settings-update-star");
-    expect(content.children.indexOf(controls)).toBeLessThan(content.children.indexOf(starBanner));
-    expect(content.children.indexOf(starBanner)).toBeLessThan(
+    expect(content.children.indexOf(controls)).toBeLessThan(
       content.children.indexOf(elementWithClass(content, "settings-update-notes-section")),
     );
-    expect(visibleText(starBanner)).toContain("如果 CodexHost 帮到了你，请在 GitHub 点个 Star");
-    const starLink = descendants(starBanner).find(({ tagName }) => tagName === "a");
-    expect(starLink).toMatchObject({
-      href: "https://github.com/BytePioneer-AI/codex-host",
-      target: "_blank",
-      rel: "noopener noreferrer",
-    });
+    expect(descendants(content).every(({ className }) => !/star/u.test(className))).toBe(true);
     expect(descendants(panel)).toContain(updateButton);
     expect(descendants(panel)).not.toContain(notes);
     expect(notes.children.map((child) => (child as FakeElement).tagName)).toEqual(["h2", "ul"]);

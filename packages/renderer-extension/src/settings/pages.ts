@@ -42,6 +42,7 @@ import {
   createHarnessSchedulesPage,
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
+import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -89,6 +90,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "accounts",
   "session-import",
   "usage-statistics",
+  "jarvis",
   "appearance",
   "updates",
   "about",
@@ -238,9 +240,6 @@ function aboutPage(
         paragraph.textContent = paragraphText;
         introduction.append(paragraph);
       }
-      const starCallout = document.createElement("p");
-      starCallout.className = "settings-about-star-callout";
-      starCallout.textContent = messages.aboutStarCallout;
       const repositorySection = document.createElement("div");
       repositorySection.className = "settings-about-repository";
       const openSource = document.createElement("p");
@@ -258,31 +257,13 @@ function aboutPage(
         repositoryUrl,
       );
       repositorySection.append(openSource, repository);
-      panel.append(product, tagline, introduction, starCallout, repositorySection);
+      panel.append(product, tagline, introduction, repositorySection);
       const consoleEntry = consoleSection(document, messages, getClient());
       if (consoleEntry) panel.append(consoleEntry);
       context.content.append(heading, panel);
       return undefined;
     },
   });
-}
-
-function updateStarBanner(document: Document, messages: RendererSettingsMessages): HTMLElement {
-  const banner = document.createElement("div");
-  banner.className = "settings-update-star";
-  const copy = document.createElement("p");
-  copy.className = "settings-update-star__copy";
-  copy.textContent = messages.updateStarCallout;
-  const link = document.createElement("a");
-  link.className = "settings-update-link settings-update-star__link";
-  link.href = CODEXHOST_GITHUB_REPOSITORY_URL;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  const star = createRendererSettingsIcon("star", 14);
-  star.classList.add("settings-update-star__mark");
-  link.append(createRendererSettingsIcon("github", 15), messages.updateStarLink, star);
-  banner.append(copy, link);
-  return banner;
 }
 
 function updatesPage(
@@ -402,13 +383,11 @@ function updatesPage(
       controls.append(manualTitle, manualNpm, manualWindowsInstaller, actions);
 
       // Release notes render below the fold, in the page scroller rather than a
-      // nested one. The Star banner stays above them so it remains visible
-      // without scrolling past the notes.
+      // nested one.
       const notes = document.createElement("div");
       notes.className = "settings-update-notes-section";
-      const starBanner = updateStarBanner(document, messages);
 
-      context.content.append(heading, metadata, panel, controls, starBanner, notes);
+      context.content.append(heading, metadata, panel, controls, notes);
 
       // Presentation-only: emphasise the manual path once the automatic one has
       // visibly failed.
@@ -699,6 +678,7 @@ export function createDefaultRendererSettingsPages(
     Promise.reject(new Error("Local Host connection is unavailable")),
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
+  jarvis?: RendererJarvisSettingsOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -717,6 +697,7 @@ export function createDefaultRendererSettingsPages(
       messages.locale,
       usageStatisticsHosts,
     ),
+    createJarvisSettingsPage(messages, jarvis ?? { createClient: () => null }),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
