@@ -294,6 +294,8 @@ export function createFixture(
     externalOnly?: boolean;
     delegationPeers?: AppServerHostOptions["delegationPeers"];
     jarvis?: AppServerHostOptions["jarvis"];
+    codexAgents?: AppServerHostOptions["codexAgents"];
+    dingTalkDispatch?: AppServerHostOptions["dingTalkDispatch"];
   } = {},
 ) {
   const adapter =
@@ -360,6 +362,8 @@ export function createFixture(
         }
       : {}),
     ...(options.jarvis ? { jarvis: options.jarvis } : {}),
+    ...(options.codexAgents ? { codexAgents: options.codexAgents } : {}),
+    ...(options.dingTalkDispatch ? { dingTalkDispatch: options.dingTalkDispatch } : {}),
     ...(options.updateCoordinator ? { updateCoordinator: options.updateCoordinator } : {}),
     ...(options.runtimeMaintenance ? { runtimeMaintenance: options.runtimeMaintenance } : {}),
     ...(options.consoleOpener ? { consoleOpener: options.consoleOpener } : {}),

@@ -45,6 +45,20 @@ import {
   jarvisInstallUploadParamsSchema,
   jarvisLoginForwardParamsSchema,
   jarvisLoginStopParamsSchema,
+  CODEX_AGENT_LIST_METHOD,
+  CODEX_AGENT_READ_METHOD,
+  CODEX_AGENT_SAVE_METHOD,
+  CODEX_AGENT_DELETE_METHOD,
+  CODEX_AGENT_CATALOG_METHOD,
+  codexAgentListResultSchema,
+  codexAgentRecordSchema,
+  codexAgentReadParamsSchema,
+  codexAgentSaveParamsSchema,
+  codexAgentDeleteParamsSchema,
+  codexAgentDeleteResultSchema,
+  DINGTALK_DISPATCH_GET_METHOD,
+  DINGTALK_DISPATCH_SET_METHOD,
+  dingtalkDispatchSettingsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -108,6 +122,9 @@ import {
 } from "./delegation-mention-rewrite.js";
 import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
 import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
+import { CodexAgentError, type CodexAgentStore } from "./codex-agents.js";
+import { codexAgentCatalogFromModelList } from "./codex-agent-models.js";
+import type { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
 import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
@@ -429,6 +446,10 @@ export interface AppServerHostOptions {
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
   jarvis?: JarvisService;
+  /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
+  codexAgents?: CodexAgentStore;
+  /** Local-only DingTalk dispatch settings read by the separate listener runtime. */
+  dingTalkDispatch?: DingTalkDispatchSettingsStore;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -469,6 +490,17 @@ type ExternalThreadStatus = { type: "active"; activeFlags: [] } | { type: "idle"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function codexAgentParamError(
+  issues: ReadonlyArray<{ path: readonly PropertyKey[] }>,
+): CodexAgentError {
+  const field = issues[0]?.path[0];
+  if (field === "name") return new CodexAgentError("invalid_name", "Invalid agent name");
+  if (field === "fileName") {
+    return new CodexAgentError("invalid_file_name", "Invalid agent file name");
+  }
+  return new CodexAgentError("invalid_params", "Invalid agent settings");
 }
 
 function officialThreadBusy(thread: Record<string, unknown> | null): boolean {
@@ -1430,6 +1462,14 @@ export class AppServerHost {
     }
     if (request.method.startsWith("codexhost/jarvis/")) {
       this.#dispatchDesktopReply(request, () => this.#handleJarvisRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/codex-agents/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleCodexAgentsRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/dingtalk-dispatch/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleDingTalkDispatchRequest(request));
       return;
     }
     if (
@@ -3542,6 +3582,112 @@ export class AppServerHost {
       return {};
     }
     throw new JarvisServiceError("unknown_method", "Unknown Jarvis method");
+  }
+
+  async #handleCodexAgentsRequest(request: JsonRpcRequest): Promise<void> {
+    const store = this.#options.codexAgents;
+    if (!store) {
+      await this.#writer.json(
+        rpcError(request, -32601, "Codex agents are available on the local Host only"),
+      );
+      return;
+    }
+    try {
+      let result: unknown;
+      if (request.method === CODEX_AGENT_LIST_METHOD) {
+        result = codexAgentListResultSchema.parse(await store.list());
+      } else if (request.method === CODEX_AGENT_READ_METHOD) {
+        const params = codexAgentReadParamsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new CodexAgentError("invalid_file_name", "Invalid agent file name");
+        }
+        result = codexAgentRecordSchema.parse(await store.read(params.data.fileName));
+      } else if (request.method === CODEX_AGENT_SAVE_METHOD) {
+        const params = codexAgentSaveParamsSchema.safeParse(request.params);
+        if (!params.success) throw codexAgentParamError(params.error.issues);
+        result = codexAgentRecordSchema.parse(await store.save(params.data));
+      } else if (request.method === CODEX_AGENT_DELETE_METHOD) {
+        const params = codexAgentDeleteParamsSchema.safeParse(request.params);
+        if (!params.success) throw codexAgentParamError(params.error.issues);
+        await store.delete(params.data.fileName, params.data.expectedRevision);
+        result = codexAgentDeleteResultSchema.parse({ fileName: params.data.fileName });
+      } else if (request.method === CODEX_AGENT_CATALOG_METHOD) {
+        result = await this.#readCodexAgentCatalog();
+      } else {
+        throw new CodexAgentError("invalid_params", "Unknown Codex agent method");
+      }
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof CodexAgentError) {
+        await this.#writer.json(rpcError(request, -32095, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32095, "io_failed"));
+    }
+  }
+
+  async #readCodexAgentCatalog(): Promise<unknown> {
+    try {
+      const response = await this.#requestOfficial("model/list", {});
+      if (isRecord(response.error)) {
+        return { available: false, models: [], defaultModel: null };
+      }
+      return codexAgentCatalogFromModelList(response);
+    } catch (error) {
+      this.#diagnose(error);
+      return { available: false, models: [], defaultModel: null };
+    }
+  }
+
+  async #handleDingTalkDispatchRequest(request: JsonRpcRequest): Promise<void> {
+    const store = this.#options.dingTalkDispatch;
+    if (!store) {
+      await this.#writer.json(
+        rpcError(
+          request,
+          -32601,
+          "DingTalk dispatch settings are available on the local Host only",
+        ),
+      );
+      return;
+    }
+    try {
+      let result: unknown;
+      if (request.method === DINGTALK_DISPATCH_GET_METHOD) {
+        result = await store.read(await this.#defaultDingTalkAgents());
+      } else if (request.method === DINGTALK_DISPATCH_SET_METHOD) {
+        const params = dingtalkDispatchSettingsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch settings");
+        }
+        result = await store.write(params.data);
+      } else {
+        throw new CodexAgentError("invalid_params", "Unknown DingTalk dispatch method");
+      }
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof CodexAgentError) {
+        await this.#writer.json(rpcError(request, -32095, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32095, "io_failed"));
+    }
+  }
+
+  /** Without a saved file, every agent that has a description is opted in. */
+  async #defaultDingTalkAgents(): Promise<string[]> {
+    const store = this.#options.codexAgents;
+    if (!store) return [];
+    try {
+      const listed = await store.list();
+      return listed.agents
+        .filter((agent) => agent.description.trim().length > 0)
+        .map((agent) => agent.name);
+    } catch {
+      return [];
+    }
   }
 
   async #handleProjectGroupsRequest(request: JsonRpcRequest): Promise<void> {
