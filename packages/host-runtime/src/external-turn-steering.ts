@@ -146,9 +146,14 @@ export async function insertNativeSteer(
     ): Promise<void>;
     diagnose(error: unknown): void;
   },
+  /** Host-side enrichment (for example Jarvis details) applied only to the Harness input. */
+  prepareText?: (text: string) => Promise<string>,
 ): Promise<void> {
   const restored = restoreHarnessCommandMentions(input.text);
-  const steered: HostTextInput[] = [{ type: "text", text: rewriteDelegationMentionText(restored) }];
+  const harnessText = rewriteDelegationMentionText(restored);
+  const steered: HostTextInput[] = [
+    { type: "text", text: prepareText ? await prepareText(harnessText) : harnessText },
+  ];
   const displayed: HostTextInput[] = [{ type: "text", text: restored }];
   const projectionDone = Promise.withResolvers<undefined>();
   thread.pendingSteerProjections.add(projectionDone.promise);
