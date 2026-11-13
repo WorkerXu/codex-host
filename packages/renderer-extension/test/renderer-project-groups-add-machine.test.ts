@@ -231,7 +231,7 @@ describe("Project group add-machine menu", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(loadAddTargets).toHaveBeenCalledWith("group-1");
-    expect(labels(document)).toContain("其他机器");
+    expect(labels(document)).toContain("添加机器");
     expect(labels(document)).toContain("tencent");
     expect(labels(document)).toContain("mac");
 

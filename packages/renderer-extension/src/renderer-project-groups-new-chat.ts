@@ -303,7 +303,7 @@ export class ProjectGroupNewChatPicker {
       this.open(view, { getBoundingClientRect: () => rect } as HTMLElement);
     });
     const headingText = this.#document.createElement("span");
-    headingText.textContent = "其他机器";
+    headingText.textContent = "添加机器";
     heading.append(back, headingText);
     menu.append(heading);
 
