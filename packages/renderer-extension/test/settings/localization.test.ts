@@ -82,6 +82,7 @@ describe("Renderer settings localization", () => {
       "会话导入",
       "用量统计",
       "Jarvis",
+      "钉钉",
       "通用",
       "更新",
       "关于",
