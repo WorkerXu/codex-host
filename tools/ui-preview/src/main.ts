@@ -47,7 +47,7 @@ function mountSettings(
   const dingtalkClient = createFakeDingTalkClient({
     empty: dingtalkEmpty,
     error: dingtalkError,
-    messageDelayMs: scenarioName === "dingtalk-scrolled-top" ? 260 : 120,
+    messageDelayMs: scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
   });
   const agentsClient = createFakeCodexAgentsClient();
   const dingtalkPage = createDingTalkSettingsPage(messages, {
@@ -105,11 +105,8 @@ const scenarios: Record<string, () => Promise<void>> = {
     if (!list) throw new Error("Message list is missing");
     list.scrollTop = 0;
     list.dispatchEvent(new Event("scroll"));
-    await waitFor(
-      () =>
-        (query(".dingtalk-message-list")?.querySelectorAll(".dingtalk-message").length ?? 0) > 30,
-    );
-    await delay(220);
+    await waitFor(() => query(".dingtalk-loading-older:not([hidden])"));
+    await delay(120);
   },
 
   async "dingtalk-search"() {
@@ -129,7 +126,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
     const checks = queryAll<HTMLInputElement>(".dingtalk-message-check");
-    for (const check of checks.slice(0, 3)) {
+    for (const check of checks.slice(-3)) {
       check.checked = true;
       check.dispatchEvent(new Event("change", { bubbles: true }));
     }
@@ -148,20 +145,24 @@ const scenarios: Record<string, () => Promise<void>> = {
 
   async "agents-list"() {
     const { query } = mountSettings("codex-agents");
-    await waitFor(() => query(".agent-row"));
+    await waitFor(() => query(".agent-row:not(.agent-row--skeleton)"));
   },
 
   async "agents-edit"() {
     const { query } = mountSettings("codex-agents");
-    const row = await waitFor(() => query<HTMLButtonElement>(".agent-row"));
+    const row = await waitFor(() =>
+      query<HTMLButtonElement>(".agent-row:not(.agent-row--skeleton)"),
+    );
     row.click();
     await waitFor(() => query(".agent-editor:not([hidden])"));
   },
 
   async "agents-dingtalk-settings"() {
-    const { query } = mountSettings("codex-agents");
-    const section = await waitFor(() => query(".dingtalk-listener"));
-    section.scrollIntoView({ block: "end" });
+    const { query, shell } = mountSettings("codex-agents");
+    await waitFor(() => query(".dingtalk-listener"));
+    const page = shell.root.shadowRoot?.querySelector<HTMLElement>(".settings-page");
+    if (!page) throw new Error("Settings page scroller is missing");
+    page.scrollTop = page.scrollHeight;
     await delay(180);
   },
 
