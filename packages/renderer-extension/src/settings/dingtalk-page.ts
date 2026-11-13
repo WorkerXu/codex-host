@@ -391,23 +391,27 @@ export function createDingTalkSettingsPage(
         }
         let previous: DingTalkMessage | undefined;
         let previousDay = "";
+        let afterTimeSeparator = false;
         for (const message of state.messages) {
           const key = dayKey(message.createdAt);
           if (key !== previousDay) {
             messageList.append(createDateSeparator(document, message.createdAt));
             previous = undefined;
             previousDay = key;
+            afterTimeSeparator = false;
           } else if (
             previous !== undefined &&
             message.createdAt - previous.createdAt > 5 * 60_000
           ) {
             messageList.append(createTimeSeparator(document, message.createdAt));
             previous = undefined;
+            afterTimeSeparator = true;
           }
           const continuation = continuesDingTalkGroup(previous, message);
           messageList.append(
             createMessageRow(document, message, text, {
               continuation,
+              suppressTime: afterTimeSeparator,
               selected: state.selectedMessages.has(message.messageId),
               onSelect: (checked) => setMessageSelected(message.messageId, checked),
               onActivate: () =>
@@ -419,6 +423,7 @@ export function createDingTalkSettingsPage(
             }),
           );
           previous = message;
+          afterTimeSeparator = false;
         }
         if (behavior?.scroll === "bottom") scrollToBottom();
         else if (behavior?.distance !== undefined) {

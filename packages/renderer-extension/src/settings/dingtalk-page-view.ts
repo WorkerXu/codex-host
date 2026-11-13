@@ -221,6 +221,8 @@ export function createSearchMessageRow(
 export interface MessageRowOptions {
   continuation: boolean;
   selected: boolean;
+  /** The centered time separator already carries this group's time. */
+  suppressTime?: boolean;
   onSelect(checked: boolean): void;
   onActivate(): void;
   onRetry?(): void;
@@ -274,17 +276,19 @@ export function createMessageRow(
   const body = createElementNode(document, "div", "dingtalk-message-body");
   if (!options.continuation && !message.mine) {
     const meta = createElementNode(document, "div", "dingtalk-message-meta");
-    meta.append(
-      createElementNode(document, "span", "dingtalk-message-sender", message.senderName),
-      createElementNode(
-        document,
-        "span",
-        "dingtalk-message-time",
-        formatDingTalkClock(message.createdAt),
-      ),
-    );
+    meta.append(createElementNode(document, "span", "dingtalk-message-sender", message.senderName));
+    if (!options.suppressTime) {
+      meta.append(
+        createElementNode(
+          document,
+          "span",
+          "dingtalk-message-time",
+          formatDingTalkClock(message.createdAt),
+        ),
+      );
+    }
     body.append(meta);
-  } else if (!options.continuation && message.mine) {
+  } else if (!options.continuation && message.mine && !options.suppressTime) {
     const meta = createElementNode(
       document,
       "div",
