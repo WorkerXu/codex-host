@@ -1,4 +1,3 @@
-import PanelRight from "lucide/dist/esm/icons/panel-right.mjs";
 import SearchIcon from "lucide/dist/esm/icons/search.mjs";
 import XIcon from "lucide/dist/esm/icons/x.mjs";
 
@@ -27,13 +26,21 @@ import {
   createListEmpty,
   createMessageRow,
   createMessageSkeleton,
+  createOlderMessagesSkeleton,
+  createTimeSeparator,
 } from "./dingtalk-page-view.js";
 import { createDingTalkComposer } from "./dingtalk-composer.js";
+import { createDingTalkMainHeader } from "./dingtalk-main-header.js";
 import { createDingTalkPageMenu } from "./dingtalk-page-menu.js";
 import { consumeDingTalkReveal, type DingTalkRevealTarget } from "./dingtalk-reveal.js";
 import { createDingTalkSearchPanel } from "./dingtalk-search-panel.js";
 import { dingtalkPageStrings } from "./dingtalk-page-strings.js";
 
+/**
+ * Chat state machine for the DingTalk workbench. DOM builders live in
+ * dingtalk-page-view, -menu, -composer and -search-panel; the remaining
+ * actions share one message/search/selection state, so they stay together.
+ */
 const SEARCH_DEBOUNCE_MS = 450;
 const HIGHLIGHT_MS = 2_500;
 const INITIAL_MESSAGE_LIMIT = 30;
@@ -62,6 +69,7 @@ export function createDingTalkSettingsPage(
       const text = dingtalkPageStrings(locale);
       const state: DingTalkPageState = {
         source: "empty",
+        view: "recent",
         conversations: [],
         selectedId: null,
         currentConversation: null,
@@ -87,6 +95,10 @@ export function createDingTalkSettingsPage(
       let searchTimer: number | null = null;
       let highlightTimer: number | null = null;
       let scrollRequest = 0;
+      let searchExpanded = { conversations: false, messages: false };
+      let searchCursor = -1;
+      let viewInitialized = false;
+      let loadingOlderRequest = false;
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
 
@@ -113,7 +125,14 @@ export function createDingTalkSettingsPage(
       });
       sidebarHead.append(searchBox, pageMenu.moreButton);
 
-      const listLabel = createElementNode(document, "div", "dingtalk-list-label");
+      const listSwitch = createElementNode(document, "div", "dingtalk-list-switch");
+      const unreadButton = createElementNode(document, "button", "dingtalk-list-switch-button");
+      unreadButton.type = "button";
+      unreadButton.textContent = text.unread;
+      const recentButton = createElementNode(document, "button", "dingtalk-list-switch-button");
+      recentButton.type = "button";
+      recentButton.textContent = text.recentReplied;
+      listSwitch.append(unreadButton, recentButton);
       const conversationList = createElementNode(document, "div", "dingtalk-conversation-list");
       conversationList.setAttribute("role", "listbox");
       conversationList.setAttribute("aria-label", text.brand);
@@ -126,28 +145,32 @@ export function createDingTalkSettingsPage(
         openMessage: (conversationId, messageId) =>
           void revealTarget({ conversationId, messageIds: [messageId] }),
         retry: () => void runSearch(state.searchQuery),
+        expand: (kind) => {
+          searchExpanded[kind] = true;
+          renderSearch();
+        },
       });
-      sidebar.append(sidebarHead, listLabel, conversationList, searchPanel.element);
-
-      const main = createElementNode(document, "section", "dingtalk-main");
-      const mainHead = createElementNode(document, "div", "dingtalk-main-head");
-      const headCopy = createElementNode(document, "div", "dingtalk-main-copy");
-      const title = createElementNode(
+      const searchHint = createElementNode(
         document,
         "div",
-        "dingtalk-main-title",
-        text.selectConversation,
+        "dingtalk-search-hint",
+        text.searchKeyboardHint,
       );
-      const subtitle = createElementNode(document, "div", "dingtalk-main-subtitle");
-      headCopy.append(title, subtitle);
-      const headActions = createElementNode(document, "div", "dingtalk-main-actions");
-      const embedConversation = createIconButton(document, text.embedConversation, PanelRight, {
-        className: "dingtalk-embed-button",
-        size: 17,
+      searchHint.hidden = true;
+      sidebar.append(sidebarHead, listSwitch, conversationList, searchPanel.element, searchHint);
+
+      const main = createElementNode(document, "section", "dingtalk-main");
+      const mainHead = createDingTalkMainHeader({
+        document,
+        text,
+        onEmbed: () => {
+          if (!state.selectedId) return;
+          void embed(conversationMention(state.currentConversation, state.selectedId));
+        },
+        onRefresh: () => {
+          if (state.selectedId) void selectConversation(state.selectedId, true);
+        },
       });
-      embedConversation.disabled = true;
-      headActions.append(embedConversation);
-      mainHead.append(headCopy, headActions);
 
       const notice = createElementNode(document, "div", "dingtalk-main-notice");
       notice.hidden = true;
@@ -159,12 +182,12 @@ export function createDingTalkSettingsPage(
       const mainState = createElementNode(document, "div", "dingtalk-main-state");
       const loadingOlder = createElementNode(document, "div", "dingtalk-loading-older");
       loadingOlder.hidden = true;
-      loadingOlder.append(createMessageSkeleton(document));
+      loadingOlder.append(createOlderMessagesSkeleton(document));
       const newPill = document.createElement("button");
       newPill.type = "button";
       newPill.className = "dingtalk-new-messages";
       newPill.hidden = true;
-      pane.append(messageList, mainState, loadingOlder, newPill);
+      pane.append(messageList, mainState, newPill);
 
       const composer = createDingTalkComposer({
         document,
@@ -181,7 +204,7 @@ export function createDingTalkSettingsPage(
         onCancelSelection: () => clearSelection(),
       });
 
-      main.append(mainHead, notice, pane, composer.element);
+      main.append(mainHead.element, notice, pane, composer.element);
       root.append(sidebar, pageMenu.element, main);
       context.content.append(root);
 
@@ -199,18 +222,33 @@ export function createDingTalkSettingsPage(
         const searching = state.searchQuery.length > 0;
         conversationList.hidden = searching;
         searchPanel.element.hidden = !searching;
-        listLabel.hidden = searching || state.listError || listLabel.textContent === "";
+        searchHint.hidden = !searching;
+        listSwitch.hidden = searching || state.listError;
+      };
+
+      const applySearchCursor = (): void => {
+        const rows = [
+          ...searchPanel.element.querySelectorAll<HTMLButtonElement>(".dingtalk-search-result"),
+        ];
+        if (searchCursor >= rows.length) searchCursor = rows.length - 1;
+        rows.forEach((row, index) => {
+          row.classList.toggle("dingtalk-search-result--cursor", index === searchCursor);
+        });
+        if (searchCursor >= 0) rows[searchCursor]?.scrollIntoView({ block: "nearest" });
       };
 
       const renderList = (): void => {
         conversationList.replaceChildren();
-        listLabel.textContent =
-          state.source === "recent-replied"
-            ? text.recentReplied
-            : state.source === "unread"
-              ? text.unread
-              : "";
-        listLabel.hidden = listLabel.textContent === "" || state.listError;
+        unreadButton.setAttribute("aria-pressed", String(state.view === "unread"));
+        recentButton.setAttribute("aria-pressed", String(state.view === "recent"));
+        unreadButton.classList.toggle(
+          "dingtalk-list-switch-button--active",
+          state.view === "unread",
+        );
+        recentButton.classList.toggle(
+          "dingtalk-list-switch-button--active",
+          state.view === "recent",
+        );
         if (state.listError) {
           conversationList.append(
             createListEmpty(document, text.listFailedReason, {
@@ -221,7 +259,13 @@ export function createDingTalkSettingsPage(
           syncColumnMode();
           return;
         }
-        for (const conversation of state.conversations) {
+        const rows =
+          state.view === "unread"
+            ? state.conversations.filter(
+                (conversation) => conversation.unreadCount > 0 || conversation.muted,
+              )
+            : state.conversations;
+        for (const conversation of rows) {
           conversationList.append(
             createConversationRow(
               document,
@@ -232,8 +276,15 @@ export function createDingTalkSettingsPage(
             ),
           );
         }
-        if (state.conversations.length === 0) {
-          conversationList.append(createListEmpty(document, text.noConversations));
+        if (rows.length === 0) {
+          conversationList.append(
+            createListEmpty(
+              document,
+              state.view === "unread" && state.conversations.length > 0
+                ? text.noUnreadConversations
+                : text.noConversations,
+            ),
+          );
         }
         syncColumnMode();
       };
@@ -244,7 +295,10 @@ export function createDingTalkSettingsPage(
           pending: state.searchPending,
           failed: state.searchFailed,
           result: state.search,
+          expanded: searchExpanded,
         });
+        searchCursor = -1;
+        applySearchCursor();
         syncColumnMode();
       };
 
@@ -263,14 +317,7 @@ export function createDingTalkSettingsPage(
 
       const updateHeader = (): void => {
         const conversation = state.currentConversation;
-        title.textContent = conversation?.title || text.selectConversation;
-        title.title = conversation?.title ?? "";
-        subtitle.textContent = conversation
-          ? conversation.singleChat
-            ? text.direct
-            : text.group
-          : "";
-        embedConversation.disabled = conversation === null;
+        mainHead.setConversation(conversation);
         composer.setPlaceholder(conversation?.title || "");
       };
 
@@ -292,6 +339,18 @@ export function createDingTalkSettingsPage(
           "{count}",
           String(state.pendingNewCount),
         )}`;
+      };
+
+      const setMessageSelected = (messageId: string, checked: boolean): void => {
+        if (checked) state.selectedMessages.add(messageId);
+        else state.selectedMessages.delete(messageId);
+        const row = messageList.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(messageId)}"]`,
+        );
+        row?.classList.toggle("dingtalk-message--selected", checked);
+        const check = row?.querySelector<HTMLInputElement>(".dingtalk-message-check");
+        if (check) check.checked = checked;
+        updateSelectionUi();
       };
 
       const renderMessages = (behavior?: { scroll?: "bottom"; distance?: number }): void => {
@@ -338,21 +397,24 @@ export function createDingTalkSettingsPage(
             messageList.append(createDateSeparator(document, message.createdAt));
             previous = undefined;
             previousDay = key;
+          } else if (
+            previous !== undefined &&
+            message.createdAt - previous.createdAt > 5 * 60_000
+          ) {
+            messageList.append(createTimeSeparator(document, message.createdAt));
+            previous = undefined;
           }
           const continuation = continuesDingTalkGroup(previous, message);
           messageList.append(
             createMessageRow(document, message, text, {
               continuation,
               selected: state.selectedMessages.has(message.messageId),
-              onSelect: (checked) => {
-                if (checked) state.selectedMessages.add(message.messageId);
-                else state.selectedMessages.delete(message.messageId);
-                const row = messageList.querySelector<HTMLElement>(
-                  `[data-message-id="${CSS.escape(message.messageId)}"]`,
-                );
-                row?.classList.toggle("dingtalk-message--selected", checked);
-                updateSelectionUi();
-              },
+              onSelect: (checked) => setMessageSelected(message.messageId, checked),
+              onActivate: () =>
+                setMessageSelected(
+                  message.messageId,
+                  !state.selectedMessages.has(message.messageId),
+                ),
               onRetry: () => void deliver(message),
             }),
           );
@@ -381,6 +443,7 @@ export function createDingTalkSettingsPage(
       const selectConversation = async (conversationId: string, force = false): Promise<void> => {
         if (!client) return;
         if (!force && state.selectedId === conversationId && state.messages.length > 0) return;
+        mainHead.closeMenu();
         state.selectedId = conversationId;
         state.currentConversation = conversationFor(conversationId);
         state.messages = [];
@@ -426,6 +489,7 @@ export function createDingTalkSettingsPage(
           !state.hasMore ||
           state.nextCursor === null ||
           state.loadingMessages ||
+          loadingOlderRequest ||
           (state.loadMoreError && !force)
         ) {
           return;
@@ -434,11 +498,15 @@ export function createDingTalkSettingsPage(
         const cursor = state.nextCursor;
         const generation = messageGeneration;
         const distance = distanceFromBottom();
+        loadingOlderRequest = true;
         loadingOlder.hidden = false;
+        messageList.prepend(loadingOlder);
         const result = await client
           .messages({ conversationId, before: cursor, limit: OLDER_MESSAGE_LIMIT })
           .catch(() => null);
+        loadingOlder.remove();
         loadingOlder.hidden = true;
+        loadingOlderRequest = false;
         if (disposed || generation !== messageGeneration || state.selectedId !== conversationId) {
           return;
         }
@@ -512,6 +580,10 @@ export function createDingTalkSettingsPage(
         }
         state.conversations = result.conversations;
         state.source = result.source;
+        if (!viewInitialized) {
+          state.view = result.source === "unread" ? "unread" : "recent";
+          viewInitialized = true;
+        }
         state.listError = !result.available;
         pageMenu.setStatus(result.available, effectiveHost);
         renderList();
@@ -535,6 +607,8 @@ export function createDingTalkSettingsPage(
         state.searchPending = true;
         state.searchFailed = false;
         state.search = null;
+        searchExpanded = { conversations: false, messages: false };
+        searchCursor = -1;
         renderSearch();
         const decision = await client
           .decide({
@@ -584,6 +658,8 @@ export function createDingTalkSettingsPage(
         state.search = null;
         state.searchPending = false;
         state.searchFailed = false;
+        searchExpanded = { conversations: false, messages: false };
+        searchCursor = -1;
         searchInput.value = "";
         clearSearchButton.hidden = true;
         renderSearch();
@@ -686,9 +762,15 @@ export function createDingTalkSettingsPage(
         }
       };
 
-      embedConversation.addEventListener("click", () => {
-        if (!state.selectedId) return;
-        void embed(conversationMention(state.currentConversation, state.selectedId));
+      unreadButton.addEventListener("click", () => {
+        if (state.view === "unread") return;
+        state.view = "unread";
+        renderList();
+      });
+      recentButton.addEventListener("click", () => {
+        if (state.view === "recent") return;
+        state.view = "recent";
+        renderList();
       });
       searchInput.addEventListener("input", () => {
         const query = searchInput.value.trim();
@@ -702,6 +784,8 @@ export function createDingTalkSettingsPage(
         state.searchPending = true;
         state.searchFailed = false;
         state.search = null;
+        searchExpanded = { conversations: false, messages: false };
+        searchCursor = -1;
         renderSearch();
         searchTimer = view.setTimeout(() => {
           searchTimer = null;
@@ -713,6 +797,28 @@ export function createDingTalkSettingsPage(
           event.preventDefault();
           event.stopPropagation();
           clearSearch();
+          return;
+        }
+        const rows = [
+          ...searchPanel.element.querySelectorAll<HTMLButtonElement>(".dingtalk-search-result"),
+        ];
+        if (rows.length === 0) return;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          searchCursor =
+            searchCursor < 0
+              ? step > 0
+                ? 0
+                : rows.length - 1
+              : (searchCursor + step + rows.length) % rows.length;
+          applySearchCursor();
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const index = searchCursor >= 0 ? searchCursor : 0;
+          rows[index]?.click();
         }
       });
       clearSearchButton.addEventListener("click", () => {
@@ -740,13 +846,21 @@ export function createDingTalkSettingsPage(
         if (detail) void revealTarget(detail);
       };
       const onPointerDown = (event: PointerEvent): void => {
-        if (!pageMenu.open) return;
         const target = event.target;
+        if (mainHead.menuOpen) {
+          if (!(target instanceof Node) || !mainHead.contains(target)) mainHead.closeMenu();
+        }
+        if (!pageMenu.open) return;
         if (target instanceof Node && pageMenu.contains(target)) return;
         pageMenu.close();
       };
       const onKey = (event: KeyboardEvent): void => {
         if (event.key !== "Escape") return;
+        if (mainHead.menuOpen) {
+          mainHead.closeMenu();
+          event.stopPropagation();
+          return;
+        }
         if (pageMenu.open) {
           pageMenu.close();
           event.stopPropagation();

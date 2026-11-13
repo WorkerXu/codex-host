@@ -18,12 +18,15 @@ export interface DingTalkPageText {
   searching: string;
   searchConversations: string;
   searchMessages: string;
+  searchMore: string;
+  searchKeyboardHint: string;
   noSearchResults: string;
   searchFailed: string;
   searchFallback: string;
   recentReplied: string;
   unread: string;
   noConversations: string;
+  noUnreadConversations: string;
   listFailed: string;
   listFailedReason: string;
   retry: string;
@@ -39,6 +42,7 @@ export interface DingTalkPageText {
   unsupported: string;
   embedConversation: string;
   embedFailed: string;
+  refreshMessages: string;
   selectedCount: string;
   embedToConversation: string;
   cancelSelection: string;
@@ -68,12 +72,15 @@ const ZH: DingTalkPageText = {
   searching: "正在搜索…",
   searchConversations: "会话",
   searchMessages: "聊天记录",
+  searchMore: "查看更多（{count}）",
+  searchKeyboardHint: "↑↓ 移动 · ↵ 打开 · Esc 退出",
   noSearchResults: "没有找到相关会话或消息",
   searchFailed: "搜索失败，请稍后重试",
   searchFallback: "搜索分类不可用，已按关键词搜索",
   recentReplied: "最近回复",
   unread: "未读",
-  noConversations: "暂无未读会话",
+  noConversations: "暂无会话",
+  noUnreadConversations: "暂无未读会话",
   listFailed: "会话列表读取失败",
   listFailedReason: "钉钉连接不可用，请稍后重试",
   retry: "重试",
@@ -87,8 +94,9 @@ const ZH: DingTalkPageText = {
   unnamed: "未命名会话",
   selectMessage: "选择消息",
   unsupported: "在手机上查看",
-  embedConversation: "嵌入会话",
+  embedConversation: "嵌入会话到对话",
   embedFailed: "无法嵌入：请重新打开该对话的输入框",
+  refreshMessages: "刷新消息",
   selectedCount: "已选 {count} 条",
   embedToConversation: "嵌入到对话",
   cancelSelection: "取消",
@@ -96,7 +104,7 @@ const ZH: DingTalkPageText = {
   sending: "发送中…",
   sendFailed: "发送失败，点击重试",
   retrySend: "重试发送",
-  sendPlaceholder: "发消息给 {name}",
+  sendPlaceholder: "发送给 {name}",
   newMessages: "{count} 条新消息",
   loadMoreFailed: "更早的消息加载失败，请重试",
 };
@@ -118,12 +126,15 @@ const EN: DingTalkPageText = {
   searching: "Searching…",
   searchConversations: "Conversations",
   searchMessages: "Messages",
+  searchMore: "Show more ({count})",
+  searchKeyboardHint: "↑↓ Move · ↵ Open · Esc Exit",
   noSearchResults: "No matching conversations or messages",
   searchFailed: "Search failed. Try again.",
   searchFallback: "Classification is unavailable; searched by keyword",
   recentReplied: "Recently replied",
   unread: "Unread",
-  noConversations: "No unread conversations",
+  noConversations: "No conversations",
+  noUnreadConversations: "No unread conversations",
   listFailed: "Could not read conversations",
   listFailedReason: "DingTalk is unavailable. Try again.",
   retry: "Retry",
@@ -137,8 +148,9 @@ const EN: DingTalkPageText = {
   unnamed: "Untitled conversation",
   selectMessage: "Select message",
   unsupported: "View on your phone",
-  embedConversation: "Embed conversation",
+  embedConversation: "Embed conversation in chat",
   embedFailed: "Could not embed: reopen the Composer that opened this page",
+  refreshMessages: "Refresh messages",
   selectedCount: "{count} selected",
   embedToConversation: "Embed in conversation",
   cancelSelection: "Cancel",
@@ -146,7 +158,7 @@ const EN: DingTalkPageText = {
   sending: "Sending…",
   sendFailed: "Send failed. Click to retry.",
   retrySend: "Retry sending",
-  sendPlaceholder: "Message {name}",
+  sendPlaceholder: "Send to {name}",
   newMessages: "{count} new messages",
   loadMoreFailed: "Could not load older messages. Try again.",
 };

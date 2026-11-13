@@ -33,10 +33,13 @@ export function formatDingTalkTime(value: number | null, now = Date.now()): stri
   if (Number.isNaN(date.getTime())) return "";
   if (isSameDingTalkDay(value, now)) return clock(value);
   if (isYesterday(value, now)) return "昨天";
+  const pad = (input: number): string => String(input).padStart(2, "0");
   if (date.getFullYear() === new Date(now).getFullYear()) {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
+    return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  return `${String(date.getFullYear()).slice(-2)}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
 }
 
 /** Centered date separator label. */
@@ -51,6 +54,11 @@ export function formatDingTalkDateLabel(value: number, now = Date.now()): string
 }
 
 export function formatDingTalkClock(value: number): string {
+  return clock(value);
+}
+
+/** A centered time marker inside one day; date changes use a date separator. */
+export function formatDingTalkTimeMark(value: number): string {
   return clock(value);
 }
 
@@ -140,6 +148,7 @@ export interface ViewMessage extends DingTalkMessage {
 
 export interface DingTalkPageState {
   source: "unread" | "recent-replied" | "empty";
+  view: "unread" | "recent";
   conversations: DingTalkConversation[];
   selectedId: string | null;
   currentConversation: DingTalkConversation | null;
