@@ -6,17 +6,22 @@ import {
   buildDingTalkDecideRequest,
   buildDingTalkScoreRequest,
   dingtalkMessageKeyword,
+  dingtalkRecentConversationIds,
   parseDingTalkDecideAnswers,
   parseDingTalkScoreResponse,
 } from "../src/dingtalk-decisions.js";
 
-function conversation(id: string, title: string): DingTalkConversation {
+function conversation(
+  id: string,
+  title: string,
+  lastMessageAt = 1_791_000_000_000,
+): DingTalkConversation {
   return {
     conversationId: id,
     title,
     singleChat: false,
     unreadCount: 2,
-    lastMessageAt: 1_791_000_000_000,
+    lastMessageAt,
     muted: false,
     preview: "最近的回复",
   };
@@ -27,7 +32,13 @@ describe("DingTalk search decisions", () => {
     const request = buildDingTalkDecideRequest("最新给我发消息的", [
       conversation("a", "财务打款群"),
     ]);
-    expect(Object.keys(request.questions)).toEqual(["route", "from_me", "at_me", "range"]);
+    expect(Object.keys(request.questions)).toEqual([
+      "route",
+      "from_me",
+      "at_me",
+      "range",
+      "by_recency",
+    ]);
     expect(request.input).toContain("财务打款群");
     expect(request.questions.route).toMatchObject({ type: "choice" });
   });
@@ -40,14 +51,25 @@ describe("DingTalk search decisions", () => {
           from_me: { noul: 0.9 },
           at_me: { noul: 0.1 },
           range: { choice: "7" },
+          by_recency: { noul: 0.8 },
         },
       }),
-    ).toEqual({ route: "messages", fromMe: true, atMe: false, days: 7 });
+    ).toEqual({ route: "messages", fromMe: true, atMe: false, days: 7, byRecency: true });
     expect(
       parseDingTalkDecideAnswers({
         answers: { route: { choice: "bogus" }, range: { choice: "365" } },
       }),
-    ).toEqual({ route: "none", fromMe: false, atMe: false, days: 30 });
+    ).toEqual({ route: "none", fromMe: false, atMe: false, days: 30, byRecency: false });
+  });
+
+  it("orders time-only queries by the latest message", () => {
+    expect(
+      dingtalkRecentConversationIds([
+        conversation("old", "旧群", 1),
+        conversation("new", "新群", 3),
+        conversation("mid", "中群", 2),
+      ]),
+    ).toEqual(["new", "mid", "old"]);
   });
 
   it("builds one score question per candidate", () => {

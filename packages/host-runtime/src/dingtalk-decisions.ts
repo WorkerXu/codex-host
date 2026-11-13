@@ -49,6 +49,9 @@ const ROUTE_CRITERIA = {
 const FROM_ME_INSTRUCTIONS = "用户是否明确要求查找自己发送的聊天记录。";
 const AT_ME_INSTRUCTIONS = "用户是否明确要求查找 @我 的消息。";
 const RANGE_INSTRUCTIONS = "用户要求的时间范围；未说明时选择 30 天。";
+const RECENT_INSTRUCTIONS =
+  "用户是否只是按时间找最近的会话（例如“最新给我发消息的”“谁刚找我”“最近的聊天”），" +
+  "而没有指定会话名称、人名、群名或内容关键词。";
 const RANGE_CRITERIA = { "7": "最近一周", "30": "最近一个月", "90": "最近三个月" } as const;
 const SCORE_INSTRUCTIONS =
   "判断该钉钉会话是否就是用户想找的会话。标题语义最重要，其次参考最近消息摘要、单聊/群聊和最近消息时间。" +
@@ -83,6 +86,7 @@ export function buildDingTalkDecideRequest(
       from_me: { type: "noul", instructions: FROM_ME_INSTRUCTIONS },
       at_me: { type: "noul", instructions: AT_ME_INSTRUCTIONS },
       range: { type: "choice", instructions: RANGE_INSTRUCTIONS, criteria: RANGE_CRITERIA },
+      by_recency: { type: "noul", instructions: RECENT_INSTRUCTIONS },
     },
   };
 }
@@ -119,6 +123,8 @@ export interface DingTalkDecideAnswers {
   fromMe: boolean;
   atMe: boolean;
   days: number;
+  /** The user wants the most recent conversations, not a named one. */
+  byRecency: boolean;
 }
 
 export function parseDingTalkDecideAnswers(value: unknown): DingTalkDecideAnswers {
@@ -130,12 +136,24 @@ export function parseDingTalkDecideAnswers(value: unknown): DingTalkDecideAnswer
   const rangeChoice = typeof range?.choice === "string" ? Number(range.choice) : 30;
   const fromMe = answers && record(answers.from_me) ? answers.from_me : null;
   const atMe = answers && record(answers.at_me) ? answers.at_me : null;
+  const byRecency = answers && record(answers.by_recency) ? answers.by_recency : null;
   return {
     route: validRoute ? (choice as DingTalkDecideResult["route"]) : "none",
     fromMe: unit(fromMe?.noul) >= 0.5,
     atMe: unit(atMe?.noul) >= 0.5,
     days: rangeChoice === 7 || rangeChoice === 90 ? rangeChoice : 30,
+    byRecency: unit(byRecency?.noul) >= 0.5,
   };
+}
+
+/** Conversations someone else spoke in last, newest first; used for time-only queries. */
+export function dingtalkRecentConversationIds(
+  conversations: readonly DingTalkConversation[],
+): string[] {
+  return [...conversations]
+    .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
+    .map(({ conversationId }) => conversationId)
+    .slice(0, 8);
 }
 
 export function parseDingTalkScoreResponse(value: unknown, count: number): number[] {
@@ -257,6 +275,19 @@ export function createDingTalkDecisions(options: DingTalkDecisionsOptions): Ding
         await request(buildDingTalkDecideRequest(query, conversations)),
       );
       const keywords = dingtalkMessageKeyword(query);
+      if (answers.byRecency && !answers.fromMe && !answers.atMe) {
+        return {
+          available: true,
+          route: "conversations",
+          messageQuery: keywords,
+          fromMe: false,
+          atMe: false,
+          days: answers.days,
+          conversationIds: dingtalkRecentConversationIds(conversations),
+          errorCode: null,
+          keywords,
+        };
+      }
       if (answers.route === "conversations") {
         const scored = await this.score(query, conversations);
         return {
