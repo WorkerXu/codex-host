@@ -355,6 +355,8 @@ export class ProjectGroupNewChatPicker {
     );
     wrapper.append(row);
     const error = this.#line("", "var(--color-token-charts-red, #f85149)");
+    error.className = "project-add-machine-error";
+    error.style.paddingLeft = "34px";
     error.hidden = true;
     wrapper.append(error);
 

@@ -278,14 +278,14 @@ describe("Project group add-machine menu", () => {
           harnessLabel: "Codex",
         },
       ],
-      onAddMachine: async () => ({ ok: false, message: "该机器当前离线。" }),
+      onAddMachine: async () => ({ ok: false, message: "创建目录失败：权限不足。" }),
     });
     picker.open(view, document.createElement() as unknown as HTMLElement);
     find(document, "data-codexhost-add-machine-row")?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     find(document, "data-codexhost-add-machine-host")?.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(labels(document)).toContain("该机器当前离线。");
+    expect(labels(document)).toContain("创建目录失败：权限不足。");
     picker.dispose();
   });
 });
