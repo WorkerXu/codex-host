@@ -57,6 +57,8 @@ import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { createJarvisService } from "./jarvis-service.js";
 import { runDwsRaw } from "./dingtalk-cli.js";
 import { createDingTalkService } from "./dingtalk-service.js";
+import { CodexAgentStore } from "./codex-agents.js";
+import { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -325,6 +327,10 @@ export async function runHostRuntime(input: {
             environment: delegationEnvironment,
             isLocalHost: true,
           });
+          const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
+          const dingTalkDispatch = new DingTalkDispatchSettingsStore({
+            environment: delegationEnvironment,
+          });
           try {
             const host = new AppServerHost({
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
@@ -332,6 +338,8 @@ export async function runHostRuntime(input: {
               usageStatistics,
               jarvis,
               dingtalk,
+              codexAgents,
+              dingTalkDispatch,
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -380,6 +388,10 @@ export async function runHostRuntime(input: {
           environment: delegationEnvironment,
           isLocalHost: true,
         });
+        const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
+        const dingTalkDispatch = new DingTalkDispatchSettingsStore({
+          environment: delegationEnvironment,
+        });
         try {
           await mappingStore.initialize();
           const common = {
@@ -387,6 +399,8 @@ export async function runHostRuntime(input: {
             environment: delegationEnvironment,
             jarvis,
             dingtalk,
+            codexAgents,
+            dingTalkDispatch,
             ...shared,
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,

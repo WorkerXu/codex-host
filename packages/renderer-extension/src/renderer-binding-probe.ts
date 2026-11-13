@@ -120,6 +120,7 @@ import {
 } from "./renderer-dingtalk-entry.js";
 import { installRendererDingTalkLinks } from "./renderer-dingtalk-links.js";
 import { embedDingTalkMention, openDingTalkWorkbench } from "./renderer-dingtalk-embed.js";
+import { createRendererCodexAgentsClient } from "./renderer-codex-agents-client.js";
 import {
   installRendererJarvisMention,
   type RendererJarvisMentionControl,
@@ -862,6 +863,12 @@ export function installRendererBindingProbe(
   });
   let connectionDiagnostics: RendererConnectionDiagnostics | null = null;
   const remoteConnections = createRemoteConnectionsControl(window, modelClientForHost);
+  const codexAgentsClient = createRendererCodexAgentsClient({
+    forHost(hostId) {
+      const route = window.__codexhostHostRoutingV1?.forHost(hostId);
+      return route ? { hostId: route.hostId, manager: route.manager } : null;
+    },
+  });
   const jarvisClient = createRendererJarvisClient({
     forHost(hostId) {
       const route = window.__codexhostHostRoutingV1?.forHost(hostId);
@@ -947,6 +954,7 @@ export function installRendererBindingProbe(
       readLocale: () => settingsLifecycle.locale,
       embed: (mention) => embedDingTalkMention(mention),
     },
+    codexAgents: { createClient: () => codexAgentsClient },
     onLocaleChange() {
       for (const mounted of mountedByComposer.values()) renderMounted(mounted);
     },

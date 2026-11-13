@@ -5,6 +5,7 @@ import type { LoadedSessionsClient } from "./settings/loaded-sessions-table.js";
 import type { HarnessSchedulesPageOptions } from "./settings/harness-schedules-page.js";
 import type { RendererJarvisSettingsOptions } from "./settings/jarvis-page.js";
 import type { RendererDingTalkPageOptions } from "./settings/dingtalk-page.js";
+import type { RendererCodexAgentsSettingsOptions } from "./settings/codex-agents-page.js";
 import { readCodexLocaleSettings, type CodexLocaleSettings } from "./codex-locale-adapter.js";
 import {
   rendererSettingsMessages,
@@ -43,6 +44,7 @@ export interface RendererSettingsLifecycleOptions {
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider;
   jarvis?: RendererJarvisSettingsOptions;
   dingtalk?: RendererDingTalkPageOptions;
+  codexAgents?: RendererCodexAgentsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
   onLocaleChange?(locale: RendererSettingsLocale): void;
 }
@@ -104,6 +106,7 @@ export function installRendererSettingsLifecycle(
         : undefined,
       options.jarvis,
       options.dingtalk,
+      options.codexAgents,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {
