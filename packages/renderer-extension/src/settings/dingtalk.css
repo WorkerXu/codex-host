@@ -53,7 +53,7 @@
   height: 32px;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0 8px;
   background: var(--color-token-main-surface-primary);
   border: 1px solid var(--color-token-border-default);
@@ -137,7 +137,7 @@
 
 .dingtalk-list-label {
   flex: none;
-  padding: 4px 16px 6px;
+  padding: 4px 16px 8px;
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   font-weight: 500;
@@ -241,7 +241,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dingtalk-conversation-preview {
@@ -262,7 +262,7 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 0 5px;
+  padding: 0 6px;
   color: var(--color-token-on-accent);
   background: var(--color-token-charts-red);
   border-radius: var(--radius-full);
@@ -332,7 +332,7 @@
 .dingtalk-main-notice {
   flex: none;
   margin: 8px 16px 0;
-  padding: 6px 10px;
+  padding: 8px 12px;
   color: var(--color-token-charts-red);
   background: color-mix(in srgb, var(--color-token-charts-red) 8%, transparent);
   border-radius: var(--radius-md);
@@ -383,7 +383,7 @@
 .dingtalk-message-check {
   position: absolute;
   top: 12px;
-  left: 2px;
+  left: 4px;
   width: 14px;
   height: 14px;
   margin: 0;
@@ -404,7 +404,7 @@
   width: 28px;
   height: 28px;
   flex: none;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .dingtalk-message-avatar {
@@ -435,7 +435,7 @@
 .dingtalk-message-meta {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   padding: 0 2px;
 }
 
@@ -460,7 +460,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dingtalk-message--mine .dingtalk-message-line {
@@ -474,7 +474,7 @@
   background: var(--color-token-bg-primary);
   border-radius: 12px;
   font-size: var(--font-text-sm-size);
-  line-height: 22px;
+  line-height: var(--font-text-sm-line-height);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -509,7 +509,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  margin-left: 6px;
+  margin-left: 8px;
   border: 1.5px solid var(--color-token-text-tertiary);
   border-right-color: transparent;
   border-radius: var(--radius-full);
@@ -590,7 +590,7 @@
   position: absolute;
   right: 20px;
   bottom: 16px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   color: var(--color-token-text-primary);
   background: var(--color-token-dropdown-background);
   border: 1px solid var(--color-token-border-default);
@@ -675,7 +675,7 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 8px 8px 14px;
+  padding: 8px 8px 8px 16px;
   background: var(--color-token-main-surface-primary);
   border: 1px solid var(--color-token-border-default);
   border-radius: var(--composer-radius);
@@ -695,7 +695,7 @@
   min-height: 32px;
   max-height: 138px;
   flex: 1;
-  padding: 6px 0;
+  padding: 8px 0;
   color: var(--color-token-text-primary);
   background: transparent;
   border: 0;
@@ -703,7 +703,7 @@
   resize: none;
   font: inherit;
   font-size: var(--font-text-sm-size);
-  line-height: 20px;
+  line-height: var(--font-text-sm-line-height);
   overflow-y: hidden;
 }
 
@@ -765,7 +765,7 @@
   top: 52px;
   right: 12px;
   width: 240px;
-  padding: 6px;
+  padding: 8px;
   background: var(--color-token-dropdown-background);
   border: 1px solid var(--color-token-border-default);
   border-radius: var(--menu-radius, 12px);
@@ -775,7 +775,7 @@
 .dingtalk-menu-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px;
   color: var(--color-token-text-secondary);
   font-size: var(--font-text-xs-size);
@@ -801,7 +801,7 @@
 }
 
 .dingtalk-menu-label {
-  padding: 6px 8px 4px;
+  padding: 8px 8px 4px;
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
@@ -876,7 +876,7 @@
 .dingtalk-search-result--message {
   display: block;
   min-height: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
 }
 
 .dingtalk-search-copy {
@@ -910,7 +910,7 @@
   display: flex;
   min-width: 0;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dingtalk-search-heading-line .dingtalk-search-title {
@@ -977,7 +977,7 @@
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .dingtalk-skeleton-line {
