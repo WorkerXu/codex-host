@@ -352,13 +352,7 @@ export function createDingTalkSettingsPage(
       const renderSearch = (): void => {
         searchResults.replaceChildren();
         const result = state.search;
-        if (
-          !result ||
-          (!state.searchPending &&
-            result.messages.length === 0 &&
-            result.conversations.length === 0 &&
-            state.error === null)
-        ) {
+        if (!result) {
           searchResults.hidden = true;
           return;
         }
