@@ -165,6 +165,27 @@ describe("dws process invocation", () => {
     );
   });
 
+  it("reports a spawn error as a CLI failure, not a timeout", async () => {
+    const spawnImpl = vi.fn(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: ReturnType<typeof vi.fn>;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = vi.fn(() => true);
+      queueMicrotask(() => child.emit("error", new Error("ENOENT")));
+      return child;
+    });
+    const result = await runDwsJson(["auth", "status"], {
+      executable: "/fake/dws",
+      spawnImpl: spawnImpl as never,
+    });
+    expect(result.errorCode).toBe("cli_failed");
+    expect(result.timedOut).toBe(false);
+  });
+
   it("turns a hanging command into a timeout", async () => {
     const spawnImpl = vi.fn(() => {
       const child = new EventEmitter() as EventEmitter & {

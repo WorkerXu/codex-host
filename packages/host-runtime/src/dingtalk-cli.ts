@@ -190,7 +190,11 @@ export async function runDwsJson(
   return {
     ...raw,
     value,
-    errorCode: !raw.timedOut && raw.exitCode !== null ? failure.code : "timeout",
+    errorCode: raw.timedOut
+      ? "timeout"
+      : raw.exitCode === null
+        ? "cli_failed"
+        : (failure.code ?? (raw.exitCode === 0 ? null : "cli_failed")),
     errorMessage: failure.message,
   };
 }
