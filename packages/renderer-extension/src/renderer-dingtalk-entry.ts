@@ -6,6 +6,7 @@
  * page's embed actions do that against the Composer remembered here.
  */
 import {
+  HEADER_CLASS,
   LIST_CLASS,
   MENU_CLASS,
   ROW_CLASS,
@@ -82,7 +83,7 @@ function buildRow(document: Document, locale: string): HTMLElement {
   row.className = ROW_CLASS;
   const content = document.createElement("div");
   content.className = ROW_CONTENT_CLASS;
-  const mark = createDingTalkMark(document, 18);
+  const mark = createDingTalkMark(document, 16);
   const label = document.createElement("span");
   label.className = "min-w-0 shrink truncate";
   label.textContent = locale === "zh-CN" ? "钉钉" : "DingTalk";
@@ -95,7 +96,23 @@ function buildRow(document: Document, locale: string): HTMLElement {
   return row;
 }
 
-/** The single row appended to the native `@` menu; exported for the preview harness. */
+/** The single Workbench section appended to the native `@` menu. */
+export function createDingTalkEntrySection(
+  document: Document,
+  locale: string,
+): { element: HTMLElement; row: HTMLElement } {
+  const section = document.createElement("div");
+  section.setAttribute(SECTION_ATTRIBUTE, "true");
+  section.className = "flex w-full flex-col";
+  const header = document.createElement("div");
+  header.className = HEADER_CLASS;
+  header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
+  const row = buildRow(document, locale);
+  section.append(header, row);
+  return { element: section, row };
+}
+
+/** The row alone; used by previews that own their section chrome. */
 export function createDingTalkEntryRow(document: Document, locale: string): HTMLElement {
   return buildRow(document, locale);
 }
@@ -152,11 +169,7 @@ export function installRendererDingTalkEntry(
 
   const attach = (trigger: Trigger): void => {
     const locale = ownerDocument.documentElement.lang || view.navigator.language;
-    const section = ownerDocument.createElement("div");
-    section.setAttribute(SECTION_ATTRIBUTE, "true");
-    section.className = "flex w-full flex-col";
-    const row = buildRow(ownerDocument, locale);
-    section.append(row);
+    const { element: section, row } = createDingTalkEntrySection(ownerDocument, locale);
     let panel: HTMLElement | null = null;
     const anchor = options.anchorForEditor(trigger.editor);
     const native = nativeList(ownerDocument, anchor);
