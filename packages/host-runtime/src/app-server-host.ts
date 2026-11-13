@@ -45,6 +45,25 @@ import {
   jarvisInstallUploadParamsSchema,
   jarvisLoginForwardParamsSchema,
   jarvisLoginStopParamsSchema,
+  DINGTALK_STATUS_METHOD,
+  DINGTALK_SETTINGS_GET_METHOD,
+  DINGTALK_SETTINGS_SET_METHOD,
+  DINGTALK_CONVERSATIONS_METHOD,
+  DINGTALK_MESSAGES_METHOD,
+  DINGTALK_SEND_METHOD,
+  DINGTALK_DECIDE_METHOD,
+  DINGTALK_SEARCH_METHOD,
+  DINGTALK_RESOLVE_METHOD,
+  DINGTALK_VIEWED_METHOD,
+  DINGTALK_CHANGED_METHOD,
+  dingtalkConversationsParamsSchema,
+  dingtalkMessagesParamsSchema,
+  dingtalkSendParamsSchema,
+  dingtalkDecideParamsSchema,
+  dingtalkSearchParamsSchema,
+  dingtalkResolveParamsSchema,
+  dingtalkViewedParamsSchema,
+  dingtalkSettingsSetParamsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -107,7 +126,9 @@ import {
   rewriteDelegationMentionText,
 } from "./delegation-mention-rewrite.js";
 import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
+import { hasDingTalkCarrier } from "@codexhost/shared-contracts";
 import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
+import { DingTalkServiceError, type DingTalkService } from "./dingtalk-service.js";
 import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
@@ -429,6 +450,8 @@ export interface AppServerHostOptions {
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
   jarvis?: JarvisService;
+  /** DingTalk workbench, mention expansion and dws routing. */
+  dingtalk?: DingTalkService;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -793,6 +816,11 @@ export class AppServerHost {
     this.#writer = new OrderedWriter(this.#options.desktopOutput, (value) => {
       this.#noteDesktopReply(value);
       return this.#takeConsoleReply(value);
+    });
+    this.#options.dingtalk?.setNotifier((event) => {
+      void this.#writer
+        .json({ method: DINGTALK_CHANGED_METHOD, params: event })
+        .catch(() => undefined);
     });
     const environment = this.#options.environment ?? process.env;
     this.#launchSettings = new HarnessLaunchSettingsStore(
@@ -1430,6 +1458,10 @@ export class AppServerHost {
     }
     if (request.method.startsWith("codexhost/jarvis/")) {
       this.#dispatchDesktopReply(request, () => this.#handleJarvisRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/dingtalk/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleDingTalkRequest(request));
       return;
     }
     if (
@@ -2349,8 +2381,10 @@ export class AppServerHost {
     let changed = false;
     const expanded: JsonValue[] = [];
     for (const item of input) {
-      if (isRecord(item) && typeof item.text === "string" && hasJarvisCarrier(item.text)) {
-        const text = await this.#expandJarvisText(item.text);
+      if (isRecord(item) && typeof item.text === "string") {
+        let text = item.text;
+        if (hasJarvisCarrier(text)) text = await this.#expandJarvisText(text);
+        if (hasDingTalkCarrier(text)) text = await this.#expandDingTalkText(text);
         if (text !== item.text) changed = true;
         expanded.push({ ...item, text } as JsonObject);
       } else {
@@ -2373,6 +2407,17 @@ export class AppServerHost {
     if (!this.#options.jarvis) return text;
     try {
       return await this.#options.jarvis.expandMentions(text);
+    } catch (error) {
+      this.#diagnose(error);
+      return text;
+    }
+  }
+
+  /** DingTalk reads route to the configured Host; failure is a note, not a Turn error. */
+  async #expandDingTalkText(text: string): Promise<string> {
+    if (!this.#options.dingtalk) return text;
+    try {
+      return await this.#options.dingtalk.expandMentions(text);
     } catch (error) {
       this.#diagnose(error);
       return text;
@@ -3457,6 +3502,100 @@ export class AppServerHost {
     } catch (error) {
       await this.#writer.json(rpcError(request, -32091, errorMessage(error).slice(0, 500)));
     }
+  }
+
+  async #handleDingTalkRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.dingtalk;
+    if (!service) {
+      await this.#writer.json(rpcError(request, -32601, "DingTalk is unavailable on this Host"));
+      return;
+    }
+    try {
+      const result = await this.#runDingTalkMethod(service, request);
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof DingTalkServiceError) {
+        await this.#writer.json(rpcError(request, -32094, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32094, "dingtalk_failed"));
+    }
+  }
+
+  async #runDingTalkMethod(service: DingTalkService, request: JsonRpcRequest): Promise<unknown> {
+    if (request.method === DINGTALK_STATUS_METHOD) return await service.status();
+    if (request.method === DINGTALK_SETTINGS_GET_METHOD) return await service.settings();
+    if (request.method === DINGTALK_CONVERSATIONS_METHOD) {
+      const parsed = dingtalkConversationsParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk conversation request");
+      }
+      return await service.conversations(parsed.data.refresh ?? false);
+    }
+    if (request.method === DINGTALK_MESSAGES_METHOD) {
+      const parsed = dingtalkMessagesParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk message request");
+      }
+      return await service.messages(parsed.data);
+    }
+    if (request.method === DINGTALK_SEND_METHOD) {
+      const parsed = dingtalkSendParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk message");
+      }
+      return await service.send(parsed.data);
+    }
+    if (request.method === DINGTALK_DECIDE_METHOD) {
+      const parsed = dingtalkDecideParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk search query");
+      }
+      return await service.decide(parsed.data);
+    }
+    if (request.method === DINGTALK_SEARCH_METHOD) {
+      const parsed = dingtalkSearchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk search");
+      }
+      return await service.search(parsed.data);
+    }
+    if (request.method === DINGTALK_RESOLVE_METHOD) {
+      const parsed = dingtalkResolveParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk reference");
+      }
+      const mention =
+        parsed.data.messageIds && parsed.data.messageIds.length > 0
+          ? {
+              kind: "messages" as const,
+              conversationId: parsed.data.conversationId,
+              messageIds: parsed.data.messageIds,
+              label: "",
+            }
+          : {
+              kind: "conversation" as const,
+              conversationId: parsed.data.conversationId,
+              label: "",
+            };
+      return await service.resolve(mention);
+    }
+    if (request.method === DINGTALK_VIEWED_METHOD) {
+      const parsed = dingtalkViewedParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk view state");
+      }
+      return await service.markViewed(parsed.data.conversationId, parsed.data.lastMessageAt);
+    }
+    if (request.method === DINGTALK_SETTINGS_SET_METHOD) {
+      const parsed = dingtalkSettingsSetParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk settings");
+      }
+      return await service.updateSettings(parsed.data);
+    }
+    throw new DingTalkServiceError("unknown_method", "Unknown DingTalk method");
   }
 
   async #handleJarvisRequest(request: JsonRpcRequest): Promise<void> {

@@ -125,6 +125,9 @@ export const DELEGATION_HELP = `usage:
   codexhost thread watches
   codexhost thread list
   codexhost peer list|add|remove|test|self
+  codexhost dingtalk dws [--host <peer>] [--yes] -- <dws args>
+
+DingTalk reads run on the configured DingTalk Host; writes require --yes.
 
 Use <command> --help for its options. Use harness list to discover targets.
 ${COMMON_HELP}
