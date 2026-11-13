@@ -44,6 +44,10 @@ import {
 } from "./harness-schedules-page.js";
 import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 import { createDingTalkSettingsPage, type RendererDingTalkPageOptions } from "./dingtalk-page.js";
+import {
+  createCodexAgentsSettingsPage,
+  type RendererCodexAgentsSettingsOptions,
+} from "./codex-agents-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -93,6 +97,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "usage-statistics",
   "jarvis",
   "dingtalk",
+  "codex-agents",
   "appearance",
   "updates",
   "about",
@@ -682,6 +687,7 @@ export function createDefaultRendererSettingsPages(
   harnessSchedules?: HarnessSchedulesPageOptions,
   jarvis?: RendererJarvisSettingsOptions,
   dingtalk?: RendererDingTalkPageOptions,
+  codexAgents?: RendererCodexAgentsSettingsOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -709,6 +715,7 @@ export function createDefaultRendererSettingsPages(
         embed: () => false,
       },
     ),
+    createCodexAgentsSettingsPage(messages, codexAgents ?? { createClient: () => null }),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
