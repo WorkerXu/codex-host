@@ -100,6 +100,7 @@ export function createCodexAgentsSettingsPage(
       page.append(dingtalk.root);
 
       let idCounter = 0;
+      let savingEditor = false;
       const editor = createEditor();
       page.append(editor.root);
 
@@ -494,12 +495,23 @@ export function createCodexAgentsSettingsPage(
         modelGroup.append(modelField, effortField);
 
         const instructionsGroup = fieldGroup(text.instructionsGroup);
-        const instructions = textarea(10);
+        const instructions = textarea(6);
         instructions.maxLength = 200_000;
         instructions.spellcheck = false;
         instructions.className = "agent-input agent-instructions";
         instructions.setAttribute("aria-label", text.instructions);
-        instructionsGroup.append(labeledField(null, text.instructionsHint, instructions));
+        const instructionsField = document.createElement("div");
+        instructionsField.className = "agent-field";
+        const instructionsMeta = document.createElement("div");
+        instructionsMeta.className = "agent-instruction-meta";
+        const instructionsHint = document.createElement("p");
+        instructionsHint.className = "agent-field-hint";
+        instructionsHint.textContent = text.instructionsHint;
+        const instructionCount = document.createElement("span");
+        instructionCount.className = "agent-character-count";
+        instructionsMeta.append(instructionsHint, instructionCount);
+        instructionsField.append(instructions, instructionsMeta);
+        instructionsGroup.append(instructionsField);
 
         const error = document.createElement("p");
         error.className = "agent-editor-error";
@@ -536,6 +548,7 @@ export function createCodexAgentsSettingsPage(
           catalogHint,
           effortSlot,
           instructions,
+          instructionCount,
           error,
           save,
           cancel,
@@ -589,6 +602,21 @@ export function createCodexAgentsSettingsPage(
         field.className = "agent-input agent-textarea";
         return field;
       }
+
+      const updateInstructionCount = (): void => {
+        editor.instructionCount.textContent = text.characterCount.replace(
+          "{count}",
+          String(editor.instructions.value.length),
+        );
+      };
+
+      const updateSaveState = (): void => {
+        editor.save.disabled =
+          savingEditor ||
+          editor.name.value.trim().length === 0 ||
+          editor.description.value.trim().length === 0 ||
+          editor.instructions.value.trim().length === 0;
+      };
 
       const draftErrorText: Record<CodexAgentDraftError, string> = {
         invalid_name: text.invalidName,
@@ -667,8 +695,10 @@ export function createCodexAgentsSettingsPage(
         editor.modelInput.value = currentDraft.model;
         editor.instructions.value = currentDraft.developerInstructions;
         rebuildEffort(currentDraft.reasoningEffort);
-        editor.save.disabled = false;
+        savingEditor = false;
         editor.save.textContent = text.save;
+        updateInstructionCount();
+        updateSaveState();
         view.requestAnimationFrame(() => editor.name.focus());
       };
 
@@ -708,6 +738,12 @@ export function createCodexAgentsSettingsPage(
         }
       };
 
+      for (const control of [editor.name, editor.description, editor.instructions]) {
+        control.addEventListener("input", () => {
+          updateSaveState();
+          if (control === editor.instructions) updateInstructionCount();
+        });
+      }
       create.addEventListener("click", () => openEditor("create", undefined, create));
       editor.close.addEventListener("click", closeEditor);
       editor.cancel.addEventListener("click", closeEditor);
@@ -727,6 +763,7 @@ export function createCodexAgentsSettingsPage(
           showError(draftErrorText[problem.error], problem.field);
           return;
         }
+        savingEditor = true;
         editor.save.disabled = true;
         editor.save.textContent = text.saving;
         void client
@@ -744,8 +781,9 @@ export function createCodexAgentsSettingsPage(
           })
           .finally(() => {
             if (disposed) return;
-            editor.save.disabled = false;
+            savingEditor = false;
             editor.save.textContent = text.save;
+            updateSaveState();
           });
       });
       editor.model.addEventListener("change", () => rebuildEffort(""));
