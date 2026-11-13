@@ -258,11 +258,13 @@ export function buildProjectGroupViews(input: {
 export interface ProjectGroupAddMachineTarget {
   hostId: string;
   machineLabel: string;
-  harnessId: string;
-  harnessLabel: string;
+  state: "ready" | "offline" | "error";
+  /** Preferred Agent on that machine; null when the machine has none. */
+  harnessId: string | null;
+  harnessLabel: string | null;
 }
 
-/** Ready peers not already present in the group, one row per ready Harness. */
+/** Machines not already present in the group, one row per machine. */
 export function projectGroupAddMachineTargets(
   catalog: {
     machines: readonly {
@@ -275,12 +277,23 @@ export function projectGroupAddMachineTargets(
   memberHostIds: ReadonlySet<string>,
 ): ProjectGroupAddMachineTarget[] {
   return catalog.machines.flatMap((machine) => {
-    if (machine.state !== "ready" || memberHostIds.has(machine.hostId)) return [];
-    return machine.harnesses.map((harness) => ({
-      hostId: machine.hostId,
-      machineLabel: machine.label,
-      harnessId: harness.id,
-      harnessLabel: harness.label,
-    }));
+    if (memberHostIds.has(machine.hostId) || machine.hostId === "local") return [];
+    const preferred =
+      machine.harnesses.find((harness) => harness.id === "codex") ?? machine.harnesses[0];
+    if (!preferred) return [];
+    return [
+      {
+        hostId: machine.hostId,
+        machineLabel: machine.label,
+        state: machine.state,
+        harnessId: preferred.id,
+        harnessLabel: preferred.label,
+      },
+    ];
   });
+}
+
+export interface ProjectGroupAddMachineResult {
+  ok: boolean;
+  message: string | null;
 }

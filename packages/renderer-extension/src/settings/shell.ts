@@ -1,6 +1,7 @@
 import settingsCss from "./shell.css";
 import accountsCss from "./accounts.css";
 import dingtalkCss from "./dingtalk.css";
+import agentsCss from "./agents.css";
 import consoleComponentsCss from "../console/components.css";
 import usageCss from "../console/usage/usage.css";
 import tailwindCss from "./tailwind.css";
@@ -83,7 +84,7 @@ export function mountRendererSettingsShell(
   const shadow = root.attachShadow({ mode: "open" });
   const style = ownerDocument.createElement("style");
   // Tailwind declares the cascade layer order, so it must precede the unlayered settings CSS.
-  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${dingtalkCss}\n${consoleComponentsCss}\n${usageCss}`;
+  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${dingtalkCss}\n${agentsCss}\n${consoleComponentsCss}\n${usageCss}`;
 
   // A page beside the native navigation rail, not a modal: the rail stays
   // usable and native navigation replaces the page.
@@ -138,6 +139,11 @@ export function mountRendererSettingsShell(
   page.append(pageContent);
   sidebar.append(navigation);
   layout.append(sidebar, page);
+
+  const setActivePage = (pageId: string): void => {
+    page.dataset.activePage = pageId;
+    pageContent.dataset.pageId = pageId;
+  };
   frame.append(header, layout);
   surface.append(frame);
   surface.setAttribute("aria-labelledby", brandTitle.id);
@@ -179,6 +185,7 @@ export function mountRendererSettingsShell(
     navigationState.select(pageId);
     disposeActivePage();
     setActiveNavigation(navigationButtons, pageId);
+    setActivePage(pageId);
     pageContent.replaceChildren();
     const scope = new RendererSettingsPageScope();
     activeScope = scope;

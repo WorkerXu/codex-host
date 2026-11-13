@@ -83,18 +83,38 @@ function buildRow(document: Document, locale: string): HTMLElement {
   row.className = ROW_CLASS;
   const content = document.createElement("div");
   content.className = ROW_CONTENT_CLASS;
-  const mark = createDingTalkMark(document, 18);
+  const mark = createDingTalkMark(document, 16);
   const label = document.createElement("span");
   label.className = "min-w-0 shrink truncate";
   label.textContent = locale === "zh-CN" ? "钉钉" : "DingTalk";
   const meta = document.createElement("span");
   meta.className = "flex-1 truncate text-codex-description";
-  meta.textContent =
-    locale === "zh-CN" ? "未读会话、搜索、嵌入对话" : "Unread, search, embed conversation";
+  meta.textContent = locale === "zh-CN" ? "打开钉钉工作台" : "Open the DingTalk workbench";
   content.append(mark, label, meta);
   row.append(content);
   row.classList.add(ROW_IDLE_CLASS);
   return row;
+}
+
+/** The single Workbench section appended to the native `@` menu. */
+export function createDingTalkEntrySection(
+  document: Document,
+  locale: string,
+): { element: HTMLElement; row: HTMLElement } {
+  const section = document.createElement("div");
+  section.setAttribute(SECTION_ATTRIBUTE, "true");
+  section.className = "flex w-full flex-col";
+  const header = document.createElement("div");
+  header.className = HEADER_CLASS;
+  header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
+  const row = buildRow(document, locale);
+  section.append(header, row);
+  return { element: section, row };
+}
+
+/** The row alone; used by previews that own their section chrome. */
+export function createDingTalkEntryRow(document: Document, locale: string): HTMLElement {
+  return buildRow(document, locale);
 }
 
 export function installRendererDingTalkEntry(
@@ -149,14 +169,7 @@ export function installRendererDingTalkEntry(
 
   const attach = (trigger: Trigger): void => {
     const locale = ownerDocument.documentElement.lang || view.navigator.language;
-    const section = ownerDocument.createElement("div");
-    section.setAttribute(SECTION_ATTRIBUTE, "true");
-    section.className = "flex w-full flex-col";
-    const header = ownerDocument.createElement("div");
-    header.className = HEADER_CLASS;
-    header.textContent = locale === "zh-CN" ? "钉钉" : "DingTalk";
-    const row = buildRow(ownerDocument, locale);
-    section.append(header, row);
+    const { element: section, row } = createDingTalkEntrySection(ownerDocument, locale);
     let panel: HTMLElement | null = null;
     const anchor = options.anchorForEditor(trigger.editor);
     const native = nativeList(ownerDocument, anchor);

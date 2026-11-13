@@ -3,7 +3,7 @@
  * `dingtalk://message/…` links. Clicking one opens the workbench page and asks
  * the mounted page to scroll to and highlight the referenced message.
  */
-import { requestDingTalkReveal } from "./settings/dingtalk-page.js";
+import { requestDingTalkReveal } from "./settings/dingtalk-reveal.js";
 
 const ANCHOR_SELECTOR = 'a[href^="dingtalk://"]';
 

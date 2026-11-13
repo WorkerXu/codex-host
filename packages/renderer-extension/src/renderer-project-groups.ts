@@ -23,6 +23,7 @@ import {
   projectHostKey,
   projectMachineName,
   type MachineConnectionState,
+  type ProjectGroupAddMachineResult,
   type ProjectGroupAddMachineTarget,
   type ProjectGroupProjectView,
   type ProjectGroupView,
@@ -582,26 +583,30 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     return projectGroupAddMachineTargets(catalog, memberHostIds);
   }
 
-  #addMachine(groupId: string, target: ProjectGroupAddMachineTarget): void {
+  async #addMachine(
+    groupId: string,
+    target: ProjectGroupAddMachineTarget,
+  ): Promise<ProjectGroupAddMachineResult> {
     const api = this.#window.__codexhostProjectMirrorV1;
-    if (!api) {
-      this.#notify("跨机对话服务不可用，无法添加机器。");
-      return;
-    }
-    void api
-      .addToGroup({
+    if (!api) return { ok: false, message: "跨机对话服务不可用，无法添加机器。" };
+    if (!target.harnessId) return { ok: false, message: "这台机器没有可用的 Agent。" };
+    try {
+      const result = await api.addToGroup({
         groupId,
         hostId: target.hostId,
         harnessId: target.harnessId,
         machineLabel: target.machineLabel,
-        harnessLabel: target.harnessLabel,
-      })
-      .then((added) => {
-        if (!added) return;
-        this.#notify(`已添加 ${target.machineLabel} · ${target.harnessLabel}`);
+        harnessLabel: target.harnessLabel ?? target.harnessId,
+      });
+      if (result.ok) {
+        this.#notify(`已添加 ${target.machineLabel} · ${target.harnessLabel ?? "Agent"}`);
         this.#scheduleRefresh(300);
-      })
-      .catch((error: unknown) => this.#recordError(error));
+      }
+      return result;
+    } catch (error) {
+      this.#recordError(error);
+      return { ok: false, message: "添加机器失败，请稍后重试。" };
+    }
   }
 
   #startNewChat(project: ProjectGroupProjectView): void {

@@ -86,7 +86,7 @@ export interface RendererProjectMirrorApi {
     harnessId: string;
     machineLabel: string;
     harnessLabel: string;
-  }): Promise<boolean>;
+  }): Promise<{ ok: boolean; message: string | null }>;
   consumePending(input: {
     composer: Element;
     hostId: string;
@@ -443,18 +443,21 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     services: ProjectMirrorDesktopServices,
     rpc: ProjectMirrorRpc,
     options: { groupId?: string } = {},
-  ): Promise<boolean> => {
+  ): Promise<{ ok: boolean; message: string | null }> => {
+    const fail = (message: string): { ok: false; message: string } => {
+      showProjectMirrorNotice(document, message, "error");
+      return { ok: false, message };
+    };
     const sourceId = context.source.id;
-    if (inFlight.has(sourceId)) return false;
+    if (inFlight.has(sourceId)) {
+      return { ok: false, message: "正在添加这台机器，请稍候。" };
+    }
     inFlight.add(sourceId);
     const hostId = selection.machine.hostId;
     const name = context.source.name.trim() || context.source.name;
     try {
       const route = hostRoute(hostId);
-      if (!route) {
-        showProjectMirrorNotice(document, `${selection.machine.label} 当前离线`, "error");
-        return false;
-      }
+      if (!route) return fail(`${selection.machine.label} 当前离线`);
       const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
       const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
       const remoteProjects = context.catalog.remoteProjects.filter(
@@ -480,10 +483,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         appProjects,
         directoryState: (path) => directoryState(route, path),
       });
-      if (!destination) {
-        showProjectMirrorNotice(document, "找不到可用的远程目录名", "error");
-        return false;
-      }
+      if (!destination) return fail("找不到可用的远程目录名");
       const chosenPath = destination.path;
       let existingProjectId = destination.projectId;
 
@@ -491,8 +491,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         if ((await directoryState(route, chosenPath)) === "missing") {
           await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
           if ((await directoryState(route, chosenPath)) !== "directory") {
-            showProjectMirrorNotice(document, "远程目录创建失败", "error");
-            return false;
+            return fail("远程目录创建失败");
           }
         }
         const created = await services.projects.createRemote({
@@ -502,18 +501,12 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
           remotePath: chosenPath,
           reuseExisting: true,
         });
-        if (!created) {
-          showProjectMirrorNotice(document, "创建远程项目被取消", "error");
-          return false;
-        }
+        if (!created) return fail("创建远程项目被取消");
         existingProjectId = created.id;
       }
 
       const projectId = existingProjectId;
-      if (!projectId) {
-        showProjectMirrorNotice(document, "创建远程项目失败", "error");
-        return false;
-      }
+      if (!projectId) return fail("创建远程项目失败");
       const appProject = appProjects.find((project) =>
         project.roots.some((root) => root.path === chosenPath),
       );
@@ -544,15 +537,9 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       });
 
       const row = await waitForSidebarProject(projectId);
-      if (!row) {
-        showProjectMirrorNotice(document, "项目已创建，但侧栏尚未显示；请稍后手动打开", "error");
-        return false;
-      }
+      if (!row) return fail("项目已创建，但侧栏尚未显示，请稍后手动打开");
       const button = newChatButton(row);
-      if (!button || button.disabled) {
-        showProjectMirrorNotice(document, "该项目当前不可用（可能离线）", "error");
-        return false;
-      }
+      if (!button || button.disabled) return fail("该项目当前不可用，可能已离线");
       pending.set(hostId, { agentId: selection.harness.id, createdAt: Date.now() });
       button.click();
 
@@ -585,26 +572,21 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
               showProjectMirrorNotice(document, "该项目已在其他项目组，已跳过自动分组");
             }
           } else if (result === "conflict") {
-            showProjectMirrorNotice(document, "该项目已在其他项目组，未加入当前分组", "error");
+            return fail("该项目已在其他项目组，未加入当前分组");
           } else if (result === "missing-group") {
-            showProjectMirrorNotice(document, "目标项目组已不存在", "error");
+            return fail("目标项目组已不存在");
           }
-        } catch (error) {
-          showProjectMirrorNotice(
-            document,
-            `项目已创建，但自动分组失败：${errorMessage(error)}`,
-            "error",
-          );
-          return false;
+        } catch {
+          return fail("项目已创建，但加入项目组失败");
         }
       }
     } catch (error) {
       status.lastError = errorMessage(error);
-      showProjectMirrorNotice(document, `跨机对话创建失败：${errorMessage(error)}`, "error");
+      return { ok: false, message: "添加机器失败，请稍后重试。" };
     } finally {
       inFlight.delete(sourceId);
     }
-    return true;
+    return { ok: true, message: null };
   };
   const openForAgentPicker: RendererProjectMirrorApi["openForAgentPicker"] = (input) => {
     if (disposed) return;
@@ -697,9 +679,9 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       }
     },
     async addToGroup(input) {
-      if (disposed) return false;
+      if (disposed) return { ok: false, message: "跨机对话服务不可用。" };
       const manager = localManager();
-      if (!manager) return false;
+      if (!manager) return { ok: false, message: "跨机对话服务不可用。" };
       try {
         const [config, catalogValue, services] = await Promise.all([
           createProjectGroupRpc(manager).list(),
@@ -709,10 +691,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         const catalog = desktopProjectsCatalogSchema.parse(catalogValue);
         const group = config.groups.find((candidate) => candidate.id === input.groupId);
         const member = group?.members.find((candidate) => candidate.projectKind === "local");
-        if (!member) {
-          showProjectMirrorNotice(document, "该分组没有本机项目，无法添加其他机器", "error");
-          return false;
-        }
+        if (!member) return { ok: false, message: "该分组没有本机项目，无法添加其他机器。" };
         const source =
           catalog.localProjects[member.projectId] ??
           Object.values(catalog.localProjects).find(
@@ -720,14 +699,8 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
               project.rootPaths.length === member.rootPaths.length &&
               project.rootPaths.every((path, index) => path === member.rootPaths[index]),
           );
-        if (!source) {
-          showProjectMirrorNotice(document, "找不到分组对应的本机项目", "error");
-          return false;
-        }
-        if (!services) {
-          showProjectMirrorNotice(document, "Desktop 项目服务不可用", "error");
-          return false;
-        }
+        if (!source) return { ok: false, message: "找不到分组对应的本机项目。" };
+        if (!services) return { ok: false, message: "本机项目服务暂不可用。" };
         return await runMirror(
           { catalog, source, acknowledged: true, revision: config.revision },
           {
@@ -745,8 +718,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         );
       } catch (error) {
         status.lastError = errorMessage(error);
-        showProjectMirrorNotice(document, `添加机器失败：${errorMessage(error)}`, "error");
-        return false;
+        return { ok: false, message: "添加机器失败，请稍后重试。" };
       }
     },
     consumePending(input) {
