@@ -1,5 +1,5 @@
 import previewCss from "./preview.css";
-import { createDingTalkEntryRow } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
+import { createDingTalkEntrySection } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
@@ -7,6 +7,10 @@ import { rendererSettingsMessages } from "../../../packages/renderer-extension/s
 import { installRendererSettingsShell } from "../../../packages/renderer-extension/src/settings/shell.js";
 
 import { createFakeCodexAgentsClient, createFakeDingTalkClient } from "./fake-clients.js";
+import type {
+  ProjectGroupAddMachineResult,
+  ProjectGroupAddMachineTarget,
+} from "../../../packages/renderer-extension/src/renderer-project-groups-model.js";
 import { addMachineTargets, projectGroupView } from "./fixtures.js";
 
 const parameters = new URLSearchParams(location.search);
@@ -85,6 +89,53 @@ function mountStage(html: string): HTMLElement {
   return stage;
 }
 
+type AddMachineHandler = (
+  groupId: string,
+  target: ProjectGroupAddMachineTarget,
+) => Promise<ProjectGroupAddMachineResult> | undefined;
+
+function openProjectMenu(onAddMachine: AddMachineHandler): ProjectGroupNewChatPicker {
+  const stage = mountStage(`
+    <aside class="preview-projects">
+      <div class="preview-projects-heading">Projects</div>
+      <div class="preview-group-row">
+        <span class="preview-group-icon"></span>
+        <span class="preview-group-name">codex-host</span>
+        <button type="button" class="preview-plus" aria-label="新建对话">+</button>
+      </div>
+      <div class="preview-project-row">codex-host</div>
+      <div class="preview-project-row">gate-a</div>
+    </aside>
+    <main class="preview-canvas">
+      <article class="preview-thread">
+        <h1>工作台重构</h1>
+        <p>项目组、钉钉与智能体页面正在按照同一套 Desktop 视觉语言收敛。</p>
+        <div class="preview-composer">讨论工作台 UI 的下一步…</div>
+      </article>
+    </main>`);
+  const anchor = stage.querySelector<HTMLButtonElement>(".preview-plus");
+  if (!anchor) throw new Error("Plus anchor is missing");
+  const picker = new ProjectGroupNewChatPicker({
+    document,
+    window,
+    onSelect: () => undefined,
+    loadAddTargets: async () => addMachineTargets,
+    onAddMachine,
+  });
+  picker.open(projectGroupView, anchor);
+  return picker;
+}
+
+async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
+  openProjectMenu(onAddMachine);
+  const add = await waitFor(() =>
+    document.querySelector<HTMLElement>("[data-codexhost-add-machine-row]"),
+  );
+  add.click();
+  await waitFor(() => document.querySelector("[data-codexhost-add-machine-menu]"));
+  await delay(160);
+}
+
 const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-list"() {
     const { query } = mountSettings("dingtalk");
@@ -157,6 +208,22 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".agent-editor:not([hidden])"));
   },
 
+  async "agents-dingtalk-disabled"() {
+    const { query, shell } = mountSettings("codex-agents");
+    const toggle = await waitFor(() => {
+      const input = query<HTMLInputElement>(".dingtalk-switch");
+      return input?.checked ? input : null;
+    });
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => query('.dingtalk-listener-body[data-disabled="true"]'));
+    await waitFor(() => query(".dingtalk-listener-status")?.textContent === "已保存", 3_000);
+    const page = shell.root.shadowRoot?.querySelector<HTMLElement>(".settings-page");
+    if (!page) throw new Error("Settings page scroller is missing");
+    page.scrollTop = page.scrollHeight;
+    await delay(180);
+  },
+
   async "agents-dingtalk-settings"() {
     const { query, shell } = mountSettings("codex-agents");
     await waitFor(() => query(".dingtalk-listener"));
@@ -167,47 +234,36 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "group-plus-menu"() {
-    const stage = mountStage(`
-      <aside class="preview-projects">
-        <div class="preview-projects-heading">Projects</div>
-        <div class="preview-group-row">
-          <span class="preview-group-icon"></span>
-          <span class="preview-group-name">codex-host</span>
-          <button type="button" class="preview-plus" aria-label="新建对话">+</button>
-        </div>
-        <div class="preview-project-row">codex-host</div>
-        <div class="preview-project-row">gate-a</div>
-      </aside>
-      <main class="preview-canvas">
-        <article class="preview-thread">
-          <h1>工作台重构</h1>
-          <p>项目组、钉钉与智能体页面正在按照同一套 Desktop 视觉语言收敛。</p>
-          <div class="preview-composer">讨论工作台 UI 的下一步…</div>
-        </article>
-      </main>`);
-    const anchor = stage.querySelector<HTMLButtonElement>(".preview-plus");
-    if (!anchor) throw new Error("Plus anchor is missing");
-    const picker = new ProjectGroupNewChatPicker({
-      document,
-      window,
-      onSelect: () => undefined,
-      loadAddTargets: async () => addMachineTargets,
-      onAddMachine: () => undefined,
-    });
-    picker.open(projectGroupView, anchor);
+    openProjectMenu();
     await waitFor(() => document.querySelector("[data-codexhost-project-groups-new-chat]"));
   },
 
   async "group-add-machine"() {
-    await scenarios["group-plus-menu"]!();
-    const add = await waitFor(
-      () =>
-        document.querySelector<HTMLElement>("[data-codexhost-add-machine-row]") ??
-        document.querySelector<HTMLElement>("[data-codexhost-project-groups-add-machine] button"),
+    await openMachineMenu(() => undefined);
+  },
+
+  async "group-add-machine-busy"() {
+    await openMachineMenu(() => new Promise(() => undefined));
+    const row = await waitFor(() =>
+      document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
     );
-    add.click();
-    await waitFor(() => document.querySelector("[data-codexhost-add-machine-menu]"));
-    await delay(160);
+    row.click();
+    await waitFor(() => row.getAttribute("aria-busy") === "true");
+    await delay(120);
+  },
+
+  async "group-add-machine-error"() {
+    await openMachineMenu(async () => ({ ok: false, message: "该机器当前离线。" }));
+    const row = await waitFor(() =>
+      document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
+    );
+    row.click();
+    await waitFor(() =>
+      document
+        .querySelector("[data-codexhost-add-machine-menu]")
+        ?.textContent?.includes("该机器当前离线。"),
+    );
+    await delay(120);
   },
 
   async "at-entry"() {
@@ -216,14 +272,16 @@ const scenarios: Record<string, () => Promise<void>> = {
         <div class="preview-composer-card">
           <div class="preview-composer-input">帮我把今天的发布进展整理一下…</div>
           <div class="preview-at-menu" role="listbox" aria-label="提及">
-            <div class="preview-native-row">文件</div>
-            <div class="preview-native-row">智能体</div>
+            <div class="preview-native-header">文件</div>
+            <div class="preview-native-row">图片</div>
+            <div class="preview-native-header">智能体</div>
+            <div class="preview-native-row">Codex</div>
           </div>
         </div>
       </main>`);
     const menu = stage.querySelector(".preview-at-menu");
     if (!menu) throw new Error("At menu is missing");
-    menu.append(createDingTalkEntryRow(document, locale));
+    menu.append(createDingTalkEntrySection(document, locale).element);
     await delay(80);
   },
 };

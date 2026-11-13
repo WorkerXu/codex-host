@@ -136,10 +136,24 @@ function textFor(index: number): string {
 
 function longText(index: number): string {
   return [
-    "我把这次评审的背景和结论整理一下：第一阶段只做工作台内的展示和搜索，不改变现有的会话路由；",
-    "第二阶段再接跨机器和权限；第三阶段才考虑把消息写回钉钉。这样每一段都能单独验收，也不会把风险堆到最后。",
-    "如果大家没有异议，我今晚把这份说明发到群里，明天开始按这个拆分排期。",
+    `第 ${index} 条预算说明：`,
+    "第一阶段只做工作台内的展示和搜索，不改变现有的会话路由；",
+    "第二阶段再接跨机器和权限；第三阶段才考虑把消息写回钉钉。",
+    "这样每一段都能单独验收，也不会把风险堆到最后。",
   ].join("");
+}
+
+function searchHit(conversation: string, index: number): string {
+  const variants = [
+    `${conversation}：预算表第 ${index} 版已发你，差旅和外包拆开列了。`,
+    `${conversation}：我刚核对完预算，渠道费用还差 3 万，晚点补在备注里。`,
+    `${conversation}：预算审批单编号 ${4800 + index}，麻烦今天走完流程。`,
+    `${conversation}：Q4 预算里市场活动占大头，建议先砍掉重复投放。`,
+    `${conversation}：财务说预算口径按自然季度，不要用滚动十二个月。`,
+    `${conversation}：这份预算给客户看之前，先把毛利那列隐藏。`,
+    `${conversation}：预算超支的部分我先记在风险清单，周五会上过。`,
+  ];
+  return variants[index % variants.length] ?? variants[0]!;
 }
 
 function buildLongConversation(): DingTalkMessage[] {
@@ -188,9 +202,11 @@ function buildConversationMessages(conversation: DingTalkConversation, count: nu
       text:
         index === count - 1
           ? (conversation.preview ?? textFor(index))
-          : index % 11 === 0
-            ? longText(index)
-            : textFor(index + conversation.title.length),
+          : index % 7 === 0
+            ? searchHit(conversation.title, index)
+            : index % 11 === 0
+              ? longText(index)
+              : textFor(index + conversation.title.length),
       unsupported: index === Math.floor(count / 2) && !conversation.singleChat,
       mine,
     });
