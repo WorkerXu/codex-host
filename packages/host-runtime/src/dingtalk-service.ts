@@ -615,7 +615,6 @@ export class DingTalkService {
           errorCode: null,
         };
       }
-      this.#notify(null);
     } catch {
       this.#list = {
         source: this.#list?.source ?? "empty",
