@@ -5,7 +5,11 @@ import {
   createDefaultRendererSettingsPages,
   createDefaultRendererSettingsRegistry,
 } from "../../src/settings/pages.js";
-import { RENDERER_SETTINGS_COLOR_SCHEME } from "../../src/settings/shell.js";
+import {
+  RENDERER_SETTINGS_COLOR_SCHEME,
+  SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS,
+  settingsSidebarPages,
+} from "../../src/settings/shell.js";
 
 describe("Renderer settings foundation", () => {
   it("inherits the Codex theme instead of forcing a dark settings surface", () => {
@@ -23,6 +27,7 @@ describe("Renderer settings foundation", () => {
       "Accounts",
       "Session Import",
       "Usage statistics",
+      "Jarvis",
       "General",
       "Updates",
       "About",
@@ -34,12 +39,29 @@ describe("Renderer settings foundation", () => {
       "session-import",
       "dashboard",
       "settings",
+      "settings",
       "updates",
       "about",
     ]);
     expect(registry.defaultPageId).toBe("connections");
     expect(Object.isFrozen(pages)).toBe(true);
     expect(pages.every((page) => Object.isFrozen(page))).toBe(true);
+  });
+
+  it("keeps About routable while hiding it and the Other section from the sidebar", () => {
+    const registry = createDefaultRendererSettingsRegistry();
+    expect(registry.getPage("about")).toBeDefined();
+    expect(SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS).toEqual(["about"]);
+    expect(settingsSidebarPages(registry).map(({ id }) => id)).toEqual([
+      "connections",
+      "remote-connections",
+      "accounts",
+      "session-import",
+      "usage-statistics",
+      "jarvis",
+      "appearance",
+      "updates",
+    ]);
   });
 
   it("publishes only available settings pages", () => {
@@ -51,6 +73,7 @@ describe("Renderer settings foundation", () => {
       "accounts",
       "session-import",
       "usage-statistics",
+      "jarvis",
       "appearance",
       "updates",
       "about",

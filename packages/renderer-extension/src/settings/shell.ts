@@ -15,10 +15,19 @@ import {
   DEFAULT_RENDERER_SETTINGS_MESSAGES,
   type RendererSettingsMessages,
 } from "./localization.js";
-import { CODEXHOST_GITHUB_REPOSITORY_URL, createDefaultRendererSettingsRegistry } from "./pages.js";
+import { createDefaultRendererSettingsRegistry } from "./pages.js";
 import { attachRendererSettingsRailPage, type RendererSettingsRailPage } from "./rail-page.js";
 
 export const SETTINGS_SHELL_ATTRIBUTE = "data-codexhost-settings-shell";
+/** Pages that remain routable but are intentionally absent from the sidebar. */
+export const SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS = ["about"] as const;
+export function settingsSidebarPages(
+  registry: RendererSettingsPageRegistry,
+): readonly RendererSettingsPageDefinition[] {
+  return registry.pages.filter(
+    (page) => !(SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS as readonly string[]).includes(page.id),
+  );
+}
 export const RENDERER_SETTINGS_COLOR_SCHEME = "inherit";
 
 export interface RendererSettingsShell {
@@ -94,7 +103,7 @@ export function mountRendererSettingsShell(
   brandCopy.className = "settings-brand__copy";
   const brandName = ownerDocument.createElement("span");
   brandName.className = "settings-brand__name";
-  brandName.textContent = "CodexHost";
+  brandName.textContent = messages.brandName;
   const brandTitle = ownerDocument.createElement("span");
   brandTitle.className = "settings-brand__title";
   brandTitle.id = "codexhost-settings-page-title";
@@ -192,13 +201,8 @@ export function mountRendererSettingsShell(
     section.textContent = label;
     navigation.append(section);
   };
-  let otherSectionAdded = false;
   appendNavigationSection(messages.generalSection);
-  for (const definition of resolvedRegistry.pages) {
-    if (definition.id === "about" && !otherSectionAdded) {
-      appendNavigationSection(messages.otherSection);
-      otherSectionAdded = true;
-    }
+  for (const definition of settingsSidebarPages(resolvedRegistry)) {
     const button = ownerDocument.createElement("button");
     button.type = "button";
     button.className = "settings-nav-button";
@@ -210,18 +214,6 @@ export function mountRendererSettingsShell(
     navigationButtons.set(definition.id, button);
     navigation.append(button);
   }
-  const starLink = ownerDocument.createElement("a");
-  starLink.className = "settings-nav-button settings-nav-star-link";
-  starLink.href = CODEXHOST_GITHUB_REPOSITORY_URL;
-  starLink.target = "_blank";
-  starLink.rel = "noopener noreferrer";
-  starLink.setAttribute("aria-label", messages.starOnGitHub);
-  starLink.title = messages.starOnGitHub;
-  starLink.append(createRendererSettingsIcon("github", 17));
-  const starLabel = ownerDocument.createElement("span");
-  starLabel.textContent = messages.starOnGitHub;
-  starLink.append(starLabel);
-  navigation.append(starLink);
   const supported = true;
   const focusActiveNavigation = (): void => {
     navigationButtons
