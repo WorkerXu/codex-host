@@ -5,6 +5,7 @@ import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-h
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
 import { runPeerExec } from "./peer-exec.js";
+import { DINGTALK_CLI_HELP, runDingTalkCli } from "./dingtalk-cli-command.js";
 import { runPeerCli } from "./peer-cli.js";
 import {
   peerThreadReference,
@@ -15,6 +16,7 @@ import {
 import { DEFAULT_PEER_TIMEOUT_MS, requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
+export { DINGTALK_CLI_HELP };
 
 import {
   DEFAULT_WATCH_TIMEOUT_MS,
@@ -322,6 +324,15 @@ export async function runDelegationCli(input: {
         arguments: input.arguments.slice(1),
         environment,
         output,
+      });
+    }
+    if (input.arguments[0] === "dingtalk") {
+      return await runDingTalkCli({
+        arguments: input.arguments.slice(1),
+        environment,
+        output,
+        diagnosticOutput,
+        ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
       });
     }
     const [group, command, ...rest] = input.arguments;

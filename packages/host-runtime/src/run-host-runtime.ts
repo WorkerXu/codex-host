@@ -55,6 +55,8 @@ import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-g
 import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-mirror-service.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { createJarvisService } from "./jarvis-service.js";
+import { runDwsRaw } from "./dingtalk-cli.js";
+import { createDingTalkService } from "./dingtalk-service.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -164,7 +166,20 @@ async function prepareDelegationRuntime(input: {
       ),
   });
   const token = randomBytes(32).toString("hex");
-  const server = await startDelegationControlServer({ token, api: registry, watchApi: registry });
+  const server = await startDelegationControlServer({
+    token,
+    api: registry,
+    watchApi: registry,
+    dingtalkDws: {
+      async runDingTalkDws(args) {
+        const raw = await runDwsRaw(args, {
+          environment: input.environment,
+          timeoutMs: 60_000,
+        });
+        return { ...raw };
+      },
+    },
+  });
   // Peer delegation depends on this file, but local delegation must keep
   // working when the data directory is not writable.
   const control: RuntimeControlHandle | undefined = await publishRuntimeControl({
@@ -306,12 +321,17 @@ export async function runHostRuntime(input: {
             environment: delegationEnvironment,
             isLocalHost: true,
           });
+          const dingtalk = createDingTalkService({
+            environment: delegationEnvironment,
+            isLocalHost: true,
+          });
           try {
             const host = new AppServerHost({
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
               jarvis,
+              dingtalk,
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -346,6 +366,7 @@ export async function runHostRuntime(input: {
             );
           } finally {
             jarvis.dispose();
+            dingtalk.dispose();
             await official.close();
           }
         }
@@ -355,12 +376,17 @@ export async function runHostRuntime(input: {
           environment: delegationEnvironment,
           isLocalHost: true,
         });
+        const dingtalk = createDingTalkService({
+          environment: delegationEnvironment,
+          isLocalHost: true,
+        });
         try {
           await mappingStore.initialize();
           const common = {
             stockCodexPath,
             environment: delegationEnvironment,
             jarvis,
+            dingtalk,
             ...shared,
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
@@ -420,6 +446,7 @@ export async function runHostRuntime(input: {
               await mappingStore.close();
             }
             jarvis.dispose();
+            dingtalk.dispose();
           }
         }
       },
@@ -469,11 +496,16 @@ export async function runHostRuntime(input: {
         environment: delegationEnvironment,
         isLocalHost: false,
       });
+      const dingtalk = createDingTalkService({
+        environment: delegationEnvironment,
+        isLocalHost: true,
+      });
       const externalHost = new AppServerHost({
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
         jarvis,
+        dingtalk,
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
@@ -589,6 +621,7 @@ export async function runHostRuntime(input: {
               await mappingStore.close();
             }
             jarvis.dispose();
+            dingtalk.dispose();
           }
         }
       }

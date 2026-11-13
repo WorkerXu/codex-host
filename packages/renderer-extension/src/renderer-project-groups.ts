@@ -18,10 +18,12 @@ import {
   buildProjectGroupViews,
   buildProjectIndex,
   mergeMachineState,
+  projectGroupAddMachineTargets,
   projectGroupMachineSummary,
   projectHostKey,
   projectMachineName,
   type MachineConnectionState,
+  type ProjectGroupAddMachineTarget,
   type ProjectGroupProjectView,
   type ProjectGroupView,
 } from "./renderer-project-groups-model.js";
@@ -162,6 +164,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       document: this.#document,
       window: this.#window,
       onSelect: (project) => this.#startNewChat(project),
+      loadAddTargets: (groupId) => this.#loadAddTargets(groupId),
+      onAddMachine: (groupId, target) => this.#addMachine(groupId, target),
     });
     this.#dialog = new ProjectGroupsDialog({
       document: this.#document,
@@ -565,6 +569,39 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #openNewChat(groupId: string, anchor: HTMLElement): void {
     const view = this.#views.find((candidate) => candidate.group.id === groupId);
     if (view) this.#picker.open(view, anchor);
+  }
+
+  async #loadAddTargets(groupId: string): Promise<ProjectGroupAddMachineTarget[]> {
+    const view = this.#views.find((candidate) => candidate.group.id === groupId);
+    const api = this.#window.__codexhostProjectMirrorV1;
+    if (!view || !api) return [];
+    const catalog = await api.machineCatalog().catch(() => ({ machines: [], loadedPeers: 0 }));
+    const memberHostIds = new Set(
+      view.machines.filter((machine) => machine.key !== "local").map((machine) => machine.key),
+    );
+    return projectGroupAddMachineTargets(catalog, memberHostIds);
+  }
+
+  #addMachine(groupId: string, target: ProjectGroupAddMachineTarget): void {
+    const api = this.#window.__codexhostProjectMirrorV1;
+    if (!api) {
+      this.#notify("跨机对话服务不可用，无法添加机器。");
+      return;
+    }
+    void api
+      .addToGroup({
+        groupId,
+        hostId: target.hostId,
+        harnessId: target.harnessId,
+        machineLabel: target.machineLabel,
+        harnessLabel: target.harnessLabel,
+      })
+      .then((added) => {
+        if (!added) return;
+        this.#notify(`已添加 ${target.machineLabel} · ${target.harnessLabel}`);
+        this.#scheduleRefresh(300);
+      })
+      .catch((error: unknown) => this.#recordError(error));
   }
 
   #startNewChat(project: ProjectGroupProjectView): void {

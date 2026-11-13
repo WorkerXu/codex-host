@@ -1,0 +1,492 @@
+.dingtalk-workbench {
+  display: flex;
+  height: min(72vh, 760px);
+  min-height: 520px;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #d0d0d0);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #111);
+}
+
+.dingtalk-sidebar {
+  display: flex;
+  flex: 0 0 300px;
+  min-width: 240px;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border, #d0d0d0);
+  background: var(--color-surface-secondary, #f7f7f7);
+}
+
+.dingtalk-sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border, #d0d0d0);
+}
+
+.dingtalk-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.dingtalk-brand-title {
+  font-size: 14px;
+}
+
+.dingtalk-status {
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-status--error {
+  color: var(--color-chart-red, #d33);
+}
+
+.dingtalk-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary, #777);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dingtalk-icon-button:hover {
+  border-color: var(--color-border, #d0d0d0);
+  color: var(--color-text, #111);
+}
+
+.dingtalk-search {
+  padding: 10px 12px;
+}
+
+.dingtalk-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border, #d0d0d0);
+  border-radius: 7px;
+  background: var(--color-surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.dingtalk-source-label {
+  padding: 0 14px 6px;
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-conversation-list {
+  flex: 1;
+  overflow: auto;
+  padding: 0 6px 8px;
+}
+
+.dingtalk-conversation {
+  display: flex;
+  width: 100%;
+  gap: 9px;
+  align-items: center;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dingtalk-conversation:hover {
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.dingtalk-conversation--active {
+  background: var(--color-surface-active, rgba(22, 119, 255, 0.12));
+}
+
+.dingtalk-avatar {
+  display: inline-flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dingtalk-conversation-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dingtalk-conversation-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.dingtalk-conversation-title {
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-conversation-time {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary, #999);
+  font-size: 10px;
+}
+
+.dingtalk-conversation-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.dingtalk-conversation-preview {
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-muted {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary, #999);
+  font-size: 10px;
+}
+
+.dingtalk-unread {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #f04438;
+  color: #fff;
+  font-size: 10px;
+}
+
+.dingtalk-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  background: var(--color-surface, #fff);
+}
+
+.dingtalk-main-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border, #d0d0d0);
+}
+
+.dingtalk-main-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.dingtalk-main-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-main-subtitle {
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-main-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dingtalk-notice {
+  margin: 8px 14px 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--color-surface-secondary, #f2f2f2);
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-notice--error {
+  background: rgba(240, 68, 56, 0.1);
+  color: #b42318;
+}
+
+.dingtalk-search-results {
+  margin: 8px 14px 0;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--color-border, #d0d0d0);
+  border-radius: 9px;
+  background: var(--color-surface-secondary, #fafafa);
+}
+
+.dingtalk-search-results-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  background: var(--color-surface-secondary, #fafafa);
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-search-row {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-top: 1px solid var(--color-border, #e5e5e5);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.dingtalk-search-message {
+  display: flex;
+  gap: 8px;
+  padding: 7px 9px;
+  border-top: 1px solid var(--color-border, #e5e5e5);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.dingtalk-search-message:hover,
+.dingtalk-search-row:hover {
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.dingtalk-search-message-meta {
+  flex: 0 0 150px;
+  overflow: hidden;
+  color: var(--color-text-secondary, #777);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-search-message-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-message-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.dingtalk-message {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border-radius: 8px;
+  content-visibility: auto;
+  contain-intrinsic-size: 64px;
+  padding: 2px 4px;
+}
+
+.dingtalk-message--mine {
+  flex-direction: row-reverse;
+}
+
+.dingtalk-message-check {
+  margin-top: 14px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.dingtalk-message:hover .dingtalk-message-check,
+.dingtalk-message--selected .dingtalk-message-check {
+  opacity: 1;
+}
+
+.dingtalk-message-bubble {
+  max-width: min(78%, 640px);
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--color-surface-secondary, #f2f2f2);
+}
+
+.dingtalk-message--mine .dingtalk-message-bubble {
+  background: rgba(22, 119, 255, 0.12);
+}
+
+.dingtalk-message--selected .dingtalk-message-bubble {
+  outline: 2px solid #1677ff;
+}
+
+.dingtalk-message--highlight .dingtalk-message-bubble {
+  animation: dingtalk-highlight 2.4s ease;
+}
+
+@keyframes dingtalk-highlight {
+  0%,
+  60% {
+    box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 180, 41, 0);
+  }
+}
+
+.dingtalk-message-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 3px;
+}
+
+.dingtalk-message-sender {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dingtalk-message-time {
+  color: var(--color-text-tertiary, #999);
+  font-size: 10px;
+}
+
+.dingtalk-message-text {
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dingtalk-message-unsupported {
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.dingtalk-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--color-border, #d0d0d0);
+}
+
+.dingtalk-composer-input {
+  min-height: 38px;
+  max-height: 160px;
+  flex: 1;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid var(--color-border, #d0d0d0);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.dingtalk-send {
+  flex: 0 0 auto;
+}
+
+.dingtalk-composer-status {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-composer-status--error {
+  color: #b42318;
+}
+
+.dingtalk-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--color-text-tertiary, #999);
+  font-size: 12px;
+  text-align: center;
+}
+
+.dingtalk-empty--list {
+  padding: 18px 8px;
+}
+
+.dingtalk-mark {
+  flex: 0 0 auto;
+}
+
+.dingtalk-host-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 8px;
+  color: var(--color-text-secondary, #777);
+  font-size: 11px;
+}
+
+.dingtalk-host-label {
+  flex: 0 0 auto;
+}
+
+.dingtalk-host-select {
+  min-width: 0;
+  flex: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--color-border, #d0d0d0);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
