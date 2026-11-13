@@ -79,6 +79,7 @@ export async function fetchLatestJarvisRelease(input: {
     response = await fetchImpl(input.endpoint ?? JARVIS_RELEASES_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(20_000),
       body: JSON.stringify({
         appId: JARVIS_CLI_APP_ID,
         platform: input.platform,
