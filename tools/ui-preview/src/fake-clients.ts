@@ -48,7 +48,7 @@ export function createFakeDingTalkClient(
   const conversationsResult = (): DingTalkConversationsResult => ({
     available: !options.error,
     source: options.empty ? "empty" : "unread",
-    conversations: options.empty ? [] : conversations.map((row) => ({ ...row })),
+    conversations: options.empty || options.error ? [] : conversations.map((row) => ({ ...row })),
     cachedAt: Date.now(),
     refreshing: false,
     errorCode: options.error ? "cli_failed" : null,

@@ -118,8 +118,7 @@ for (const scenario of scenarios) {
         );
       }
       if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
-        const count = queryAll(".dingtalk-message").length;
-        check("older-page-loaded", count > 30, `${count} messages`);
+        check("loading-older-visible", Boolean(query(".dingtalk-loading-older:not([hidden])")));
       }
       if (document.body.dataset.scenario === "dingtalk-search") {
         const panel = query(".dingtalk-search-results");

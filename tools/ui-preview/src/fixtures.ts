@@ -147,12 +147,17 @@ function buildLongConversation(): DingTalkMessage[] {
   for (let index = 0; index < 200; index += 1) {
     const mine = index % 4 === 0;
     const unsupported = index === 47 || index === 133;
-    const createdAt = now - (199 - index) * 50 * minute;
+    // Keep a visible day boundary and a same-sender cluster inside the newest page.
+    const recent = index >= 190;
+    const createdAt = recent
+      ? now - (199 - index) * 2 * minute
+      : now - (199 - index) * 50 * minute - 30 * hour;
+    const senderIndex = index >= 190 && index <= 194 ? 0 : index % 3;
     messages.push({
       messageId: `msg-launch-${String(index).padStart(3, "0")}`,
       conversationId: "cid-launch",
-      senderName: mine ? "我" : (senderNames[index % 3] ?? "吴菁"),
-      senderId: mine ? "me" : `user-${index % 3}`,
+      senderName: mine ? "我" : (senderNames[senderIndex] ?? "吴菁"),
+      senderId: mine ? "me" : `user-${senderIndex}`,
       createdAt,
       text: unsupported
         ? index === 47
@@ -412,19 +417,15 @@ export const addMachineTargets: ProjectGroupAddMachineTarget[] = [
   {
     hostId: "host-build",
     machineLabel: "build-01",
+    state: "ready",
     harnessId: "codex",
     harnessLabel: "Codex",
   },
   {
     hostId: "host-mac",
     machineLabel: "Mac mini",
+    state: "offline",
     harnessId: "claude",
     harnessLabel: "Claude Code",
-  },
-  {
-    hostId: "host-offline",
-    machineLabel: "老工作站",
-    harnessId: "codex",
-    harnessLabel: "Codex",
   },
 ];
