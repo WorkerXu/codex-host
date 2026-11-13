@@ -9,6 +9,7 @@ import {
   effortOptionsForModel,
   emptyAgentDraft,
   nextDuplicateName,
+  parseDingTalkMatchThreshold,
   validateAgentDraft,
 } from "../../src/settings/codex-agents-form.js";
 import { codexAgentsMessagesChinese } from "../../src/settings/codex-agents-messages.js";
@@ -142,6 +143,17 @@ describe("Codex agent form logic", () => {
     expect(duplicate.expectedRevision).toBeNull();
     expect(duplicate.name).toBe("terra_worker-copy");
     expect(duplicate.developerInstructions).toBe("Do the work.");
+  });
+
+  it("parses the DingTalk threshold, rejecting empty and out-of-range input", () => {
+    expect(parseDingTalkMatchThreshold("0.85")).toBe(0.85);
+    expect(parseDingTalkMatchThreshold("0")).toBe(0);
+    expect(parseDingTalkMatchThreshold(" 1 ")).toBe(1);
+    expect(parseDingTalkMatchThreshold("")).toBeNull();
+    expect(parseDingTalkMatchThreshold("   ")).toBeNull();
+    expect(parseDingTalkMatchThreshold("-0.01")).toBeNull();
+    expect(parseDingTalkMatchThreshold("1.01")).toBeNull();
+    expect(parseDingTalkMatchThreshold("abc")).toBeNull();
   });
 
   it("states the approval rule without granting approval changes", () => {

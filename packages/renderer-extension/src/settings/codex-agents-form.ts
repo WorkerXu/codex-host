@@ -140,6 +140,12 @@ export function validateAgentDraft(
   return null;
 }
 
+/** 0–1, or null when the field is empty or outside the accepted range. */
+export function parseDingTalkMatchThreshold(raw: string): number | null {
+  const value = raw.trim() ? Number(raw) : Number.NaN;
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
 export function agentSaveParamsFromDraft(draft: CodexAgentDraft): CodexAgentSaveParams {
   return {
     fileName: draft.fileName,
