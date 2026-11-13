@@ -43,6 +43,7 @@ import {
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
 import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
+import { createDingTalkSettingsPage, type RendererDingTalkPageOptions } from "./dingtalk-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -91,6 +92,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "session-import",
   "usage-statistics",
   "jarvis",
+  "dingtalk",
   "appearance",
   "updates",
   "about",
@@ -679,6 +681,7 @@ export function createDefaultRendererSettingsPages(
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
   jarvis?: RendererJarvisSettingsOptions,
+  dingtalk?: RendererDingTalkPageOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -698,6 +701,14 @@ export function createDefaultRendererSettingsPages(
       usageStatisticsHosts,
     ),
     createJarvisSettingsPage(messages, jarvis ?? { createClient: () => null }),
+    createDingTalkSettingsPage(
+      messages,
+      dingtalk ?? {
+        createClient: () => null,
+        readLocale: () => messages.locale,
+        embed: () => false,
+      },
+    ),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),

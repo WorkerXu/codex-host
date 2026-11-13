@@ -113,6 +113,13 @@ import {
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
 import { createRendererJarvisClient } from "./renderer-jarvis-client.js";
+import { createRendererDingTalkClient } from "./renderer-dingtalk-client.js";
+import {
+  installRendererDingTalkEntry,
+  type RendererDingTalkEntryControl,
+} from "./renderer-dingtalk-entry.js";
+import { installRendererDingTalkLinks } from "./renderer-dingtalk-links.js";
+import { embedDingTalkMention, openDingTalkWorkbench } from "./renderer-dingtalk-embed.js";
 import {
   installRendererJarvisMention,
   type RendererJarvisMentionControl,
@@ -895,6 +902,12 @@ export function installRendererBindingProbe(
       window.open(url, "_blank", "noopener,noreferrer");
     },
   });
+  const dingtalkClient = createRendererDingTalkClient({
+    forHost(hostId) {
+      const route = window.__codexhostHostRoutingV1?.forHost(hostId);
+      return route ? { hostId: route.hostId, manager: route.manager } : null;
+    },
+  });
   const usageStatistics = createRendererUsageStatisticsSource({
     routing: () => window.__codexhostHostRoutingV1,
     listConnections: () => remoteConnections.ssh.list(),
@@ -929,6 +942,11 @@ export function installRendererBindingProbe(
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     jarvis: { createClient: () => jarvisClient },
+    dingtalk: {
+      createClient: () => dingtalkClient,
+      readLocale: () => settingsLifecycle.locale,
+      embed: (mention) => embedDingTalkMention(mention),
+    },
     onLocaleChange() {
       for (const mounted of mountedByComposer.values()) renderMounted(mounted);
     },
@@ -1230,6 +1248,8 @@ export function installRendererBindingProbe(
 
   let delegationMention: RendererDelegationMentionControl | null = null;
   let jarvisMention: RendererJarvisMentionControl | null = null;
+  let dingtalkMention: RendererDingTalkEntryControl | null = null;
+  const disposeDingTalkLinks = installRendererDingTalkLinks(document);
   let peerDelegationCatalog: DelegationPeerCatalog | null = null;
   let peerDelegationCatalogAt = 0;
   let peerDelegationCatalogRequest: Promise<void> | null = null;
@@ -3622,6 +3642,20 @@ export function installRendererBindingProbe(
     anchorForEditor: (editor) =>
       editor.closest("[data-composer-body]") ?? composerForElement(editor),
   });
+  dingtalkMention = installRendererDingTalkEntry(document, {
+    isComposerEditor: (editor) => {
+      const composer = composerForElement(editor);
+      return composer !== null && isMountedComposer(composer);
+    },
+    anchorForEditor: (editor) =>
+      editor.closest("[data-composer-body]") ?? composerForElement(editor),
+    open: (editor) => {
+      const composer = composerForElement(editor);
+      const mounted = composer ? mountedByComposer.get(composer) : undefined;
+      const hostId = mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
+      return openDingTalkWorkbench(editor, hostId);
+    },
+  });
   refreshPeerDelegationCatalog();
 
   const connectedComposers = (): MountedComposer[] =>
@@ -3777,6 +3811,8 @@ export function installRendererBindingProbe(
       disposeReasoningSoftWrap();
       delegationMention?.dispose();
       jarvisMention?.dispose();
+      dingtalkMention?.dispose();
+      disposeDingTalkLinks();
       sidebarAgentIcons.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();
