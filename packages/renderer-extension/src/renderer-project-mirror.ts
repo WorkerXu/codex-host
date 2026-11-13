@@ -17,6 +17,7 @@ import {
   type CrossHostAgentSelection,
 } from "./renderer-cross-host-agent-section.js";
 import {
+  appendMirrorToGroup,
   chooseMirrorDestination,
   isNameOnlyProject,
   mirrorDirectoryCandidates,
@@ -76,6 +77,16 @@ interface PendingHarness {
 
 export interface RendererProjectMirrorApi {
   openForAgentPicker(input: { composer: Element; picker: RendererAgentPickerControl }): void;
+  /** Ready peers and Harnesses for the project-group add-machine section. */
+  machineCatalog(): Promise<CrossHostHarnessCatalog>;
+  /** Creates the mirror and appends it to an existing group. */
+  addToGroup(input: {
+    groupId: string;
+    hostId: string;
+    harnessId: string;
+    machineLabel: string;
+    harnessLabel: string;
+  }): Promise<boolean>;
   consumePending(input: {
     composer: Element;
     hostId: string;
@@ -366,6 +377,33 @@ async function joinMirrorGroup(
   return "joined";
 }
 
+async function appendGroupMirror(
+  groups: ProjectGroupRpc,
+  input: {
+    groupId: string;
+    mirror: { projectId: string; hostId: string; remotePath: string; label: string };
+  },
+): Promise<"appended" | "already-member" | "conflict" | "missing-group"> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await groups.list();
+    const plan = appendMirrorToGroup({
+      groups: current.groups,
+      groupId: input.groupId,
+      mirror: mirrorMember(input.mirror),
+      now: new Date().toISOString(),
+    });
+    if (plan.action !== "appended") return plan.action;
+    if (!plan.changed) return "already-member";
+    try {
+      await groups.replace({ revision: current.revision, groups: plan.groups });
+      return "appended";
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
+  return "appended";
+}
+
 export function installRendererProjectMirror(): RendererProjectMirrorApi {
   const existing = window.__codexhostProjectMirrorV1;
   if (existing) return existing;
@@ -404,9 +442,10 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     selection: CrossHostAgentSelection,
     services: ProjectMirrorDesktopServices,
     rpc: ProjectMirrorRpc,
-  ): Promise<void> => {
+    options: { groupId?: string } = {},
+  ): Promise<boolean> => {
     const sourceId = context.source.id;
-    if (inFlight.has(sourceId)) return;
+    if (inFlight.has(sourceId)) return false;
     inFlight.add(sourceId);
     const hostId = selection.machine.hostId;
     const name = context.source.name.trim() || context.source.name;
@@ -414,7 +453,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       const route = hostRoute(hostId);
       if (!route) {
         showProjectMirrorNotice(document, `${selection.machine.label} 当前离线`, "error");
-        return;
+        return false;
       }
       const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
       const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
@@ -443,7 +482,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       });
       if (!destination) {
         showProjectMirrorNotice(document, "找不到可用的远程目录名", "error");
-        return;
+        return false;
       }
       const chosenPath = destination.path;
       let existingProjectId = destination.projectId;
@@ -453,7 +492,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
           await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
           if ((await directoryState(route, chosenPath)) !== "directory") {
             showProjectMirrorNotice(document, "远程目录创建失败", "error");
-            return;
+            return false;
           }
         }
         const created = await services.projects.createRemote({
@@ -465,7 +504,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         });
         if (!created) {
           showProjectMirrorNotice(document, "创建远程项目被取消", "error");
-          return;
+          return false;
         }
         existingProjectId = created.id;
       }
@@ -473,7 +512,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       const projectId = existingProjectId;
       if (!projectId) {
         showProjectMirrorNotice(document, "创建远程项目失败", "error");
-        return;
+        return false;
       }
       const appProject = appProjects.find((project) =>
         project.roots.some((root) => root.path === chosenPath),
@@ -507,12 +546,12 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       const row = await waitForSidebarProject(projectId);
       if (!row) {
         showProjectMirrorNotice(document, "项目已创建，但侧栏尚未显示；请稍后手动打开", "error");
-        return;
+        return false;
       }
       const button = newChatButton(row);
       if (!button || button.disabled) {
         showProjectMirrorNotice(document, "该项目当前不可用（可能离线）", "error");
-        return;
+        return false;
       }
       pending.set(hostId, { agentId: selection.harness.id, createdAt: Date.now() });
       button.click();
@@ -520,21 +559,35 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       const manager = localManager();
       if (manager) {
         try {
-          const result = await joinMirrorGroup(createProjectGroupRpc(manager), {
-            source: context.source,
-            mirror: {
-              projectId,
-              hostId,
-              remotePath: chosenPath,
-              label: name,
-            },
-          });
+          const result = options.groupId
+            ? await appendGroupMirror(createProjectGroupRpc(manager), {
+                groupId: options.groupId,
+                mirror: {
+                  projectId,
+                  hostId,
+                  remotePath: chosenPath,
+                  label: name,
+                },
+              })
+            : await joinMirrorGroup(createProjectGroupRpc(manager), {
+                source: context.source,
+                mirror: {
+                  projectId,
+                  hostId,
+                  remotePath: chosenPath,
+                  label: name,
+                },
+              });
           if (result === "skipped") {
             const key = `${sourceId}\u0000${hostId}\u0000${projectId}`;
             if (!announcedConflicts.has(key)) {
               announcedConflicts.add(key);
               showProjectMirrorNotice(document, "该项目已在其他项目组，已跳过自动分组");
             }
+          } else if (result === "conflict") {
+            showProjectMirrorNotice(document, "该项目已在其他项目组，未加入当前分组", "error");
+          } else if (result === "missing-group") {
+            showProjectMirrorNotice(document, "目标项目组已不存在", "error");
           }
         } catch (error) {
           showProjectMirrorNotice(
@@ -542,6 +595,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
             `项目已创建，但自动分组失败：${errorMessage(error)}`,
             "error",
           );
+          return false;
         }
       }
     } catch (error) {
@@ -550,8 +604,8 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     } finally {
       inFlight.delete(sourceId);
     }
+    return true;
   };
-
   const openForAgentPicker: RendererProjectMirrorApi["openForAgentPicker"] = (input) => {
     if (disposed) return;
     status.pickerDetected = true;
@@ -631,6 +685,70 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
 
   const api: RendererProjectMirrorApi = {
     openForAgentPicker,
+    async machineCatalog() {
+      if (disposed) return { machines: [], loadedPeers: 0 };
+      const manager = localManager();
+      if (!manager) return { machines: [], loadedPeers: 0 };
+      try {
+        const value = await manager.sendRequest(DESKTOP_PROJECTS_CATALOG_METHOD, {});
+        return await loadHarnessCatalog(desktopProjectsCatalogSchema.parse(value));
+      } catch {
+        return { machines: [], loadedPeers: 0 };
+      }
+    },
+    async addToGroup(input) {
+      if (disposed) return false;
+      const manager = localManager();
+      if (!manager) return false;
+      try {
+        const [config, catalogValue, services] = await Promise.all([
+          createProjectGroupRpc(manager).list(),
+          manager.sendRequest(DESKTOP_PROJECTS_CATALOG_METHOD, {}),
+          loadProjectMirrorDesktopServices(window),
+        ]);
+        const catalog = desktopProjectsCatalogSchema.parse(catalogValue);
+        const group = config.groups.find((candidate) => candidate.id === input.groupId);
+        const member = group?.members.find((candidate) => candidate.projectKind === "local");
+        if (!member) {
+          showProjectMirrorNotice(document, "该分组没有本机项目，无法添加其他机器", "error");
+          return false;
+        }
+        const source =
+          catalog.localProjects[member.projectId] ??
+          Object.values(catalog.localProjects).find(
+            (project) =>
+              project.rootPaths.length === member.rootPaths.length &&
+              project.rootPaths.every((path, index) => path === member.rootPaths[index]),
+          );
+        if (!source) {
+          showProjectMirrorNotice(document, "找不到分组对应的本机项目", "error");
+          return false;
+        }
+        if (!services) {
+          showProjectMirrorNotice(document, "Desktop 项目服务不可用", "error");
+          return false;
+        }
+        return await runMirror(
+          { catalog, source, acknowledged: true, revision: config.revision },
+          {
+            machine: {
+              hostId: input.hostId,
+              label: input.machineLabel,
+              state: "ready",
+              harnesses: [{ id: input.harnessId, label: input.harnessLabel }],
+            },
+            harness: { id: input.harnessId, label: input.harnessLabel },
+          },
+          services,
+          createProjectMirrorRpc(manager),
+          { groupId: input.groupId },
+        );
+      } catch (error) {
+        status.lastError = errorMessage(error);
+        showProjectMirrorNotice(document, `添加机器失败：${errorMessage(error)}`, "error");
+        return false;
+      }
+    },
     consumePending(input) {
       if (disposed) return false;
       const entry = pending.get(input.hostId);

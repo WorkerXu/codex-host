@@ -106,10 +106,16 @@ async function startWithWatch(
   return { ...result, watch };
 }
 
+export interface DingTalkDwsPeerApi {
+  /** Runs one dws command on the machine that owns the DingTalk login. */
+  runDingTalkDws(args: readonly string[]): Promise<Record<string, unknown>>;
+}
+
 export async function startDelegationControlServer(input: {
   token: string;
   api: DelegationControlApi;
   watchApi?: DelegationWatchApi;
+  dingtalkDws?: DingTalkDwsPeerApi;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
     void (async () => {
@@ -175,6 +181,19 @@ export async function startDelegationControlServer(input: {
             await watchApi(input.watchApi).cancelWatch(body as unknown as ThreadWatchCancelInput),
           );
           return;
+        case "/v1/dingtalk/dws": {
+          if (!input.dingtalkDws) {
+            writeJson(response, 404, {
+              error: { code: "INVALID_ARGUMENT", message: "DingTalk is unavailable on this Host" },
+            });
+            return;
+          }
+          const args = Array.isArray(body.args)
+            ? body.args.filter((value): value is string => typeof value === "string")
+            : [];
+          writeJson(response, 200, await input.dingtalkDws.runDingTalkDws(args));
+          return;
+        }
         case "/v1/thread/list":
           writeJson(response, 200, await input.api.list(body as unknown as ThreadListInput));
           return;

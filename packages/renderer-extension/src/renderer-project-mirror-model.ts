@@ -208,3 +208,41 @@ export function readComposerProject(composer: Element): DesktopSelectedProject |
   }
   return null;
 }
+
+export interface AppendMirrorPlan {
+  groups: ProjectGroup[];
+  action: "appended" | "already-member" | "missing-group" | "conflict";
+  changed: boolean;
+}
+
+/**
+ * The group "+" picker already names its target group, so a new mirror is
+ * appended there instead of re-running name-based grouping.
+ */
+export function appendMirrorToGroup(input: {
+  groups: readonly ProjectGroup[];
+  groupId: string;
+  mirror: ProjectGroupMember;
+  now: string;
+}): AppendMirrorPlan {
+  const group = input.groups.find((candidate) => candidate.id === input.groupId);
+  if (!group) return { groups: [...input.groups], action: "missing-group", changed: false };
+  if (group.members.some((member) => sameMember(member, input.mirror))) {
+    return { groups: [...input.groups], action: "already-member", changed: false };
+  }
+  const other = input.groups.find(
+    (candidate) =>
+      candidate.id !== group.id &&
+      candidate.members.some((member) => sameMember(member, input.mirror)),
+  );
+  if (other) return { groups: [...input.groups], action: "conflict", changed: false };
+  return {
+    groups: input.groups.map((candidate) =>
+      candidate.id === group.id
+        ? { ...candidate, members: [...candidate.members, input.mirror], updatedAt: input.now }
+        : candidate,
+    ),
+    action: "appended",
+    changed: true,
+  };
+}

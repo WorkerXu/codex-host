@@ -1,8 +1,11 @@
 import type {
   MachineConnectionState,
+  ProjectGroupAddMachineTarget,
   ProjectGroupProjectView,
   ProjectGroupView,
 } from "./renderer-project-groups-model.js";
+
+export type { ProjectGroupAddMachineTarget } from "./renderer-project-groups-model.js";
 
 function style(element: HTMLElement, values: Record<string, string>): void {
   for (const [property, value] of Object.entries(values))
@@ -40,7 +43,26 @@ export interface ProjectGroupNewChatPickerOptions {
   document: Document;
   window: Window;
   onSelect(project: ProjectGroupProjectView): void;
+  /** Ready machines/Harnesses that can be mirrored into the group. */
+  loadAddTargets?(groupId: string): Promise<readonly ProjectGroupAddMachineTarget[]>;
+  onAddMachine?(groupId: string, target: ProjectGroupAddMachineTarget): void;
   onClosed?(): void;
+}
+
+function sectionLabel(document: Document, label: string): HTMLElement {
+  const header = document.createElement("div");
+  header.textContent = label;
+  style(header, {
+    display: "flex",
+    "align-items": "center",
+    gap: "6px",
+    padding: "8px 8px 5px",
+    "border-top": "1px solid var(--color-border, #e5e5e5)",
+    "margin-top": "4px",
+    color: "var(--color-text-secondary, #777)",
+    "font-size": "11px",
+  });
+  return header;
 }
 
 export class ProjectGroupNewChatPicker {
@@ -130,6 +152,66 @@ export class ProjectGroupNewChatPicker {
         });
         popover.append(row);
       }
+    }
+
+    if (this.#options.loadAddTargets && this.#options.onAddMachine) {
+      const addSection = this.#document.createElement("div");
+      addSection.setAttribute("data-codexhost-project-groups-add-machine", "");
+      popover.append(addSection);
+      const renderTargets = (targets: readonly ProjectGroupAddMachineTarget[]): void => {
+        if (this.#popover !== popover) return;
+        addSection.replaceChildren(sectionLabel(this.#document, "添加其他机器"));
+        if (targets.length === 0) {
+          const empty = this.#document.createElement("div");
+          empty.textContent = "没有可添加的机器";
+          style(empty, {
+            padding: "5px 8px 8px",
+            color: "var(--color-text-tertiary, #999)",
+            "font-size": "11px",
+          });
+          addSection.append(empty);
+          return;
+        }
+        for (const target of targets) {
+          const row = this.#document.createElement("button");
+          row.type = "button";
+          row.setAttribute("role", "menuitem");
+          row.setAttribute("data-codexhost-add-machine-host", target.hostId);
+          row.setAttribute("data-codexhost-add-machine-harness", target.harnessId);
+          row.textContent = `${target.machineLabel} · ${target.harnessLabel}`;
+          style(row, {
+            display: "flex",
+            "align-items": "center",
+            width: "100%",
+            border: "0",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            padding: "7px 8px",
+            "border-radius": "6px",
+            "text-align": "left",
+            "font-size": "13px",
+          });
+          row.addEventListener("click", () => {
+            this.close();
+            this.#options.onAddMachine?.(view.group.id, target);
+          });
+          addSection.append(row);
+        }
+      };
+      addSection.append(sectionLabel(this.#document, "添加其他机器"));
+      const loading = this.#document.createElement("div");
+      loading.textContent = "正在查找可用机器…";
+      style(loading, {
+        padding: "5px 8px 8px",
+        color: "var(--color-text-tertiary, #999)",
+        "font-size": "11px",
+      });
+      addSection.append(loading);
+      void this.#options
+        .loadAddTargets(view.group.id)
+        .then(renderTargets)
+        .catch(() => renderTargets([]));
     }
 
     this.#document.body.append(popover);

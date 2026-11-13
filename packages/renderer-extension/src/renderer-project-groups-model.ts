@@ -254,3 +254,33 @@ export function buildProjectGroupViews(input: {
       } satisfies ProjectGroupView;
     });
 }
+
+export interface ProjectGroupAddMachineTarget {
+  hostId: string;
+  machineLabel: string;
+  harnessId: string;
+  harnessLabel: string;
+}
+
+/** Ready peers not already present in the group, one row per ready Harness. */
+export function projectGroupAddMachineTargets(
+  catalog: {
+    machines: readonly {
+      hostId: string;
+      label: string;
+      state: "ready" | "offline" | "error";
+      harnesses: readonly { id: string; label: string }[];
+    }[];
+  },
+  memberHostIds: ReadonlySet<string>,
+): ProjectGroupAddMachineTarget[] {
+  return catalog.machines.flatMap((machine) => {
+    if (machine.state !== "ready" || memberHostIds.has(machine.hostId)) return [];
+    return machine.harnesses.map((harness) => ({
+      hostId: machine.hostId,
+      machineLabel: machine.label,
+      harnessId: harness.id,
+      harnessLabel: harness.label,
+    }));
+  });
+}

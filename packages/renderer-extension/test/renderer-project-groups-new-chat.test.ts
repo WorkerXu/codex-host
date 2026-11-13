@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ProjectGroupProjectView } from "../src/renderer-project-groups-model.js";
+import { projectGroupAddMachineTargets } from "../src/renderer-project-groups-model.js";
 import { newChatProjectDisabled } from "../src/renderer-project-groups-new-chat.js";
 
 function project(
@@ -51,5 +52,42 @@ describe("Project group new chat selection", () => {
     expect(newChatProjectDisabled(project("missing"), "connected")).toBe(true);
     expect(newChatProjectDisabled(project("not-mounted"), "connected")).toBe(true);
     expect(newChatProjectDisabled(project(null, false), "connected")).toBe(true);
+  });
+});
+
+describe("Project group add-machine targets", () => {
+  it("lists ready peers that are not in the group, one row per Harness", () => {
+    const targets = projectGroupAddMachineTargets(
+      {
+        machines: [
+          {
+            hostId: "remote-a",
+            label: "tencent",
+            state: "ready",
+            harnesses: [
+              { id: "codex", label: "Codex" },
+              { id: "claude", label: "Claude Code" },
+            ],
+          },
+          { hostId: "remote-b", label: "offline", state: "offline", harnesses: [] },
+          {
+            hostId: "remote-c",
+            label: "existing",
+            state: "ready",
+            harnesses: [{ id: "codex", label: "Codex" }],
+          },
+        ],
+      },
+      new Set(["remote-c"]),
+    );
+    expect(targets).toEqual([
+      { hostId: "remote-a", machineLabel: "tencent", harnessId: "codex", harnessLabel: "Codex" },
+      {
+        hostId: "remote-a",
+        machineLabel: "tencent",
+        harnessId: "claude",
+        harnessLabel: "Claude Code",
+      },
+    ]);
   });
 });
