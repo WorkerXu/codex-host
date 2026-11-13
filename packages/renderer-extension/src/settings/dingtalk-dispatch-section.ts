@@ -8,6 +8,7 @@ import {
 
 import type { RendererCodexAgentsClient } from "../renderer-codex-agents-client.js";
 import type { CodexAgentsMessages } from "./codex-agents-messages.js";
+import { parseDingTalkMatchThreshold } from "./codex-agents-form.js";
 import { createPreferenceGroup, createPreferenceSwitch, preferenceId } from "./preference-ui.js";
 
 export interface DingTalkDispatchSection {
@@ -223,9 +224,8 @@ export function createDingTalkDispatchSection(
   });
 
   save.addEventListener("click", () => {
-    const raw = threshold.value.trim();
-    const value = raw ? Number(raw) : Number.NaN;
-    if (!Number.isFinite(value) || value < 0 || value > 1) {
+    const value = parseDingTalkMatchThreshold(threshold.value);
+    if (value === null) {
       setStatus(text.thresholdInvalid, true);
       threshold.focus();
       return;
