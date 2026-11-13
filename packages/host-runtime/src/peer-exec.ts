@@ -14,6 +14,7 @@ export const PEER_EXEC_ROUTES = [
   "/v1/thread/read",
   "/v1/thread/wait",
   "/v1/thread/list",
+  "/v1/dingtalk/dws",
 ] as const;
 
 export type PeerExecRoute = (typeof PEER_EXEC_ROUTES)[number];

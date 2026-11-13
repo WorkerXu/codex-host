@@ -35,6 +35,15 @@ export type {
   RemoteAppServerWebSocketListener,
 } from "./remote-app-server.js";
 export { runDelegationCli, DELEGATION_HELP } from "./delegation-cli.js";
+export { DINGTALK_CLI_HELP, runDingTalkCli } from "./dingtalk-cli-command.js";
+export {
+  createDingTalkService,
+  DingTalkService,
+  DingTalkServiceError,
+} from "./dingtalk-service.js";
+export type { DingTalkServiceOptions } from "./dingtalk-service.js";
+export { createDingTalkCli } from "./dingtalk-cli.js";
+export { createDingTalkTransport } from "./dingtalk-transport.js";
 export { DelegationControlRegistry } from "./delegation-control-registry.js";
 export { startDelegationControlServer } from "./delegation-control-server.js";
 export { installDelegationSkills, CODEXHOST_DELEGATION_SKILL } from "./delegation-skill.js";
