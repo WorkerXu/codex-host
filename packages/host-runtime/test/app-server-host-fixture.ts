@@ -293,6 +293,7 @@ export function createFixture(
     projectGroups?: ProjectGroupsService;
     externalOnly?: boolean;
     delegationPeers?: AppServerHostOptions["delegationPeers"];
+    jarvis?: AppServerHostOptions["jarvis"];
   } = {},
 ) {
   const adapter =
@@ -358,6 +359,7 @@ export function createFixture(
           },
         }
       : {}),
+    ...(options.jarvis ? { jarvis: options.jarvis } : {}),
     ...(options.updateCoordinator ? { updateCoordinator: options.updateCoordinator } : {}),
     ...(options.runtimeMaintenance ? { runtimeMaintenance: options.runtimeMaintenance } : {}),
     ...(options.consoleOpener ? { consoleOpener: options.consoleOpener } : {}),

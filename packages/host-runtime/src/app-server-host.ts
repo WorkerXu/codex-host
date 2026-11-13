@@ -21,6 +21,30 @@ import {
   PROJECT_MIRROR_UPSERT_METHOD,
   projectGroupsReplaceParamsSchema,
   projectMirrorUpsertParamsSchema,
+  JARVIS_STATUS_METHOD,
+  JARVIS_CLASSIFY_METHOD,
+  JARVIS_CANDIDATES_METHOD,
+  JARVIS_RANK_METHOD,
+  JARVIS_SETTINGS_GET_METHOD,
+  JARVIS_SETTINGS_SET_METHOD,
+  JARVIS_SETTINGS_TEST_METHOD,
+  JARVIS_INSTALL_METHOD,
+  JARVIS_DOWNLOAD_START_METHOD,
+  JARVIS_DOWNLOAD_CHUNK_METHOD,
+  JARVIS_INSTALL_UPLOAD_METHOD,
+  JARVIS_LOGIN_START_METHOD,
+  JARVIS_LOGIN_FORWARD_METHOD,
+  JARVIS_LOGIN_STOP_METHOD,
+  jarvisClassifyParamsSchema,
+  jarvisCandidatesParamsSchema,
+  jarvisRankParamsSchema,
+  jarvisSettingsSetParamsSchema,
+  jarvisInstallParamsSchema,
+  jarvisDownloadStartParamsSchema,
+  jarvisDownloadChunkParamsSchema,
+  jarvisInstallUploadParamsSchema,
+  jarvisLoginForwardParamsSchema,
+  jarvisLoginStopParamsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -82,6 +106,8 @@ import {
   rewriteDelegationMentionInput,
   rewriteDelegationMentionText,
 } from "./delegation-mention-rewrite.js";
+import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
+import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
 import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
@@ -401,6 +427,8 @@ export interface AppServerHostOptions {
   projectGroups?: ProjectGroupsService;
   /** Local-only registry of remote projects created for local source projects. */
   projectMirror?: ProjectMirrorService;
+  /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
+  jarvis?: JarvisService;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -1400,6 +1428,10 @@ export class AppServerHost {
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
       return;
     }
+    if (request.method.startsWith("codexhost/jarvis/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleJarvisRequest(request));
+      return;
+    }
     if (
       request.method === PROJECT_GROUPS_LIST_METHOD ||
       request.method === PROJECT_GROUPS_REPLACE_METHOD ||
@@ -2300,7 +2332,7 @@ export class AppServerHost {
     );
   }
 
-  /** Native Codex Turns: turn `#` delegation chips into an explicit Skill-backed request. */
+  /** Native Codex Turns: expand Jarvis details and turn `#` chips into an explicit request. */
   async #rewriteOfficialDelegationMentions(
     request: JsonRpcRequest,
     frame: Buffer<ArrayBufferLike>,
@@ -2308,22 +2340,43 @@ export class AppServerHost {
     if (request.method !== "turn/start" && request.method !== "turn/steer") return frame;
     if (!isRecord(request.params) || !Array.isArray(request.params.input)) return frame;
     const input = request.params.input as JsonValue[];
-    if (
-      !input.some(
-        (item) =>
-          isRecord(item) &&
-          typeof item.text === "string" &&
-          item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
-      )
-    ) {
-      return frame;
+    const hasDelegation = input.some(
+      (item) =>
+        isRecord(item) &&
+        typeof item.text === "string" &&
+        item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
+    );
+    let changed = false;
+    const expanded: JsonValue[] = [];
+    for (const item of input) {
+      if (isRecord(item) && typeof item.text === "string" && hasJarvisCarrier(item.text)) {
+        const text = await this.#expandJarvisText(item.text);
+        if (text !== item.text) changed = true;
+        expanded.push({ ...item, text } as JsonObject);
+      } else {
+        expanded.push(item);
+      }
     }
-    const rewritten = rewriteDelegationMentionInput(input, await managedDelegationSkillReference());
-    if (!rewritten) return frame;
+    if (!changed && !hasDelegation) return frame;
+    const rewritten = hasDelegation
+      ? rewriteDelegationMentionInput(expanded, await managedDelegationSkillReference())
+      : null;
+    if (!changed && !rewritten) return frame;
     return encodeJsonFrame({
       ...(request as unknown as JsonObject),
-      params: { ...(request.params as JsonObject), input: rewritten },
+      params: { ...(request.params as JsonObject), input: rewritten ?? expanded },
     });
+  }
+
+  /** Details are fetched on the Host that runs the Thread; a failure is a note, not a Turn error. */
+  async #expandJarvisText(text: string): Promise<string> {
+    if (!this.#options.jarvis) return text;
+    try {
+      return await this.#options.jarvis.expandMentions(text);
+    } catch (error) {
+      this.#diagnose(error);
+      return text;
+    }
   }
 
   async #forwardOfficialNonRequest(
@@ -3404,6 +3457,91 @@ export class AppServerHost {
     } catch (error) {
       await this.#writer.json(rpcError(request, -32091, errorMessage(error).slice(0, 500)));
     }
+  }
+
+  async #handleJarvisRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.jarvis;
+    if (!service) {
+      await this.#writer.json(rpcError(request, -32601, "Jarvis is unavailable on this Host"));
+      return;
+    }
+    try {
+      const result = await this.#runJarvisMethod(service, request);
+      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+    } catch (error) {
+      if (error instanceof JarvisServiceError) {
+        await this.#writer.json(rpcError(request, -32094, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32094, "jarvis_failed"));
+    }
+  }
+
+  async #runJarvisMethod(service: JarvisService, request: JsonRpcRequest): Promise<unknown> {
+    if (request.method === JARVIS_STATUS_METHOD) return await service.status();
+    if (request.method === JARVIS_SETTINGS_GET_METHOD) return await service.settings();
+    if (request.method === JARVIS_SETTINGS_TEST_METHOD) return await service.testSettings();
+    if (request.method === JARVIS_LOGIN_START_METHOD) return await service.startLogin();
+    if (request.method === JARVIS_INSTALL_METHOD) {
+      const parsed = jarvisInstallParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid install request");
+      return await service.install();
+    }
+    if (request.method === JARVIS_CLASSIFY_METHOD) {
+      const parsed = jarvisClassifyParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid Jarvis query");
+      return await service.classify(parsed.data.query);
+    }
+    if (request.method === JARVIS_CANDIDATES_METHOD) {
+      const parsed = jarvisCandidatesParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis candidate request");
+      }
+      return await service.candidates(parsed.data.kind, parsed.data.refresh ?? false);
+    }
+    if (request.method === JARVIS_RANK_METHOD) {
+      const parsed = jarvisRankParamsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis rank request");
+      return await service.rank(parsed.data);
+    }
+    if (request.method === JARVIS_SETTINGS_SET_METHOD) {
+      const parsed = jarvisSettingsSetParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis settings");
+      }
+      return await service.updateSettings(parsed.data);
+    }
+    if (request.method === JARVIS_DOWNLOAD_START_METHOD) {
+      const parsed = jarvisDownloadStartParamsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid download request");
+      return await service.startDownload(parsed.data.release);
+    }
+    if (request.method === JARVIS_DOWNLOAD_CHUNK_METHOD) {
+      const parsed = jarvisDownloadChunkParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid download chunk");
+      return await service.downloadChunk(parsed.data.token, parsed.data.offset, parsed.data.length);
+    }
+    if (request.method === JARVIS_INSTALL_UPLOAD_METHOD) {
+      const parsed = jarvisInstallUploadParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid upload chunk");
+      return await service.uploadChunk(parsed.data);
+    }
+    if (request.method === JARVIS_LOGIN_FORWARD_METHOD) {
+      const parsed = jarvisLoginForwardParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid login forward");
+      return await service.forwardLogin(parsed.data);
+    }
+    if (request.method === JARVIS_LOGIN_STOP_METHOD) {
+      const parsed = jarvisLoginStopParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid login stop");
+      service.stopForward(parsed.data.forwardId);
+      return {};
+    }
+    throw new JarvisServiceError("unknown_method", "Unknown Jarvis method");
   }
 
   async #handleProjectGroupsRequest(request: JsonRpcRequest): Promise<void> {
@@ -5208,27 +5346,32 @@ export class AppServerHost {
     thread: ExternalThread,
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
-    await insertNativeSteer(thread, input, {
-      project: async (turnId, item, clientUserMessageId) => {
-        const projection = this.#projectedTurn(thread, turnId);
-        if (clientUserMessageId) {
-          projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
-        }
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: { type: "item.started", turnId, item },
-        });
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: {
-            type: "item.completed",
-            turnId,
-            snapshot: { item, outcome: { status: "succeeded" } },
-          },
-        });
+    await insertNativeSteer(
+      thread,
+      input,
+      {
+        project: async (turnId, item, clientUserMessageId) => {
+          const projection = this.#projectedTurn(thread, turnId);
+          if (clientUserMessageId) {
+            projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
+          }
+          await this.#projectHarnessOutput(thread, {
+            kind: "event",
+            event: { type: "item.started", turnId, item },
+          });
+          await this.#projectHarnessOutput(thread, {
+            kind: "event",
+            event: {
+              type: "item.completed",
+              turnId,
+              snapshot: { item, outcome: { status: "succeeded" } },
+            },
+          });
+        },
+        diagnose: (error) => this.#diagnose(error),
       },
-      diagnose: (error) => this.#diagnose(error),
-    });
+      (text) => this.#expandJarvisText(text),
+    );
     return {
       turnId: input.turnId,
       gate: { promise: Promise.resolve(), resolve: () => undefined },
@@ -5361,13 +5504,14 @@ export class AppServerHost {
       if (thread.unsubmittedPrewarm && (await this.#externalRuntime.submitPrewarm(thread))) {
         await this.#notifyExternalThreadStarted(thread.thread);
       }
+      const harnessText = await this.#expandJarvisText(rewriteDelegationMentionText(text));
       const result = await thread.session.execute({
         type: "turn.start",
         turnId,
         input: [
           {
             type: "text",
-            text: withInjectedContext(injected?.prefix, rewriteDelegationMentionText(text)),
+            text: withInjectedContext(injected?.prefix, harnessText),
           },
         ],
       });

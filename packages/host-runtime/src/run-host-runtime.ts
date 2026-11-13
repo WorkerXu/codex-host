@@ -54,6 +54,7 @@ import { UsageStatistics } from "./usage-statistics.js";
 import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-groups-service.js";
 import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-mirror-service.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
+import { createJarvisService } from "./jarvis-service.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -306,6 +307,10 @@ export async function runHostRuntime(input: {
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
+              jarvis: createJarvisService({
+                environment: delegationEnvironment,
+                isLocalHost: true,
+              }),
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -367,6 +372,10 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
+            jarvis: createJarvisService({
+              environment: delegationEnvironment,
+              isLocalHost: true,
+            }),
             ...common,
             arguments: input.arguments,
             delegationPeers: registry,
@@ -381,6 +390,10 @@ export async function runHostRuntime(input: {
                 ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
                 modelPrices,
                 usageStatistics,
+                jarvis: createJarvisService({
+                  environment: delegationEnvironment,
+                  isLocalHost: true,
+                }),
                 ...common,
                 arguments: [],
                 desktopInput,
@@ -456,6 +469,10 @@ export async function runHostRuntime(input: {
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
+        jarvis: createJarvisService({
+          environment: delegationEnvironment,
+          isLocalHost: false,
+        }),
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
@@ -488,6 +505,10 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
+            jarvis: createJarvisService({
+              environment: delegationEnvironment,
+              isLocalHost: false,
+            }),
             ...(sharedDelegation ? { sharedDelegation } : {}),
             sharedThreads: new SharedThreadBridge({
               connect: async () => sharedOwner.connect(),
