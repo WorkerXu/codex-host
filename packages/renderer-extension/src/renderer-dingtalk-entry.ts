@@ -139,7 +139,12 @@ export function installRendererDingTalkEntry(
       VIEWPORT_MARGIN,
       Math.min(rect.left, view.innerWidth - width - VIEWPORT_MARGIN),
     )}px`;
-    panel.style.top = `${Math.max(VIEWPORT_MARGIN, rect.top - MENU_MAX_HEIGHT - MENU_GAP)}px`;
+    const height = panel.getBoundingClientRect().height;
+    panel.style.top = `${
+      rect.top >= height + MENU_GAP + VIEWPORT_MARGIN
+        ? rect.top - height - MENU_GAP
+        : Math.min(view.innerHeight - height - VIEWPORT_MARGIN, rect.bottom + MENU_GAP)
+    }px`;
   };
 
   const attach = (trigger: Trigger): void => {
