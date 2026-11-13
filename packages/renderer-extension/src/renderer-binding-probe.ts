@@ -878,6 +878,17 @@ export function installRendererBindingProbe(
           reachable: window.__codexhostHostRoutingV1?.forHost(connection.hostId) != null,
         });
       }
+      // Peers configured for `#` delegation may not have a Desktop SSH row yet.
+      for (const peer of peerDelegationCatalog?.peers ?? []) {
+        const hostId = peer.hostIds[0] ?? peer.name;
+        if (hosts.some((host) => host.hostId === hostId)) continue;
+        hosts.push({
+          hostId,
+          displayName: peer.name,
+          local: false,
+          reachable: window.__codexhostHostRoutingV1?.forHost(hostId) != null,
+        });
+      }
       return hosts;
     },
     openExternal(url) {
