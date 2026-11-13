@@ -288,9 +288,17 @@ export function installRendererJarvisMention(
         content.append(label, meta);
         row.append(content);
         const index = entries.length;
-        row.addEventListener("pointermove", () => select(index));
-        row.addEventListener("mousedown", (event) => event.preventDefault());
-        row.addEventListener("click", () => {
+        row.addEventListener("pointermove", (event) => {
+          event.stopPropagation();
+          select(index);
+        });
+        row.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        row.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           const entry = entries.find((candidate) => candidate.row === row);
           if (entry) void choose(entry.suggestion);
         });

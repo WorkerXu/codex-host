@@ -262,6 +262,7 @@ export function createJarvisSettingsPage(
               "{reason}",
               jarvisErrorText(session.forwardErrorCode, messages.locale),
             );
+            return;
           }
           const started = Date.now();
           while (!disposed && Date.now() - started < LOGIN_TIMEOUT_MS) {
