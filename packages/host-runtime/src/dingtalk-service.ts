@@ -57,6 +57,7 @@ const VIEWED_WRITE_DELAY_MS = 500;
 const NOTIFY_DELAY_MS = 250;
 const RECENT_REPLIED_LIMIT = 10;
 const FALLBACK_WINDOW_DAYS = 30;
+const RECENT_REPLIED_WINDOW_DAYS = 90;
 
 export class DingTalkServiceError extends Error {
   constructor(
@@ -629,7 +630,7 @@ export class DingTalkService {
     if (!userId) return [];
     const sent = await this.#cli.searchMessages({
       senderIds: [userId],
-      days: FALLBACK_WINDOW_DAYS,
+      days: RECENT_REPLIED_WINDOW_DAYS,
       limit: 100,
     });
     const rows: DingTalkConversation[] = [];
