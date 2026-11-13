@@ -29,6 +29,7 @@ export function createDingTalkDispatchSection(
   document: Document,
   client: RendererCodexAgentsClient,
   text: CodexAgentsMessages["dingtalk"],
+  effortLabel: (id: string) => string = (id) => id,
 ): DingTalkDispatchSection {
   const root = document.createElement("section");
   root.className = "dingtalk-listener";
@@ -68,7 +69,7 @@ export function createDingTalkDispatchSection(
   eventsField.className = "dingtalk-listener-field dingtalk-listener-events";
   eventsField.append(fieldTitle(document, text.eventsTitle));
   const eventGroup = document.createElement("div");
-  eventGroup.className = "dingtalk-check-list";
+  eventGroup.className = "dingtalk-check-list dingtalk-check-list--row";
   const eventInputs = new Map<DingTalkEventType, HTMLInputElement>();
   for (const eventType of DINGTALK_EVENT_TYPES) {
     const label = document.createElement("label");
@@ -85,12 +86,9 @@ export function createDingTalkDispatchSection(
 
   const thresholdField = document.createElement("div");
   thresholdField.className = "dingtalk-listener-field";
-  const thresholdHead = document.createElement("div");
-  thresholdHead.className = "dingtalk-field-head";
-  thresholdHead.append(fieldTitle(document, text.thresholdTitle));
+  thresholdField.append(fieldTitle(document, text.thresholdTitle));
   const thresholdValue = document.createElement("output");
   thresholdValue.className = "dingtalk-threshold-value";
-  thresholdHead.append(thresholdValue);
   const threshold = document.createElement("input");
   threshold.type = "range";
   threshold.min = "0";
@@ -101,7 +99,10 @@ export function createDingTalkDispatchSection(
   const thresholdHint = document.createElement("p");
   thresholdHint.className = "dingtalk-field-hint";
   thresholdHint.textContent = text.thresholdDescription;
-  thresholdField.append(thresholdHead, threshold, thresholdHint);
+  const thresholdRow = document.createElement("div");
+  thresholdRow.className = "dingtalk-threshold-row";
+  thresholdRow.append(threshold, thresholdValue);
+  thresholdField.append(thresholdRow, thresholdHint);
 
   const replyField = document.createElement("div");
   replyField.className = "dingtalk-listener-field";
@@ -190,7 +191,8 @@ export function createDingTalkDispatchSection(
   };
 
   const renderBody = (): void => {
-    body.hidden = !enabled.checked;
+    body.dataset.disabled = String(!enabled.checked);
+    body.inert = !enabled.checked;
     if (!enabled.checked) setStatus("idle");
   };
 
@@ -232,7 +234,12 @@ export function createDingTalkDispatchSection(
       name.textContent = agent.name;
       const meta = document.createElement("span");
       meta.className = "dingtalk-agent-meta";
-      meta.textContent = [agent.model, agent.reasoningEffort].filter(Boolean).join(" · ");
+      meta.textContent = [
+        agent.model,
+        agent.reasoningEffort ? effortLabel(agent.reasoningEffort) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
       copy.append(name, meta);
       label.append(input, copy);
       agentList.append(label);
