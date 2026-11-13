@@ -31,11 +31,10 @@ export interface RendererSettingsMessages {
   readonly credentialImports: CredentialImportMessages;
   readonly locale: RendererSettingsLocale;
   readonly title: string;
+  readonly brandName: string;
   readonly close: string;
-  readonly starOnGitHub: string;
   readonly sectionsLabel: string;
   readonly generalSection: string;
-  readonly otherSection: string;
   readonly appearanceDescription: string;
   readonly appearanceGroup: string;
   readonly loadedSessions: {
@@ -271,12 +270,9 @@ export interface RendererSettingsMessages {
   readonly updateCopyFailed: string;
   readonly updateDownloadFromReleases: string;
   readonly updateDownloadWindowsInstaller: string;
-  readonly updateStarCallout: string;
-  readonly updateStarLink: string;
   readonly aboutTagline: string;
   readonly aboutParagraphs: readonly string[];
   readonly aboutOpenSource: string;
-  readonly aboutStarCallout: string;
   readonly aboutRepository: string;
   readonly aboutConsole: string;
   readonly aboutConsoleOpen: string;
@@ -327,11 +323,10 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportEnglish,
   locale: "en",
   title: "Settings",
+  brandName: "Workbench",
   close: "Close settings",
-  starOnGitHub: "Star to support",
   sectionsLabel: "Settings sections",
   generalSection: "General",
-  otherSection: "Other",
   appearanceDescription: "Conversation display and local resource management.",
   appearanceGroup: "Appearance",
   loadedSessions: {
@@ -606,9 +601,6 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "Copy failed",
   updateDownloadFromReleases: "Download from GitHub Releases",
   updateDownloadWindowsInstaller: "Download Windows installer",
-  updateStarCallout:
-    "If CodexHost has helped you, please Star it on GitHub. It means a lot to us 👉",
-  updateStarLink: "GitHub",
   aboutTagline: "Run Pi and other Harnesses in Codex Desktop",
   aboutParagraphs: Object.freeze([
     "We believe Codex Desktop offers the best desktop development experience available today.",
@@ -616,7 +608,6 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "codexhost lets you choose the Agent that actually executes tasks inside Codex Desktop, while preserving the native Codex experience and enabling them to collaborate.",
   ]),
   aboutOpenSource: "codexhost is an open-source project. The source code is available at:",
-  aboutStarCallout: "⭐ If this project helps you, please give us a Star! ⭐",
   aboutRepository: "Open-source repository",
   aboutConsole:
     "The codexhost console runs outside Codex Desktop. It shows startup diagnostics and logs, and can update codexhost even when Codex cannot start.",
@@ -682,11 +673,10 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportChinese,
   locale: "zh-CN",
   title: "设置",
+  brandName: "工作台",
   close: "关闭设置",
-  starOnGitHub: "Star 支持",
   sectionsLabel: "设置分类",
   generalSection: "通用",
-  otherSection: "其他",
   appearanceDescription: "会话显示与本地资源管理。",
   appearanceGroup: "外观",
   loadedSessions: {
@@ -944,8 +934,6 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "复制失败",
   updateDownloadFromReleases: "前往 GitHub Releases 下载",
   updateDownloadWindowsInstaller: "下载 Windows 安装包",
-  updateStarCallout: "如果 CodexHost 帮到了你，请在 GitHub 点个 Star，这对我们意义重大 👉",
-  updateStarLink: "GitHub",
   aboutTagline: "在 Codex Desktop 中运行 Pi 和其他 Harness",
   aboutParagraphs: Object.freeze([
     "我们认为 Codex Desktop 提供了目前最好的桌面开发交互体验。",
@@ -953,7 +941,6 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "codexhost 让你在 Codex Desktop 中选择真正执行任务的 Agent，同时保留 Codex 的原生体验，并让它们协作完成任务。",
   ]),
   aboutOpenSource: "codexhost 是一个开源项目，开源地址：",
-  aboutStarCallout: "⭐ 如果这个项目对你有帮助，请给我们一个 Star！⭐",
   aboutRepository: "开源仓库",
   aboutConsole:
     "codexhost 控制台独立于 Codex Desktop 运行，可以查看启动诊断和日志；即使 Codex 无法启动，也能在控制台更新 codexhost。",
