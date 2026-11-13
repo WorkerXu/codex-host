@@ -158,7 +158,7 @@ describe("Codex agent form logic", () => {
 
   it("states the approval rule without granting approval changes", () => {
     expect(codexAgentsMessagesChinese.dingtalk.approvalNote).toBe(
-      "审批：智能体按你的配置处理，但不会直接同意、拒绝或撤销审批，审批状态由你决定",
+      "审批由你决定：智能体可以整理材料并给出建议，但不会代为同意、拒绝或撤销。",
     );
     expect(codexAgentsMessagesChinese.dingtalk.approvalNote).not.toMatch(/自动通过/);
   });
