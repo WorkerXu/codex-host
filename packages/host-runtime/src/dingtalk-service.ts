@@ -271,14 +271,14 @@ export class DingTalkService {
         ? { before: params.before, direction: "older" as const }
         : {}),
     });
-    if (page.errorCode !== null && !cache) {
+    if (page.errorCode !== null) {
       return dingtalkMessagesResultSchema.parse({
         available: false,
         conversation: await this.#conversationFor(conversationId),
-        messages: [],
-        hasMore: false,
-        nextCursor: null,
-        cachedAt: null,
+        messages: cache?.messages ?? [],
+        hasMore: cache?.hasMore ?? false,
+        nextCursor: cache?.nextCursor ?? null,
+        cachedAt: cache?.fetchedAt ?? null,
         errorCode: page.errorCode,
       });
     }
