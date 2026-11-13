@@ -3,6 +3,7 @@ import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
 import type { LoadedSessionsClient } from "./settings/loaded-sessions-table.js";
 import type { HarnessSchedulesPageOptions } from "./settings/harness-schedules-page.js";
+import type { RendererJarvisSettingsOptions } from "./settings/jarvis-page.js";
 import { readCodexLocaleSettings, type CodexLocaleSettings } from "./codex-locale-adapter.js";
 import {
   rendererSettingsMessages,
@@ -39,6 +40,7 @@ export interface RendererSettingsLifecycleOptions {
   requestUsageStatistics?: RendererUsageStatisticsRequest;
   /** Machines the usage statistics page may read besides the local Host. */
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider;
+  jarvis?: RendererJarvisSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
   onLocaleChange?(locale: RendererSettingsLocale): void;
 }
@@ -98,6 +100,7 @@ export function installRendererSettingsLifecycle(
             },
           }
         : undefined,
+      options.jarvis,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

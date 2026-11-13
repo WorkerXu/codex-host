@@ -43,21 +43,21 @@ const STYLE_ATTRIBUTE = "data-codexhost-delegation-mention-style";
 const MENU_MAX_HEIGHT = 320;
 // Class lists mirror Desktop's composer suggestion menu (measured from the
 // native `@` menu), so density, colors and light/dark theming follow Desktop.
-const MENU_CLASS =
+export const MENU_CLASS =
   "border-default bg-surface-elevated-secondary flex flex-col overflow-hidden " +
   "rounded-[var(--radius-suggestion-menu,var(--radius-2xl))] border text-sm backdrop-blur-sm";
-const LIST_CLASS = "vertical-scroll-fade-mask flex w-full flex-1 flex-col overflow-y-auto";
-const HEADER_CLASS =
+export const LIST_CLASS = "vertical-scroll-fade-mask flex w-full flex-1 flex-col overflow-y-auto";
+export const HEADER_CLASS =
   "text-codex-description sticky top-0 z-10 px-row-x py-1 text-sm bg-surface-elevated-secondary";
-const ROW_CLASS =
+export const ROW_CLASS =
   "text-default outline-hidden cursor-interaction flex w-full min-h-[var(--app-menu-item-height,0px)] " +
   "shrink-0 items-center overflow-hidden rounded-[var(--suggestion-menu-item-radius,var(--radius-xl))] " +
   "p-[var(--suggestion-menu-item-padding,var(--app-menu-item-padding,var(--padding-row-y)_var(--padding-row-x)))] " +
   "text-start text-sm";
-const ROW_CONTENT_CLASS =
+export const ROW_CONTENT_CLASS =
   "flex w-full min-w-0 items-center gap-[var(--spacing-menu-item-content,calc(var(--spacing)*1.5))]";
-const ROW_HIGHLIGHT_CLASSES = ["bg-primary-ghost-hover", "opacity-100"] as const;
-const ROW_IDLE_CLASS = "menu-row-opacity";
+export const ROW_HIGHLIGHT_CLASSES = ["bg-primary-ghost-hover", "opacity-100"] as const;
+export const ROW_IDLE_CLASS = "menu-row-opacity";
 const VIEWPORT_MARGIN = 8;
 const MENU_GAP = 4;
 const MAX_QUERY_LENGTH = 32;
