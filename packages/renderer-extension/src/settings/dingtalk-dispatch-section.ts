@@ -223,7 +223,8 @@ export function createDingTalkDispatchSection(
   });
 
   save.addEventListener("click", () => {
-    const value = Number(threshold.value);
+    const raw = threshold.value.trim();
+    const value = raw ? Number(raw) : Number.NaN;
     if (!Number.isFinite(value) || value < 0 || value > 1) {
       setStatus(text.thresholdInvalid, true);
       threshold.focus();
