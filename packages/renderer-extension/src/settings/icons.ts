@@ -1,5 +1,6 @@
 import type { IconNode } from "lucide";
 import createElement from "lucide/dist/esm/createElement.mjs";
+import Bot from "lucide/dist/esm/icons/bot.mjs";
 import Boxes from "lucide/dist/esm/icons/boxes.mjs";
 import CalendarClock from "lucide/dist/esm/icons/calendar-clock.mjs";
 import Check from "lucide/dist/esm/icons/circle-check.mjs";
@@ -43,6 +44,7 @@ import codexhostLogoUrl from "../assets/codexhost-app-icon.svg";
 
 export const RENDERER_SETTINGS_ICON_NAMES = [
   "settings",
+  "agents",
   "close",
   "star",
   "github",
@@ -89,6 +91,7 @@ export type RendererSettingsIconName = (typeof RENDERER_SETTINGS_ICON_NAMES)[num
 
 const iconNodes = {
   settings: Settings,
+  agents: Bot,
   close: X,
   star: Star,
   github: [
