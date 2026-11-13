@@ -9,6 +9,7 @@ import {
   formatDingTalkClock,
   formatDingTalkDateLabel,
   formatDingTalkTime,
+  formatDingTalkTimeMark,
   highlightSegments,
   unsupportedSummary,
 } from "./dingtalk-page-model.js";
@@ -71,13 +72,7 @@ export function createAvatar(
 }
 
 function unreadBadge(document: Document, conversation: DingTalkConversation): HTMLElement | null {
-  if (conversation.muted) {
-    const dot = createElementNode(document, "span", "dingtalk-muted-dot");
-    dot.setAttribute("aria-label", "免打扰");
-    dot.title = "免打扰";
-    return dot;
-  }
-  if (conversation.unreadCount <= 0) return null;
+  if (conversation.muted || conversation.unreadCount <= 0) return null;
   const badge = createElementNode(
     document,
     "span",
@@ -128,7 +123,14 @@ export function createConversationRow(
   const badge = unreadBadge(document, conversation);
   if (badge) meta.append(badge);
   copy.append(line, meta);
-  row.append(createAvatar(document, conversation), copy);
+  const avatar = createElementNode(document, "span", "dingtalk-avatar-wrap");
+  avatar.append(createAvatar(document, conversation));
+  if (conversation.muted && conversation.unreadCount > 0) {
+    const dot = createElementNode(document, "span", "dingtalk-avatar-unread");
+    dot.setAttribute("aria-label", `${conversation.unreadCount} 条未读`);
+    avatar.append(dot);
+  }
+  row.append(avatar, copy);
   row.addEventListener("click", onSelect);
   return row;
 }
@@ -220,6 +222,7 @@ export interface MessageRowOptions {
   continuation: boolean;
   selected: boolean;
   onSelect(checked: boolean): void;
+  onActivate(): void;
   onRetry?(): void;
 }
 
@@ -244,6 +247,15 @@ export function createMessageRow(
   check.setAttribute("aria-label", text.selectMessage);
   check.title = text.selectMessage;
   check.addEventListener("change", () => options.onSelect(check.checked));
+  row.addEventListener("click", (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest(".dingtalk-send-retry, .dingtalk-message-check")
+    ) {
+      return;
+    }
+    options.onActivate();
+  });
 
   if (!message.mine && !options.continuation) {
     const sender = createElementNode(document, "span", "dingtalk-message-avatar");
@@ -329,6 +341,7 @@ export function createDateSeparator(
   now = Date.now(),
 ): HTMLElement {
   const separator = createElementNode(document, "div", "dingtalk-date-separator");
+  separator.dataset.separator = "date";
   separator.append(
     createElementNode(
       document,
@@ -338,6 +351,36 @@ export function createDateSeparator(
     ),
   );
   return separator;
+}
+
+export function createTimeSeparator(document: Document, value: number): HTMLElement {
+  const separator = createElementNode(document, "div", "dingtalk-time-separator");
+  separator.dataset.separator = "time";
+  separator.append(
+    createElementNode(
+      document,
+      "span",
+      "dingtalk-time-separator-label",
+      formatDingTalkTimeMark(value),
+    ),
+  );
+  return separator;
+}
+
+/** Rows shown at the top of the transcript while the previous page is loading. */
+export function createOlderMessagesSkeleton(document: Document): HTMLElement {
+  const skeleton = createElementNode(document, "div", "dingtalk-older-skeleton");
+  for (const width of ["72%", "54%", "64%"]) {
+    const row = createElementNode(document, "div", "dingtalk-older-skeleton-row");
+    const line = createElementNode(document, "span", "dingtalk-skeleton dingtalk-skeleton-line");
+    line.style.width = width;
+    row.append(
+      createElementNode(document, "span", "dingtalk-skeleton dingtalk-skeleton-avatar"),
+      line,
+    );
+    skeleton.append(row);
+  }
+  return skeleton;
 }
 
 export function createListEmpty(

@@ -43,21 +43,17 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
   const count = createElementNode(document, "span", "dingtalk-selection-count");
   const embed = document.createElement("button");
   embed.type = "button";
-  embed.className = "dingtalk-text-button dingtalk-selection-embed";
+  embed.className = "dingtalk-selection-embed";
   embed.textContent = text.embedToConversation;
   embed.addEventListener("click", options.onEmbedSelected);
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "dingtalk-text-button";
+  cancel.className = "dingtalk-selection-cancel";
   cancel.textContent = text.cancelSelection;
   cancel.addEventListener("click", options.onCancelSelection);
-  selectionBar.append(
-    count,
-    createElementNode(document, "span", "dingtalk-selection-dot", "·"),
-    embed,
-    createElementNode(document, "span", "dingtalk-selection-dot", "·"),
-    cancel,
-  );
+  const actions = createElementNode(document, "div", "dingtalk-selection-actions");
+  actions.append(embed, cancel);
+  selectionBar.append(count, actions);
   selectionBar.hidden = true;
   area.append(composer, selectionBar);
 

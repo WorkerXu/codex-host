@@ -30,8 +30,8 @@ describe("DingTalk page model", () => {
     const now = new Date(2026, 10, 13, 18, 0, 0).getTime();
     expect(formatDingTalkTime(new Date(2026, 10, 13, 9, 5).getTime(), now)).toBe("09:05");
     expect(formatDingTalkTime(new Date(2026, 10, 12, 9, 5).getTime(), now)).toBe("昨天");
-    expect(formatDingTalkTime(new Date(2026, 10, 2, 9, 5).getTime(), now)).toBe("11/2");
-    expect(formatDingTalkTime(new Date(2025, 10, 2, 9, 5).getTime(), now)).toBe("2025/11/2");
+    expect(formatDingTalkTime(new Date(2026, 10, 2, 9, 5).getTime(), now)).toBe("11-02");
+    expect(formatDingTalkTime(new Date(2025, 10, 2, 9, 5).getTime(), now)).toBe("25-11-02");
     expect(formatDingTalkTime(null, now)).toBe("");
     expect(formatDingTalkDateLabel(new Date(2026, 10, 13, 9, 5).getTime(), now)).toBe("今天");
     expect(formatDingTalkDateLabel(new Date(2026, 10, 12, 9, 5).getTime(), now)).toBe("昨天");

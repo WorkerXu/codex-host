@@ -14,6 +14,11 @@ export interface DingTalkSearchPanelState {
   pending: boolean;
   failed: boolean;
   result: DingTalkSearchResult | null;
+  expanded: { conversations: boolean; messages: boolean };
+}
+
+export interface DingTalkSearchPanelHandlers {
+  expand(kind: "conversations" | "messages"): void;
 }
 
 export interface DingTalkSearchPanelOptions {
@@ -23,6 +28,7 @@ export interface DingTalkSearchPanelOptions {
   openConversation(conversationId: string): void;
   openMessage(conversationId: string, messageId: string): void;
   retry(): void;
+  expand: DingTalkSearchPanelHandlers["expand"];
 }
 
 export interface DingTalkSearchPanel {
@@ -63,10 +69,22 @@ export function createDingTalkSearchPanel(
       group.append(
         createElementNode(document, "div", "dingtalk-search-group-label", text.searchConversations),
       );
-      for (const conversation of result.conversations) {
+      const visible = state.expanded.conversations
+        ? result.conversations
+        : result.conversations.slice(0, 3);
+      for (const conversation of visible) {
         group.append(
           createSearchConversationRow(document, conversation, text, state.query, () =>
             options.openConversation(conversation.conversationId),
+          ),
+        );
+      }
+      if (!state.expanded.conversations && result.conversations.length > 3) {
+        group.append(
+          moreButton(
+            document,
+            text.searchMore.replace("{count}", String(result.conversations.length)),
+            () => options.expand("conversations"),
           ),
         );
       }
@@ -77,7 +95,8 @@ export function createDingTalkSearchPanel(
       group.append(
         createElementNode(document, "div", "dingtalk-search-group-label", text.searchMessages),
       );
-      for (const message of result.messages) {
+      const visible = state.expanded.messages ? result.messages : result.messages.slice(0, 3);
+      for (const message of visible) {
         group.append(
           createSearchMessageRow(
             document,
@@ -88,9 +107,27 @@ export function createDingTalkSearchPanel(
           ),
         );
       }
+      if (!state.expanded.messages && result.messages.length > 3) {
+        group.append(
+          moreButton(
+            document,
+            text.searchMore.replace("{count}", String(result.messages.length)),
+            () => options.expand("messages"),
+          ),
+        );
+      }
       element.append(group);
     }
   };
 
   return { element, render };
+}
+
+function moreButton(document: Document, label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dingtalk-search-more";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
 }
