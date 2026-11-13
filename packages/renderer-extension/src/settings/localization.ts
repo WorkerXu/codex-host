@@ -9,6 +9,11 @@ import {
   harnessVersionChinese,
   type HarnessVersionMessages,
 } from "./harness-version-messages.js";
+import {
+  codexAgentsMessagesEnglish,
+  codexAgentsMessagesChinese,
+  type CodexAgentsMessages,
+} from "./codex-agents-messages.js";
 
 export const RENDERER_SETTINGS_LOCALES = ["en", "zh-CN"] as const;
 export type RendererSettingsLocale = (typeof RENDERER_SETTINGS_LOCALES)[number];
@@ -29,6 +34,7 @@ export interface RendererSettingsLanguageControl {
 
 export interface RendererSettingsMessages {
   readonly credentialImports: CredentialImportMessages;
+  readonly codexAgents: CodexAgentsMessages;
   readonly locale: RendererSettingsLocale;
   readonly title: string;
   readonly brandName: string;
@@ -321,6 +327,7 @@ export interface RendererSettingsMessages {
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportEnglish,
+  codexAgents: Object.freeze(codexAgentsMessagesEnglish),
   locale: "en",
   title: "Settings",
   brandName: "Workbench",
@@ -664,6 +671,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
     jarvis: "Jarvis",
+    "codex-agents": "Agents",
     updates: "Updates",
     about: "About",
   }),
@@ -671,6 +679,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
 
 const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportChinese,
+  codexAgents: Object.freeze(codexAgentsMessagesChinese),
   locale: "zh-CN",
   title: "设置",
   brandName: "工作台",
@@ -996,6 +1005,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "session-import": "会话导入",
     "usage-statistics": "用量统计",
     jarvis: "Jarvis",
+    "codex-agents": "智能体",
     updates: "更新",
     about: "关于",
   }),

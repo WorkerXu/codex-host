@@ -43,6 +43,10 @@ import {
   type HarnessSchedulesPageOptions,
 } from "./harness-schedules-page.js";
 import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
+import {
+  createCodexAgentsSettingsPage,
+  type RendererCodexAgentsSettingsOptions,
+} from "./codex-agents-page.js";
 
 export type {
   RendererConnectionAgentSnapshot,
@@ -91,6 +95,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "session-import",
   "usage-statistics",
   "jarvis",
+  "codex-agents",
   "appearance",
   "updates",
   "about",
@@ -679,6 +684,7 @@ export function createDefaultRendererSettingsPages(
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
   jarvis?: RendererJarvisSettingsOptions,
+  codexAgents?: RendererCodexAgentsSettingsOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -698,6 +704,7 @@ export function createDefaultRendererSettingsPages(
       usageStatisticsHosts,
     ),
     createJarvisSettingsPage(messages, jarvis ?? { createClient: () => null }),
+    createCodexAgentsSettingsPage(messages, codexAgents ?? { createClient: () => null }),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
