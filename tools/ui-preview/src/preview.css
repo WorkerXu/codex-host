@@ -173,3 +173,10 @@ body {
   font-size: var(--font-text-sm-size, 14px);
   border-radius: 8px;
 }
+
+.preview-native-header {
+  padding: 6px 8px 4px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: var(--font-text-sm-size, 14px);
+  line-height: 20px;
+}

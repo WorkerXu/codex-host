@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global document */
+/* global document, getComputedStyle */
 /**
  * Captures every preview scenario in light and dark with the installed
  * Playwright Chromium and records basic DOM assertions next to the images.
@@ -23,8 +23,11 @@ const allScenarios = [
   "agents-list",
   "agents-edit",
   "agents-dingtalk-settings",
+  "agents-dingtalk-disabled",
   "group-plus-menu",
   "group-add-machine",
+  "group-add-machine-busy",
+  "group-add-machine-error",
   "at-entry",
 ];
 
@@ -116,6 +119,8 @@ for (const scenario of scenarios) {
           queryAll(".dingtalk-date-separator").length > 0,
           `${queryAll(".dingtalk-date-separator").length} separators`,
         );
+        check("time-separator", queryAll(".dingtalk-time-separator").length > 0);
+        check("list-switch", queryAll(".dingtalk-list-switch-button").length === 2);
       }
       if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
         check("loading-older-visible", Boolean(query(".dingtalk-loading-older:not([hidden])")));
@@ -131,6 +136,17 @@ for (const scenario of scenarios) {
           `${queryAll(".dingtalk-search-mark").length} marks`,
         );
         check("chat-still-visible", queryAll(".dingtalk-message").length > 0);
+        check(
+          "search-more",
+          queryAll(".dingtalk-search-more").length > 0,
+          `${queryAll(".dingtalk-search-more").length} more buttons`,
+        );
+        check("search-keyboard-hint", Boolean(query(".dingtalk-search-hint:not([hidden])")));
+        check(
+          "search-orange-mark",
+          queryAll(".dingtalk-search-mark").length > 0 &&
+            getComputedStyle(query(".dingtalk-search-mark")).backgroundColor === "rgba(0, 0, 0, 0)",
+        );
       }
       if (document.body.dataset.scenario === "dingtalk-select") {
         const bar = query(".dingtalk-selection-bar");
@@ -158,9 +174,15 @@ for (const scenario of scenarios) {
         check("editor-open", Boolean(editor) && !editor.hidden);
         check("editor-instructions", Boolean(query(".agent-instructions")));
       }
-      if (document.body.dataset.scenario === "agents-dingtalk-settings") {
+      if (
+        document.body.dataset.scenario === "agents-dingtalk-settings" ||
+        document.body.dataset.scenario === "agents-dingtalk-disabled"
+      ) {
         check("listener-section", Boolean(query(".dingtalk-listener")));
         check("listener-events", queryAll(".dingtalk-listener-events input").length === 3);
+      }
+      if (document.body.dataset.scenario === "agents-dingtalk-disabled") {
+        check("listener-disabled", Boolean(query('.dingtalk-listener-body[data-disabled="true"]')));
       }
       if (document.body.dataset.scenario === "group-plus-menu") {
         check("add-machine-row", Boolean(query("[data-codexhost-add-machine-row]")));
@@ -168,9 +190,28 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario === "group-add-machine") {
         check("machine-menu", Boolean(query("[data-codexhost-add-machine-menu]")));
       }
+      if (document.body.dataset.scenario === "group-add-machine-busy") {
+        check(
+          "machine-row-busy",
+          query('[data-codexhost-add-machine-host="host-build"]')?.getAttribute("aria-busy") ===
+            "true",
+        );
+      }
+      if (document.body.dataset.scenario === "group-add-machine-error") {
+        check(
+          "machine-row-error",
+          Boolean(
+            query("[data-codexhost-add-machine-menu]")?.textContent?.includes("该机器当前离线。"),
+          ),
+        );
+      }
       if (document.body.dataset.scenario === "at-entry") {
         const row = query("[data-codexhost-dingtalk-entry]");
         check("single-dingtalk-row", Boolean(row));
+        check(
+          "entry-workbench-group",
+          Boolean(query("[data-codexhost-dingtalk-section]")?.textContent?.includes("工作台")),
+        );
         check(
           "entry-helper-text",
           Boolean(row?.textContent.includes("打开钉钉工作台")),

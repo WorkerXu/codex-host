@@ -240,7 +240,8 @@ export function createFakeCodexAgentsClient(
       };
     },
     async saveDispatchSettings(settings) {
-      await sleep(120);
+      // Long enough for the disabled-state screenshot to see the greyed body.
+      await sleep(800);
       dispatch = {
         ...settings,
         eventTypes: [...settings.eventTypes],
