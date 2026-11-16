@@ -8,6 +8,10 @@ import {
   installRendererJarvisMention,
 } from "../../../packages/renderer-extension/src/renderer-jarvis-mention.js";
 import { createWorkbenchSection } from "../../../packages/renderer-extension/src/renderer-native-at-menu.js";
+import {
+  mountRendererAgentPicker,
+  renderRendererAgentPicker,
+} from "../../../packages/renderer-extension/src/renderer-agent-picker.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
 import {
   ProjectGroupHeaders,
@@ -61,6 +65,45 @@ const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+
+type PreviewInputAction = "click" | "hover" | "wheel" | "type" | "key";
+interface PreviewInputBridge {
+  request(
+    element: Element,
+    action: PreviewInputAction,
+    options?: { text?: string; deltaY?: number; key?: string },
+  ): Promise<void>;
+}
+
+const previewInput = (window as Window & { __codexhostPreviewInput?: PreviewInputBridge })
+  .__codexhostPreviewInput;
+
+/**
+ * Every interaction scenario goes through a real pointer/keyboard input when
+ * the Playwright capture runner is driving the page. A plain `element.click()`
+ * hides focus, shadow-retargeting and popover problems, so it is only a
+ * fallback for opening the page by hand.
+ */
+async function previewInputOn(
+  element: Element,
+  action: PreviewInputAction,
+  options?: { text?: string; deltaY?: number; key?: string },
+): Promise<void> {
+  if (previewInput) {
+    await previewInput.request(element, action, options);
+    return;
+  }
+  if (action === "click") (element as HTMLElement).click();
+}
+
+const previewClick = (element: Element): Promise<void> => previewInputOn(element, "click");
+const previewHover = (element: Element): Promise<void> => previewInputOn(element, "hover");
+const previewType = (element: Element, text: string): Promise<void> =>
+  previewInputOn(element, "type", { text });
+const previewWheel = (element: Element, deltaY: number): Promise<void> =>
+  previewInputOn(element, "wheel", { deltaY });
+const previewKey = (element: Element, key: string): Promise<void> =>
+  previewInputOn(element, "key", { key });
 
 async function waitFor<T>(read: () => T | null | undefined, timeout = 4_000): Promise<T> {
   const started = Date.now();
@@ -138,15 +181,26 @@ async function openPageMenu(query: <T extends Element>(selector: string) => T | 
   const button = await waitFor(() =>
     query<HTMLButtonElement>(".dingtalk-sidebar .dingtalk-more-button"),
   );
-  button.click();
+  await previewClick(button);
   await waitFor(() => query(".dingtalk-page-menu:not([hidden])"));
 }
 
 async function openFirstConversation(query: <T extends Element>(selector: string) => T | null) {
   const row = await waitFor(() => query<HTMLButtonElement>(".dingtalk-conversation"));
-  row.click();
+  await previewClick(row);
   await waitFor(() => query(".dingtalk-message"));
   await delay(180);
+}
+
+/** The native popup is portaled above the Composer; keep it out of card flow. */
+function pinAtMenu(card: HTMLElement, menu: HTMLElement): void {
+  card.style.position = "relative";
+  menu.style.position = "absolute";
+  menu.style.left = "0";
+  menu.style.right = "0";
+  menu.style.bottom = "100%";
+  menu.style.width = "100%";
+  menu.style.maxHeight = "340px";
 }
 
 function mountStage(html: string): HTMLElement {
@@ -355,7 +409,7 @@ async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
   const add = await waitFor(() =>
     document.querySelector<HTMLElement>("[data-codexhost-add-machine-row]"),
   );
-  add.click();
+  await previewClick(add);
   await waitFor(() => document.querySelector("[data-codexhost-add-machine-menu]"));
   await delay(160);
 }
@@ -464,7 +518,10 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
   const editor = stage.querySelector<HTMLElement>("#native-editor");
   if (!editor) throw new Error("Native composer is missing");
   const menu = nativeAtMenu();
-  stage.querySelector(".preview-composer-card")?.append(menu);
+  const card = stage.querySelector<HTMLElement>(".preview-composer-card");
+  if (!card) throw new Error("Preview composer is missing");
+  card.append(menu);
+  pinAtMenu(card, menu);
   const scroll = menu.querySelector<HTMLElement>("[data-mention-list-scroll-area]");
   if (!scroll) throw new Error("Native scroll area is missing");
   const text = editor.firstChild;
@@ -540,28 +597,20 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
     ...scroll.querySelectorAll<HTMLElement>('[data-list-navigation-item="true"]'),
   ].filter((row) => !row.closest("[data-codexhost-workbench-section]"));
   const lastNative = nativeRows.at(-1);
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
-  );
+  await previewKey(editor, "ArrowDown");
   document.body.dataset.entryKeyboardHandoff = String(
     dingtalkRow?.getAttribute("aria-current") === "true" &&
       lastNative?.getAttribute("aria-current") !== "true",
   );
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
-  );
+  await previewKey(editor, "ArrowDown");
   const walkedToJarvis = jarvisRow?.getAttribute("aria-current") === "true";
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
-  );
+  await previewKey(editor, "ArrowUp");
   document.body.dataset.entryWorkbenchWalk = String(
     walkedToJarvis &&
       dingtalkRow?.getAttribute("aria-current") === "true" &&
       jarvisRow?.getAttribute("aria-current") !== "true",
   );
-  window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-  );
+  await previewKey(editor, "Enter");
   await waitFor(() => document.body.dataset.entryOpened === "true");
 }
 
@@ -621,6 +670,40 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
     }),
   ],
   total: 4,
+  capped: false,
+};
+
+const jarvisPreviewSingleBug: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [{ key: "status:1", kind: "status", label: "未解决" }],
+  bugs: [previewBug(9301, 9001, "示例后台 · 迭代 B", "示例：列表页加载失败", { priority: 1 })],
+  total: 1,
+  capped: false,
+};
+
+const jarvisPreviewMany: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [
+    { key: "status:1", kind: "status", label: "未解决" },
+    { key: "order:newest", kind: "order", label: "最新" },
+  ],
+  bugs: Array.from({ length: 14 }, (_, index) =>
+    previewBug(
+      9400 + index,
+      9001 + (index % 3),
+      `示例项目 ${(index % 3) + 1}`,
+      `示例：第 ${index + 1} 条待处理 Bug`,
+      {
+        status: index % 3 === 1 ? 2 : 1,
+        priority: (index % 3) + 1,
+        severity: (index % 4) + 1,
+        updatedAt: new Date(Date.now() - index * 40 * 60_000).toISOString(),
+      },
+    ),
+  ),
+  total: 14,
   capped: false,
 };
 
@@ -724,6 +807,7 @@ async function mountJarvisSearch(
   editor.textContent = initialText;
   const menu = nativeAtMenu();
   card.append(menu);
+  pinAtMenu(card, menu);
   const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
   previewWindow.__jarvisPreviewSearchCalls = 0;
   const control = installRendererJarvisMention(document, {
@@ -767,7 +851,7 @@ async function mountJarvisSearch(
     await delay(80);
     return;
   }
-  row.click();
+  await previewClick(row);
   const mode = await waitFor(() =>
     document.querySelector<HTMLElement>("[data-codexhost-jarvis-mode]"),
   );
@@ -786,8 +870,7 @@ async function mountJarvisSearch(
     await delay(120);
     return;
   }
-  input.value = query;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await previewType(input, query);
   if (preview.pending) {
     await waitFor(() => mode.getAttribute("aria-busy") === "true");
   } else {
@@ -950,7 +1033,7 @@ const scenarios: Record<string, () => Promise<void>> = {
         (item) => item.textContent?.includes("林晓") && !item.textContent?.includes("群"),
       ),
     );
-    row.click();
+    await previewClick(row);
     await waitFor(() => query(".dingtalk-main-title")?.textContent === "林晓");
     await waitFor(() => query(".dingtalk-message"));
   },
@@ -973,8 +1056,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     await openFirstConversation(query);
     const input = query<HTMLInputElement>(".dingtalk-search-input");
     if (!input) throw new Error("Search input is missing");
-    input.value = "示例Sprint";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await previewType(input, "示例Sprint");
     await waitFor(() => query(".dingtalk-search-result"));
     await delay(260);
   },
@@ -985,14 +1067,13 @@ const scenarios: Record<string, () => Promise<void>> = {
     await openFirstConversation(query);
     const input = query<HTMLInputElement>(".dingtalk-search-input");
     if (!input) throw new Error("Search input is missing");
-    input.value = "示例Sprint";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await previewType(input, "示例Sprint");
     const more = await waitFor(() =>
       query<HTMLButtonElement>(".dingtalk-search-result--conversation")
         ? query<HTMLButtonElement>(".dingtalk-search-more")
         : null,
     );
-    more.click();
+    await previewClick(more);
     await waitFor(() => queryAll(".dingtalk-search-result--conversation").length >= 4);
     await delay(120);
   },
@@ -1030,7 +1111,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const card = await waitFor(() =>
       query<HTMLElement>(".agent-card:not(.agent-card--skeleton):not(.agent-card--new)"),
     );
-    card.click();
+    await previewClick(card);
     await waitFor(() => query(".agent-editor:not([hidden])"));
   },
 
@@ -1039,7 +1120,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".agent-card-tag--dispatch"));
     const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
     const button = await waitFor(() => card.querySelector<HTMLButtonElement>(".agent-card-menu"));
-    button.click();
+    await previewClick(button);
     await waitFor(() => query(".agent-menu"));
     await delay(120);
   },
@@ -1049,14 +1130,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".agent-card-tag--dispatch"));
     const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
     const button = await waitFor(() => card.querySelector<HTMLButtonElement>(".agent-card-menu"));
-    button.click();
+    await previewClick(button);
     const menu = await waitFor(() => query(".agent-menu"));
     const remove = await waitFor(() =>
       [...menu.querySelectorAll<HTMLButtonElement>(".agent-menu-item")].find(
         (item) => item.textContent === "删除",
       ),
     );
-    remove.click();
+    await previewClick(remove);
     await waitFor(() => query<HTMLDialogElement>(".agent-confirm[open]"));
     await delay(120);
   },
@@ -1064,7 +1145,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "agents-edit-dingtalk-on"() {
     const { query } = mountSettings("codex-agents");
     const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
-    card.click();
+    await previewClick(card);
     await waitFor(() => query(".agent-editor:not([hidden])"));
     await waitFor(() => query<HTMLInputElement>(".agent-dingtalk-switch input")?.checked === true);
     await waitFor(() => query('.agent-dingtalk-body[data-disabled="false"]'));
@@ -1080,7 +1161,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const card = await waitFor(() =>
       query<HTMLElement>('.agent-card[data-agent-name="researcher"]'),
     );
-    card.click();
+    await previewClick(card);
     await waitFor(() => query(".agent-editor:not([hidden])"));
     await waitFor(() => query<HTMLInputElement>(".agent-dingtalk-switch input")?.checked === false);
     await waitFor(() => query('.agent-dingtalk-body[data-disabled="true"]'));
@@ -1095,7 +1176,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("codex-agents");
     await waitFor(() => query(".agent-card-tag--dispatch"));
     const card = await waitFor(() => query<HTMLElement>(".agent-card--new"));
-    card.click();
+    await previewClick(card);
     await waitFor(() => query(".agent-editor:not([hidden])"));
     const description = query<HTMLTextAreaElement>(".agent-editor textarea");
     const instructions = query<HTMLTextAreaElement>(".agent-instructions");
@@ -1161,7 +1242,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const row = await waitFor(() =>
       document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
     );
-    row.click();
+    await previewClick(row);
     await waitFor(() => row.getAttribute("aria-busy") === "true");
     await delay(120);
   },
@@ -1171,7 +1252,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const row = await waitFor(() =>
       document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
     );
-    row.click();
+    await previewClick(row);
     await waitFor(() =>
       document
         .querySelector("[data-codexhost-add-machine-menu]")
@@ -1273,6 +1354,65 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(8_200);
   },
 
+  async "jarvis-mode-single"() {
+    await mountJarvisSearch({ result: jarvisPreviewSingleBug, delayMs: 80 }, "我还没处理完的bug");
+  },
+
+  async "jarvis-mode-many"() {
+    await mountJarvisSearch({ result: jarvisPreviewMany, delayMs: 80 }, "我还没处理完的bug");
+  },
+
+  async "harness-picker"() {
+    const stage = mountStage(`
+      <main class="preview-canvas preview-canvas--composer">
+        <div class="preview-composer-card" data-composer-body>
+          <div class="preview-composer-editor" contenteditable="true">hello</div>
+          <div class="preview-agent-toolbar"></div>
+        </div>
+      </main>`);
+    const toolbar = stage.querySelector<HTMLElement>(".preview-agent-toolbar");
+    const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
+    if (!toolbar || !editor) throw new Error("Composer preview is missing");
+    const state = { agent: "codex" as string, phase: "draft" as const };
+    const picker = mountRendererAgentPicker(
+      "preview-harness-picker",
+      ["codex", "claude-code", "grok"],
+      (agent) => {
+        document.body.dataset.selectedAgent = agent;
+        state.agent = agent;
+        renderRendererAgentPicker(picker, state, "ready", false, {
+          "claude-code": "ready",
+          grok: "ready",
+        });
+      },
+      () => {},
+    );
+    toolbar.append(picker.root);
+    renderRendererAgentPicker(picker, state, "ready", false, {
+      "claude-code": "ready",
+      grok: "ready",
+    });
+    editor.focus();
+    await previewClick(picker.trigger);
+    const menu = await waitFor(() => document.getElementById("preview-harness-picker-agent-menu"));
+    // Desktop rebuilds the Composer chrome when a press escapes the menu. The
+    // picker rows must keep the press inside the menu for the click to land.
+    document.addEventListener("pointerdown", (event) => {
+      if (event.defaultPrevented) return;
+      if (!event.composedPath().includes(menu)) return;
+      document.body.dataset.toolbarTornDown = "true";
+      picker.root.remove();
+    });
+    const target = menu.querySelector<HTMLElement>('button[data-agent="claude-code"]');
+    if (!target) throw new Error("Agent menu row is missing");
+    await previewClick(target);
+    await waitFor(() => document.body.dataset.selectedAgent === "claude-code");
+    // Reopen so the capture shows the menu that the press just kept alive.
+    await previewClick(picker.trigger);
+    await waitFor(() => menu.matches(":popover-open"));
+    document.body.dataset.harnessPicker = String(Boolean(menu.isConnected));
+  },
+
   async "jarvis-mode-conditions"() {
     await mountJarvisSearch(
       { result: jarvisPreviewConditions, delayMs: 80 },
@@ -1291,7 +1431,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     );
     const chip = document.querySelector<HTMLElement>('[data-jarvis-chip="status:1"]');
     if (!chip) throw new Error("Status chip is missing");
-    chip.click();
+    await previewClick(chip);
     await waitFor(() => document.querySelector('[data-jarvis-chip="status:1"]') === null, 4_000);
     await delay(120);
   },

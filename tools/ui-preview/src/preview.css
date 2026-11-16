@@ -276,3 +276,9 @@ html[data-theme="dark"] .preview-projects {
   background: #1f1f1f;
   border-right-color: rgb(255 255 255 / 10%);
 }
+
+.preview-agent-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
