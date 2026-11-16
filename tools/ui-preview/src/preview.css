@@ -166,71 +166,25 @@ body {
 .preview-at-menu {
   display: flex;
   width: 320px;
-  max-height: 460px;
+  max-height: 340px;
   flex-direction: column;
-  overflow-y: auto;
-  padding: 6px;
+  overflow: hidden;
   background: var(--color-token-dropdown-background, #fff);
   border: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
   border-radius: var(--menu-radius, 12px);
   box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
 }
 
-.preview-native-row {
-  display: flex;
-  height: 36px;
-  align-items: center;
-  padding: 0 8px;
-  color: var(--color-token-text-primary, #0d0d0d);
-  font-size: var(--font-text-sm-size, 14px);
-  border-radius: 8px;
-}
-
-.preview-native-header {
-  padding: 6px 8px 4px;
-  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
-  font-size: var(--font-text-sm-size, 14px);
-  line-height: 20px;
-}
-
-.preview-at-menu {
+/* The native scroller is the single owner of every section, including ours. */
+.preview-at-menu > [data-mention-list-scroll-area] {
   max-height: 340px;
 }
 
-.preview-native-scroll {
-  display: flex;
-  max-height: 300px;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.preview-native-row[aria-selected="true"],
-.preview-native-row:hover {
-  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
-}
-
-/* Desktop's document utilities are not loaded here; approximate the native row. */
-.preview-at-menu [data-codexhost-dingtalk-section] {
+/* Fallback only; the exported Desktop stylesheet supplies the real row look. */
+.preview-at-menu [data-codexhost-workbench-section] {
   display: flex;
   width: 100%;
   flex-direction: column;
-}
-
-.preview-at-menu [data-codexhost-dingtalk-entry] {
-  display: flex;
-  height: 36px;
-  align-items: center;
-  padding: 0 8px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.preview-at-menu [data-codexhost-dingtalk-entry] > div {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
 }
 
 /*

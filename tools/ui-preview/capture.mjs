@@ -496,11 +496,10 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "at-entry") {
         const row = query("[data-codexhost-dingtalk-entry]");
+        const section = query("[data-codexhost-workbench-section]");
+        const scroller = query("[data-mention-list-scroll-area]");
         check("single-dingtalk-row", Boolean(row));
-        check(
-          "entry-workbench-group",
-          Boolean(query("[data-codexhost-dingtalk-section]")?.textContent?.includes("工作台")),
-        );
+        check("entry-workbench-group", Boolean(section?.textContent?.includes("工作台")));
         check(
           "entry-helper-text",
           Boolean(row?.textContent.includes("打开钉钉工作台")),
@@ -510,14 +509,58 @@ for (const scenario of scenarios) {
         check("single-jarvis-row", Boolean(jarvis));
         check(
           "shared-workbench-group",
-          Boolean(jarvis) && query("[data-codexhost-dingtalk-section]")?.contains(jarvis) === true,
+          Boolean(jarvis) && section?.contains(jarvis) === true,
           jarvis?.textContent ?? "",
+        );
+        check(
+          "workbench-section-in-native-scroller",
+          Boolean(section && scroller && section.parentElement === scroller),
+        );
+        check("workbench-section-last", Boolean(scroller?.lastElementChild === section));
+        check(
+          "workbench-single-header",
+          Boolean(
+            section &&
+            [...section.children].filter((child) => child.textContent?.trim() === "工作台")
+              .length === 1,
+          ),
+        );
+        check(
+          "no-entry-overlay",
+          !query("[data-codexhost-dingtalk-panel]") && !query("[data-codexhost-jarvis-panel]"),
+        );
+        check(
+          "workbench-rows-native",
+          queryAll("[data-codexhost-workbench-row]").every(
+            (item) =>
+              item.tagName === "BUTTON" &&
+              item.getAttribute("data-list-navigation-item") === "true" &&
+              Boolean(item.querySelector("[data-menu-row-content]")),
+          ),
         );
       }
       if (document.body.dataset.scenario === "jarvis-entry") {
         const row = query("[data-codexhost-jarvis-entry-row]");
+        const section = query("[data-codexhost-workbench-section]");
+        const scroller = query("[data-mention-list-scroll-area]");
         check("jarvis-row", Boolean(row));
         check("no-mode-before-selection", !query("[data-codexhost-jarvis-mode]"));
+        check(
+          "jarvis-row-in-native-scroller",
+          Boolean(section && scroller && section.parentElement === scroller),
+        );
+        check(
+          "single-workbench-header",
+          Boolean(
+            section &&
+            [...section.children].filter((child) => child.textContent?.trim() === "工作台")
+              .length === 1,
+          ),
+        );
+        check(
+          "no-entry-overlay",
+          !query("[data-codexhost-dingtalk-panel]") && !query("[data-codexhost-jarvis-panel]"),
+        );
         check(
           "no-search-before-selection",
           (window.__jarvisPreviewSearchCalls ?? 0) === 0,
@@ -537,9 +580,11 @@ for (const scenario of scenarios) {
         document.body.dataset.scenario === "jarvis-mode-chip-removed"
       ) {
         const mode = query("[data-codexhost-jarvis-mode]");
+        const scroller = query("[data-mention-list-scroll-area]");
+        check("mode-inside-native-list", Boolean(mode) && Boolean(scroller?.contains(mode)));
         check(
-          "mode-inside-native-list",
-          Boolean(mode) && Boolean(query(".preview-at-menu")?.contains(mode)),
+          "mode-no-overlay",
+          !query("[data-codexhost-dingtalk-panel]") && !query("[data-codexhost-jarvis-panel]"),
         );
         check("mode-header", Boolean(mode?.textContent?.includes("Jarvis · Bug")));
         const input = mode?.querySelector("input");
@@ -554,9 +599,11 @@ for (const scenario of scenarios) {
         check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
         check(
           "native-rows-hidden",
-          [...document.querySelectorAll(".preview-native-row")].every(
-            (row) => getComputedStyle(row).display === "none",
-          ),
+          [
+            ...document.querySelectorAll(
+              "[data-mention-list-scroll-area] > [data-mention-section-id]",
+            ),
+          ].every((section) => getComputedStyle(section).display === "none"),
         );
       }
       if (document.body.dataset.scenario === "jarvis-mode-results") {
@@ -594,11 +641,21 @@ for (const scenario of scenarios) {
         check("single-dingtalk-row", document.body.dataset.entryRow === "true");
         check("entry-workbench-group", document.body.dataset.entryGroupTitle === "true");
         check("entry-helper-text", document.body.dataset.entryHelper === "true");
+        check("entry-shared-section", document.body.dataset.entrySharedSection === "true");
+        check(
+          "single-workbench-header",
+          document.body.dataset.entryHeaderCount === "1",
+          document.body.dataset.entryHeaderCount ?? "",
+        );
+        check("no-entry-overlay", document.body.dataset.entryOverlay === "false");
+        check("native-rows-are-buttons", document.body.dataset.entryNativeButtons === "true");
         if (document.body.dataset.scenario === "at-entry-native") {
           check("entry-opened-by-keyboard", document.body.dataset.entryOpened === "true");
+          check("keyboard-handoff", document.body.dataset.entryKeyboardHandoff === "true");
+          check("workbench-row-walk", document.body.dataset.entryWorkbenchWalk === "true");
         } else {
-          const nativeList = document.querySelector("#native-at-menu .vertical-scroll-fade-mask");
-          const section = nativeList?.querySelector("[data-codexhost-dingtalk-section]");
+          const nativeList = document.querySelector("[data-mention-list-scroll-area]");
+          const section = nativeList?.querySelector("[data-codexhost-workbench-section]");
           check("entry-still-mounted", Boolean(section && section.parentElement === nativeList));
         }
       }

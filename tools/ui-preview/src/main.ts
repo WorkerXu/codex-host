@@ -1,12 +1,13 @@
 import previewCss from "./preview.css";
 import {
-  createDingTalkEntrySection,
+  createDingTalkEntryRow,
   installRendererDingTalkEntry,
 } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
 import {
   createJarvisEntryRow,
   installRendererJarvisMention,
 } from "../../../packages/renderer-extension/src/renderer-jarvis-mention.js";
+import { createWorkbenchSection } from "../../../packages/renderer-extension/src/renderer-native-at-menu.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
@@ -177,25 +178,95 @@ async function loadDesktopCss(): Promise<void> {
   await loaded;
 }
 
+/**
+ * Mirror of the real `@` menu DOM captured on 2026-11-16: no listbox/option
+ * roles, `data-mention-*` structure and the native row classes.
+ */
+const NATIVE_HEADER_CLASS =
+  "text-codex-description shrink-0 h-[var(--suggestion-menu-header-height,auto)] px-row-x py-1 " +
+  "text-sm sticky top-0 z-10 " +
+  "bg-[var(--suggestion-menu-header-background,var(--color-surface-elevated-secondary))]";
+const NATIVE_ROW_CLASS =
+  "text-default outline-hidden focus:bg-secondary-ghost-hover cursor-interaction flex w-full " +
+  "shrink-0 items-center overflow-hidden text-start min-h-[var(--app-menu-item-height,0px)] " +
+  "rounded-[var(--suggestion-menu-item-radius,var(--radius-xl))] " +
+  "p-[var(--suggestion-menu-item-padding,var(--app-menu-item-padding,var(--padding-row-y)_var(--padding-row-x)))] " +
+  "text-sm [content-visibility:auto] [contain-intrinsic-block-size:auto_1lh]";
+const NATIVE_ROW_CONTENT_CLASS =
+  "flex w-full min-w-0 items-center gap-[var(--spacing-menu-item-content,calc(var(--spacing)*1.5))]";
+const NATIVE_ROW_ACTIVE = "bg-secondary-ghost-hover opacity-100";
+const NATIVE_ROW_IDLE = "menu-row-opacity";
+
+function nativeRow(
+  label: string,
+  options: { active?: boolean; description?: string } = {},
+): HTMLButtonElement {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.setAttribute("data-list-navigation-item", "true");
+  row.className = `${NATIVE_ROW_CLASS} ${options.active ? NATIVE_ROW_ACTIVE : NATIVE_ROW_IDLE}`;
+  if (options.active) row.setAttribute("aria-current", "true");
+  const content = document.createElement("div");
+  content.setAttribute("data-menu-row-content", "true");
+  content.className = NATIVE_ROW_CONTENT_CLASS;
+  const labelSpan = document.createElement("span");
+  labelSpan.className = "min-w-0 truncate";
+  labelSpan.textContent = label;
+  content.append(labelSpan);
+  if (options.description) {
+    const description = document.createElement("span");
+    description.className = "min-w-0 flex-1 truncate text-sm text-codex-description";
+    description.textContent = options.description;
+    content.append(description);
+  }
+  row.append(content);
+  return row;
+}
+
+function nativeSection(id: string, title: string, rows: HTMLElement[], first = false): HTMLElement {
+  const section = document.createElement("div");
+  section.setAttribute("data-mention-section-id", id);
+  const header = document.createElement("div");
+  header.className = first ? NATIVE_HEADER_CLASS : `${NATIVE_HEADER_CLASS} pt-2`;
+  header.textContent = title;
+  const items = document.createElement("div");
+  items.setAttribute("data-mention-section-items", "true");
+  items.append(...rows);
+  section.append(header, items);
+  return section;
+}
+
+/** Panel + the single native scroll container that owns every section. */
+function nativeAtMenu(): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "preview-at-menu suggestionMenu-Preview";
+  const scroll = document.createElement("div");
+  scroll.className = "vertical-scroll-fade-mask flex w-full flex-1 flex-col overflow-y-auto";
+  scroll.setAttribute("data-mention-list-scroll-area", "");
+  scroll.append(
+    nativeSection("context-actions", "添加", [nativeRow("文件和文件夹"), nativeRow("图片")], true),
+    nativeSection("agents", "智能体", [
+      nativeRow("Codex", { description: "默认编码智能体", active: true }),
+    ]),
+  );
+  panel.append(scroll);
+  return panel;
+}
+
 async function mountNativeAtMenu(open: boolean): Promise<void> {
   await loadDesktopCss();
   const stage = mountStage(`
     <main class="preview-canvas preview-canvas--composer">
       <div class="preview-composer-card">
-        <div class="preview-composer-input" id="native-editor" contenteditable="true">@钉</div>
-      </div>
-      <div class="preview-at-menu" id="native-at-menu" role="listbox" aria-label="提及">
-        <div class="preview-native-scroll vertical-scroll-fade-mask">
-          <div class="preview-native-header">文件</div>
-          <div class="preview-native-row" role="option" aria-selected="false">图片</div>
-          <div class="preview-native-header">智能体</div>
-          <div class="preview-native-row" role="option" aria-selected="true">Codex</div>
-        </div>
+        <div class="preview-composer-input" id="native-editor" contenteditable="true">@</div>
       </div>
     </main>`);
   const editor = stage.querySelector<HTMLElement>("#native-editor");
-  const menu = stage.querySelector<HTMLElement>("#native-at-menu");
-  if (!editor || !menu) throw new Error("Native composer or menu is missing");
+  if (!editor) throw new Error("Native composer is missing");
+  const menu = nativeAtMenu();
+  stage.querySelector(".preview-composer-card")?.append(menu);
+  const scroll = menu.querySelector<HTMLElement>("[data-mention-list-scroll-area]");
+  if (!scroll) throw new Error("Native scroll area is missing");
   const text = editor.firstChild;
   if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
   editor.focus();
@@ -214,25 +285,79 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
       return true;
     },
   });
+  installRendererJarvisMention(document, {
+    isComposerEditor: (element) => element === editor,
+    readHostId: () => "local",
+    readLocale: () => locale,
+    anchorForEditor: () => menu,
+    search: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    }),
+  });
+  document.dispatchEvent(new Event("selectionchange"));
   editor.dispatchEvent(new Event("input", { bubbles: true }));
-  const section = await waitFor(() => menu.querySelector("[data-codexhost-dingtalk-section]"));
-  const scroller = menu.querySelector(".vertical-scroll-fade-mask");
-  const entryRow = section.querySelector("[data-codexhost-dingtalk-entry]");
-  document.body.dataset.entryNativeScroller = String(
-    Boolean(scroller && section.parentElement === scroller),
-  );
-  document.body.dataset.entryLastGroup = String(scroller?.lastElementChild === section);
-  document.body.dataset.entryRow = String(Boolean(entryRow));
+  const section = await waitFor(() => scroll.querySelector("[data-codexhost-workbench-section]"));
+  section.scrollIntoView({ block: "nearest" });
+  const dingtalkRow = section.querySelector<HTMLElement>("[data-codexhost-dingtalk-entry]");
+  const jarvisRow = section.querySelector<HTMLElement>("[data-codexhost-jarvis-entry-row]");
+  document.body.dataset.entryNativeScroller = String(section.parentElement === scroll);
+  document.body.dataset.entryLastGroup = String(scroll.lastElementChild === section);
+  document.body.dataset.entryRow = String(Boolean(dingtalkRow));
   document.body.dataset.entryGroupTitle = String(section.textContent?.includes("工作台") ?? false);
   document.body.dataset.entryHelper = String(
-    entryRow?.textContent?.includes("打开钉钉工作台") ?? false,
+    dingtalkRow?.textContent?.includes("打开钉钉工作台") ?? false,
+  );
+  document.body.dataset.entrySharedSection = String(
+    Boolean(
+      jarvisRow &&
+      jarvisRow.parentElement === dingtalkRow?.parentElement &&
+      section.children.length === 2,
+    ),
+  );
+  document.body.dataset.entryHeaderCount = String(
+    [...section.children].filter((child) => child.textContent?.trim() === "工作台").length,
+  );
+  document.body.dataset.entryOverlay = String(
+    Boolean(
+      document.querySelector("[data-codexhost-dingtalk-panel],[data-codexhost-jarvis-panel]"),
+    ),
+  );
+  document.body.dataset.entryNativeButtons = String(
+    [...scroll.querySelectorAll('[data-list-navigation-item="true"]')]
+      .filter((row) => !row.closest("[data-codexhost-workbench-section]"))
+      .every((row) => row.tagName === "BUTTON"),
   );
   if (!open) {
     await delay(80);
     return;
   }
+  const nativeRows = [
+    ...scroll.querySelectorAll<HTMLElement>('[data-list-navigation-item="true"]'),
+  ].filter((row) => !row.closest("[data-codexhost-workbench-section]"));
+  const lastNative = nativeRows.at(-1);
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  document.body.dataset.entryKeyboardHandoff = String(
+    dingtalkRow?.getAttribute("aria-current") === "true" &&
+      lastNative?.getAttribute("aria-current") !== "true",
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  const walkedToJarvis = jarvisRow?.getAttribute("aria-current") === "true";
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+  );
+  document.body.dataset.entryWorkbenchWalk = String(
+    walkedToJarvis &&
+      dingtalkRow?.getAttribute("aria-current") === "true" &&
+      jarvisRow?.getAttribute("aria-current") !== "true",
   );
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -344,17 +469,13 @@ async function mountJarvisSearch(
     <main class="preview-canvas preview-canvas--composer">
       <div class="preview-composer-card" data-composer-body>
         <div class="preview-composer-editor" contenteditable="true">@</div>
-        <div class="preview-at-menu vertical-scroll-fade-mask" role="listbox" aria-label="提及">
-          <div class="preview-native-header">文件</div>
-          <div class="preview-native-row">图片</div>
-          <div class="preview-native-header">智能体</div>
-          <div class="preview-native-row">Codex</div>
-        </div>
       </div>
     </main>`);
   const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
   const card = stage.querySelector<HTMLElement>("[data-composer-body]");
   if (!editor || !card) throw new Error("Composer preview is missing");
+  const menu = nativeAtMenu();
+  card.append(menu);
   const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
   previewWindow.__jarvisPreviewSearchCalls = 0;
   const control = installRendererJarvisMention(document, {
@@ -633,21 +754,18 @@ const scenarios: Record<string, () => Promise<void>> = {
       <main class="preview-canvas preview-canvas--composer">
         <div class="preview-composer-card">
           <div class="preview-composer-input">帮我把今天的发布进展整理一下…</div>
-          <div class="preview-at-menu" role="listbox" aria-label="提及">
-            <div class="preview-native-scroll vertical-scroll-fade-mask">
-              <div class="preview-native-header">文件</div>
-              <div class="preview-native-row">图片</div>
-              <div class="preview-native-header">智能体</div>
-              <div class="preview-native-row">Codex</div>
-            </div>
-          </div>
         </div>
       </main>`);
-    const menu = stage.querySelector(".preview-native-scroll");
-    if (!menu) throw new Error("At menu is missing");
-    const workbench = createDingTalkEntrySection(document, locale).element;
-    workbench.append(createJarvisEntryRow(document, locale));
-    menu.append(workbench);
+    const menu = nativeAtMenu();
+    stage.querySelector(".preview-composer-card")?.append(menu);
+    const scroll = menu.querySelector<HTMLElement>("[data-mention-list-scroll-area]");
+    if (!scroll) throw new Error("Native scroll area is missing");
+    const workbench = createWorkbenchSection(document, locale);
+    workbench.items.append(
+      createDingTalkEntryRow(document, locale),
+      createJarvisEntryRow(document, locale),
+    );
+    scroll.append(workbench.element);
     await delay(80);
   },
 
