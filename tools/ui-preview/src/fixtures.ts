@@ -5,7 +5,6 @@ import type {
   DingTalkConversation,
   DingTalkDispatchSettings,
   DingTalkMessage,
-  DingTalkSettings,
 } from "@codexhost/shared-contracts";
 
 import type {
@@ -319,16 +318,6 @@ export function messagesFor(conversationId: string): DingTalkMessage[] {
   messageCache.set(conversationId, sorted);
   return sorted;
 }
-
-export const dingTalkSettings: DingTalkSettings = {
-  defaultHost: null,
-  effectiveHost: "本机",
-  effectiveHostId: null,
-  hosts: [
-    { name: "本机", hostId: null, local: true },
-    { name: "tencent", hostId: "host-tencent", local: false },
-  ],
-};
 
 export const agents: CodexAgentRecord[] = [
   {

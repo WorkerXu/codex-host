@@ -10,7 +10,6 @@ import type {
   DingTalkResourceResult,
   DingTalkSearchResult,
   DingTalkSendResult,
-  DingTalkSettings,
   DingTalkStatus,
   DingTalkDispatchSettings,
 } from "@codexhost/shared-contracts";
@@ -22,7 +21,6 @@ import {
   agentSummaries,
   agents,
   conversations,
-  dingTalkSettings,
   dispatchSettings,
   messagesFor,
   previewImageDataUrl,
@@ -30,10 +28,13 @@ import {
   remoteSearchPeople,
 } from "./fixtures.js";
 
+export type FakeDingTalkStatus = "connected" | "not-logged-in" | "unreachable";
+
 export interface FakeDingTalkOptions {
   empty?: boolean;
   error?: boolean;
   messageDelayMs?: number;
+  status?: FakeDingTalkStatus;
 }
 
 const sleep = (milliseconds: number) =>
@@ -45,7 +46,7 @@ export function createFakeDingTalkClient(
   options: FakeDingTalkOptions = {},
 ): RendererDingTalkClient {
   const messageDelay = options.messageDelayMs ?? 120;
-  let currentSettings = { ...dingTalkSettings };
+  const statusState = options.status ?? "connected";
   const listeners = new Set<(conversationId: string | null) => void>();
 
   const conversationsResult = (view: "unread" | "recent"): DingTalkConversationsResult => {
@@ -70,23 +71,40 @@ export function createFakeDingTalkClient(
   return {
     available: () => true,
     async status(): Promise<DingTalkStatus> {
+      if (statusState === "not-logged-in") {
+        return {
+          installed: true,
+          authenticated: false,
+          userName: null,
+          userId: null,
+          corpName: null,
+          defaultHost: "tencent",
+          defaultHostId: "host-tencent",
+          errorCode: "not_logged_in",
+        };
+      }
+      if (statusState === "unreachable") {
+        return {
+          installed: true,
+          authenticated: false,
+          userName: null,
+          userId: null,
+          corpName: null,
+          defaultHost: "tencent",
+          defaultHostId: "host-tencent",
+          errorCode: "peer_unavailable",
+        };
+      }
       return {
         installed: true,
         authenticated: true,
-        userName: "预览用户",
+        userName: "示例用户",
         userId: "user-preview",
-        corpName: "示例公司",
-        defaultHost: currentSettings.effectiveHost,
-        defaultHostId: currentSettings.effectiveHostId,
+        corpName: "示例科技有限公司",
+        defaultHost: "tencent",
+        defaultHostId: "host-tencent",
         errorCode: null,
       };
-    },
-    async settings(): Promise<DingTalkSettings> {
-      return { ...currentSettings, hosts: currentSettings.hosts.map((host) => ({ ...host })) };
-    },
-    async updateSettings(params) {
-      currentSettings = { ...currentSettings, defaultHost: params.defaultHost };
-      return currentSettings;
     },
     async conversations(params = {}): Promise<DingTalkConversationsResult> {
       await sleep(40);

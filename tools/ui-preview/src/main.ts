@@ -9,7 +9,11 @@ import { createDingTalkSettingsPage } from "../../../packages/renderer-extension
 import { rendererSettingsMessages } from "../../../packages/renderer-extension/src/settings/localization.js";
 import { installRendererSettingsShell } from "../../../packages/renderer-extension/src/settings/shell.js";
 
-import { createFakeCodexAgentsClient, createFakeDingTalkClient } from "./fake-clients.js";
+import {
+  createFakeCodexAgentsClient,
+  createFakeDingTalkClient,
+  type FakeDingTalkStatus,
+} from "./fake-clients.js";
 import type {
   ProjectGroupAddMachineResult,
   ProjectGroupAddMachineTarget,
@@ -50,10 +54,12 @@ function mountSettings(
   pageId: "dingtalk" | "codex-agents",
   dingtalkEmpty = false,
   dingtalkError = false,
+  dingtalkStatus: FakeDingTalkStatus = "connected",
 ) {
   const dingtalkClient = createFakeDingTalkClient({
     empty: dingtalkEmpty,
     error: dingtalkError,
+    status: dingtalkStatus,
     messageDelayMs: scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
   });
   const agentsClient = createFakeCodexAgentsClient();
@@ -74,6 +80,14 @@ function mountSettings(
     ...shadow.querySelectorAll<T>(selector),
   ];
   return { shell, query, queryAll };
+}
+
+async function openPageMenu(query: <T extends Element>(selector: string) => T | null) {
+  const button = await waitFor(() =>
+    query<HTMLButtonElement>(".dingtalk-sidebar .dingtalk-more-button"),
+  );
+  button.click();
+  await waitFor(() => query(".dingtalk-page-menu:not([hidden])"));
 }
 
 async function openFirstConversation(query: <T extends Element>(selector: string) => T | null) {
@@ -206,6 +220,25 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-status-connected"() {
+    const { query } = mountSettings("dingtalk", false, false, "connected");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await waitFor(() => query(".dingtalk-menu-status-text")?.textContent?.includes("示例用户"));
+    await openPageMenu(query);
+  },
+
+  async "dingtalk-status-not-logged-in"() {
+    const { query } = mountSettings("dingtalk", false, false, "not-logged-in");
+    await waitFor(() => query(".dingtalk-menu-status-text")?.textContent === "钉钉未登录");
+    await openPageMenu(query);
+  },
+
+  async "dingtalk-status-unreachable"() {
+    const { query } = mountSettings("dingtalk", false, false, "unreachable");
+    await waitFor(() => query(".dingtalk-menu-status-text")?.textContent === "无法连接钉钉服务");
+    await openPageMenu(query);
   },
 
   async "dingtalk-open"() {

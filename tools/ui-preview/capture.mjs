@@ -15,6 +15,9 @@ const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "dingtalk-list",
+  "dingtalk-status-connected",
+  "dingtalk-status-not-logged-in",
+  "dingtalk-status-unreachable",
   "dingtalk-open",
   "dingtalk-direct",
   "dingtalk-scrolled-top",
@@ -174,6 +177,27 @@ for (const scenario of scenarios) {
         );
         check("default-conversation-open", queryAll(".dingtalk-message").length > 0);
         check("list-switch", queryAll(".dingtalk-list-switch-button").length === 2);
+      }
+      if (document.body.dataset.scenario.startsWith("dingtalk-status-")) {
+        const text = query(".dingtalk-menu-status-text")?.textContent ?? "";
+        const retry = query(".dingtalk-menu-retry");
+        check("status-menu-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
+        check("status-no-host-select", !query(".dingtalk-host-select"));
+        check("status-no-login-label", !query(".dingtalk-menu-label"));
+        if (document.body.dataset.scenario === "dingtalk-status-connected") {
+          check(
+            "status-connected",
+            text.includes("已连接") && text.includes("示例用户") && text.includes("示例科技"),
+            text,
+          );
+          check("status-retry-hidden", Boolean(retry?.hidden));
+        } else if (document.body.dataset.scenario === "dingtalk-status-not-logged-in") {
+          check("status-not-logged-in", text === "钉钉未登录", text);
+          check("status-retry-visible", Boolean(retry) && !retry.hidden);
+        } else {
+          check("status-unreachable", text === "无法连接钉钉服务", text);
+          check("status-retry-visible", Boolean(retry) && !retry.hidden);
+        }
       }
       if (document.body.dataset.scenario === "dingtalk-list") {
         check("internal-group-tag", queryAll(".dingtalk-conversation-tag").length > 0);
