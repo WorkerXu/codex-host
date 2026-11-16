@@ -85,14 +85,62 @@ export function projectHostKey(entry: ProjectIndexEntry): string {
     : (entry.hostId ?? `host-label:${entry.hostLabel ?? entry.projectId}`);
 }
 
-export function projectGroupMachineSummary(machines: readonly ProjectGroupMachineView[]): {
+export function projectGroupMachineSummary(
+  machines: readonly ProjectGroupMachineView[],
+  visibleMachines: readonly ProjectGroupMachineView[] = machines,
+): {
   text: string;
   title: string;
 } {
   const title = machines.map((machine) => machine.label).join(" · ");
-  if (machines.length === 0) return { text: "", title };
+  if (machines.length === 0 || visibleMachines.length === 0) return { text: "", title };
   if (machines.length === 1) return { text: machines[0]?.label ?? "", title };
-  return { text: `${machines.length} 台`, title };
+  return { text: `${visibleMachines.length} 台`, title };
+}
+
+function groupProjectId(project: ProjectGroupProjectView): string {
+  return project.project.entry?.projectId ?? project.project.member.projectId;
+}
+
+export interface ProjectGroupEmptyVisibility {
+  visibleMachines: ProjectGroupMachineView[];
+  hiddenProjectIds: Set<string>;
+}
+
+/**
+ * Empty machines stay mounted but are hidden. If every machine is empty, keep
+ * the first mounted machine so the group never collapses to a bare header.
+ */
+export function projectGroupEmptyVisibility(
+  view: ProjectGroupView,
+  emptyProjectIds: ReadonlySet<string>,
+): ProjectGroupEmptyVisibility {
+  const mountedMachines = view.machines.filter((machine) =>
+    machine.projects.some((project) => project.mounted),
+  );
+  const firstMounted = mountedMachines[0] ?? null;
+  const allEmpty =
+    mountedMachines.length > 0 &&
+    mountedMachines.every((machine) =>
+      machine.projects
+        .filter((project) => project.mounted)
+        .every((project) => emptyProjectIds.has(groupProjectId(project))),
+    );
+  const hiddenProjectIds = new Set<string>();
+  for (const machine of view.machines) {
+    const keepMachine = allEmpty && machine === firstMounted;
+    for (const project of machine.projects) {
+      if (!project.mounted || keepMachine) continue;
+      const projectId = groupProjectId(project);
+      if (emptyProjectIds.has(projectId)) hiddenProjectIds.add(projectId);
+    }
+  }
+  const visibleMachines = view.machines.filter((machine) =>
+    machine.projects.some(
+      (project) => project.mounted && !hiddenProjectIds.has(groupProjectId(project)),
+    ),
+  );
+  return { visibleMachines, hiddenProjectIds };
 }
 
 /** Machine name used by group headers and native-row subtitles. */

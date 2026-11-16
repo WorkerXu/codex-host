@@ -4,7 +4,7 @@ Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，�
 
 ## 入口与页面
 
-- Composer 的原生 `@` 菜单在查询为空或匹配「钉」（`钉钉` / `dingtalk` 前缀）时，把「工作台 / 钉钉」分组追加到原生列表底部；分组与原生行共用同一个滚动容器、分组标题和行结构，上下键与回车跟随原生选择。只有原生菜单不存在时才停靠浮动面板。
+- Composer 的原生 `@` 菜单在查询为空或匹配「钉」（`钉钉` / `dingtalk` 前缀）时，把「钉钉」行追加到与 Jarvis 共用的「工作台」分组：分组位于原生 `[data-mention-list-scroll-area]` 滚动容器内，使用原生 section 结构、header 类名和 `[data-list-navigation-item]` 按钮行，上下键与回车跟随原生 `aria-current` 高亮。原生菜单在 `input` 之后挂载，Renderer 等待约 300 ms 并继续观察 DOM；列表不出现时不绘制任何浮层。
 - 选择该行打开工作台（设置页外壳中的 `dingtalk` 页面），并记住打开它的 Composer。页面关闭后，嵌入操作仍回到这个 Composer。
 - 页面左侧有「未读 / 最近回复」两个独立视图，各自缓存：未读来自 `chat message list-unread-conversations`；最近回复来自我发出的消息，按时间去重取前 10 个会话。右侧显示所选会话的消息、支持多选，底部以当前用户身份发送消息。
 - 钉钉页占用工作台内容区全宽；打开时隐藏设置导航，顶部关闭按钮仍可返回。

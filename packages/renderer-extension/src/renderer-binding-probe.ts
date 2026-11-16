@@ -112,7 +112,10 @@ import {
   installRendererDelegationMention,
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
-import { createRendererJarvisClient } from "./renderer-jarvis-client.js";
+import {
+  createRendererJarvisClient,
+  jarvisSearchShouldFallback,
+} from "./renderer-jarvis-client.js";
 import { createRendererDingTalkClient } from "./renderer-dingtalk-client.js";
 import {
   installRendererDingTalkEntry,
@@ -3645,10 +3648,29 @@ export function installRendererBindingProbe(
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
     },
-    search: (hostId, params) => jarvisClient.searchBugs(hostId, params),
+    search: async (threadHostId, params) => {
+      // The Desktop-local Host owns the Mac's Jarvis login; prefer it even when
+      // the Composer Thread lives on another machine. Fall back only when the
+      // local Host has no usable Jarvis.
+      if (threadHostId !== "local" && jarvisClient.localAvailable()) {
+        const local = await jarvisClient.searchBugs("local", params);
+        if (!jarvisSearchShouldFallback(local)) return local;
+      }
+      return jarvisClient.searchBugs(threadHostId, params);
+    },
     readLocale: () => settingsLifecycle.locale,
     anchorForEditor: (editor) =>
       editor.closest("[data-composer-body]") ?? composerForElement(editor),
+    openSettings: (opener) => {
+      const shell = (
+        window as Window & {
+          __codexhostSettingsShellV1?: {
+            openSettings(opener?: HTMLElement, pageId?: string): boolean;
+          };
+        }
+      ).__codexhostSettingsShellV1;
+      shell?.openSettings(opener, "jarvis");
+    },
   });
   dingtalkMention = installRendererDingTalkEntry(document, {
     isComposerEditor: (editor) => {

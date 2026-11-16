@@ -5,6 +5,7 @@ import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
 import {
   createRendererJarvisClient,
   jarvisCodeFromError,
+  jarvisSearchShouldFallback,
   jarvisErrorText,
 } from "../src/renderer-jarvis-client.js";
 import {
@@ -12,10 +13,12 @@ import {
   jarvisBugLabel,
   jarvisEntryAction,
   jarvisPriorityText,
+  jarvisQueryEntry,
   jarvisRelativeTime,
   jarvisSeverityText,
   jarvisStatusText,
   matchesJarvisEntry,
+  showsJarvisEntry,
   truncateJarvisText,
 } from "../src/renderer-jarvis-mention.js";
 
@@ -41,17 +44,28 @@ describe("Jarvis entry gating", () => {
   it("never searches before the row is selected", () => {
     expect(jarvisEntryAction({ query: "", selectedEntry: false })).toBe("entry");
     expect(jarvisEntryAction({ query: "jarvis", selectedEntry: false })).toBe("entry");
-    expect(jarvisEntryAction({ query: "示例买", selectedEntry: false })).toBe("none");
-    expect(jarvisEntryAction({ query: "示例买", selectedEntry: true })).toBe("none");
+    expect(jarvisEntryAction({ query: "示例买", selectedEntry: false })).toBe("entry");
+    expect(jarvisEntryAction({ query: "示例买", selectedEntry: true })).toBe("search");
     expect(jarvisEntryAction({ query: "", selectedEntry: true })).toBe("search");
+  });
+
+  it("turns a natural-language query into a prefilled Jarvis row", () => {
+    expect(jarvisQueryEntry("")).toBeNull();
+    expect(jarvisQueryEntry("jar")).toBeNull();
+    expect(jarvisQueryEntry("贾")).toBeNull();
+    expect(jarvisQueryEntry("钉")).toBeNull();
+    expect(jarvisQueryEntry("ding")).toBeNull();
+    expect(jarvisQueryEntry("我还没处理完的bug")).toBe("我还没处理完的bug");
+    expect(showsJarvisEntry("我还没处理完的bug")).toBe(true);
+    expect(showsJarvisEntry("钉")).toBe(false);
   });
 });
 
 describe("Jarvis bug presentation", () => {
   const bug = {
-    id: 928,
-    projectId: 4029,
-    title: "填写已查码的序列号给新的查码任务，无法进行下一步",
+    id: 9101,
+    projectId: 9001,
+    title: "示例：列表页加载失败",
     status: 1,
     priority: 1,
     severity: 2,
@@ -64,7 +78,7 @@ describe("Jarvis bug presentation", () => {
   });
 
   it("builds the chip label", () => {
-    expect(jarvisBugLabel(bug)).toBe("Bug #928 填写已查码的序列号给新的查码任务，无法进行下一步");
+    expect(jarvisBugLabel(bug)).toBe("Bug #9101 示例：列表页加载失败");
   });
 
   it("maps status, priority and severity in both locales", () => {
@@ -93,10 +107,10 @@ describe("Renderer Jarvis client", () => {
     conditions: [{ key: "scope:assigned", kind: "scope", label: "指派给我" }],
     bugs: [
       {
-        id: 928,
-        projectId: 4029,
-        projectName: "示例商城 · 迭代 A",
-        title: "序列号",
+        id: 9101,
+        projectId: 9001,
+        projectName: "示例后台 · 迭代 B",
+        title: "示例：列表页加载失败",
         status: 1,
       },
     ],
@@ -158,6 +172,22 @@ describe("Renderer Jarvis client", () => {
       { geminiApiKey: "secret" },
       expect.any(Object),
     );
+  });
+
+  it("falls back to the thread Host only when local Jarvis is unusable", () => {
+    const result = (errorCode: JarvisBugSearchResult["errorCode"]) => ({
+      available: errorCode === null,
+      errorCode,
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    });
+    expect(jarvisSearchShouldFallback(result("not_installed"))).toBe(true);
+    expect(jarvisSearchShouldFallback(result("not_logged_in"))).toBe(true);
+    expect(jarvisSearchShouldFallback(result("unreachable"))).toBe(true);
+    expect(jarvisSearchShouldFallback(result(null))).toBe(false);
+    expect(jarvisSearchShouldFallback(result("cli_failed"))).toBe(false);
   });
 
   it("localizes Host error codes", () => {

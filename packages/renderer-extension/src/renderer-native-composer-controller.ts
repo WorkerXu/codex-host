@@ -146,3 +146,34 @@ export function insertNativeAgentMention(
     return false;
   }
 }
+
+/**
+ * Insert a native `agentMention` at the current selection. Used after the
+ * `@query` text was already removed when the Workbench entry was chosen.
+ */
+export function insertNativeAgentMentionAtSelection(
+  editor: Element,
+  mention: { name: string; displayName: string; path: string },
+): boolean {
+  const controller = findNativeComposerController(editor);
+  const nodeType = controller?.view.state.schema.nodes.agentMention;
+  if (!controller || !nodeType) return false;
+  try {
+    const { from, to } = controller.view.state.selection;
+    controller.insertMentionNodeInRange(
+      nodeType,
+      {
+        conversationId: null,
+        displayName: mention.displayName,
+        name: mention.name,
+        path: mention.path,
+      },
+      from,
+      to,
+      true,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}

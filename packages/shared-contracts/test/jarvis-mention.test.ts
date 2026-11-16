@@ -13,13 +13,13 @@ describe("Jarvis mention carrier", () => {
   });
 
   it("formats the bug path", () => {
-    expect(jarvisMentionPath({ kind: "bug", id: 928, projectId: 4029 })).toBe(
-      "jarvis://bug/4029/928",
+    expect(jarvisMentionPath({ kind: "bug", id: 9101, projectId: 9001 })).toBe(
+      "jarvis://bug/9001/9101",
     );
   });
 
   it("rejects ids that are not positive safe integers", () => {
-    expect(() => jarvisMentionPath({ kind: "bug", id: 0, projectId: 4029 })).toThrow(
+    expect(() => jarvisMentionPath({ kind: "bug", id: 0, projectId: 9001 })).toThrow(
       /Invalid Jarvis/u,
     );
     expect(() => jarvisMentionPath({ kind: "bug", id: 1 })).toThrow(/project id/u);
@@ -29,11 +29,11 @@ describe("Jarvis mention carrier", () => {
     expect(
       formatJarvisMentionLink({
         kind: "bug",
-        id: 928,
-        projectId: 4029,
-        label: "Bug #928 填写已查码的序列号…",
+        id: 9101,
+        projectId: 9001,
+        label: "Bug #9101 示例：列表页加载失败…",
       }),
-    ).toBe("[@Bug #928 填写已查码的序列号…](jarvis://bug/4029/928)");
+    ).toBe("[@Bug #9101 示例：列表页加载失败…](jarvis://bug/9001/9101)");
     expect(formatJarvisMentionLink({ kind: "bug", id: 3, projectId: 1, label: "a [b](c)\n" })).toBe(
       "[@a b c](jarvis://bug/1/3)",
     );
@@ -42,32 +42,32 @@ describe("Jarvis mention carrier", () => {
   it("strips bug links, restores readable labels and deduplicates mentions", () => {
     const bug = formatJarvisMentionLink({
       kind: "bug",
-      id: 928,
-      projectId: 4029,
-      label: "Bug #928 填写序列号",
+      id: 9101,
+      projectId: 9001,
+      label: "Bug #9101 示例：列表页加载失败",
     });
     const other = formatJarvisMentionLink({
       kind: "bug",
-      id: 929,
-      projectId: 4029,
-      label: "Bug #929 查码日志",
+      id: 9102,
+      projectId: 9001,
+      label: "Bug #9102 示例：日志页异常",
     });
     const result = stripJarvisMentions(`修复 ${bug} 和 ${other}，再看 ${bug}`);
     expect(result.text).toBe(
-      "修复 @Bug #928 填写序列号 和 @Bug #929 查码日志，再看 @Bug #928 填写序列号",
+      "修复 @Bug #9101 示例：列表页加载失败 和 @Bug #9102 示例：日志页异常，再看 @Bug #9101 示例：列表页加载失败",
     );
     expect(result.mentions).toEqual([
-      { kind: "bug", id: 928, projectId: 4029, label: "Bug #928 填写序列号" },
-      { kind: "bug", id: 929, projectId: 4029, label: "Bug #929 查码日志" },
+      { kind: "bug", id: 9101, projectId: 9001, label: "Bug #9101 示例：列表页加载失败" },
+      { kind: "bug", id: 9102, projectId: 9001, label: "Bug #9102 示例：日志页异常" },
     ]);
   });
 
   it("leaves non-bug and malformed links untouched", () => {
     const text = [
       "[@x](subagent://codexhost.claude-code)",
-      "[@y](jarvis://bug/4029)",
+      "[@y](jarvis://bug/9001)",
       "[@z](jarvis://task/101170)",
-      "[@p](jarvis://project/4029)",
+      "[@p](jarvis://project/9001)",
       "[@r](jarvis://requirement/2530)",
     ].join(" ");
     expect(stripJarvisMentions(text)).toEqual({ text, mentions: [] });

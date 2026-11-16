@@ -11,6 +11,7 @@ export const PROJECT_LABEL_ATTRIBUTE = "data-app-action-sidebar-project-label";
 export const PROJECT_COLLAPSED_ATTRIBUTE = "data-app-action-sidebar-project-collapsed";
 export const PROJECT_SELECT_SELECTOR = "[data-app-action-sidebar-select-project]";
 export const PROJECT_KIND_SELECTOR = "[data-sidebar-project-kind]";
+export const PROJECT_THREAD_ROW_SELECTOR = "[data-app-action-sidebar-thread-row]";
 export const SECTION_COLLAPSED_ATTRIBUTE = "data-app-action-sidebar-section-collapsed";
 export const NEW_CHAT_BUTTON_SELECTOR = `button:not([aria-haspopup]):not([${PROJECT_SELECT_SELECTOR.slice(
   1,
@@ -50,6 +51,11 @@ export function projectUnits(list: HTMLElement): HTMLElement[] {
 
 export function projectRowForUnit(unit: HTMLElement): HTMLElement | null {
   return unit.querySelector<HTMLElement>(PROJECT_ROW_SELECTOR);
+}
+
+/** A project with any thread row is not empty, even if it is collapsed. */
+export function projectUnitHasThreads(unit: HTMLElement): boolean {
+  return unit.querySelector(PROJECT_THREAD_ROW_SELECTOR) !== null;
 }
 
 export function projectUnitForId(section: HTMLElement, projectId: string): HTMLElement | null {

@@ -180,7 +180,7 @@ export class JarvisBugSearcher {
     this.#decisions = options.decisions;
     this.#isLocalHost = options.isLocalHost;
     this.#now = options.now ?? Date.now;
-    this.#concurrency = options.concurrency ?? 4;
+    this.#concurrency = options.concurrency ?? 8;
     this.#projectSearchTtlMs = options.projectSearchTtlMs ?? PROJECT_SEARCH_TTL_MS;
   }
 
@@ -188,12 +188,21 @@ export class JarvisBugSearcher {
     const now = this.#now();
     const rules = parseJarvisBugRules(params.query, now);
     const omit = new Set(params.omit ?? []);
+    // Auth, the project list and the project-name search are independent; all
+    // start before the (local-only) Gemini interpretation is awaited.
+    const userPromise = this.#cli.user();
+    const knownPromise = this.#cli.projects().catch(() => []);
+    const projectSearchesPromise = this.#prefetchProjectSearches(rules.leftover, omit);
     const interpretation = this.#isLocalHost
       ? await this.#interpret(params.query, rules, threshold)
       : { available: false, values: {} as JarvisBugInterpretation };
     this.#applyInterpretation(rules, interpretation.values, now);
 
-    const user = await this.#cli.user();
+    const [user, known, prefetched] = await Promise.all([
+      userPromise,
+      knownPromise,
+      projectSearchesPromise,
+    ]);
     if (!user) {
       return {
         available: false,
@@ -205,8 +214,7 @@ export class JarvisBugSearcher {
       };
     }
 
-    const known = await this.#cli.projects().catch(() => []);
-    const resolution = await this.#resolveProjects(rules.leftover, known, omit, interpretation);
+    const resolution = await this.#resolveProjects(rules.leftover, known, omit, prefetched);
     const plan = this.#plan(rules, resolution, omit);
     const projectNames = new Map<number, string>();
     for (const project of [...known, ...resolution.targets.values()]) {
@@ -260,7 +268,6 @@ export class JarvisBugSearcher {
     if (rules.unresolved.severity) fields.push("severity");
     if (rules.unresolved.order) fields.push("order");
     if (rules.unresolved.time) fields.push("time");
-    if (rules.leftover.length > 0) fields.push("mentionsProject");
     if (fields.length === 0) return { available: true, values: {} };
     try {
       return await this.#decisions.interpret(query, fields, threshold);
@@ -327,16 +334,35 @@ export class JarvisBugSearcher {
     };
   }
 
+  /**
+   * Start the project-name searches in parallel with auth, `project list` and
+   * Gemini. Project resolution itself never depends on the Gemini answer.
+   */
+  async #prefetchProjectSearches(
+    leftover: string,
+    omit: Set<string>,
+  ): Promise<Map<string, JarvisProjectRow[]>> {
+    const phrases = jarvisProjectPhrases(leftover)
+      .filter((phrase) => !omit.has(`project:${phrase}`))
+      .slice(0, 8);
+    const results = new Map<string, JarvisProjectRow[]>();
+    await Promise.all(
+      phrases.map(async (phrase) => {
+        results.set(phrase, await this.#searchProjects(phrase));
+      }),
+    );
+    return results;
+  }
+
   async #resolveProjects(
     leftover: string,
     known: readonly JarvisProjectRow[],
     omit: Set<string>,
-    interpretation: { available: boolean; values: JarvisBugInterpretation },
+    prefetched: ReadonlyMap<string, JarvisProjectRow[]>,
   ): Promise<ProjectResolution> {
     const tokens: ProjectTokenMatch[] = [];
     const targets = new Map<number, JarvisProjectRow>();
     const remainders: string[] = [];
-    const attemptSearch = interpretation.values.mentionsProject !== false;
     let searchBudget = 6;
 
     for (const phrase of jarvisProjectPhrases(leftover)) {
@@ -349,13 +375,9 @@ export class JarvisBugSearcher {
         if (knownMatch.remainder) remainders.push(knownMatch.remainder);
         continue;
       }
-      if (!attemptSearch) {
-        remainders.push(phrase);
-        continue;
-      }
       let matched: JarvisProjectRow[] = [];
       let consumed = phrase;
-      const direct = await this.#searchProjects(phrase);
+      const direct = prefetched.get(phrase) ?? (await this.#searchProjects(phrase));
       if (direct.length > 0) {
         matched = direct;
       } else if (searchBudget > 0) {

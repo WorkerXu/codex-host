@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { expandJarvisMentions, jarvisMentionContextBlock } from "../src/jarvis-mention-rewrite.js";
 
-const link = "[@Bug #928 填写序列号](jarvis://bug/4029/928)";
+const link = "[@Bug #9101 示例：列表页加载失败](jarvis://bug/9001/9101)";
 
 describe("Jarvis mention expansion", () => {
   it("returns text untouched without a Jarvis carrier", async () => {
@@ -22,21 +22,23 @@ describe("Jarvis mention expansion", () => {
         calls.push(mention);
         return {
           ok: true,
-          data: { bug: { id: 928, bugTitle: "填写序列号", status: 1 } },
+          data: { bug: { id: 9101, bugTitle: "示例：列表页加载失败", status: 1 } },
           errorCode: null,
           errorMessage: null,
         };
       },
     });
     expect(calls).toEqual([
-      { kind: "bug", id: 928, projectId: 4029, label: "Bug #928 填写序列号" },
+      { kind: "bug", id: 9101, projectId: 9001, label: "Bug #9101 示例：列表页加载失败" },
     ]);
-    expect(result.text.startsWith("修复 @Bug #928 填写序列号\n\n[codexhost Jarvis]")).toBe(true);
-    expect(result.text).toContain("### Bug #928 填写序列号");
+    expect(
+      result.text.startsWith("修复 @Bug #9101 示例：列表页加载失败\n\n[codexhost Jarvis]"),
+    ).toBe(true);
+    expect(result.text).toContain("### Bug #9101 示例：列表页加载失败");
     expect(result.text).toContain(
-      "链接：https://jarvis.eshetang.com/bugs/form?projectId=4029&bugId=928",
+      "链接：https://jarvis.eshetang.com/bugs/form?projectId=9001&bugId=9101",
     );
-    expect(result.text).toContain('"bugTitle": "填写序列号"');
+    expect(result.text).toContain('"bugTitle": "示例：列表页加载失败"');
     expect(result.text).not.toContain("jarvis://");
   });
 
@@ -51,13 +53,13 @@ describe("Jarvis mention expansion", () => {
         };
       },
     });
-    expect(result.text).toContain("@Bug #928 填写序列号");
+    expect(result.text).toContain("@Bug #9101 示例：列表页加载失败");
     expect(result.text).toContain("Jarvis 详情获取失败：本机未安装或未登录 jarvis CLI");
     expect(result.text).not.toContain("```json");
   });
 
   it("fetches multiple bugs and truncates oversized details", async () => {
-    const two = `${link} [@Bug #929 通知](jarvis://bug/4029/929)`;
+    const two = `${link} [@Bug #9102 通知](jarvis://bug/9001/9102)`;
     const result = await expandJarvisMentions(two, {
       async detail(mention) {
         return {
@@ -74,7 +76,7 @@ describe("Jarvis mention expansion", () => {
   });
 
   it("leaves non-bug carriers untouched", async () => {
-    const text = "[@任务 #1 开发](jarvis://task/101170) [@项目 #2](jarvis://project/4029)";
+    const text = "[@任务 #1 开发](jarvis://task/101170) [@项目 #2](jarvis://project/9001)";
     expect(
       await expandJarvisMentions(text, {
         detail: async () => ({ ok: true, data: {}, errorCode: null, errorMessage: null }),
@@ -88,13 +90,15 @@ describe("Jarvis mention expansion", () => {
   it("formats the context block independently of the CLI", () => {
     const block = jarvisMentionContextBlock([
       {
-        mention: { kind: "bug", id: 928, projectId: 4029, label: "Bug #928 序列号" },
-        data: { bugTitle: "序列号" },
+        mention: { kind: "bug", id: 9101, projectId: 9001, label: "Bug #9101 序列号" },
+        data: { bugTitle: "示例：列表页加载失败" },
         error: null,
       },
     ]);
     expect(block).toContain("[codexhost Jarvis]");
-    expect(block).toContain("链接：https://jarvis.eshetang.com/bugs/form?projectId=4029&bugId=928");
-    expect(block).toContain("类型：Bug，ID：928，项目：4029");
+    expect(block).toContain(
+      "链接：https://jarvis.eshetang.com/bugs/form?projectId=9001&bugId=9101",
+    );
+    expect(block).toContain("类型：Bug，ID：9101，项目：9001");
   });
 });

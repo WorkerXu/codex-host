@@ -21,12 +21,12 @@ interface FakeBug {
 }
 
 const KNOWN: JarvisProjectRow[] = [
-  { id: 4041, name: "示例后台 · 迭代 B" },
-  { id: 4029, name: "示例商城 · 迭代 A" },
+  { id: 9002, name: "示例商城 · 迭代 A" },
+  { id: 9001, name: "示例后台 · 迭代 B" },
 ];
 const VISIBLE: JarvisProjectRow[] = [
-  { id: 4078, name: "示例买 · 消息通知" },
-  { id: 4081, name: "示例买 · 标记迭代" },
+  { id: 9003, name: "示例买 · 消息通知" },
+  { id: 9004, name: "示例买 · 标记迭代" },
 ];
 
 function bug(overrides: Partial<FakeBug> & Pick<FakeBug, "id" | "projectId">): FakeBug {
@@ -103,17 +103,17 @@ function searcher(
 describe("Jarvis structured bug search", () => {
   it("filters assigned unresolved bugs across every project without a project search", async () => {
     const cli = fakeCli([
-      bug({ id: 1, projectId: 4041 }),
-      bug({ id: 2, projectId: 4041 }),
-      bug({ id: 3, projectId: 4041, status: 2 }),
-      bug({ id: 4, projectId: 4041, assigned: false, created: true }),
-      bug({ id: 5, projectId: 4029 }),
+      bug({ id: 1, projectId: 9002 }),
+      bug({ id: 2, projectId: 9002 }),
+      bug({ id: 3, projectId: 9002, status: 2 }),
+      bug({ id: 4, projectId: 9002, assigned: false, created: true }),
+      bug({ id: 5, projectId: 9001 }),
     ]);
     const result = await searcher(cli).search({ query: "我还没处理完成的bug" });
     expect(cli.searchProjects).not.toHaveBeenCalled();
     expect(cli.bugs).toHaveBeenCalledTimes(2);
     expect(cli.bugs).toHaveBeenCalledWith(
-      4041,
+      9002,
       expect.objectContaining({ createdByMe: false, statuses: [1] }),
     );
     expect(result.bugs.map(({ id }) => id).sort()).toEqual([1, 2, 5]);
@@ -129,17 +129,17 @@ describe("Jarvis structured bug search", () => {
     const cli = fakeCli([
       bug({
         id: 10,
-        projectId: 4078,
+        projectId: 9003,
         updateTime: "2026-11-15 09:00:00",
       }),
       bug({
         id: 11,
-        projectId: 4078,
+        projectId: 9003,
         updateTime: "2026-11-10 09:00:00",
       }),
       bug({
         id: 12,
-        projectId: 4081,
+        projectId: 9004,
         updateTime: "2026-11-16 09:00:00",
       }),
     ]);
@@ -155,11 +155,43 @@ describe("Jarvis structured bug search", () => {
     });
   });
 
+  it("never turns a matched project into a title keyword for Gemini", async () => {
+    const decisions = {
+      interpret: vi.fn(async () => ({
+        available: true,
+        values: { mentionsProject: false },
+      })),
+      orderBugs: vi.fn(async (_query: string, bugs: readonly JarvisBug[]) => ({
+        available: false,
+        bugs: [...bugs],
+      })),
+    };
+    const cli = fakeCli([bug({ id: 13, projectId: 9003 })]);
+    const result = await searcher(cli, decisions, true).search({
+      query: "示例买的最近的bug",
+    });
+    expect(result.conditions).toContainEqual({
+      key: "project:示例买",
+      kind: "project",
+      label: "示例买 ×2 个项目",
+    });
+    expect(result.conditions.some(({ kind }) => kind === "title")).toBe(false);
+  });
+
+  it("starts auth, project list and project-name search together", async () => {
+    const cli = fakeCli([]);
+    const pending = searcher(cli).search({ query: "示例买的bug" });
+    expect(cli.user).toHaveBeenCalledTimes(1);
+    expect(cli.projects).toHaveBeenCalledTimes(1);
+    expect(cli.searchProjects).toHaveBeenCalledWith("示例买");
+    await pending;
+  });
+
   it("merges assigned and created scopes and de-duplicates by project and bug id", async () => {
     const cli = fakeCli([
-      bug({ id: 20, projectId: 4041, assigned: true, created: true }),
-      bug({ id: 21, projectId: 4041, assigned: false, created: true }),
-      bug({ id: 22, projectId: 4029, assigned: true, created: false }),
+      bug({ id: 20, projectId: 9002, assigned: true, created: true }),
+      bug({ id: 21, projectId: 9002, assigned: false, created: true }),
+      bug({ id: 22, projectId: 9001, assigned: true, created: false }),
     ]);
     const result = await searcher(cli).search({ query: "我创建的指派给我的bug" });
     expect(cli.bugs).toHaveBeenCalledTimes(4);
@@ -173,7 +205,7 @@ describe("Jarvis structured bug search", () => {
 
   it("pages through results and stops at the documented cap", async () => {
     const rows = Array.from({ length: 250 }, (_unused, index) =>
-      bug({ id: index + 1, projectId: 4041, updateTime: "2026-11-10 09:00:00" }),
+      bug({ id: index + 1, projectId: 9002, updateTime: "2026-11-10 09:00:00" }),
     );
     const cli = fakeCli(rows);
     const result = await searcher(cli).search({ query: "bug" });
@@ -181,38 +213,38 @@ describe("Jarvis structured bug search", () => {
     expect(result.bugs).toHaveLength(200);
     expect(result.capped).toBe(true);
     expect(cli.bugs).toHaveBeenCalledTimes(3);
-    expect(cli.bugs).toHaveBeenLastCalledWith(4041, expect.objectContaining({ page: 2 }));
+    expect(cli.bugs).toHaveBeenLastCalledWith(9002, expect.objectContaining({ page: 2 }));
   });
 
   it("removes a chip condition when the key is omitted", async () => {
     const cli = fakeCli([
-      bug({ id: 30, projectId: 4041, status: 1 }),
-      bug({ id: 31, projectId: 4041, status: 2 }),
+      bug({ id: 30, projectId: 9002, status: 1 }),
+      bug({ id: 31, projectId: 9002, status: 2 }),
     ]);
     const result = await searcher(cli).search({ query: "未解决的bug", omit: ["status:1"] });
-    expect(cli.bugs).toHaveBeenCalledWith(4041, expect.not.objectContaining({ statuses: [1] }));
+    expect(cli.bugs).toHaveBeenCalledWith(9002, expect.not.objectContaining({ statuses: [1] }));
     expect(result.bugs.map(({ id }) => id).sort()).toEqual([30, 31]);
     expect(result.conditions.some(({ kind }) => kind === "status")).toBe(false);
   });
 
   it("uses the created scope for '我提的'", async () => {
     const cli = fakeCli([
-      bug({ id: 40, projectId: 4041, assigned: false, created: true }),
-      bug({ id: 41, projectId: 4041, assigned: true, created: false }),
+      bug({ id: 40, projectId: 9002, assigned: false, created: true }),
+      bug({ id: 41, projectId: 9002, assigned: true, created: false }),
     ]);
     const result = await searcher(cli).search({ query: "我提的bug" });
-    expect(cli.bugs).toHaveBeenCalledWith(4041, expect.objectContaining({ createdByMe: true }));
+    expect(cli.bugs).toHaveBeenCalledWith(9002, expect.objectContaining({ createdByMe: true }));
     expect(result.bugs.map(({ id }) => id)).toEqual([40]);
   });
 
   it("uses unmatched leftover text as the title keyword", async () => {
     const cli = fakeCli([
-      bug({ id: 50, projectId: 4041, bugTitle: "登录失败" }),
-      bug({ id: 51, projectId: 4041, bugTitle: "支付失败" }),
+      bug({ id: 50, projectId: 9002, bugTitle: "登录失败" }),
+      bug({ id: 51, projectId: 9002, bugTitle: "支付失败" }),
     ]);
     const result = await searcher(cli).search({ query: "登录问题" });
     expect(cli.searchProjects).toHaveBeenCalledWith("登录");
-    expect(cli.bugs).toHaveBeenCalledWith(4041, expect.objectContaining({ title: "登录" }));
+    expect(cli.bugs).toHaveBeenCalledWith(9002, expect.objectContaining({ title: "登录" }));
     expect(result.bugs.map(({ id }) => id)).toEqual([50]);
     expect(result.conditions).toContainEqual({
       key: "title",
@@ -222,7 +254,7 @@ describe("Jarvis structured bug search", () => {
   });
 
   it("can omit a project token that was matched from a longer phrase", async () => {
-    const cli = fakeCli([bug({ id: 55, projectId: 4078, bugTitle: "示例买支付回调失败" })]);
+    const cli = fakeCli([bug({ id: 9106, projectId: 9003, bugTitle: "示例买支付回调失败" })]);
     const api = searcher(cli);
     const first = await api.search({ query: "示例买支付的bug" });
     expect(first.conditions).toContainEqual({
@@ -249,9 +281,9 @@ describe("Jarvis structured bug search", () => {
 
   it("filters severity and time locally", async () => {
     const cli = fakeCli([
-      bug({ id: 60, projectId: 4041, severity: 1, updateTime: "2026-11-15 09:00:00" }),
-      bug({ id: 61, projectId: 4041, severity: 3, updateTime: "2026-11-15 09:00:00" }),
-      bug({ id: 62, projectId: 4041, severity: 1, updateTime: "2026-10-01 09:00:00" }),
+      bug({ id: 60, projectId: 9002, severity: 1, updateTime: "2026-11-15 09:00:00" }),
+      bug({ id: 61, projectId: 9002, severity: 3, updateTime: "2026-11-15 09:00:00" }),
+      bug({ id: 62, projectId: 9002, severity: 1, updateTime: "2026-10-01 09:00:00" }),
     ]);
     const result = await searcher(cli).search({ query: "最近3天严重的bug" });
     expect(result.bugs.map(({ id }) => id)).toEqual([60]);
@@ -269,20 +301,22 @@ describe("Jarvis structured bug search", () => {
       })),
     };
     const cli = fakeCli([
-      bug({ id: 70, projectId: 4078, assigned: false, created: true }),
-      bug({ id: 71, projectId: 4078, assigned: true, created: false }),
+      bug({ id: 70, projectId: 9003, assigned: false, created: true }),
+      bug({ id: 71, projectId: 9003, assigned: true, created: false }),
     ]);
     const result = await searcher(cli, decisions, true).search({
       query: "最近的示例买bug",
     });
     expect(decisions.interpret).toHaveBeenCalledTimes(1);
-    const fields = decisions.interpret.mock.calls[0]?.[1] as readonly string[];
+    const fields = (
+      decisions.interpret.mock.calls as unknown as [string, readonly string[]][]
+    )[0]?.[1];
     expect(fields).toContain("scope");
     expect(fields).toContain("status");
-    expect(fields).toContain("mentionsProject");
+    expect(fields).not.toContain("mentionsProject");
     expect(fields).not.toContain("order");
     expect(cli.bugs).toHaveBeenCalledWith(
-      4078,
+      9003,
       expect.objectContaining({ createdByMe: true, statuses: [1] }),
     );
     expect(result.bugs.map(({ id }) => id)).toEqual([70]);
@@ -296,7 +330,7 @@ describe("Jarvis structured bug search", () => {
         bugs: [...bugs],
       })),
     };
-    const cli = fakeCli([bug({ id: 80, projectId: 4041 })]);
+    const cli = fakeCli([bug({ id: 80, projectId: 9002 })]);
     await searcher(cli, decisions, true).search({
       query: "我还没处理完成的高优先级严重的最旧的最近3天bug",
     });

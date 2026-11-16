@@ -1,27 +1,24 @@
 /**
- * A single 「钉钉」row appended to Codex Desktop's native `@` menu.
+ * The 「钉钉」 row inside the shared 「工作台」 group of Desktop's native `@` menu.
  *
  * Desktop owns the menu; the row only opens the workbench page and removes the
  * typed trigger text. Selecting it never inserts a mention by itself — the
  * page's embed actions do that against the Composer remembered here.
  */
 import {
-  HEADER_CLASS,
-  LIST_CLASS,
-  MENU_CLASS,
-  ROW_CLASS,
-  ROW_CONTENT_CLASS,
-  ROW_HIGHLIGHT_CLASSES,
-  ROW_IDLE_CLASS,
-} from "./renderer-delegation-mention.js";
-import { findJarvisTrigger, findNativeSuggestionList } from "./renderer-jarvis-mention.js";
+  createWorkbenchRow,
+  createWorkbenchSection,
+  ensureWorkbenchSection,
+  findNativeSuggestionList,
+  highlightWorkbenchRow,
+  registerWorkbenchRow,
+  removeWorkbenchSectionIfEmpty,
+  waitForNativeSuggestionList,
+} from "./renderer-native-at-menu.js";
+import { findJarvisTrigger } from "./renderer-jarvis-mention.js";
 import { createDingTalkMark } from "./settings/dingtalk-icon.js";
 
-const SECTION_ATTRIBUTE = "data-codexhost-dingtalk-section";
-const PANEL_ATTRIBUTE = "data-codexhost-dingtalk-panel";
-const MENU_MAX_HEIGHT = 120;
-const VIEWPORT_MARGIN = 8;
-const MENU_GAP = 4;
+const ROW_ATTRIBUTE = "data-codexhost-dingtalk-entry";
 
 export interface RendererDingTalkEntryOptions {
   isComposerEditor(editor: HTMLElement): boolean;
@@ -43,47 +40,37 @@ interface Trigger {
   query: string;
 }
 
+interface EntryState {
+  trigger: Trigger;
+  row: HTMLButtonElement;
+  section: HTMLElement | null;
+  unregister: () => void;
+}
+
 function matchesEntry(query: string): boolean {
   if (query.length === 0) return true;
   const value = query.toLowerCase();
   return "钉钉".startsWith(value) || "dingtalk".startsWith(value);
 }
 
-function buildRow(document: Document, locale: string): HTMLElement {
-  const row = document.createElement("div");
-  row.setAttribute("role", "option");
-  row.setAttribute("aria-selected", "false");
-  row.setAttribute("data-codexhost-dingtalk-entry", "true");
-  row.className = ROW_CLASS;
-  const content = document.createElement("div");
-  content.className = ROW_CONTENT_CLASS;
-  const mark = createDingTalkMark(document, 16);
-  const label = document.createElement("span");
-  label.className = "min-w-0 shrink truncate";
-  label.textContent = locale === "zh-CN" ? "钉钉" : "DingTalk";
-  const meta = document.createElement("span");
-  meta.className = "flex-1 truncate text-codex-description";
-  meta.textContent = locale === "zh-CN" ? "打开钉钉工作台" : "Open the DingTalk workbench";
-  content.append(mark, label, meta);
-  row.append(content);
-  row.classList.add(ROW_IDLE_CLASS);
-  return row;
+function buildRow(document: Document, locale: string): HTMLButtonElement {
+  return createWorkbenchRow(document, {
+    rowAttribute: ROW_ATTRIBUTE,
+    icon: createDingTalkMark(document, 16),
+    label: locale === "zh-CN" ? "钉钉" : "DingTalk",
+    description: locale === "zh-CN" ? "打开钉钉工作台" : "Open the DingTalk workbench",
+  });
 }
 
-/** The single Workbench section appended to the native `@` menu. */
+/** The shared workbench section with only the DingTalk row; previews use it. */
 export function createDingTalkEntrySection(
   document: Document,
   locale: string,
 ): { element: HTMLElement; row: HTMLElement } {
-  const section = document.createElement("div");
-  section.setAttribute(SECTION_ATTRIBUTE, "true");
-  section.className = "flex w-full flex-col";
-  const header = document.createElement("div");
-  header.className = HEADER_CLASS;
-  header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
+  const section = createWorkbenchSection(document, locale === "zh-CN" ? "zh-CN" : "en");
   const row = buildRow(document, locale);
-  section.append(header, row);
-  return { element: section, row };
+  section.items.append(row);
+  return { element: section.element, row };
 }
 
 /** The row alone; used by previews that own their section chrome. */
@@ -97,93 +84,64 @@ export function installRendererDingTalkEntry(
 ): RendererDingTalkEntryControl {
   const view = ownerDocument.defaultView;
   if (!view) return { refresh: () => undefined, dispose: () => undefined };
-  let current: {
-    trigger: Trigger;
-    section: HTMLElement;
-    row: HTMLElement;
-    panel: HTMLElement | null;
-  } | null = null;
+  let current: EntryState | null = null;
+  let pending: Trigger | null = null;
+  let cancelWait: (() => void) | null = null;
   let suppressed: string | null = null;
-  let selected = false;
+
+  const locale = (): string => ownerDocument.documentElement.lang || view.navigator.language;
+
+  const stopWait = (): void => {
+    cancelWait?.();
+    cancelWait = null;
+  };
 
   const remove = (): void => {
-    current?.section.remove();
-    current?.panel?.remove();
+    stopWait();
+    pending = null;
+    current?.unregister();
+    current?.row.remove();
+    removeWorkbenchSectionIfEmpty(current?.section ?? null);
     current = null;
-    selected = false;
   };
 
-  const highlight = (): void => {
-    if (!current) return;
-    current.row.setAttribute("aria-selected", String(selected));
-    for (const name of ROW_HIGHLIGHT_CLASSES) {
-      current.row.classList.toggle(name, selected);
-    }
-    current.row.classList.toggle(ROW_IDLE_CLASS, !selected);
-    if (selected) current.row.scrollIntoView({ block: "nearest" });
+  const attachRow = (state: EntryState, list: HTMLElement): void => {
+    const section = ensureWorkbenchSection(
+      ownerDocument,
+      list,
+      locale().startsWith("zh") ? "zh-CN" : "en",
+    );
+    if (state.row.parentElement !== section.items) section.items.append(state.row);
+    state.section = section.element;
   };
 
-  const readTrigger = (): Trigger | null => {
-    const selection = ownerDocument.getSelection();
-    if (!selection?.isCollapsed || selection.rangeCount === 0) return null;
-    const node = selection.anchorNode;
-    if (!node || node.nodeType !== node.TEXT_NODE) return null;
-    const editor = node.parentElement?.closest<HTMLElement>('[contenteditable="true"]');
-    if (!editor || !options.isComposerEditor(editor)) return null;
-    const found = findJarvisTrigger((node as Text).data.slice(0, selection.anchorOffset));
-    if (!found || !matchesEntry(found.query)) return null;
-    return {
-      editor,
-      node: node as Text,
-      start: found.start,
-      end: selection.anchorOffset,
-      query: found.query,
-    };
-  };
-
-  const positionPanel = (panel: HTMLElement, editor: HTMLElement): void => {
-    const anchor = options.anchorForEditor(editor) ?? editor;
-    const rect = anchor.getBoundingClientRect();
-    const width = Math.min(rect.width, view.innerWidth - VIEWPORT_MARGIN * 2);
-    panel.style.width = `${width}px`;
-    panel.style.left = `${Math.max(
-      VIEWPORT_MARGIN,
-      Math.min(rect.left, view.innerWidth - width - VIEWPORT_MARGIN),
-    )}px`;
-    const height = panel.getBoundingClientRect().height;
-    panel.style.top = `${
-      rect.top >= height + MENU_GAP + VIEWPORT_MARGIN
-        ? rect.top - height - MENU_GAP
-        : Math.min(view.innerHeight - height - VIEWPORT_MARGIN, rect.bottom + MENU_GAP)
-    }px`;
-  };
+  const listFor = (trigger: Trigger): HTMLElement | null =>
+    findNativeSuggestionList(ownerDocument, options.anchorForEditor(trigger.editor));
 
   const attach = (trigger: Trigger): void => {
-    const locale = ownerDocument.documentElement.lang || view.navigator.language;
-    const { element: section, row } = createDingTalkEntrySection(ownerDocument, locale);
-    let panel: HTMLElement | null = null;
-    const anchor = options.anchorForEditor(trigger.editor);
-    const native = findNativeSuggestionList(ownerDocument, anchor);
-    if (native) {
-      native.append(section);
-    } else {
-      panel = ownerDocument.createElement("div");
-      panel.setAttribute(PANEL_ATTRIBUTE, "true");
-      panel.className = MENU_CLASS;
-      Object.assign(panel.style, {
-        position: "fixed",
-        zIndex: "2147483647",
-        maxHeight: `${MENU_MAX_HEIGHT}px`,
-        padding: "var(--spacing)",
-      } satisfies Partial<CSSStyleDeclaration>);
-      const list = ownerDocument.createElement("div");
-      list.className = LIST_CLASS;
-      list.setAttribute("role", "listbox");
-      list.append(section);
-      panel.append(list);
-      ownerDocument.body.append(panel);
-      positionPanel(panel, trigger.editor);
+    const list = listFor(trigger);
+    if (!list) {
+      // The popup mounts after `input`; wait for it instead of drawing a panel.
+      pending = trigger;
+      stopWait();
+      cancelWait = waitForNativeSuggestionList(
+        ownerDocument,
+        () => options.anchorForEditor(trigger.editor),
+        () => {
+          cancelWait = null;
+          if (current || pending !== trigger) return;
+          attach(trigger);
+        },
+      );
+      return;
     }
+    stopWait();
+    pending = null;
+    const row = buildRow(ownerDocument, locale());
+    const state: EntryState = { trigger, row, section: null, unregister: () => undefined };
+    attachRow(state, list);
+    current = state;
+
     const choose = (event: Event): void => {
       event.preventDefault();
       event.stopPropagation();
@@ -205,19 +163,30 @@ export function installRendererDingTalkEntry(
       }
       options.open(trigger.editor);
     };
-    row.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
-      selected = true;
-      highlight();
+      highlightWorkbenchRow(ownerDocument, state.row);
     });
     row.addEventListener("click", choose);
-    current = { trigger, section, row, panel };
-    selected = false;
-    highlight();
+    state.unregister = registerWorkbenchRow(ownerDocument, row, () => row.click());
+  };
+
+  const readTrigger = (): Trigger | null => {
+    const selection = ownerDocument.getSelection();
+    if (!selection?.isCollapsed || selection.rangeCount === 0) return null;
+    const node = selection.anchorNode;
+    if (!node || node.nodeType !== node.TEXT_NODE) return null;
+    const editor = node.parentElement?.closest<HTMLElement>('[contenteditable="true"]');
+    if (!editor || !options.isComposerEditor(editor)) return null;
+    const found = findJarvisTrigger((node as Text).data.slice(0, selection.anchorOffset));
+    if (!found || !matchesEntry(found.query)) return null;
+    return {
+      editor,
+      node: node as Text,
+      start: found.start,
+      end: selection.anchorOffset,
+      query: found.query,
+    };
   };
 
   const schedule = (): void => {
@@ -237,88 +206,52 @@ export function installRendererDingTalkEntry(
       current.trigger = trigger;
       return;
     }
+    if (pending && pending.query === trigger.query && pending.node === trigger.node) return;
     remove();
     attach(trigger);
   };
 
-  const nativeRows = (): HTMLElement[] => {
-    if (!current) return [];
-    const native = findNativeSuggestionList(
-      ownerDocument,
-      options.anchorForEditor(current.trigger.editor),
-    );
-    if (!native) return [];
-    return [...native.querySelectorAll<HTMLElement>('[role="option"]')].filter(
-      (row) => !row.closest(`[${SECTION_ATTRIBUTE}]`),
-    );
+  const reattach = (): void => {
+    if (current) {
+      const list = listFor(current.trigger);
+      if (!list) {
+        remove();
+        return;
+      }
+      attachRow(current, list);
+      return;
+    }
+    if (!pending) return;
+    const trigger = pending;
+    const list = listFor(trigger);
+    if (list) attach(trigger);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
     if (!current) return;
     const target = event.target as Node;
-    if (current.section.contains(target) || current.panel?.contains(target)) return;
-    const native = findNativeSuggestionList(
-      ownerDocument,
-      options.anchorForEditor(current.trigger.editor),
-    );
+    if (current.row.contains(target)) return;
+    const native = listFor(current.trigger);
     if (native?.contains(target)) return;
     remove();
   };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.isComposing) return;
     if (event.key === "Escape" && !current) {
       suppressed = readTrigger()?.query ?? null;
       return;
     }
-    if (!current) return;
-    let handled = true;
-    if (event.key === "ArrowDown") {
-      if (!selected) {
-        const rows = nativeRows();
-        const last = rows.at(-1);
-        if (rows.length === 0 || last?.getAttribute("aria-selected") === "true") {
-          selected = true;
-          highlight();
-        } else {
-          handled = false;
-        }
-      }
-    } else if (event.key === "ArrowUp") {
-      if (selected) {
-        selected = false;
-        highlight();
-        handled = false;
-      } else {
-        handled = false;
-      }
-    } else if (event.key === "Enter" || event.key === "Tab") {
-      if (selected) current.row.click();
-      else handled = false;
-    } else if (event.key === "Escape") {
-      suppressed = current.trigger.query;
-      remove();
-    } else {
-      handled = false;
-    }
-    if (!handled) return;
+    if (!current || event.key !== "Escape") return;
+    const selected = current.row.getAttribute("aria-current") === "true";
+    suppressed = current.trigger.query;
+    remove();
+    if (!selected) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };
-  const observer = new MutationObserver(() => {
-    if (!current) return;
-    if (current.section.isConnected) return;
-    const native = findNativeSuggestionList(
-      ownerDocument,
-      options.anchorForEditor(current.trigger.editor),
-    );
-    if (native) {
-      native.append(current.section);
-      current.panel?.remove();
-      current.panel = null;
-    } else {
-      remove();
-    }
-  });
+
+  const observer = new MutationObserver(reattach);
   observer.observe(ownerDocument.body, { childList: true, subtree: true });
 
   ownerDocument.addEventListener("input", schedule, true);

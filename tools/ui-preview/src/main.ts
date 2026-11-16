@@ -1,13 +1,23 @@
 import previewCss from "./preview.css";
 import {
-  createDingTalkEntrySection,
+  createDingTalkEntryRow,
   installRendererDingTalkEntry,
 } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
 import {
   createJarvisEntryRow,
   installRendererJarvisMention,
 } from "../../../packages/renderer-extension/src/renderer-jarvis-mention.js";
+import { createWorkbenchSection } from "../../../packages/renderer-extension/src/renderer-native-at-menu.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
+import {
+  ProjectGroupHeaders,
+  type ProjectGroupHeaderItem,
+} from "../../../packages/renderer-extension/src/renderer-project-groups-header.js";
+import {
+  ProjectGroupLayoutStyle,
+  PROJECT_GROUP_EMPTY_ATTRIBUTE,
+  type ProjectGroupLayoutMember,
+} from "../../../packages/renderer-extension/src/renderer-project-groups-layout.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
 import { rendererSettingsMessages } from "../../../packages/renderer-extension/src/settings/localization.js";
@@ -18,9 +28,14 @@ import {
   createFakeDingTalkClient,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
-import type {
-  ProjectGroupAddMachineResult,
-  ProjectGroupAddMachineTarget,
+import {
+  projectGroupEmptyVisibility,
+  projectGroupMachineSummary,
+  type ProjectGroupAddMachineResult,
+  type ProjectGroupAddMachineTarget,
+  type ProjectGroupMachineView,
+  type ProjectGroupProjectView,
+  type ProjectGroupView,
 } from "../../../packages/renderer-extension/src/renderer-project-groups-model.js";
 import { addMachineTargets, projectGroupView } from "./fixtures.js";
 import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
@@ -149,6 +164,161 @@ function openProjectMenu(onAddMachine: AddMachineHandler): ProjectGroupNewChatPi
   return picker;
 }
 
+interface PreviewProjectMachine {
+  key: string;
+  label: string;
+  projectId: string;
+  threads: string[];
+}
+
+/** Native-shaped sidebar used by the empty-machine preview scenarios. */
+async function mountProjectGroupMachineScene(
+  machines: readonly PreviewProjectMachine[],
+): Promise<void> {
+  await loadDesktopCss();
+  const groupName = "示例工作台";
+  const stage = mountStage(`
+    <aside class="preview-projects preview-native-sidebar">
+      <div class="preview-projects-heading">项目</div>
+      <section data-app-action-sidebar-section data-app-action-sidebar-section-heading="Projects"
+               data-app-action-sidebar-section-collapsed="false">
+        <div class="preview-native-section-body">
+          <div role="list" class="preview-native-project-list"></div>
+        </div>
+      </section>
+    </aside>
+    <main class="preview-canvas preview-canvas--composer"></main>`);
+  const list = stage.querySelector<HTMLElement>(".preview-native-project-list");
+  if (!list) throw new Error("Native project list is missing");
+  for (const machine of machines) {
+    const unit = document.createElement("div");
+    unit.setAttribute("role", "listitem");
+    unit.className = "preview-project-unit";
+    const wrapper = document.createElement("div");
+    wrapper.setAttribute("role", "listitem");
+    wrapper.setAttribute("aria-label", machine.label);
+    const row = document.createElement("div");
+    row.className = "preview-native-project-row";
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-expanded", "true");
+    row.setAttribute("data-app-action-sidebar-project-row", "");
+    row.setAttribute("data-app-action-sidebar-project-id", machine.projectId);
+    row.setAttribute("data-app-action-sidebar-project-label", groupName);
+    row.setAttribute("data-app-action-sidebar-project-collapsed", "false");
+    const leading = document.createElement("div");
+    leading.className = "preview-native-project-leading";
+    const kind = document.createElement("span");
+    kind.setAttribute("data-sidebar-project-kind", machine.key === "local" ? "local" : "remote");
+    const label = document.createElement("span");
+    label.textContent = groupName;
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.textContent = "+";
+    leading.append(kind, label, plus);
+    const trailing = document.createElement("div");
+    trailing.className = "preview-native-project-trailing";
+    trailing.textContent = "···";
+    row.append(leading, trailing);
+    wrapper.append(row);
+    const conversations = document.createElement("div");
+    conversations.setAttribute("data-app-action-sidebar-project-list-id", machine.projectId);
+    const conversationList = document.createElement("div");
+    conversationList.setAttribute("role", "list");
+    if (machine.threads.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "preview-empty-chat";
+      empty.textContent = "暂无聊天";
+      conversationList.append(empty);
+    } else {
+      for (const thread of machine.threads) {
+        const threadRow = document.createElement("div");
+        threadRow.className = "preview-thread-row";
+        threadRow.setAttribute("data-app-action-sidebar-thread-row", "");
+        threadRow.textContent = thread;
+        conversationList.append(threadRow);
+      }
+    }
+    conversations.append(conversationList);
+    wrapper.append(conversations);
+    unit.append(wrapper);
+    list.append(unit);
+  }
+
+  const projects = machines.map(
+    (machine) =>
+      ({
+        project: {
+          member: {
+            projectId: machine.projectId,
+            projectKind: machine.key === "local" ? "local" : "remote",
+          },
+          entry: { projectId: machine.projectId },
+          missing: null,
+        },
+        mounted: true,
+        newChatAvailable: true,
+      }) as unknown as ProjectGroupProjectView,
+  );
+  const machineViews: ProjectGroupMachineView[] = machines.map((machine, index) => ({
+    key: machine.key,
+    label: machine.label,
+    state: "connected",
+    projects: [projects[index]!],
+  }));
+  const group = {
+    id: "preview-group",
+    name: groupName,
+    order: 0,
+    collapsed: false,
+    members: [],
+  };
+  const view = {
+    group,
+    projects,
+    machines: machineViews,
+    unresolved: [],
+  } as unknown as ProjectGroupView;
+  const emptyIds = new Set(
+    machines.filter((machine) => machine.threads.length === 0).map((machine) => machine.projectId),
+  );
+  const visibility = projectGroupEmptyVisibility(view, emptyIds);
+  const members: ProjectGroupLayoutMember[] = machines.map((machine) => ({
+    projectId: machine.projectId,
+    label: groupName,
+    machineName: machine.label,
+    kind: machine.key === "local" ? "local" : "remote",
+  }));
+  new ProjectGroupLayoutStyle(document).apply([
+    { id: group.id, name: group.name, collapsed: false, members },
+  ]);
+  const summary = projectGroupMachineSummary(machineViews, visibility.visibleMachines);
+  const items: ProjectGroupHeaderItem[] = [
+    {
+      id: group.id,
+      name: group.name,
+      machineSummary: summary.text,
+      machineSummaryTitle: summary.title,
+      projectIds: machines.map((machine) => machine.projectId),
+    },
+  ];
+  new ProjectGroupHeaders(document, {
+    toggleGroup: () => undefined,
+    openNewChat: () => undefined,
+    openManager: () => undefined,
+    showMoreProjects: () => undefined,
+  }).render(items, { collapsedGroups: new Set(), placeholders: new Map() });
+  for (const projectId of visibility.hiddenProjectIds) {
+    document
+      .querySelector(
+        `[data-app-action-sidebar-project-row][data-app-action-sidebar-project-id="${projectId}"]`,
+      )
+      ?.closest(".preview-project-unit")
+      ?.setAttribute(PROJECT_GROUP_EMPTY_ATTRIBUTE, "true");
+  }
+  document.body.dataset.previewGroupEmpty = String(visibility.hiddenProjectIds.size);
+  await delay(120);
+}
+
 async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
   openProjectMenu(onAddMachine);
   const add = await waitFor(() =>
@@ -177,25 +347,95 @@ async function loadDesktopCss(): Promise<void> {
   await loaded;
 }
 
+/**
+ * Mirror of the real `@` menu DOM captured on 2026-11-16: no listbox/option
+ * roles, `data-mention-*` structure and the native row classes.
+ */
+const NATIVE_HEADER_CLASS =
+  "text-codex-description shrink-0 h-[var(--suggestion-menu-header-height,auto)] px-row-x py-1 " +
+  "text-sm sticky top-0 z-10 " +
+  "bg-[var(--suggestion-menu-header-background,var(--color-surface-elevated-secondary))]";
+const NATIVE_ROW_CLASS =
+  "text-default outline-hidden focus:bg-secondary-ghost-hover cursor-interaction flex w-full " +
+  "shrink-0 items-center overflow-hidden text-start min-h-[var(--app-menu-item-height,0px)] " +
+  "rounded-[var(--suggestion-menu-item-radius,var(--radius-xl))] " +
+  "p-[var(--suggestion-menu-item-padding,var(--app-menu-item-padding,var(--padding-row-y)_var(--padding-row-x)))] " +
+  "text-sm [content-visibility:auto] [contain-intrinsic-block-size:auto_1lh]";
+const NATIVE_ROW_CONTENT_CLASS =
+  "flex w-full min-w-0 items-center gap-[var(--spacing-menu-item-content,calc(var(--spacing)*1.5))]";
+const NATIVE_ROW_ACTIVE = "bg-secondary-ghost-hover opacity-100";
+const NATIVE_ROW_IDLE = "menu-row-opacity";
+
+function nativeRow(
+  label: string,
+  options: { active?: boolean; description?: string } = {},
+): HTMLButtonElement {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.setAttribute("data-list-navigation-item", "true");
+  row.className = `${NATIVE_ROW_CLASS} ${options.active ? NATIVE_ROW_ACTIVE : NATIVE_ROW_IDLE}`;
+  if (options.active) row.setAttribute("aria-current", "true");
+  const content = document.createElement("div");
+  content.setAttribute("data-menu-row-content", "true");
+  content.className = NATIVE_ROW_CONTENT_CLASS;
+  const labelSpan = document.createElement("span");
+  labelSpan.className = "min-w-0 truncate";
+  labelSpan.textContent = label;
+  content.append(labelSpan);
+  if (options.description) {
+    const description = document.createElement("span");
+    description.className = "min-w-0 flex-1 truncate text-sm text-codex-description";
+    description.textContent = options.description;
+    content.append(description);
+  }
+  row.append(content);
+  return row;
+}
+
+function nativeSection(id: string, title: string, rows: HTMLElement[], first = false): HTMLElement {
+  const section = document.createElement("div");
+  section.setAttribute("data-mention-section-id", id);
+  const header = document.createElement("div");
+  header.className = first ? NATIVE_HEADER_CLASS : `${NATIVE_HEADER_CLASS} pt-2`;
+  header.textContent = title;
+  const items = document.createElement("div");
+  items.setAttribute("data-mention-section-items", "true");
+  items.append(...rows);
+  section.append(header, items);
+  return section;
+}
+
+/** Panel + the single native scroll container that owns every section. */
+function nativeAtMenu(): HTMLElement {
+  const panel = document.createElement("div");
+  panel.className = "preview-at-menu suggestionMenu-Preview";
+  const scroll = document.createElement("div");
+  scroll.className = "vertical-scroll-fade-mask flex w-full flex-1 flex-col overflow-y-auto";
+  scroll.setAttribute("data-mention-list-scroll-area", "");
+  scroll.append(
+    nativeSection("context-actions", "添加", [nativeRow("文件和文件夹"), nativeRow("图片")], true),
+    nativeSection("agents", "智能体", [
+      nativeRow("Codex", { description: "默认编码智能体", active: true }),
+    ]),
+  );
+  panel.append(scroll);
+  return panel;
+}
+
 async function mountNativeAtMenu(open: boolean): Promise<void> {
   await loadDesktopCss();
   const stage = mountStage(`
     <main class="preview-canvas preview-canvas--composer">
       <div class="preview-composer-card">
-        <div class="preview-composer-input" id="native-editor" contenteditable="true">@钉</div>
-      </div>
-      <div class="preview-at-menu" id="native-at-menu" role="listbox" aria-label="提及">
-        <div class="preview-native-scroll vertical-scroll-fade-mask">
-          <div class="preview-native-header">文件</div>
-          <div class="preview-native-row" role="option" aria-selected="false">图片</div>
-          <div class="preview-native-header">智能体</div>
-          <div class="preview-native-row" role="option" aria-selected="true">Codex</div>
-        </div>
+        <div class="preview-composer-input" id="native-editor" contenteditable="true">@</div>
       </div>
     </main>`);
   const editor = stage.querySelector<HTMLElement>("#native-editor");
-  const menu = stage.querySelector<HTMLElement>("#native-at-menu");
-  if (!editor || !menu) throw new Error("Native composer or menu is missing");
+  if (!editor) throw new Error("Native composer is missing");
+  const menu = nativeAtMenu();
+  stage.querySelector(".preview-composer-card")?.append(menu);
+  const scroll = menu.querySelector<HTMLElement>("[data-mention-list-scroll-area]");
+  if (!scroll) throw new Error("Native scroll area is missing");
   const text = editor.firstChild;
   if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
   editor.focus();
@@ -214,25 +454,79 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
       return true;
     },
   });
+  installRendererJarvisMention(document, {
+    isComposerEditor: (element) => element === editor,
+    readHostId: () => "local",
+    readLocale: () => locale,
+    anchorForEditor: () => menu,
+    search: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    }),
+  });
+  document.dispatchEvent(new Event("selectionchange"));
   editor.dispatchEvent(new Event("input", { bubbles: true }));
-  const section = await waitFor(() => menu.querySelector("[data-codexhost-dingtalk-section]"));
-  const scroller = menu.querySelector(".vertical-scroll-fade-mask");
-  const entryRow = section.querySelector("[data-codexhost-dingtalk-entry]");
-  document.body.dataset.entryNativeScroller = String(
-    Boolean(scroller && section.parentElement === scroller),
-  );
-  document.body.dataset.entryLastGroup = String(scroller?.lastElementChild === section);
-  document.body.dataset.entryRow = String(Boolean(entryRow));
+  const section = await waitFor(() => scroll.querySelector("[data-codexhost-workbench-section]"));
+  section.scrollIntoView({ block: "nearest" });
+  const dingtalkRow = section.querySelector<HTMLElement>("[data-codexhost-dingtalk-entry]");
+  const jarvisRow = section.querySelector<HTMLElement>("[data-codexhost-jarvis-entry-row]");
+  document.body.dataset.entryNativeScroller = String(section.parentElement === scroll);
+  document.body.dataset.entryLastGroup = String(scroll.lastElementChild === section);
+  document.body.dataset.entryRow = String(Boolean(dingtalkRow));
   document.body.dataset.entryGroupTitle = String(section.textContent?.includes("工作台") ?? false);
   document.body.dataset.entryHelper = String(
-    entryRow?.textContent?.includes("打开钉钉工作台") ?? false,
+    dingtalkRow?.textContent?.includes("打开钉钉工作台") ?? false,
+  );
+  document.body.dataset.entrySharedSection = String(
+    Boolean(
+      jarvisRow &&
+      jarvisRow.parentElement === dingtalkRow?.parentElement &&
+      section.children.length === 2,
+    ),
+  );
+  document.body.dataset.entryHeaderCount = String(
+    [...section.children].filter((child) => child.textContent?.trim() === "工作台").length,
+  );
+  document.body.dataset.entryOverlay = String(
+    Boolean(
+      document.querySelector("[data-codexhost-dingtalk-panel],[data-codexhost-jarvis-panel]"),
+    ),
+  );
+  document.body.dataset.entryNativeButtons = String(
+    [...scroll.querySelectorAll('[data-list-navigation-item="true"]')]
+      .filter((row) => !row.closest("[data-codexhost-workbench-section]"))
+      .every((row) => row.tagName === "BUTTON"),
   );
   if (!open) {
     await delay(80);
     return;
   }
+  const nativeRows = [
+    ...scroll.querySelectorAll<HTMLElement>('[data-list-navigation-item="true"]'),
+  ].filter((row) => !row.closest("[data-codexhost-workbench-section]"));
+  const lastNative = nativeRows.at(-1);
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  document.body.dataset.entryKeyboardHandoff = String(
+    dingtalkRow?.getAttribute("aria-current") === "true" &&
+      lastNative?.getAttribute("aria-current") !== "true",
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  const walkedToJarvis = jarvisRow?.getAttribute("aria-current") === "true";
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+  );
+  document.body.dataset.entryWorkbenchWalk = String(
+    walkedToJarvis &&
+      dingtalkRow?.getAttribute("aria-current") === "true" &&
+      jarvisRow?.getAttribute("aria-current") !== "true",
   );
   window.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -272,29 +566,24 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "status:1", kind: "status", label: "未解决" },
-    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
-    { key: "order:newest", kind: "order", label: "最新" },
   ],
   bugs: [
-    previewBug(
-      928,
-      4029,
-      "示例商城 · 迭代 A",
-      "填写已查码的序列号给新的查码任务，无法进行下一步",
-      { priority: 1, severity: 2, updatedAt: new Date(Date.now() - 3 * 60_000).toISOString() },
-    ),
-    previewBug(936, 4041, "示例后台 · 迭代 B", "加盟商鉴定任务的查码成本判断", {
+    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：列表页加载失败", {
+      priority: 1,
+      severity: 2,
+      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    }),
+    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：筛选条件未生效", {
       priority: 3,
       severity: 3,
       updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
     }),
-    previewBug(941, 4078, "示例买 · 消息通知", "示例买消息通知未送达", {
+    previewBug(9104, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
       priority: 2,
       severity: 1,
       updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
     }),
-    previewBug(952, 4081, "示例买 · 标记迭代", "搜索结果列表未显示示例买标记", {
-      status: 2,
+    previewBug(9105, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
       priority: 3,
       severity: 2,
       updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
@@ -304,20 +593,61 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
   capped: false,
 };
 
+const jarvisPreviewProjectRecent: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [
+    { key: "scope:assigned", kind: "scope", label: "指派给我" },
+    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
+    { key: "order:newest", kind: "order", label: "最新" },
+  ],
+  bugs: [
+    previewBug(9201, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
+      priority: 2,
+      severity: 1,
+      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    }),
+    previewBug(9202, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
+      status: 2,
+      priority: 3,
+      severity: 2,
+      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    }),
+    previewBug(9203, 9003, "示例买 · 消息通知", "示例：通知开关无效", {
+      priority: 3,
+      severity: 3,
+      updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+    }),
+    previewBug(9204, 9004, "示例买 · 标记迭代", "示例：标记颜色错误", {
+      priority: 3,
+      severity: 3,
+      updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    }),
+  ],
+  total: 4,
+  capped: false,
+};
+
 const jarvisPreviewConditions: JarvisBugSearchResult = {
-  ...jarvisPreviewResults,
+  available: true,
+  errorCode: null,
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "status:1", kind: "status", label: "未解决" },
-    { key: "priority:1", kind: "priority", label: "高优先级" },
-    { key: "severity:1", kind: "severity", label: "严重" },
-    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
-    { key: "time", kind: "time", label: "最近 7 天" },
+    { key: "severity:2", kind: "severity", label: "严重" },
     { key: "title", kind: "title", label: "标题含「登录」" },
-    { key: "order:newest", kind: "order", label: "最新" },
   ],
-  bugs: jarvisPreviewResults.bugs.slice(0, 2),
+  bugs: [
+    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：登录后无法进入工作台", {
+      severity: 2,
+    }),
+    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：验证码不显示", {
+      severity: 2,
+      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    }),
+  ],
   total: 2,
+  capped: false,
 };
 
 const jarvisPreviewEmpty: JarvisBugSearchResult = {
@@ -326,8 +656,17 @@ const jarvisPreviewEmpty: JarvisBugSearchResult = {
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "status:3", kind: "status", label: "已关闭" },
-    { key: "severity:1", kind: "severity", label: "严重" },
+    { key: "severity:2", kind: "severity", label: "严重" },
   ],
+  bugs: [],
+  total: 0,
+  capped: false,
+};
+
+const jarvisPreviewError: JarvisBugSearchResult = {
+  available: false,
+  errorCode: "not_logged_in",
+  conditions: [],
   bugs: [],
   total: 0,
   capped: false,
@@ -338,23 +677,22 @@ async function mountJarvisSearch(
   query: string,
   clickEntry = true,
   ready?: (mode: HTMLElement) => boolean,
+  initialText = "@",
+  prefill?: string,
 ): Promise<void> {
   await loadDesktopCss();
   const stage = mountStage(`
     <main class="preview-canvas preview-canvas--composer">
       <div class="preview-composer-card" data-composer-body>
         <div class="preview-composer-editor" contenteditable="true">@</div>
-        <div class="preview-at-menu vertical-scroll-fade-mask" role="listbox" aria-label="提及">
-          <div class="preview-native-header">文件</div>
-          <div class="preview-native-row">图片</div>
-          <div class="preview-native-header">智能体</div>
-          <div class="preview-native-row">Codex</div>
-        </div>
       </div>
     </main>`);
   const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
   const card = stage.querySelector<HTMLElement>("[data-composer-body]");
   if (!editor || !card) throw new Error("Composer preview is missing");
+  editor.textContent = initialText;
+  const menu = nativeAtMenu();
+  card.append(menu);
   const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
   previewWindow.__jarvisPreviewSearchCalls = 0;
   const control = installRendererJarvisMention(document, {
@@ -362,6 +700,9 @@ async function mountJarvisSearch(
     readHostId: () => "local",
     readLocale: () => locale,
     anchorForEditor: () => card,
+    openSettings: () => {
+      document.body.dataset.jarvisSettingsOpened = "true";
+    },
     search: async (_hostId, params) => {
       previewWindow.__jarvisPreviewSearchCalls =
         (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
@@ -401,6 +742,19 @@ async function mountJarvisSearch(
   );
   const input = mode.querySelector<HTMLInputElement>("input");
   if (!input) throw new Error("Jarvis search field is missing");
+  if (prefill !== undefined) {
+    await waitFor(() => input.value === prefill);
+    document.body.dataset.jarvisPrefill = input.value;
+    document.body.dataset.jarvisEditorText = editor.textContent ?? "";
+    document.body.dataset.jarvisSearchCalls = String(previewWindow.__jarvisPreviewSearchCalls ?? 0);
+    await waitFor(
+      () =>
+        (ready?.(mode) ?? Boolean(mode.querySelector("[data-codexhost-jarvis-bug]"))) ? mode : null,
+      4_000,
+    );
+    await delay(120);
+    return;
+  }
   input.value = query;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   if (preview.pending) {
@@ -594,6 +948,25 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(120);
   },
 
+  async "project-group-empty-machine"() {
+    await mountProjectGroupMachineScene([
+      {
+        key: "remote",
+        label: "示例新加坡",
+        projectId: "preview-machine-remote",
+        threads: ["示例：列表页加载失败", "示例：筛选条件未生效"],
+      },
+      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
+    ]);
+  },
+
+  async "project-group-all-empty"() {
+    await mountProjectGroupMachineScene([
+      { key: "remote", label: "示例新加坡", projectId: "preview-machine-remote", threads: [] },
+      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
+    ]);
+  },
+
   async "group-plus-menu"() {
     openProjectMenu();
     await waitFor(() => document.querySelector("[data-codexhost-project-groups-new-chat]"));
@@ -633,21 +1006,18 @@ const scenarios: Record<string, () => Promise<void>> = {
       <main class="preview-canvas preview-canvas--composer">
         <div class="preview-composer-card">
           <div class="preview-composer-input">帮我把今天的发布进展整理一下…</div>
-          <div class="preview-at-menu" role="listbox" aria-label="提及">
-            <div class="preview-native-scroll vertical-scroll-fade-mask">
-              <div class="preview-native-header">文件</div>
-              <div class="preview-native-row">图片</div>
-              <div class="preview-native-header">智能体</div>
-              <div class="preview-native-row">Codex</div>
-            </div>
-          </div>
         </div>
       </main>`);
-    const menu = stage.querySelector(".preview-native-scroll");
-    if (!menu) throw new Error("At menu is missing");
-    const workbench = createDingTalkEntrySection(document, locale).element;
-    workbench.append(createJarvisEntryRow(document, locale));
-    menu.append(workbench);
+    const menu = nativeAtMenu();
+    stage.querySelector(".preview-composer-card")?.append(menu);
+    const scroll = menu.querySelector<HTMLElement>("[data-mention-list-scroll-area]");
+    if (!scroll) throw new Error("Native scroll area is missing");
+    const workbench = createWorkbenchSection(document, locale);
+    workbench.items.append(
+      createDingTalkEntryRow(document, locale),
+      createJarvisEntryRow(document, locale),
+    );
+    scroll.append(workbench.element);
     await delay(80);
   },
 
@@ -661,6 +1031,35 @@ const scenarios: Record<string, () => Promise<void>> = {
 
   async "jarvis-entry"() {
     await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "", false);
+  },
+
+  async "jarvis-entry-query"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewResults, pending: true },
+      "",
+      false,
+      undefined,
+      "@我还没处理完的bug",
+    );
+  },
+
+  async "jarvis-mode-prefilled"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewProjectRecent, delayMs: 120 },
+      "",
+      true,
+      undefined,
+      "@示例买的最近的bug",
+      "示例买的最近的bug",
+    );
+  },
+
+  async "jarvis-mode-detached"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, delayMs: 120 }, "我还没处理完成的bug");
+    document.querySelector<HTMLInputElement>("[data-codexhost-jarvis-mode] input")?.focus();
+    document.querySelector(".preview-at-menu")?.remove();
+    await waitFor(() => document.querySelector("[data-codexhost-jarvis-detached]"), 4_000);
+    await delay(120);
   },
 
   async "jarvis-mode-loading"() {
@@ -680,12 +1079,26 @@ const scenarios: Record<string, () => Promise<void>> = {
     );
   },
 
+  async "jarvis-mode-error"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewError, delayMs: 80 },
+      "我还没处理完的bug",
+      true,
+      (mode) => mode.textContent?.includes("Jarvis 未安装或未登录") === true,
+    );
+  },
+
+  async "jarvis-mode-slow"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "我还没处理完的bug");
+    await delay(8_200);
+  },
+
   async "jarvis-mode-conditions"() {
     await mountJarvisSearch(
       { result: jarvisPreviewConditions, delayMs: 80 },
       "我还没处理完成的严重登录bug",
       true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
     );
   },
 
@@ -694,7 +1107,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       { result: jarvisPreviewConditions, delayMs: 80 },
       "我还没处理完成的严重登录bug",
       true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
     );
     const chip = document.querySelector<HTMLElement>('[data-jarvis-chip="status:1"]');
     if (!chip) throw new Error("Status chip is missing");

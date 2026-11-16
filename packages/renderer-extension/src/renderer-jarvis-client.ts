@@ -198,6 +198,15 @@ export function jarvisCodeFromError(error: unknown): string {
   return "jarvis_failed";
 }
 
+/** Local Host has no usable Jarvis; try the Composer Thread's Host instead. */
+export function jarvisSearchShouldFallback(result: JarvisBugSearchResult): boolean {
+  return (
+    result.errorCode === "not_installed" ||
+    result.errorCode === "not_logged_in" ||
+    result.errorCode === "unreachable"
+  );
+}
+
 export function createRendererJarvisClient(
   options: RendererJarvisClientOptions,
 ): RendererJarvisClient {
