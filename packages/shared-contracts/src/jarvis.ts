@@ -10,19 +10,19 @@ import { z } from "zod";
  */
 export const JARVIS_MENTION_PATH_PREFIX = "jarvis://";
 
-export const JARVIS_KINDS = ["project", "requirement", "task", "bug"] as const;
+/** The `@` menu only carries bugs; projects, requirements and tasks are gone. */
+export const JARVIS_KINDS = ["bug"] as const;
 export type JarvisKind = (typeof JARVIS_KINDS)[number];
 
 const JARVIS_ID = /^[1-9][0-9]{0,17}$/u;
-const MENTION_LINK_PATTERN =
-  /\[@([^\]\n]+)\]\(<?jarvis:\/\/(project|requirement|task|bug)\/([0-9]{1,18})(?:\/([0-9]{1,18}))?>?\)/gu;
+const BUG_MENTION_LINK_PATTERN =
+  /\[@([^\]\n]+)\]\(<?jarvis:\/\/bug\/([0-9]{1,18})\/([0-9]{1,18})>?\)/gu;
 
 export interface JarvisMention {
-  kind: JarvisKind;
-  /** Jarvis business id: project, requirement, task or bug id. */
+  kind: "bug";
+  /** Jarvis bug id. */
   id: number;
-  /** Owning project; required for bugs and optional for derived items. */
-  projectId?: number;
+  projectId: number;
   label: string;
 }
 
@@ -33,18 +33,15 @@ function positiveId(value: number, name: string): number {
   return value;
 }
 
-/** Exact native mention path for one Jarvis item. */
+/** Exact native mention path for one Jarvis bug. */
 export function jarvisMentionPath(mention: {
-  kind: JarvisKind;
+  kind: "bug";
   id: number;
   projectId?: number;
 }): string {
-  const id = positiveId(mention.id, "item id");
-  if (mention.kind === "bug") {
-    const projectId = positiveId(mention.projectId ?? 0, "project id");
-    return `${JARVIS_MENTION_PATH_PREFIX}bug/${projectId}/${id}`;
-  }
-  return `${JARVIS_MENTION_PATH_PREFIX}${mention.kind}/${id}`;
+  const id = positiveId(mention.id, "bug id");
+  const projectId = positiveId(mention.projectId ?? 0, "project id");
+  return `${JARVIS_MENTION_PATH_PREFIX}bug/${projectId}/${id}`;
 }
 
 function sanitizeLabel(label: string): string {
@@ -67,28 +64,23 @@ export interface JarvisMentionRewrite {
 
 /**
  * Replace each carrier link with its readable `@Label` form. Returns the
- * mentioned items in first-seen order, without duplicates.
+ * mentioned bugs in first-seen order, without duplicates.
  */
 export function stripJarvisMentions(text: string): JarvisMentionRewrite {
   const mentions: JarvisMention[] = [];
   const seen = new Set<string>();
   const rewritten = text.replace(
-    MENTION_LINK_PATTERN,
-    (_match, label: string, kind: string, first: string, second?: string) => {
+    BUG_MENTION_LINK_PATTERN,
+    (_match, label: string, first: string, second: string) => {
       const trimmed = label.trim();
-      if (!JARVIS_KINDS.includes(kind as JarvisKind)) return _match;
-      if (!JARVIS_ID.test(first)) return _match;
-      if (kind === "bug" && (!second || !JARVIS_ID.test(second))) return _match;
-      const item: JarvisMention =
-        kind === "bug"
-          ? {
-              kind: "bug",
-              id: Number(second),
-              projectId: Number(first),
-              label: trimmed,
-            }
-          : { kind: kind as JarvisKind, id: Number(first), label: trimmed };
-      const key = `${item.kind}:${item.projectId ?? ""}:${item.id}`;
+      if (!JARVIS_ID.test(first) || !JARVIS_ID.test(second)) return _match;
+      const item: JarvisMention = {
+        kind: "bug",
+        id: Number(second),
+        projectId: Number(first),
+        label: trimmed,
+      };
+      const key = `${item.projectId}:${item.id}`;
       if (!seen.has(key)) {
         seen.add(key);
         mentions.push(item);
@@ -99,32 +91,38 @@ export function stripJarvisMentions(text: string): JarvisMentionRewrite {
   return { text: rewritten, mentions };
 }
 
-/** A candidate row, and the shape returned to the Renderer for the `@` menu. */
-export const jarvisCandidateSchema = z
+/** A bug row returned by the structured `@` search. */
+export const jarvisBugSchema = z
   .object({
-    kind: z.enum(JARVIS_KINDS),
     id: z.number().int().positive(),
-    projectId: z.number().int().positive().optional(),
+    projectId: z.number().int().positive(),
     projectName: z.string().max(1_024).optional(),
     title: z.string().min(1).max(4_096),
     status: z.number().int().optional(),
-    statusLabel: z.string().max(64).optional(),
+    priority: z.number().int().optional(),
+    severity: z.number().int().optional(),
     creatorId: z.number().int().positive().optional(),
-    creatorName: z.string().max(256).optional(),
     assigneeId: z.number().int().positive().optional(),
-    assigneeName: z.string().max(256).optional(),
     createdAt: z.string().max(64).optional(),
+    updatedAt: z.string().max(64).optional(),
   })
   .strict();
-export type JarvisCandidate = z.infer<typeof jarvisCandidateSchema>;
+export type JarvisBug = z.infer<typeof jarvisBugSchema>;
+
+/** One parsed condition, rendered as a removable chip in the `@` popup. */
+export const jarvisBugConditionSchema = z
+  .object({
+    key: z.string().min(1).max(64),
+    kind: z.enum(["scope", "status", "priority", "severity", "order", "time", "project", "title"]),
+    label: z.string().min(1).max(64),
+  })
+  .strict();
+export type JarvisBugCondition = z.infer<typeof jarvisBugConditionSchema>;
 
 export const jarvisUserSchema = z
   .object({ id: z.number().int().positive(), name: z.string().min(1).max(256) })
   .strict();
 export type JarvisUser = z.infer<typeof jarvisUserSchema>;
-
-export const jarvisSuggestionSchema = jarvisCandidateSchema.extend({ score: z.number() });
-export type JarvisSuggestion = z.infer<typeof jarvisSuggestionSchema>;
 
 export const jarvisStatusSchema = z
   .object({
@@ -161,9 +159,7 @@ export const JARVIS_LOGIN_STOP_METHOD = "codexhost/jarvis/login/stop";
 
 /** Methods every Host can serve from its own machine. */
 export const JARVIS_STATUS_METHOD = "codexhost/jarvis/status";
-export const JARVIS_CLASSIFY_METHOD = "codexhost/jarvis/classify";
-export const JARVIS_CANDIDATES_METHOD = "codexhost/jarvis/candidates";
-export const JARVIS_RANK_METHOD = "codexhost/jarvis/rank";
+export const JARVIS_BUG_SEARCH_METHOD = "codexhost/jarvis/bug/search";
 export const JARVIS_INSTALL_METHOD = "codexhost/jarvis/install";
 export const JARVIS_DOWNLOAD_START_METHOD = "codexhost/jarvis/download/start";
 export const JARVIS_DOWNLOAD_CHUNK_METHOD = "codexhost/jarvis/download/chunk";
@@ -171,61 +167,29 @@ export const JARVIS_INSTALL_UPLOAD_METHOD = "codexhost/jarvis/install/upload";
 export const JARVIS_LOGIN_START_METHOD = "codexhost/jarvis/login/start";
 
 export const DEFAULT_JARVIS_THRESHOLD = 0.5;
-export const JARVIS_MAX_RANK_CANDIDATES = 200;
-export const JARVIS_MAX_SUGGESTIONS = 8;
-export const JARVIS_MIN_SUGGESTION_SCORE = 1.05;
+export const JARVIS_MAX_SEARCH_BUGS = 200;
+export const JARVIS_MAX_SEARCH_PROJECTS = 40;
 export const JARVIS_KEY_MAX_LENGTH = 512;
 
-export const jarvisClassifyParamsSchema = z
-  .object({ query: z.string().trim().min(1).max(200) })
+export const jarvisBugSearchParamsSchema = z
+  .object({
+    query: z.string().trim().max(200),
+    omit: z.array(z.string().min(1).max(64)).max(24).optional(),
+  })
   .strict();
-export type JarvisClassifyParams = z.infer<typeof jarvisClassifyParamsSchema>;
+export type JarvisBugSearchParams = z.infer<typeof jarvisBugSearchParamsSchema>;
 
-export const jarvisClassifyResultSchema = z
+export const jarvisBugSearchResultSchema = z
   .object({
     available: z.boolean(),
-    isJarvis: z.boolean(),
-    kind: z.enum([...JARVIS_KINDS, "none"]),
-    confidence: z.number().min(0).max(1),
+    errorCode: z.string().max(64).nullable(),
+    conditions: z.array(jarvisBugConditionSchema).max(24),
+    bugs: z.array(jarvisBugSchema).max(JARVIS_MAX_SEARCH_BUGS),
+    total: z.number().int().nonnegative(),
+    capped: z.boolean(),
   })
   .strict();
-export type JarvisClassifyResult = z.infer<typeof jarvisClassifyResultSchema>;
-
-export const jarvisCandidatesParamsSchema = z
-  .object({
-    kind: z.enum(JARVIS_KINDS),
-    refresh: z.boolean().optional(),
-  })
-  .strict();
-export type JarvisCandidatesParams = z.infer<typeof jarvisCandidatesParamsSchema>;
-
-export const jarvisCandidatesResultSchema = z
-  .object({
-    available: z.boolean(),
-    candidates: z.array(jarvisCandidateSchema).max(2_000),
-    user: jarvisUserSchema.nullable(),
-    fetchedAt: z.string().max(64).nullable(),
-  })
-  .strict();
-export type JarvisCandidatesResult = z.infer<typeof jarvisCandidatesResultSchema>;
-
-export const jarvisRankParamsSchema = z
-  .object({
-    query: z.string().trim().min(1).max(200),
-    kind: z.enum(JARVIS_KINDS),
-    candidates: z.array(jarvisCandidateSchema).max(JARVIS_MAX_RANK_CANDIDATES),
-    user: jarvisUserSchema.nullable().optional(),
-  })
-  .strict();
-export type JarvisRankParams = z.infer<typeof jarvisRankParamsSchema>;
-
-export const jarvisSuggestionsResultSchema = z
-  .object({
-    available: z.boolean(),
-    suggestions: z.array(jarvisSuggestionSchema).max(JARVIS_MAX_SUGGESTIONS),
-  })
-  .strict();
-export type JarvisSuggestionsResult = z.infer<typeof jarvisSuggestionsResultSchema>;
+export type JarvisBugSearchResult = z.infer<typeof jarvisBugSearchResultSchema>;
 
 export const jarvisSettingsResultSchema = z
   .object({
