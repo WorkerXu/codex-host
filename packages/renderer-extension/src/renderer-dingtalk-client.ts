@@ -200,11 +200,29 @@ export function createRendererDingTalkClient(
     subscribedRoute = route;
   };
 
-  const applyStatus = (status: DingTalkStatus): void => {
-    const remote =
-      status.defaultHost !== "local" && status.defaultHostId
-        ? options.forHost(status.defaultHostId)
-        : null;
+  const remoteRouteFor = (status: DingTalkStatus): RendererDingTalkRoute | null =>
+    status.defaultHost !== "local" && status.defaultHostId
+      ? options.forHost(status.defaultHostId)
+      : null;
+
+  /**
+   * A DingTalk Host whose Runtime predates direct reads answers "unavailable";
+   * the page then keeps using local forwarding instead of failing.
+   */
+  const probeRemote = async (route: RendererDingTalkRoute | null): Promise<boolean> => {
+    if (!route) return false;
+    try {
+      dingtalkStatusSchema.parse(
+        await route.manager.sendRequest(DINGTALK_STATUS_METHOD, {}, { timeoutMs: 10_000 }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const applyStatus = (status: DingTalkStatus, remoteUsable: boolean): void => {
+    const remote = remoteUsable ? remoteRouteFor(status) : null;
     const next = remote ?? localRoute();
     resolvedRoute = next;
     if (statusPromise === null && resolving === null) attachRoute();
@@ -219,7 +237,8 @@ export function createRendererDingTalkClient(
       const status = dingtalkStatusSchema.parse(
         await current.manager.sendRequest(DINGTALK_STATUS_METHOD, {}, { timeoutMs: 45_000 }),
       );
-      if (generation === session) applyStatus(status);
+      const remoteUsable = await probeRemote(remoteRouteFor(status));
+      if (generation === session) applyStatus(status, remoteUsable);
       return status;
     })().finally(() => {
       statusPromise = null;
@@ -233,9 +252,8 @@ export function createRendererDingTalkClient(
     if (resolvedRoute) return Promise.resolve(resolvedRoute);
     const generation = session;
     resolving ??= (async () => {
-      const status = await readStatus().catch(() => null);
+      await readStatus().catch(() => null);
       if (generation !== session) return null;
-      if (status) applyStatus(status);
       return resolvedRoute ?? localRoute();
     })().finally(() => {
       resolving = null;

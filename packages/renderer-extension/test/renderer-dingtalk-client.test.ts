@@ -99,7 +99,32 @@ describe("DingTalk renderer routing", () => {
 
     await client.conversations();
     expect(localCalls).toEqual([DINGTALK_STATUS_METHOD]);
-    expect(remoteCalls).toEqual([DINGTALK_CONVERSATIONS_METHOD]);
+    // The route is probed once before data requests use it.
+    expect(remoteCalls).toEqual([DINGTALK_STATUS_METHOD, DINGTALK_CONVERSATIONS_METHOD]);
+  });
+
+  it("keeps local forwarding when the DingTalk Host cannot serve DingTalk", async () => {
+    const localCalls: string[] = [];
+    const remoteCalls: string[] = [];
+    const local = manager(localCalls, { status: status() });
+    const remote: RendererDingTalkManager = {
+      async sendRequest(method: string) {
+        remoteCalls.push(method);
+        throw new Error("DingTalk is unavailable on this Host");
+      },
+    };
+    const client = createRendererDingTalkClient({
+      forHost: (hostId) =>
+        hostId === "local"
+          ? route("local", local)
+          : hostId === "host-tencent"
+            ? route("host-tencent", remote)
+            : null,
+    });
+
+    await client.conversations();
+    expect(remoteCalls).toEqual([DINGTALK_STATUS_METHOD]);
+    expect(localCalls).toEqual([DINGTALK_STATUS_METHOD, DINGTALK_CONVERSATIONS_METHOD]);
   });
 
   it("falls back to the local Host when the DingTalk route is absent", async () => {
@@ -149,12 +174,12 @@ describe("DingTalk renderer routing", () => {
             : null,
     });
     await client.conversations();
-    expect(remoteCalls).toHaveLength(1);
+    expect(remoteCalls).toEqual([DINGTALK_STATUS_METHOD, DINGTALK_CONVERSATIONS_METHOD]);
 
     localStatus = status({ defaultHost: "local", defaultHostId: null });
     client.beginSession();
     await client.conversations();
-    expect(remoteCalls).toHaveLength(1);
+    expect(remoteCalls).toHaveLength(2);
     expect(localCalls.filter((method) => method === DINGTALK_CONVERSATIONS_METHOD)).toHaveLength(1);
   });
 });

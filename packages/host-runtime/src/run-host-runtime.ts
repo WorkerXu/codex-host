@@ -578,6 +578,7 @@ export async function runHostRuntime(input: {
             modelPrices,
             usageStatistics,
             jarvis,
+            dingtalk,
             ...(sharedDelegation ? { sharedDelegation } : {}),
             sharedThreads: new SharedThreadBridge({
               connect: async () => sharedOwner.connect(),
