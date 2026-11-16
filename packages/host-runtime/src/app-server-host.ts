@@ -22,9 +22,7 @@ import {
   projectGroupsReplaceParamsSchema,
   projectMirrorUpsertParamsSchema,
   JARVIS_STATUS_METHOD,
-  JARVIS_CLASSIFY_METHOD,
-  JARVIS_CANDIDATES_METHOD,
-  JARVIS_RANK_METHOD,
+  JARVIS_BUG_SEARCH_METHOD,
   JARVIS_SETTINGS_GET_METHOD,
   JARVIS_SETTINGS_SET_METHOD,
   JARVIS_SETTINGS_TEST_METHOD,
@@ -35,9 +33,7 @@ import {
   JARVIS_LOGIN_START_METHOD,
   JARVIS_LOGIN_FORWARD_METHOD,
   JARVIS_LOGIN_STOP_METHOD,
-  jarvisClassifyParamsSchema,
-  jarvisCandidatesParamsSchema,
-  jarvisRankParamsSchema,
+  jarvisBugSearchParamsSchema,
   jarvisSettingsSetParamsSchema,
   jarvisInstallParamsSchema,
   jarvisDownloadStartParamsSchema,
@@ -3668,23 +3664,12 @@ export class AppServerHost {
         throw new JarvisServiceError("invalid_params", "Invalid install request");
       return await service.install();
     }
-    if (request.method === JARVIS_CLASSIFY_METHOD) {
-      const parsed = jarvisClassifyParamsSchema.safeParse(request.params);
-      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid Jarvis query");
-      return await service.classify(parsed.data.query);
-    }
-    if (request.method === JARVIS_CANDIDATES_METHOD) {
-      const parsed = jarvisCandidatesParamsSchema.safeParse(request.params);
+    if (request.method === JARVIS_BUG_SEARCH_METHOD) {
+      const parsed = jarvisBugSearchParamsSchema.safeParse(request.params);
       if (!parsed.success) {
-        throw new JarvisServiceError("invalid_params", "Invalid Jarvis candidate request");
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis bug search request");
       }
-      return await service.candidates(parsed.data.kind, parsed.data.refresh ?? false);
-    }
-    if (request.method === JARVIS_RANK_METHOD) {
-      const parsed = jarvisRankParamsSchema.safeParse(request.params);
-      if (!parsed.success)
-        throw new JarvisServiceError("invalid_params", "Invalid Jarvis rank request");
-      return await service.rank(parsed.data);
+      return await service.searchBugs(parsed.data);
     }
     if (request.method === JARVIS_SETTINGS_SET_METHOD) {
       const parsed = jarvisSettingsSetParamsSchema.safeParse(request.params);

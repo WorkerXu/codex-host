@@ -2,34 +2,28 @@ import { open, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 import {
-  jarvisCandidatesResultSchema,
-  jarvisClassifyResultSchema,
+  jarvisBugSearchResultSchema,
   jarvisLoginForwardResultSchema,
   jarvisLoginStartResultSchema,
   jarvisSettingsResultSchema,
   jarvisSettingsTestResultSchema,
   jarvisStatusSchema,
-  jarvisSuggestionsResultSchema,
-  type JarvisCandidatesResult,
-  type JarvisClassifyResult,
+  type JarvisBugSearchParams,
+  type JarvisBugSearchResult,
   type JarvisInstallResult,
   type JarvisInstallUploadParams,
   type JarvisInstallUploadResult,
-  type JarvisKind,
   type JarvisLoginForwardParams,
   type JarvisLoginForwardResult,
   type JarvisLoginStartResult,
-  type JarvisRankParams,
   type JarvisRelease,
   type JarvisSettingsResult,
   type JarvisSettingsSetParams,
   type JarvisSettingsTestResult,
   type JarvisStatus,
-  type JarvisSuggestionsResult,
-  type JarvisUser,
 } from "@codexhost/shared-contracts";
 
-import { JarvisCandidatePool } from "./jarvis-candidates.js";
+import { JarvisBugSearcher } from "./jarvis-bug-search.js";
 import { createJarvisCli, type JarvisCli } from "./jarvis-cli.js";
 import { createJarvisDecisions, type JarvisDecisions } from "./jarvis-decisions.js";
 import {
@@ -66,7 +60,7 @@ export interface JarvisServiceOptions {
   cli?: JarvisCli;
   settings?: JarvisSettingsStore;
   decisions?: JarvisDecisions;
-  pool?: JarvisCandidatePool;
+  searcher?: Pick<JarvisBugSearcher, "search">;
   login?: JarvisLoginManager;
   forwarder?: JarvisLoginForwarder;
   fetchImpl?: typeof fetch;
@@ -95,7 +89,7 @@ export class JarvisService {
   readonly #cli: JarvisCli;
   readonly #settings: JarvisSettingsStore;
   readonly #decisions: JarvisDecisions;
-  readonly #pool: JarvisCandidatePool;
+  readonly #searcher: Pick<JarvisBugSearcher, "search">;
   readonly #login: JarvisLoginManager;
   readonly #forwarder: JarvisLoginForwarder;
   readonly #fetchImpl: typeof fetch;
@@ -112,7 +106,14 @@ export class JarvisService {
       options.settings ?? new JarvisSettingsStore({ environment: this.#environment });
     this.#decisions =
       options.decisions ?? createJarvisDecisions({ readApiKey: () => this.#settings.readKey() });
-    this.#pool = options.pool ?? new JarvisCandidatePool({ cli: this.#cli });
+    this.#searcher =
+      options.searcher ??
+      new JarvisBugSearcher({
+        cli: this.#cli,
+        decisions: this.#decisions,
+        isLocalHost: this.#isLocalHost,
+        now: this.#now,
+      });
     this.#login =
       options.login ??
       new JarvisLoginManager({
@@ -132,31 +133,9 @@ export class JarvisService {
     return jarvisStatusSchema.parse(await this.#cli.status());
   }
 
-  async classify(query: string): Promise<JarvisClassifyResult> {
-    try {
-      const threshold = await this.#settings.readThreshold();
-      return jarvisClassifyResultSchema.parse(await this.#decisions.classify(query, threshold));
-    } catch {
-      return { available: false, isJarvis: false, kind: "none", confidence: 0 };
-    }
-  }
-
-  async candidates(kind: JarvisKind, refresh = false): Promise<JarvisCandidatesResult> {
-    return jarvisCandidatesResultSchema.parse(await this.#pool.get(kind, { refresh }));
-  }
-
-  async rank(params: JarvisRankParams): Promise<JarvisSuggestionsResult> {
-    try {
-      const result = await this.#decisions.rank(
-        params.query,
-        params.kind,
-        params.candidates,
-        (params.user as JarvisUser | null | undefined) ?? null,
-      );
-      return jarvisSuggestionsResultSchema.parse(result);
-    } catch {
-      return { available: false, suggestions: [] };
-    }
+  async searchBugs(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
+    const threshold = await this.#settings.readThreshold();
+    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params, threshold));
   }
 
   async settings(): Promise<JarvisSettingsResult> {
@@ -343,10 +322,6 @@ export class JarvisService {
 
   async expandMentions(text: string): Promise<string> {
     return (await expandJarvisMentions(text, this.#cli)).text;
-  }
-
-  async resolveUser(): Promise<JarvisUser | null> {
-    return await this.#cli.user();
   }
 
   dispose(): void {

@@ -56,8 +56,8 @@ describe("Jarvis mention expansion", () => {
     expect(result.text).not.toContain("```json");
   });
 
-  it("fetches multiple mentions and truncates oversized details", async () => {
-    const two = `${link} [@需求 #2530 通知](jarvis://requirement/2530)`;
+  it("fetches multiple bugs and truncates oversized details", async () => {
+    const two = `${link} [@Bug #929 通知](jarvis://bug/4029/929)`;
     const result = await expandJarvisMentions(two, {
       async detail(mention) {
         return {
@@ -73,15 +73,28 @@ describe("Jarvis mention expansion", () => {
     expect(result.text).toContain("详情已截断");
   });
 
+  it("leaves non-bug carriers untouched", async () => {
+    const text = "[@任务 #1 开发](jarvis://task/101170) [@项目 #2](jarvis://project/4029)";
+    expect(
+      await expandJarvisMentions(text, {
+        detail: async () => ({ ok: true, data: {}, errorCode: null, errorMessage: null }),
+      }),
+    ).toEqual({
+      text,
+      mentions: [],
+    });
+  });
+
   it("formats the context block independently of the CLI", () => {
     const block = jarvisMentionContextBlock([
       {
-        mention: { kind: "task", id: 101170, label: "任务 #101170 开发" },
-        data: { taskName: "开发" },
+        mention: { kind: "bug", id: 928, projectId: 4029, label: "Bug #928 序列号" },
+        data: { bugTitle: "序列号" },
         error: null,
       },
     ]);
     expect(block).toContain("[codexhost Jarvis]");
-    expect(block).toContain("链接：https://jarvis.eshetang.com/tasks/form?taskId=101170");
+    expect(block).toContain("链接：https://jarvis.eshetang.com/bugs/form?projectId=4029&bugId=928");
+    expect(block).toContain("类型：Bug，ID：928，项目：4029");
   });
 });

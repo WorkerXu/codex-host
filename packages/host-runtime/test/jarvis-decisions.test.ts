@@ -1,161 +1,213 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { JarvisCandidate } from "@codexhost/shared-contracts";
+import type { JarvisBug } from "@codexhost/shared-contracts";
 
 import {
-  buildClassifyRequest,
-  buildRankRequest,
+  buildBugInterpretRequest,
+  buildBugOrderRequest,
   createJarvisDecisions,
-  parseClassifyAnswers,
-  parseRankResponse,
+  parseBugDecisionAnswers,
+  parseBugOrderResponse,
 } from "../src/jarvis-decisions.js";
 
-const candidate = (id: number, title: string): JarvisCandidate => ({
-  kind: "bug",
+const bug = (id: number, title: string, updatedAt: string): JarvisBug => ({
   id,
   projectId: 4029,
   title,
   status: 1,
-  creatorId: 10473,
-  assigneeId: 10058,
-  createdAt: "2026-10-27 09:48:52",
+  priority: 3,
+  severity: 3,
+  createdAt: updatedAt,
+  updatedAt,
 });
 
-describe("Jarvis Decisions requests", () => {
-  it("builds the documented classify question shape", () => {
-    expect(buildClassifyRequest("测试新提给我的bug")).toEqual({
-      model: "gemini-decision-1",
-      input: "测试新提给我的bug",
-      questions: {
-        is_jarvis: {
-          type: "noul",
-          instructions: expect.stringContaining("Jarvis"),
-        },
-        kind: {
-          type: "choice",
-          instructions: expect.stringContaining("类型"),
-          criteria: {
-            project: "项目",
-            requirement: "需求",
-            task: "任务",
-            bug: "Bug",
-            none: "不是 Jarvis 条目",
-          },
-        },
+describe("Jarvis bug Decisions requests", () => {
+  it("asks one question per unsettled field only", () => {
+    const request = buildBugInterpretRequest({
+      query: "我还没处理完成的bug",
+      fields: ["scope", "status"],
+      today: "2026-11-16",
+    });
+    expect(Object.keys(request.questions)).toEqual(["scope", "status"]);
+    expect(request.questions.scope).toMatchObject({
+      type: "choice",
+      criteria: {
+        assigned: "指派给我",
+        created: "我创建的",
+        both: "指派给我和我创建的",
       },
     });
+    expect(request.input).toContain("当前日期：2026-11-16");
+    expect(request.input).toContain("我还没处理完成的bug");
   });
 
-  it("puts candidate context in the input and one score question per candidate", () => {
-    const request = buildRankRequest({
-      query: "测试新提给我的bug",
-      kind: "bug",
-      candidates: [candidate(928, "填写已查码的序列号"), candidate(936, "查码日志缺少序列号")],
-      user: { id: 10058, name: "示例用户" },
-      today: "2026-11-13",
+  it("uses a noul question for a possible project mention", () => {
+    const request = buildBugInterpretRequest({
+      query: "示例买的bug",
+      fields: ["mentionsProject"],
+    });
+    expect(request.questions.mentions_project).toMatchObject({ type: "noul" });
+  });
+
+  it("puts each bug in its own score question for semantic re-ordering", () => {
+    const request = buildBugOrderRequest({
+      query: "登录失败",
+      bugs: [bug(1, "登录失败", "2026-11-15 09:00:00"), bug(2, "支付失败", "2026-11-14 09:00:00")],
     });
     expect(Object.keys(request.questions)).toEqual(["rel_0", "rel_1"]);
+    expect(String(request.questions.rel_0?.instructions)).toContain("id=1");
+    expect(String(request.questions.rel_1?.instructions)).toContain("id=2");
     expect(request.questions.rel_0).toMatchObject({
       type: "score",
       criteria: ["不相关", "有点相关", "高度相关"],
     });
-    expect(String(request.questions.rel_0?.instructions)).toContain("id=928");
-    expect(String(request.questions.rel_1?.instructions)).toContain("id=936");
-    expect(request.input).toContain("当前日期：2026-11-13");
-    expect(request.input).toContain("当前用户：示例用户 (ID 10058)");
-    expect(request.input).toContain("id=928");
-    expect(request.input).toContain("创建人ID=10473");
-    expect(request.input).toContain("指派给ID=10058");
-  });
-
-  it("caps candidates at the documented rank limit", () => {
-    const candidates = Array.from({ length: 250 }, (_unused, index) =>
-      candidate(index + 1, `bug ${index}`),
-    );
-    const request = buildRankRequest({
-      query: "q",
-      kind: "bug",
-      candidates,
-      user: null,
-      today: "2026-11-13",
-    });
-    expect(Object.keys(request.questions)).toHaveLength(200);
-    expect(request.input).not.toContain("id=201");
   });
 });
 
-describe("Jarvis Decisions responses", () => {
-  it("reads noul, choice and confidence", () => {
-    const answers = parseClassifyAnswers({
+describe("Jarvis bug Decisions responses", () => {
+  it("reads choices and the project confidence", () => {
+    const answers = parseBugDecisionAnswers({
       answers: {
-        is_jarvis: { type: "noul", noul: 0.72, confidence: 0.72 },
-        kind: {
-          type: "choice",
-          choice: "bug",
-          confidence: 0.94,
-          probabilities: { bug: 0.94 },
-        },
+        scope: { choice: "created", confidence: 0.92 },
+        status: { choice: "active", confidence: 0.8 },
+        priority: { choice: "high", confidence: 0.7 },
+        severity: { choice: "low", confidence: 0.6 },
+        order: { choice: "oldest", confidence: 0.75 },
+        time_window: { choice: "week", confidence: 0.7 },
+        mentions_project: { noul: 0.88 },
       },
     });
-    expect(answers).toEqual({ noul: 0.72, kind: "bug", confidence: 0.94 });
+    expect(answers).toEqual({
+      scope: { choice: "created", confidence: 0.92 },
+      status: { choice: "active", confidence: 0.8 },
+      priority: { choice: "high", confidence: 0.7 },
+      severity: { choice: "low", confidence: 0.6 },
+      order: { choice: "oldest", confidence: 0.75 },
+      timeWindow: { choice: "week", confidence: 0.7 },
+      mentionsProject: 0.88,
+    });
   });
 
-  it("falls back to none for an unknown choice or malformed response", () => {
-    expect(parseClassifyAnswers({ answers: { kind: { choice: "epic" } } })).toEqual({
-      noul: 0,
-      kind: "none",
-      confidence: 0,
-    });
-    expect(parseClassifyAnswers(null)).toEqual({ noul: 0, kind: "none", confidence: 0 });
+  it("ignores unknown choices and malformed answers", () => {
+    expect(parseBugDecisionAnswers({ answers: { scope: { choice: "epic" } } })).toEqual({});
+    expect(parseBugDecisionAnswers(null)).toEqual({});
   });
 
   it("reads scores in question order and defaults missing answers to zero", () => {
     expect(
-      parseRankResponse(
-        {
-          answers: {
-            rel_0: { type: "score", score: 1.8 },
-            rel_1: { type: "score", score: 0.4 },
-          },
-        },
-        3,
-      ),
+      parseBugOrderResponse({ answers: { rel_0: { score: 1.8 }, rel_1: { score: 0.4 } } }, 3),
     ).toEqual([1.8, 0.4, 0]);
   });
 
-  it("applies the configured threshold and returns ranked suggestions", async () => {
+  it("applies the threshold and turns answers into search conditions", async () => {
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { questions: Record<string, unknown> };
-      const answers = Object.fromEntries(
-        Object.keys(body.questions).map((key, index) => [
-          key,
-          { type: "score", score: index === 0 ? 1.7 : 0.8 },
-        ]),
+      expect(Object.keys(body.questions).sort()).toEqual(
+        [
+          "mentions_project",
+          "order",
+          "priority",
+          "scope",
+          "severity",
+          "status",
+          "time_window",
+        ].sort(),
       );
-      return new Response(JSON.stringify({ answers }), { status: 200 });
+      return new Response(
+        JSON.stringify({
+          answers: {
+            scope: { choice: "created", confidence: 0.9 },
+            status: { choice: "active", confidence: 0.9 },
+            priority: { choice: "high", confidence: 0.9 },
+            severity: { choice: "low", confidence: 0.9 },
+            order: { choice: "oldest", confidence: 0.9 },
+            time_window: { choice: "week", confidence: 0.9 },
+            mentions_project: { noul: 0.8 },
+          },
+        }),
+        { status: 200 },
+      );
     });
     const decisions = createJarvisDecisions({
       readApiKey: async () => "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    const result = await decisions.rank(
-      "测试新提给我的bug",
-      "bug",
-      [candidate(928, "填写已查码的序列号"), candidate(936, "查码日志缺少序列号")],
-      { id: 10058, name: "示例用户" },
-    );
+    const result = await decisions.interpret("最近的示例买bug", [
+      "scope",
+      "status",
+      "priority",
+      "severity",
+      "order",
+      "time",
+      "mentionsProject",
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.available).toBe(true);
-    expect(result.suggestions.map(({ id }) => id)).toEqual([928]);
-    expect(result.suggestions[0]?.score).toBe(1.7);
+    expect(result.values).toEqual({
+      scope: "created",
+      statuses: [1],
+      priorities: [1],
+      severities: [4],
+      order: "oldest",
+      timeWindow: "week",
+      mentionsProject: true,
+    });
   });
 
-  it("reports missing keys instead of calling the API", async () => {
+  it("ignores low-confidence choices and keeps a low project confidence as false", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            answers: {
+              scope: { choice: "created", confidence: 0.2 },
+              mentions_project: { noul: 0.2 },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const decisions = createJarvisDecisions({
+      readApiKey: async () => "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await decisions.interpret("q", ["scope", "mentionsProject"])).toEqual({
+      available: true,
+      values: { mentionsProject: false },
+    });
+  });
+
+  it("re-orders every candidate without dropping low scores", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            answers: { rel_0: { score: 0.2 }, rel_1: { score: 1.8 } },
+          }),
+          { status: 200 },
+        ),
+    );
+    const decisions = createJarvisDecisions({
+      readApiKey: async () => "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const result = await decisions.orderBugs("登录失败", [
+      bug(1, "支付失败", "2026-11-15 09:00:00"),
+      bug(2, "登录失败", "2026-11-14 09:00:00"),
+    ]);
+    expect(result.available).toBe(true);
+    expect(result.bugs.map(({ id }) => id)).toEqual([2, 1]);
+  });
+
+  it("does not call the API without a key", async () => {
     const fetchImpl = vi.fn();
     const decisions = createJarvisDecisions({
       readApiKey: async () => null,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    await expect(decisions.classify("x")).rejects.toMatchObject({ code: "missing_key" });
+    await expect(decisions.interpret("q", ["scope"])).rejects.toMatchObject({
+      code: "missing_key",
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
