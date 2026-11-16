@@ -199,7 +199,7 @@ describe("Project group headers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("inserts the group header before its first native member and adds a create row", async () => {
+  it("inserts the group header before its first native member without a create row", async () => {
     newList();
     const alpha = memberUnit("alpha");
     const { headers } = await setup();
@@ -235,9 +235,7 @@ describe("Project group headers", () => {
       mocks.list ?? new FakeElement("div"),
       (node) => node.getAttribute("data-codexhost-project-group-create") !== null,
     );
-    expect(create).not.toBeNull();
-    expect(create?.style.getPropertyValue("order")).toBe("950");
-    expect(headerTexts(create as FakeElement)).toContain("新建项目组");
+    expect(create).toBeNull();
     headers.dispose();
   });
 
@@ -337,12 +335,6 @@ describe("Project group headers", () => {
     expect(calls.newChat).toEqual([["g1", 1]]);
     expect(calls.manager).toEqual(["g1"]);
 
-    const create = find(
-      mocks.list ?? new FakeElement("div"),
-      (node) => node.getAttribute("data-codexhost-project-group-create") !== null,
-    );
-    (create?.firstElementChild as FakeElement).dispatch("click");
-    expect(calls.manager).toEqual(["g1", undefined]);
     expect(buttons).toHaveLength(0);
     headers.dispose();
   });

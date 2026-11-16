@@ -9,7 +9,6 @@ export const PROJECT_GROUP_NON_MEMBER_ORDER = 1_000_000;
 const GROUP_ORDER_SPAN = 1_000;
 const MEMBER_ORDER_OFFSET = 10;
 const PLACEHOLDER_ORDER_OFFSET = 900;
-const CREATE_ORDER_OFFSET = 950;
 const MEMBER_INDENT = "12px";
 
 export interface ProjectGroupLayoutMember {
@@ -51,10 +50,6 @@ export function projectGroupMemberOrder(groupIndex: number, memberIndex: number)
 
 export function projectGroupPlaceholderOrder(groupIndex: number): number {
   return groupIndex * GROUP_ORDER_SPAN + PLACEHOLDER_ORDER_OFFSET;
-}
-
-export function projectGroupCreateOrder(groupCount: number): number {
-  return Math.max(0, groupCount - 1) * GROUP_ORDER_SPAN + CREATE_ORDER_OFFSET;
 }
 
 /**

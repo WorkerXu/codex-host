@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PROJECT_GROUP_NON_MEMBER_ORDER,
   ProjectGroupLayoutStyle,
-  projectGroupCreateOrder,
   projectGroupHeaderOrder,
   projectGroupLayoutCss,
   projectGroupMemberOrder,
@@ -134,15 +133,12 @@ describe("Project group layout CSS", () => {
     expect(projectGroupLayoutCss([])).toBe("");
   });
 
-  it("derives header, placeholder and create orders", () => {
+  it("derives header and placeholder orders", () => {
     expect(projectGroupHeaderOrder(0)).toBe(0);
     expect(projectGroupHeaderOrder(2)).toBe(2000);
     expect(projectGroupPlaceholderOrder(0)).toBe(900);
-    expect(projectGroupCreateOrder(0)).toBe(950);
-    expect(projectGroupCreateOrder(1)).toBe(950);
-    expect(projectGroupCreateOrder(2)).toBe(1950);
     expect(projectGroupHeaderOrder(2)).toBeLessThan(projectGroupPlaceholderOrder(2));
-    expect(projectGroupCreateOrder(2)).toBeLessThan(PROJECT_GROUP_NON_MEMBER_ORDER);
+    expect(projectGroupPlaceholderOrder(2)).toBeLessThan(PROJECT_GROUP_NON_MEMBER_ORDER);
   });
 
   it("scopes the list selector to the native Projects section", () => {

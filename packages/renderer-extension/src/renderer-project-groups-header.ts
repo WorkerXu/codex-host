@@ -8,7 +8,6 @@ import {
   projectUnitForId,
 } from "./renderer-project-groups-dom.js";
 import {
-  projectGroupCreateOrder,
   projectGroupHeaderOrder,
   projectGroupPlaceholderOrder,
 } from "./renderer-project-groups-layout.js";
@@ -154,7 +153,6 @@ export class ProjectGroupHeaders {
   readonly #handlers: ProjectGroupHeaderHandlers;
   readonly #headers = new Map<string, HTMLElement>();
   readonly #placeholders = new Map<string, HTMLElement>();
-  #create: HTMLElement | null = null;
 
   constructor(document: Document, handlers: ProjectGroupHeaderHandlers) {
     this.#document = document;
@@ -193,8 +191,6 @@ export class ProjectGroupHeaders {
       const placeholderCount = options.placeholders.get(group.id) ?? 0;
       this.#renderPlaceholder(list, group, index, placeholderCount, collapsed);
     });
-
-    this.#renderCreate(list, groups.length);
   }
 
   #headerNode(group: ProjectGroupHeaderItem, index: number, collapsed: boolean): HTMLElement {
@@ -362,23 +358,6 @@ export class ProjectGroupHeaders {
     if (reference !== node) this.#place(list, node, reference);
   }
 
-  #renderCreate(list: HTMLElement, groupCount: number): void {
-    if (!this.#create) {
-      this.#create = this.#document.createElement("div");
-      this.#create.setAttribute("role", "listitem");
-      this.#create.setAttribute("data-codexhost-project-group-create", "");
-      this.#create.setAttribute(UI_ATTRIBUTE, "");
-      style(this.#create, { display: "block", width: "100%" });
-      this.#create.append(
-        actionRow(this.#document, "＋ 新建项目组", () => this.#handlers.openManager()),
-      );
-      list.append(this.#create);
-    } else if (this.#create.parentElement !== list) {
-      list.append(this.#create);
-    }
-    this.#create.style.setProperty("order", String(projectGroupCreateOrder(groupCount)));
-  }
-
   #firstMemberUnit(section: HTMLElement, group: ProjectGroupHeaderItem): HTMLElement | null {
     for (const projectId of group.projectIds) {
       const unit = projectUnitForId(section, projectId);
@@ -415,9 +394,7 @@ export class ProjectGroupHeaders {
   dispose(): void {
     for (const node of this.#headers.values()) node.remove();
     for (const node of this.#placeholders.values()) node.remove();
-    this.#create?.remove();
     this.#headers.clear();
     this.#placeholders.clear();
-    this.#create = null;
   }
 }
