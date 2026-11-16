@@ -2,6 +2,7 @@ import createElement from "lucide/dist/esm/createElement.mjs";
 import Server from "lucide/dist/esm/icons/server.mjs";
 
 import { createRendererAgentIcon } from "./renderer-agent-icon.js";
+import { keepEditorFocusOnPress } from "./renderer-native-at-menu.js";
 import type {
   CrossHostHarness,
   CrossHostHarnessCatalog,
@@ -100,6 +101,9 @@ function rowButton(document: Document, depth: number, rightPadding: number): HTM
   button.addEventListener("pointerleave", () => {
     button.style.background = "transparent";
   });
+  // Same press-focus contract as the Agent rows: a focused Composer must not
+  // be rebuilt by Desktop before this row's click handler runs.
+  keepEditorFocusOnPress(button);
   return button;
 }
 
