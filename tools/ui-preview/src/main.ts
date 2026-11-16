@@ -696,7 +696,8 @@ const jarvisPreviewMany: JarvisBugSearchResult = {
       `示例项目 ${(index % 3) + 1}`,
       `示例：第 ${index + 1} 条待处理 Bug`,
       {
-        status: index % 3 === 1 ? 2 : 1,
+        // The active condition is 「未解决」; every fixture row must match it.
+        status: 1,
         priority: (index % 3) + 1,
         severity: (index % 4) + 1,
         updatedAt: new Date(Date.now() - index * 40 * 60_000).toISOString(),

@@ -1008,6 +1008,14 @@ for (const scenario of scenarios) {
           );
         }
         if (document.body.dataset.scenario === "jarvis-mode-many") {
+          const statuses = [...(mode?.querySelectorAll("[data-jarvis-status]") ?? [])].map(
+            (pill) => pill.textContent,
+          );
+          check(
+            "mode-status-matches-conditions",
+            statuses.length > 0 && statuses.every((status) => status === "未解决"),
+            statuses.join(","),
+          );
           const results = mode?.querySelector("[data-jarvis-results]");
           check(
             "mode-results-scrollable",
