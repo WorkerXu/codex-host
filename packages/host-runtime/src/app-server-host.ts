@@ -49,17 +49,19 @@ import {
   DINGTALK_SETTINGS_GET_METHOD,
   DINGTALK_SETTINGS_SET_METHOD,
   DINGTALK_CONVERSATIONS_METHOD,
+  DINGTALK_PREVIEW_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_RESOURCE_METHOD,
   DINGTALK_SEND_METHOD,
-  DINGTALK_DECIDE_METHOD,
   DINGTALK_SEARCH_METHOD,
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_VIEWED_METHOD,
   DINGTALK_CHANGED_METHOD,
   dingtalkConversationsParamsSchema,
+  dingtalkPreviewParamsSchema,
   dingtalkMessagesParamsSchema,
+  dingtalkResourceParamsSchema,
   dingtalkSendParamsSchema,
-  dingtalkDecideParamsSchema,
   dingtalkSearchParamsSchema,
   dingtalkResolveParamsSchema,
   dingtalkViewedParamsSchema,
@@ -3571,7 +3573,14 @@ export class AppServerHost {
       if (!parsed.success) {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk conversation request");
       }
-      return await service.conversations(parsed.data.refresh ?? false);
+      return await service.conversations(parsed.data);
+    }
+    if (request.method === DINGTALK_PREVIEW_METHOD) {
+      const parsed = dingtalkPreviewParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk preview request");
+      }
+      return await service.preview(parsed.data.conversationId);
     }
     if (request.method === DINGTALK_MESSAGES_METHOD) {
       const parsed = dingtalkMessagesParamsSchema.safeParse(request.params);
@@ -3580,19 +3589,19 @@ export class AppServerHost {
       }
       return await service.messages(parsed.data);
     }
+    if (request.method === DINGTALK_RESOURCE_METHOD) {
+      const parsed = dingtalkResourceParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk resource request");
+      }
+      return await service.resource(parsed.data);
+    }
     if (request.method === DINGTALK_SEND_METHOD) {
       const parsed = dingtalkSendParamsSchema.safeParse(request.params);
       if (!parsed.success) {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk message");
       }
       return await service.send(parsed.data);
-    }
-    if (request.method === DINGTALK_DECIDE_METHOD) {
-      const parsed = dingtalkDecideParamsSchema.safeParse(request.params);
-      if (!parsed.success) {
-        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk search query");
-      }
-      return await service.decide(parsed.data);
     }
     if (request.method === DINGTALK_SEARCH_METHOD) {
       const parsed = dingtalkSearchParamsSchema.safeParse(request.params);

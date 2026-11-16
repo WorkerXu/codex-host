@@ -1,19 +1,25 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import type { IconNode } from "lucide";
 
-import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
+import type {
+  DingTalkConversation,
+  DingTalkMessage,
+  DingTalkMessageResource,
+} from "@codexhost/shared-contracts";
 
 import {
   avatarTone,
-  dingtalkInitial,
+  dingtalkAvatarLabel,
   formatDingTalkClock,
   formatDingTalkDateLabel,
+  formatDingTalkFileSize,
   formatDingTalkTime,
   formatDingTalkTimeMark,
   highlightSegments,
   unsupportedSummary,
 } from "./dingtalk-page-model.js";
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
+import { appendDingTalkMarkdown } from "./dingtalk-markdown.js";
 
 export function createElementNode<K extends keyof HTMLElementTagNameMap>(
   document: Document,
@@ -59,28 +65,38 @@ export function createIconButton(
   return node;
 }
 
-/** 36px rounded avatar whose soft tone is stable for the conversation. */
+/** 36px rounded-square avatar with the native DingTalk default treatment. */
 export function createAvatar(
   document: Document,
-  conversation: Pick<DingTalkConversation, "conversationId" | "title">,
+  conversation: Pick<DingTalkConversation, "conversationId" | "title" | "singleChat">,
   size: 36 | 28 = 36,
 ): HTMLElement {
   const avatar = createElementNode(document, "span", `dingtalk-avatar dingtalk-avatar--${size}`);
   avatar.style.setProperty("--avatar-tone", avatarTone(conversation.conversationId));
-  avatar.textContent = dingtalkInitial(conversation.title);
+  avatar.textContent = dingtalkAvatarLabel(conversation.title, conversation.singleChat);
+  avatar.setAttribute("aria-hidden", "true");
   return avatar;
 }
 
 function unreadBadge(document: Document, conversation: DingTalkConversation): HTMLElement | null {
-  if (conversation.muted || conversation.unreadCount <= 0) return null;
+  if (conversation.unreadCount <= 0) return null;
+  if (conversation.muted) {
+    const dot = createElementNode(document, "span", "dingtalk-avatar-unread");
+    dot.setAttribute("aria-label", `${conversation.unreadCount} 条未读`);
+    return dot;
+  }
   const badge = createElementNode(
     document,
     "span",
-    "dingtalk-unread",
+    "dingtalk-unread-badge",
     conversation.unreadCount > 99 ? "99+" : String(conversation.unreadCount),
   );
   badge.setAttribute("aria-label", `${conversation.unreadCount} 条未读`);
   return badge;
+}
+
+function internalTag(document: Document): HTMLElement {
+  return createElementNode(document, "span", "dingtalk-conversation-tag", "内部群");
 }
 
 export function createConversationRow(
@@ -93,6 +109,7 @@ export function createConversationRow(
   const row = document.createElement("button");
   row.type = "button";
   row.className = "dingtalk-conversation";
+  row.dataset.conversationId = conversation.conversationId;
   row.setAttribute("role", "option");
   row.setAttribute("aria-selected", String(active));
   row.classList.toggle("dingtalk-conversation--active", active);
@@ -105,31 +122,41 @@ export function createConversationRow(
     conversation.title || text.unnamed,
   );
   title.title = conversation.title || text.unnamed;
+  line.append(title);
+  if (conversation.groupType === "INTERNAL_GROUP") line.append(internalTag(document));
   const time = createElementNode(
     document,
     "span",
     "dingtalk-conversation-time",
     formatDingTalkTime(conversation.lastMessageAt),
   );
-  line.append(title, time);
+  line.append(time);
   const meta = createElementNode(document, "span", "dingtalk-conversation-meta");
+  if (conversation.unreadCount > 1) {
+    meta.append(
+      createElementNode(
+        document,
+        "span",
+        "dingtalk-conversation-count",
+        `[${conversation.unreadCount > 99 ? "99+" : conversation.unreadCount} 条]`,
+      ),
+    );
+  }
+  if (conversation.atMe) {
+    meta.append(createElementNode(document, "span", "dingtalk-conversation-at-me", "[有人@我]"));
+  }
   const preview = createElementNode(
     document,
     "span",
     "dingtalk-conversation-preview",
-    conversation.preview ?? (conversation.singleChat ? text.direct : text.group),
+    conversation.preview ?? "",
   );
   meta.append(preview);
-  const badge = unreadBadge(document, conversation);
-  if (badge) meta.append(badge);
   copy.append(line, meta);
   const avatar = createElementNode(document, "span", "dingtalk-avatar-wrap");
   avatar.append(createAvatar(document, conversation));
-  if (conversation.muted && conversation.unreadCount > 0) {
-    const dot = createElementNode(document, "span", "dingtalk-avatar-unread");
-    dot.setAttribute("aria-label", `${conversation.unreadCount} 条未读`);
-    avatar.append(dot);
-  }
+  const badge = unreadBadge(document, conversation);
+  if (badge) avatar.append(badge);
   row.append(avatar, copy);
   row.addEventListener("click", onSelect);
   return row;
@@ -162,25 +189,47 @@ export function createSearchConversationRow(
   row.type = "button";
   row.className = "dingtalk-search-result dingtalk-search-result--conversation";
   const copy = createElementNode(document, "span", "dingtalk-search-copy");
+  // The title owns the full first line (up to two lines); tags, member count
+  // and time move to the gray meta line so similar group names stay distinct.
   const title = createElementNode(document, "span", "dingtalk-search-title");
   appendHighlighted(document, title, conversation.title || text.unnamed, query);
+  const meta = createElementNode(document, "span", "dingtalk-search-meta");
+  if (conversation.groupType === "INTERNAL_GROUP") meta.append(internalTag(document));
+  if (!conversation.singleChat && typeof conversation.memberCount === "number") {
+    meta.append(
+      createElementNode(
+        document,
+        "span",
+        "dingtalk-search-meta-text",
+        `${conversation.memberCount} 人`,
+      ),
+    );
+  }
+  if (conversation.singleChat && conversation.subtitle) {
+    meta.append(
+      createElementNode(document, "span", "dingtalk-search-meta-text", conversation.subtitle),
+    );
+  }
+  const timeText = formatDingTalkTime(conversation.lastMessageAt);
+  if (timeText) {
+    meta.append(createElementNode(document, "span", "dingtalk-search-meta-text", timeText));
+  }
   const preview = createElementNode(document, "span", "dingtalk-search-preview");
-  appendHighlighted(
-    document,
-    preview,
-    conversation.preview ?? (conversation.singleChat ? text.direct : text.group),
-    query,
-  );
-  copy.append(title, preview);
-  const time = createElementNode(
-    document,
-    "span",
-    "dingtalk-search-time",
-    formatDingTalkTime(conversation.lastMessageAt),
-  );
-  row.append(createAvatar(document, conversation, 28), copy, time);
+  if (conversation.preview) appendHighlighted(document, preview, conversation.preview, query);
+  copy.append(title, meta);
+  if (conversation.preview) copy.append(preview);
+  row.append(createAvatar(document, conversation, 28), copy);
   row.addEventListener("click", onSelect);
   return row;
+}
+
+function messageSearchSummary(message: DingTalkMessage): string {
+  const image = message.resources?.find(({ kind }) => kind === "image");
+  if (image) return "[图片]";
+  const file = message.resources?.find(({ kind }) => kind === "file");
+  if (file) return file.name ? `[文件] ${file.name}` : "[文件]";
+  if (message.cardTitle) return message.cardTitle;
+  return message.text.replace(/\s+/gu, " ").trim();
 }
 
 export function createSearchMessageRow(
@@ -210,8 +259,9 @@ export function createSearchMessageRow(
   );
   head.append(title, sender, time);
   const body = createElementNode(document, "span", "dingtalk-search-preview");
-  if (message.unsupported) body.textContent = unsupportedSummary(message);
-  else appendHighlighted(document, body, message.text.replace(/\s+/gu, " ").trim(), query);
+  const summary = messageSearchSummary(message);
+  if (message.unsupported && !summary) body.textContent = unsupportedSummary(message);
+  else appendHighlighted(document, body, summary, query);
   copy.append(head, body);
   row.append(copy);
   row.addEventListener("click", onSelect);
@@ -226,6 +276,173 @@ export interface MessageRowOptions {
   onSelect(checked: boolean): void;
   onActivate(): void;
   onRetry?(): void;
+  /** Resolves one image resource to a data URL; null shows a placeholder. */
+  loadImage?(resource: DingTalkMessageResource): Promise<string | null>;
+  onImageLoaded?(wasNearBottom: boolean): void;
+}
+
+function appendFileChip(
+  document: Document,
+  parent: HTMLElement,
+  resource: DingTalkMessageResource,
+): void {
+  const chip = createElementNode(document, "span", "dingtalk-message-file");
+  const name = createElementNode(
+    document,
+    "span",
+    "dingtalk-message-file-name",
+    resource.name || "文件",
+  );
+  chip.append(name);
+  const size = formatDingTalkFileSize(resource.sizeBytes);
+  if (size) chip.append(createElementNode(document, "span", "dingtalk-message-file-size", size));
+  parent.append(chip);
+}
+
+function imageBox(width: number, height: number): { width: number; height: number } {
+  const maxWidth = 240;
+  const maxHeight = 240;
+  const minWidth = 120;
+  const minHeight = 80;
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  let fittedWidth = width * scale;
+  let fittedHeight = height * scale;
+  if (fittedWidth < minWidth) {
+    fittedHeight *= minWidth / fittedWidth;
+    fittedWidth = minWidth;
+  }
+  if (fittedHeight < minHeight) {
+    fittedWidth *= minHeight / fittedHeight;
+    fittedHeight = minHeight;
+  }
+  if (fittedWidth > maxWidth) {
+    fittedHeight *= maxWidth / fittedWidth;
+    fittedWidth = maxWidth;
+  }
+  if (fittedHeight > maxHeight) {
+    fittedWidth *= maxHeight / fittedHeight;
+    fittedHeight = maxHeight;
+  }
+  return { width: Math.round(fittedWidth), height: Math.round(fittedHeight) };
+}
+
+function showImageUnavailable(document: Document, frame: HTMLElement): void {
+  frame.classList.remove("dingtalk-message-image--loading", "dingtalk-message-image--loaded");
+  frame.classList.add("dingtalk-message-image--unavailable");
+  frame.style.removeProperty("width");
+  frame.style.removeProperty("height");
+  frame.replaceChildren(
+    createElementNode(document, "span", "dingtalk-message-image-fallback", "[图片] 在手机上查看"),
+  );
+}
+
+function appendImage(
+  document: Document,
+  parent: HTMLElement,
+  message: DingTalkMessage,
+  resource: DingTalkMessageResource,
+  options: MessageRowOptions,
+): void {
+  const frame = createElementNode(
+    document,
+    "span",
+    "dingtalk-message-image dingtalk-message-image--loading",
+  );
+  frame.append(
+    createElementNode(document, "span", "dingtalk-skeleton dingtalk-message-image-skeleton"),
+  );
+  parent.append(frame);
+  if (!options.loadImage) {
+    showImageUnavailable(document, frame);
+    return;
+  }
+  void options
+    .loadImage(resource)
+    .then((dataUrl) => {
+      if (!frame.isConnected) return;
+      if (!dataUrl) {
+        showImageUnavailable(document, frame);
+        return;
+      }
+      const scroller = frame.closest<HTMLElement>(".dingtalk-message-list");
+      const nearBottom = scroller
+        ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 80
+        : false;
+      const image = document.createElement("img");
+      image.className = "dingtalk-message-image-content";
+      image.alt = message.text || "图片";
+      image.onload = () => {
+        if (!frame.isConnected) return;
+        const box = imageBox(image.naturalWidth || 1, image.naturalHeight || 1);
+        frame.style.width = `${box.width}px`;
+        frame.style.height = `${box.height}px`;
+        frame.classList.remove("dingtalk-message-image--loading");
+        frame.classList.add("dingtalk-message-image--loaded");
+        frame.replaceChildren(image);
+        options.onImageLoaded?.(nearBottom);
+      };
+      image.onerror = () => {
+        if (frame.isConnected) showImageUnavailable(document, frame);
+      };
+      image.src = dataUrl;
+    })
+    .catch(() => showImageUnavailable(document, frame));
+}
+
+function bubbleContent(
+  document: Document,
+  bubble: HTMLElement,
+  message: DingTalkMessage & { pending?: boolean; failed?: boolean },
+  options: MessageRowOptions,
+): void {
+  if (message.quotedMessage) {
+    const quote = createElementNode(document, "div", "dingtalk-message-quote");
+    quote.append(
+      createElementNode(
+        document,
+        "span",
+        "dingtalk-message-quote-sender",
+        message.quotedMessage.senderName || "未知成员",
+      ),
+      createElementNode(
+        document,
+        "span",
+        "dingtalk-message-quote-text",
+        message.quotedMessage.text || "[消息]",
+      ),
+    );
+    bubble.append(quote);
+  }
+  for (const resource of message.resources ?? []) {
+    if (resource.kind === "image") appendImage(document, bubble, message, resource, options);
+    else appendFileChip(document, bubble, resource);
+  }
+  if (message.cardTitle) {
+    bubble.classList.add("dingtalk-message-bubble--card");
+    bubble.append(
+      createElementNode(document, "div", "dingtalk-message-card-title", message.cardTitle),
+    );
+  }
+  if (message.format === "markdown") {
+    const markdown = createElementNode(document, "div", "dingtalk-message-markdown");
+    appendDingTalkMarkdown(document, markdown, message.text);
+    bubble.append(markdown);
+  } else if (message.text) {
+    bubble.append(createElementNode(document, "span", "dingtalk-message-text", message.text));
+  }
+  if (!message.text && !message.cardTitle && !(message.resources?.length ?? 0)) {
+    bubble.append(
+      createElementNode(
+        document,
+        "span",
+        "dingtalk-message-unsupported",
+        unsupportedSummary(message),
+      ),
+    );
+  }
+  if (message.pending) {
+    bubble.append(createElementNode(document, "span", "dingtalk-send-spinner"));
+  }
 }
 
 export function createMessageRow(
@@ -241,6 +458,8 @@ export function createMessageRow(
   row.classList.toggle("dingtalk-message--selected", options.selected);
   row.classList.toggle("dingtalk-message--pending", Boolean(message.pending));
   row.classList.toggle("dingtalk-message--failed", Boolean(message.failed));
+  row.classList.toggle("dingtalk-message--bot", Boolean(message.bot));
+  row.classList.toggle("dingtalk-message--card", Boolean(message.cardTitle));
 
   const check = document.createElement("input");
   check.type = "checkbox";
@@ -261,11 +480,8 @@ export function createMessageRow(
 
   if (!message.mine && !options.continuation) {
     const sender = createElementNode(document, "span", "dingtalk-message-avatar");
-    sender.style.setProperty(
-      "--avatar-tone",
-      avatarTone(`${message.senderId ?? message.senderName}`),
-    );
-    sender.textContent = dingtalkInitial(message.senderName || "?");
+    sender.style.setProperty("--avatar-tone", avatarTone(message.senderId ?? message.senderName));
+    sender.textContent = dingtalkAvatarLabel(message.senderName || "?", true);
     row.append(check, sender);
   } else if (!message.mine) {
     row.append(check, createElementNode(document, "span", "dingtalk-message-avatar-spacer"));
@@ -277,6 +493,9 @@ export function createMessageRow(
   if (!options.continuation && !message.mine) {
     const meta = createElementNode(document, "div", "dingtalk-message-meta");
     meta.append(createElementNode(document, "span", "dingtalk-message-sender", message.senderName));
+    if (message.bot) {
+      meta.append(createElementNode(document, "span", "dingtalk-bot-tag", "机器人"));
+    }
     if (!options.suppressTime) {
       meta.append(
         createElementNode(
@@ -307,21 +526,7 @@ export function createMessageRow(
 
   const line = createElementNode(document, "div", "dingtalk-message-line");
   const bubble = createElementNode(document, "div", "dingtalk-message-bubble");
-  if (message.unsupported) {
-    bubble.append(
-      createElementNode(
-        document,
-        "span",
-        "dingtalk-message-unsupported",
-        unsupportedSummary(message),
-      ),
-    );
-  } else {
-    bubble.append(createElementNode(document, "span", "dingtalk-message-text", message.text));
-  }
-  if (message.pending) {
-    bubble.append(createElementNode(document, "span", "dingtalk-send-spinner"));
-  }
+  bubbleContent(document, bubble, message, options);
   if (message.failed) {
     const retry = document.createElement("button");
     retry.type = "button";
@@ -335,6 +540,18 @@ export function createMessageRow(
     line.append(bubble);
   }
   body.append(line);
+  if (message.reactions && message.reactions.length > 0) {
+    const reactions = createElementNode(document, "div", "dingtalk-message-reactions");
+    for (const reaction of message.reactions) {
+      const chip = createElementNode(document, "span", "dingtalk-reaction");
+      chip.append(
+        createElementNode(document, "span", "dingtalk-reaction-emoji", reaction.emoji),
+        createElementNode(document, "span", "dingtalk-reaction-count", String(reaction.count)),
+      );
+      reactions.append(chip);
+    }
+    body.append(reactions);
+  }
   row.append(body);
   return row;
 }

@@ -1,6 +1,6 @@
 import RefreshIcon from "lucide/dist/esm/icons/refresh-cw.mjs";
 
-import type { DingTalkSettings } from "@codexhost/shared-contracts";
+import type { DingTalkStatus } from "@codexhost/shared-contracts";
 
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import { createElementNode, createIcon, createIconButton } from "./dingtalk-page-view.js";
@@ -10,7 +10,7 @@ export interface DingTalkPageMenuOptions {
   document: Document;
   text: DingTalkPageText;
   onRefresh(): void;
-  onHostChange(host: string | null): void;
+  onRetry(): void;
 }
 
 export interface DingTalkPageMenu {
@@ -20,13 +20,10 @@ export interface DingTalkPageMenu {
   contains(node: Node): boolean;
   toggle(): void;
   close(): void;
-  setStatus(available: boolean, host: string): void;
-  setError(message: string): void;
-  setSettings(settings: DingTalkSettings): void;
-  setHostDisabled(disabled: boolean): void;
+  setStatus(status: DingTalkStatus | null): void;
 }
 
-/** The top-right ⋯ menu: connection state, login host and refresh. */
+/** The top-right ⋯ menu: connection state and refresh. */
 export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTalkPageMenu {
   const { document, text } = options;
   const moreButton = createIconButton(document, text.moreActions, EllipsisIcon, {
@@ -41,12 +38,14 @@ export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTa
   const statusRow = createElementNode(document, "div", "dingtalk-menu-status");
   const dot = createElementNode(document, "span", "dingtalk-menu-dot");
   const statusText = createElementNode(document, "span", "dingtalk-menu-status-text");
-  statusRow.append(dot, statusText);
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "dingtalk-menu-retry";
+  retry.textContent = text.retry;
+  retry.hidden = true;
+  retry.addEventListener("click", () => options.onRetry());
+  statusRow.append(dot, statusText, retry);
   const divider = createElementNode(document, "div", "dingtalk-menu-divider");
-  const loginLabel = createElementNode(document, "div", "dingtalk-menu-label", text.menuLoginLabel);
-  const hostSelect = createElementNode(document, "select", "dingtalk-host-select");
-  hostSelect.setAttribute("aria-label", text.menuLoginLabel);
-  hostSelect.addEventListener("change", () => options.onHostChange(hostSelect.value || null));
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "dingtalk-menu-action";
@@ -55,7 +54,7 @@ export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTa
     createElementNode(document, "span", "", text.refreshConversations),
   );
   refresh.addEventListener("click", () => options.onRefresh());
-  menu.append(statusRow, divider, loginLabel, hostSelect, refresh);
+  menu.append(statusRow, divider, refresh);
 
   const api: DingTalkPageMenu = {
     moreButton,
@@ -74,33 +73,22 @@ export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTa
       menu.hidden = true;
       moreButton.setAttribute("aria-expanded", "false");
     },
-    setStatus(available, host) {
-      dot.classList.toggle("dingtalk-menu-dot--error", !available);
-      statusText.textContent = available
-        ? text.menuConnected.replace("{host}", host)
-        : text.menuUnavailable;
-    },
-    setError(message) {
-      dot.classList.add("dingtalk-menu-dot--error");
-      statusText.textContent = message;
-    },
-    setHostDisabled(disabled) {
-      hostSelect.disabled = disabled;
-    },
-    setSettings(settings) {
-      hostSelect.replaceChildren();
-      hostSelect.append(new Option(text.hostAuto, ""));
-      for (const host of settings.hosts) {
-        hostSelect.append(new Option(host.local ? text.hostLocal : host.name, host.name));
+    setStatus(status) {
+      const connected = status?.authenticated === true;
+      dot.classList.toggle("dingtalk-menu-dot--error", !connected);
+      if (connected) {
+        const name = status.userName?.trim() || "";
+        const corp = status.corpName?.trim() ? `（${status.corpName.trim()}）` : "";
+        statusText.textContent = name
+          ? `${text.menuConnected} · ${name}${corp}`
+          : text.menuConnected;
+      } else if (status?.errorCode === "not_logged_in") {
+        statusText.textContent = text.menuNotLoggedIn;
+      } else {
+        statusText.textContent = text.menuServiceUnavailable;
       }
-      if (
-        settings.defaultHost &&
-        !settings.hosts.some((host) => host.name === settings.defaultHost)
-      ) {
-        hostSelect.append(new Option(settings.defaultHost, settings.defaultHost));
-      }
-      hostSelect.value = settings.defaultHost ?? "";
-      hostSelect.title = text.hostEffective.replace("{name}", settings.effectiveHost);
+      statusText.title = statusText.textContent;
+      retry.hidden = connected;
     },
   };
   moreButton.addEventListener("click", (event) => {

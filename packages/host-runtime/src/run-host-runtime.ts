@@ -56,6 +56,7 @@ import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-m
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { createJarvisService } from "./jarvis-service.js";
 import { runDwsRaw } from "./dingtalk-cli.js";
+import { downloadDingTalkMedia } from "./dingtalk-media.js";
 import { createDingTalkService } from "./dingtalk-service.js";
 import { CodexAgentStore } from "./codex-agents.js";
 import { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
@@ -179,6 +180,30 @@ async function prepareDelegationRuntime(input: {
           timeoutMs: 60_000,
         });
         return { ...raw };
+      },
+      async readDingTalkMedia(body) {
+        const text = (value: unknown): string => (typeof value === "string" ? value : "");
+        const request = {
+          conversationId: text(body.conversationId),
+          messageId: text(body.messageId),
+          resourceId: text(body.resourceId),
+          resourceIdType: text(body.resourceIdType),
+        };
+        if (
+          !request.conversationId ||
+          !request.messageId ||
+          !request.resourceId ||
+          !request.resourceIdType
+        ) {
+          return {
+            ok: false,
+            base64: null,
+            mimeType: null,
+            sizeBytes: null,
+            errorCode: "invalid_params",
+          };
+        }
+        return { ...(await downloadDingTalkMedia({ environment: input.environment, request })) };
       },
     },
   });

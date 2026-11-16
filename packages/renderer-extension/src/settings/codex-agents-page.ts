@@ -23,6 +23,7 @@ import {
 } from "./codex-agents-form.js";
 import type { RendererSettingsMessages } from "./localization.js";
 import { createDingTalkDispatchSection } from "./dingtalk-dispatch-section.js";
+import { createAgentAvatar, type CodexAgentAvatarState } from "./codex-agent-avatar.js";
 
 export interface RendererCodexAgentsSettingsOptions {
   createClient(): RendererCodexAgentsClient | null;
@@ -67,11 +68,7 @@ export function createCodexAgentsSettingsPage(
       description.className = "agents-page-description";
       description.textContent = text.description;
       headCopy.append(heading, description);
-      const create = document.createElement("button");
-      create.type = "button";
-      create.className = "agents-new";
-      create.textContent = text.create;
-      head.append(headCopy, create);
+      head.append(headCopy);
       page.append(head);
 
       if (!client) {
@@ -84,18 +81,33 @@ export function createCodexAgentsSettingsPage(
       status.setAttribute("role", "status");
       status.hidden = true;
       const list = document.createElement("div");
-      list.className = "agents-list";
+      list.className = "agents-grid";
       list.setAttribute("role", "list");
+      const emptyCopy = document.createElement("p");
+      emptyCopy.className = "agents-empty-copy";
+      emptyCopy.textContent = text.empty;
+      emptyCopy.hidden = true;
       const issues = document.createElement("p");
       issues.className = "agents-issues";
       issues.hidden = true;
-      page.append(status, list, issues);
+      page.append(status, list, emptyCopy, issues);
 
+      let participatingAgents = new Set<string>();
+      let dispatchEnabled = false;
+      let editingName: string | null = null;
+      let createCard: HTMLButtonElement | null = null;
       const dingtalk = createDingTalkDispatchSection(
         document,
         client,
         text.dingtalk,
         (id) => text.effortLabels[id] ?? id,
+        {
+          onParticipationChange: (participating, enabled) => {
+            participatingAgents = new Set(participating);
+            dispatchEnabled = enabled;
+            if (loaded) renderRoutes();
+          },
+        },
       );
       page.append(dingtalk.root);
 
@@ -134,26 +146,44 @@ export function createCodexAgentsSettingsPage(
         return text.genericError;
       };
 
+      const runtimeStates = new Map<string, CodexAgentAvatarState>();
+
+      const isParticipating = (agent: CodexAgentSummary): boolean =>
+        dispatchEnabled && participatingAgents.has(agent.name);
+
+      const stateLabel = (agent: CodexAgentSummary): string => {
+        if (!isParticipating(agent) && !runtimeStates.has(agent.name)) return text.stateResting;
+        const state = runtimeStates.get(agent.name) ?? "idle";
+        return state === "working"
+          ? text.stateWorking
+          : state === "waiting"
+            ? text.stateWaiting
+            : state === "done"
+              ? text.stateDone
+              : text.stateIdle;
+      };
+
+      const setEditingCard = (name: string | null): void => {
+        for (const card of list.querySelectorAll<HTMLElement>(".agent-card[data-agent-name]")) {
+          const active = card.dataset.agentName === name;
+          card.classList.toggle("agent-card--editing", active);
+          if (active) card.setAttribute("aria-current", "true");
+          else card.removeAttribute("aria-current");
+        }
+      };
+
       const renderRoutes = (): void => {
         list.replaceChildren();
+        createCard = null;
         if (!loaded) {
-          for (let index = 0; index < 3; index += 1) list.append(skeletonRow());
+          emptyCopy.hidden = true;
+          for (let index = 0; index < 3; index += 1) list.append(skeletonCard());
           return;
         }
-        if (agents.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "agents-empty";
-          empty.append(stateText(text.empty));
-          const action = document.createElement("button");
-          action.type = "button";
-          action.className = "agents-empty-action";
-          action.textContent = text.create;
-          action.addEventListener("click", () => openEditor("create"));
-          empty.append(action);
-          list.append(empty);
-          return;
-        }
-        for (const agent of agents) list.append(agentRow(agent));
+        emptyCopy.hidden = agents.length > 0;
+        for (const agent of agents) list.append(agentCard(agent));
+        createCard = newAgentCard();
+        list.append(createCard);
       };
 
       const renderIssues = (result: CodexAgentListResult): void => {
@@ -162,36 +192,37 @@ export function createCodexAgentsSettingsPage(
           result.issues.length > 0 ? `${text.issuesTitle} (${result.issues.length})` : "";
       };
 
-      function agentRow(agent: CodexAgentSummary): HTMLElement {
-        const row = document.createElement("div");
-        row.className = "agent-row";
-        row.setAttribute("role", "listitem");
-        row.tabIndex = 0;
-        const main = document.createElement("div");
-        main.className = "agent-row-main";
-        const headingLine = document.createElement("div");
-        headingLine.className = "agent-row-heading";
-        const name = document.createElement("span");
-        name.className = "agent-row-name";
-        name.textContent = agent.name;
-        const meta = document.createElement("span");
-        meta.className = "agent-row-meta";
-        meta.textContent = [
-          agent.model ?? text.defaultModel,
-          agent.reasoningEffort ? effortLabel(agent.reasoningEffort) : null,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        headingLine.append(name, meta);
-        const copy = document.createElement("div");
-        copy.className = "agent-row-description";
-        copy.textContent = agent.description;
-        main.append(headingLine, copy);
-        const actions = document.createElement("div");
-        actions.className = "agent-row-actions";
+      function agentCard(agent: CodexAgentSummary): HTMLElement {
+        const card = document.createElement("div");
+        card.className = "agent-card";
+        card.dataset.agentName = agent.name;
+        card.setAttribute("role", "listitem");
+        card.tabIndex = 0;
+        if (editingName === agent.name) {
+          card.classList.add("agent-card--editing");
+          card.setAttribute("aria-current", "true");
+        }
+
+        const top = document.createElement("div");
+        top.className = "agent-card-top";
+        const avatar = document.createElement("span");
+        avatar.className = "agent-card-avatar";
+        avatar.append(
+          createAgentAvatar(
+            document,
+            agent.name,
+            runtimeStates.get(agent.name) ?? "idle",
+            !isParticipating(agent) && !runtimeStates.has(agent.name),
+          ),
+        );
+        const tools = document.createElement("div");
+        tools.className = "agent-card-tools";
+        const action = document.createElement("span");
+        action.className = "agent-card-action";
+        action.textContent = stateLabel(agent);
         const menuButton = document.createElement("button");
         menuButton.type = "button";
-        menuButton.className = "agent-row-menu-button";
+        menuButton.className = "agent-card-menu";
         menuButton.textContent = "⋯";
         menuButton.setAttribute("aria-label", text.moreActions);
         menuButton.title = text.moreActions;
@@ -199,44 +230,115 @@ export function createCodexAgentsSettingsPage(
           event.stopPropagation();
           openRowMenu(agent, menuButton);
         });
-        actions.append(menuButton);
-        row.append(main, actions);
+        tools.append(action, menuButton);
+        top.append(avatar, tools);
+
+        const name = document.createElement("div");
+        name.className = "agent-card-name";
+        name.textContent = agent.name;
+        name.title = agent.name;
+
+        const description = document.createElement("p");
+        description.className = "agent-card-description";
+        description.textContent = agent.description;
+        description.title = agent.description;
+
+        const tags = document.createElement("div");
+        tags.className = "agent-card-tags";
+        const model = document.createElement("span");
+        model.className = "agent-card-tag";
+        model.textContent = [
+          agent.model ?? text.defaultModel,
+          agent.reasoningEffort ? effortLabel(agent.reasoningEffort) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        tags.append(model);
+        if (isParticipating(agent)) {
+          const participating = document.createElement("span");
+          participating.className = "agent-card-tag agent-card-tag--dispatch";
+          participating.textContent = text.participating;
+          tags.append(participating);
+        }
+        if (typeof agent.lastDispatchedAt === "number") {
+          const dispatched = document.createElement("span");
+          dispatched.className = "agent-card-tag";
+          dispatched.textContent = text.lastDispatched.replace(
+            "{time}",
+            relativeTime(agent.lastDispatchedAt),
+          );
+          tags.append(dispatched);
+        }
+
+        card.append(top, name, description, tags);
         const activate = (event: Event): void => {
           if (
             event.target instanceof Element &&
-            event.target.closest(".agent-row-actions, .agent-menu")
+            event.target.closest(".agent-card-tools, .agent-menu")
           ) {
             return;
           }
-          void editExisting(agent, "edit", row);
+          void editExisting(agent, "edit", card);
         };
-        row.addEventListener("click", activate);
-        row.addEventListener("keydown", (event) => {
+        card.addEventListener("click", activate);
+        card.addEventListener("keydown", (event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             activate(event);
           }
         });
-        return row;
+        return card;
       }
 
-      function skeletonRow(): HTMLElement {
-        const row = document.createElement("div");
-        row.className = "agent-row agent-row--skeleton";
-        const main = document.createElement("div");
-        main.className = "agent-row-main";
-        main.append(
-          element("span", "agent-skeleton agent-skeleton--title"),
-          element("span", "agent-skeleton agent-skeleton--description"),
+      function newAgentCard(): HTMLButtonElement {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "agent-card agent-card--new";
+        card.setAttribute("role", "listitem");
+        const plus = document.createElement("span");
+        plus.className = "agent-card-new-plus";
+        plus.textContent = "+";
+        const label = document.createElement("span");
+        label.className = "agent-card-new-label";
+        label.textContent = text.createCard;
+        card.append(plus, label);
+        card.addEventListener("click", () => openEditor("create", undefined, card));
+        return card;
+      }
+
+      function skeletonCard(): HTMLElement {
+        const card = document.createElement("div");
+        card.className = "agent-card agent-card--skeleton";
+        card.setAttribute("role", "presentation");
+        const top = document.createElement("div");
+        top.className = "agent-card-top";
+        top.append(
+          element("span", "agent-skeleton agent-skeleton--avatar"),
+          element("span", "agent-skeleton agent-skeleton--menu"),
         );
-        row.append(main);
-        return row;
+        const name = element("span", "agent-skeleton agent-skeleton--title");
+        const description = element("span", "agent-skeleton agent-skeleton--description");
+        const tags = element("span", "agent-skeleton agent-skeleton--tags");
+        card.append(top, name, description, tags);
+        return card;
       }
 
       function element(tag: string, className: string): HTMLElement {
         const node = document.createElement(tag);
         node.className = className;
         return node;
+      }
+
+      function relativeTime(value: number): string {
+        const delta = Math.max(0, Date.now() - value);
+        const minute = 60_000;
+        const hour = 60 * minute;
+        const day = 24 * hour;
+        if (delta < minute) return "刚刚";
+        if (delta < hour) return `${Math.floor(delta / minute)} 分钟前`;
+        if (delta < day) return `${Math.floor(delta / hour)} 小时前`;
+        if (delta < 7 * day) return `${Math.floor(delta / day)} 天前`;
+        return new Date(value).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
       }
 
       function stateText(value: string): HTMLElement {
@@ -314,6 +416,9 @@ export function createCodexAgentsSettingsPage(
           if (disposed || generation !== listGeneration) return;
           loaded = true;
           agents = result.agents;
+          if (editingName && !agents.some((agent) => agent.name === editingName)) {
+            editingName = null;
+          }
           renderRoutes();
           renderIssues(result);
           dingtalk.setAgents(agents);
@@ -673,6 +778,8 @@ export function createCodexAgentsSettingsPage(
       ): void => {
         closeRowMenu();
         clearError();
+        editingName = mode === "edit" ? (record?.name ?? null) : null;
+        setEditingCard(editingName);
         currentDraft =
           mode === "create" || !record
             ? emptyAgentDraft()
@@ -705,6 +812,8 @@ export function createCodexAgentsSettingsPage(
       const closeEditor = (): void => {
         editor.root.hidden = true;
         currentDraft = emptyAgentDraft();
+        editingName = null;
+        setEditingCard(null);
         clearError();
         returnFocus?.focus();
         returnFocus = null;
@@ -715,11 +824,19 @@ export function createCodexAgentsSettingsPage(
         mode: "edit" | "duplicate",
         focusTarget?: HTMLElement,
       ): Promise<void> => {
+        if (mode === "edit") {
+          editingName = agent.name;
+          setEditingCard(agent.name);
+        }
         try {
           const record = await client.read(agent.fileName);
           if (!disposed) openEditor(mode, record, focusTarget);
         } catch (error) {
-          if (!disposed) setStatus(errorText(error), true);
+          if (!disposed) {
+            editingName = null;
+            setEditingCard(null);
+            setStatus(errorText(error), true);
+          }
         }
       };
 
@@ -744,7 +861,6 @@ export function createCodexAgentsSettingsPage(
           if (control === editor.instructions) updateInstructionCount();
         });
       }
-      create.addEventListener("click", () => openEditor("create", undefined, create));
       editor.close.addEventListener("click", closeEditor);
       editor.cancel.addEventListener("click", closeEditor);
       editor.form.addEventListener("submit", (event) => {

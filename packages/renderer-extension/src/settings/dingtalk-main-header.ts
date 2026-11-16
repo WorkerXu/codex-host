@@ -22,20 +22,19 @@ export interface DingTalkMainHeader {
   setConversation(conversation: DingTalkConversation | null): void;
 }
 
-type ConversationMeta = DingTalkConversation & {
-  memberCount?: number;
-  department?: string;
-};
-
 /** Header keeps only icon actions: embed and a small overflow menu. */
 export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): DingTalkMainHeader {
   const { document, text } = options;
   const element = createElementNode(document, "div", "dingtalk-main-head");
   const copy = createElementNode(document, "div", "dingtalk-main-copy");
+  const titleLine = createElementNode(document, "div", "dingtalk-main-title-line");
   const title = createElementNode(document, "div", "dingtalk-main-title", text.selectConversation);
+  const tag = createElementNode(document, "span", "dingtalk-main-tag", "内部群");
+  tag.hidden = true;
+  titleLine.append(title, tag);
   const subtitle = createElementNode(document, "div", "dingtalk-main-subtitle");
   subtitle.hidden = true;
-  copy.append(title, subtitle);
+  copy.append(titleLine, subtitle);
   const actions = createElementNode(document, "div", "dingtalk-main-actions");
   const embed = createIconButton(document, text.embedConversation, LogInIcon, {
     className: "dingtalk-embed-button",
@@ -80,16 +79,16 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
       more.setAttribute("aria-expanded", "false");
     },
     setConversation(conversation) {
-      const meta = conversation as ConversationMeta | null;
       title.textContent = conversation?.title || text.selectConversation;
       title.title = conversation?.title ?? "";
+      tag.hidden = conversation?.groupType !== "INTERNAL_GROUP";
       const secondary =
-        meta === null
+        conversation === null
           ? ""
-          : meta.singleChat
-            ? (meta.department ?? "")
-            : typeof meta.memberCount === "number"
-              ? `${meta.memberCount} 人`
+          : conversation.singleChat
+            ? (conversation.subtitle ?? "")
+            : typeof conversation.memberCount === "number" && conversation.memberCount > 0
+              ? `${conversation.memberCount} 人`
               : "";
       subtitle.textContent = secondary;
       subtitle.hidden = secondary.length === 0;

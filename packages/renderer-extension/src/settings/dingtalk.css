@@ -224,9 +224,29 @@
   right: -2px;
   width: 8px;
   height: 8px;
-  background: var(--color-token-charts-red);
-  border: 2px solid var(--color-token-bg-primary);
-  border-radius: var(--radius-full);
+  background: var(--color-background-danger-solid, #e02e2a);
+  border: 2px solid var(--color-token-bg-primary, #f5f5f5);
+  border-radius: var(--radius-full, 9999px);
+}
+
+.dingtalk-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  min-width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  color: var(--color-text-danger-solid, #ffffff);
+  background: var(--color-background-danger-solid, #e02e2a);
+  border: 2px solid var(--color-token-bg-primary, #f5f5f5);
+  border-radius: var(--radius-full, 9999px);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .dingtalk-avatar {
@@ -234,8 +254,8 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--avatar-tone) 70%, var(--color-token-text-primary));
-  background: color-mix(in srgb, var(--avatar-tone) 16%, var(--color-token-main-surface-primary));
+  color: var(--color-token-on-accent, #ffffff);
+  background: var(--avatar-tone, #3296fa);
   font-size: var(--font-text-sm-size);
   font-weight: 500;
   line-height: 1;
@@ -245,7 +265,7 @@
 .dingtalk-avatar--36 {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .dingtalk-avatar--28 {
@@ -272,7 +292,7 @@
 
 .dingtalk-conversation-title {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   color: var(--color-token-text-primary);
   font-size: var(--font-text-sm-size);
@@ -282,9 +302,41 @@
   white-space: nowrap;
 }
 
+.dingtalk-conversation-tag,
+.dingtalk-main-tag {
+  flex: none;
+  padding: 0 4px;
+  color: var(--color-token-text-link-foreground, #0169cc);
+  border: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
+  border-radius: 4px;
+  font-size: var(--font-text-xs-size);
+  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.dingtalk-conversation-line > .dingtalk-conversation-title {
+  flex: 0 1 auto;
+}
+
 .dingtalk-conversation-time {
   flex: none;
+  margin-left: auto;
   color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-conversation-count {
+  flex: none;
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-conversation-at-me {
+  flex: none;
+  color: var(--color-background-danger-solid, #e02e2a);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
 }
@@ -307,28 +359,24 @@
   white-space: nowrap;
 }
 
-.dingtalk-unread {
-  display: inline-flex;
-  min-width: 18px;
-  height: 18px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  color: var(--color-token-on-accent);
-  background: var(--color-token-charts-red);
-  border-radius: var(--radius-full);
-  font-size: var(--font-text-xs-size);
-  font-weight: 500;
-  line-height: 1;
-}
-
 .dingtalk-main {
   display: flex;
   min-width: 0;
   flex: 1;
   flex-direction: column;
   background: var(--color-token-main-surface-primary);
+}
+
+.dingtalk-main-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.dingtalk-main-title-line .dingtalk-main-title {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .dingtalk-main-head {
@@ -392,8 +440,8 @@
   flex: none;
   margin: 8px 16px 0;
   padding: 8px 12px;
-  color: var(--color-token-charts-red);
-  background: color-mix(in srgb, var(--color-token-charts-red) 8%, transparent);
+  color: var(--color-background-danger-solid, #e02e2a);
+  background: color-mix(in srgb, var(--color-background-danger-solid, #e02e2a) 8%, transparent);
   border-radius: var(--radius-md);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
@@ -414,6 +462,10 @@
   padding: 16px 20px;
   overscroll-behavior: contain;
   overflow-anchor: none;
+}
+
+.dingtalk-message-list > :first-child {
+  margin-top: auto;
 }
 
 .dingtalk-date-separator,
@@ -469,7 +521,7 @@
   margin: 0;
   cursor: pointer;
   opacity: 0;
-  accent-color: var(--color-token-charts-blue);
+  accent-color: var(--color-token-charts-blue, #0285ff);
   transition: opacity 120ms ease;
 }
 
@@ -491,8 +543,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--avatar-tone) 70%, var(--color-token-text-primary));
-  background: color-mix(in srgb, var(--avatar-tone) 16%, var(--color-token-main-surface-primary));
+  color: var(--color-token-on-accent, #ffffff);
+  background: var(--avatar-tone, #3296fa);
   border-radius: 8px;
   font-size: var(--font-text-xs-size);
   font-weight: 500;
@@ -562,9 +614,229 @@
 .dingtalk-message--mine .dingtalk-message-bubble {
   background: color-mix(
     in srgb,
-    var(--color-token-charts-blue) 12%,
+    var(--color-token-charts-blue, #0285ff) 12%,
     var(--color-token-main-surface-primary)
   );
+}
+
+.dingtalk-message-bubble--card {
+  padding: 12px 14px;
+  background: var(--color-token-main-surface-primary);
+  border: 1px solid var(--color-token-border-default);
+  border-radius: var(--radius-lg, 0.5rem);
+}
+
+.dingtalk-message--card .dingtalk-message-bubble {
+  background: var(--color-token-main-surface-primary);
+}
+
+.dingtalk-message-card-title {
+  margin-bottom: 6px;
+  color: var(--color-token-text-primary);
+  font-size: var(--font-text-sm-size);
+  font-weight: 600;
+  line-height: var(--font-text-sm-line-height);
+}
+
+.dingtalk-message-markdown {
+  color: var(--color-token-text-primary);
+  font-size: var(--font-text-sm-size);
+  line-height: 1.55;
+  white-space: normal;
+}
+
+.dingtalk-md-paragraph + .dingtalk-md-paragraph,
+.dingtalk-md-paragraph + .dingtalk-md-list,
+.dingtalk-md-list + .dingtalk-md-paragraph,
+.dingtalk-md-list + .dingtalk-md-list,
+.dingtalk-md-quote + .dingtalk-md-paragraph,
+.dingtalk-md-paragraph + .dingtalk-md-quote {
+  margin-top: 8px;
+}
+
+.dingtalk-md-quote {
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  color: var(--color-token-text-secondary);
+  border-left: 2px solid var(--color-token-border-default);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-md-heading {
+  font-weight: 600;
+}
+
+.dingtalk-md-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.dingtalk-md-code {
+  padding: 0 4px;
+  background: var(--color-token-list-hover-background);
+  border-radius: var(--radius-sm, 0.25rem);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-text-xs-size);
+}
+
+.dingtalk-md-link {
+  color: var(--color-token-text-link-foreground);
+  text-decoration: none;
+}
+
+.dingtalk-md-link:hover {
+  text-decoration: underline;
+}
+
+.dingtalk-md-rule {
+  height: 1px;
+  margin: 10px 0;
+  background: var(--color-token-border-light);
+  border: 0;
+}
+
+.dingtalk-message-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  color: var(--color-token-text-secondary);
+  background: var(--color-token-list-hover-background);
+  border-radius: var(--radius-md, 0.375rem);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-message-quote-sender {
+  color: var(--color-token-text-tertiary);
+  font-weight: 500;
+}
+
+.dingtalk-message-quote-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: pre-wrap;
+}
+
+.dingtalk-message-image {
+  display: inline-flex;
+  max-width: 240px;
+  max-height: 240px;
+  min-width: 120px;
+  min-height: 80px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 6px;
+  background: var(--color-token-list-hover-background);
+  border-radius: var(--radius-md, 0.375rem);
+}
+
+.dingtalk-message-image:last-child {
+  margin-bottom: 0;
+}
+
+.dingtalk-message-image--loading {
+  width: 240px;
+  height: 150px;
+}
+
+.dingtalk-message-image-content {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dingtalk-message-image-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dingtalk-message-image--unavailable {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  min-width: 160px;
+  min-height: 0;
+  padding: 8px 12px;
+}
+
+.dingtalk-message-image-fallback {
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+  white-space: nowrap;
+}
+
+.dingtalk-message-file {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  background: var(--color-token-list-hover-background);
+  border-radius: var(--radius-md, 0.375rem);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-message-file-name {
+  overflow: hidden;
+  color: var(--color-token-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-message-file-size {
+  flex: none;
+  color: var(--color-token-text-tertiary);
+}
+
+.dingtalk-message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.dingtalk-message--mine .dingtalk-message-reactions {
+  justify-content: flex-end;
+}
+
+.dingtalk-reaction {
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  color: var(--color-token-text-secondary);
+  background: var(--color-token-main-surface-primary);
+  border: 1px solid var(--color-token-border-default);
+  border-radius: var(--radius-full, 9999px);
+  font-size: var(--font-text-xs-size);
+  line-height: 1;
+}
+
+.dingtalk-reaction-count {
+  color: var(--color-token-text-tertiary);
+}
+
+.dingtalk-bot-tag {
+  flex: none;
+  padding: 0 4px;
+  color: var(--color-token-text-link-foreground);
+  border: 1px solid var(--color-token-border-default);
+  border-radius: 4px;
+  font-size: var(--font-text-xs-size);
+  line-height: 14px;
 }
 
 .dingtalk-message-text {
@@ -605,7 +877,7 @@
   flex: none;
   padding: 0;
   color: var(--color-token-on-accent);
-  background: var(--color-token-charts-red);
+  background: var(--color-background-danger-solid, #e02e2a);
   border: 0;
   border-radius: var(--radius-full);
   cursor: pointer;
@@ -621,7 +893,8 @@
 @keyframes dingtalk-highlight {
   0%,
   60% {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-token-charts-yellow) 70%, transparent);
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--color-token-charts-yellow, #d29922) 70%, transparent);
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
@@ -745,6 +1018,12 @@
   text-decoration: underline;
 }
 
+.dingtalk-text-button:disabled {
+  color: var(--color-token-text-tertiary);
+  cursor: default;
+  text-decoration: none;
+}
+
 .dingtalk-text-button:focus-visible {
   outline: 2px solid var(--color-token-text-link-foreground);
   outline-offset: 2px;
@@ -816,7 +1095,7 @@
   justify-content: center;
   padding: 0;
   color: var(--color-token-on-accent);
-  background: var(--color-token-charts-blue);
+  background: var(--color-token-charts-blue, #0285ff);
   border: 0;
   border-radius: var(--radius-full);
   cursor: pointer;
@@ -919,12 +1198,12 @@
   width: 6px;
   height: 6px;
   flex: none;
-  background: var(--color-token-charts-green);
+  background: var(--color-token-charts-green, #12a150);
   border-radius: var(--radius-full);
 }
 
 .dingtalk-menu-dot--error {
-  background: var(--color-token-charts-red);
+  background: var(--color-background-danger-solid, #e02e2a);
 }
 
 .dingtalk-menu-divider {
@@ -933,24 +1212,28 @@
   background: var(--color-token-border-light);
 }
 
-.dingtalk-menu-label {
-  padding: 8px 8px 4px;
-  color: var(--color-token-text-tertiary);
+.dingtalk-menu-status-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-menu-retry {
+  flex: none;
+  padding: 0;
+  color: var(--color-token-text-link-foreground);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
 }
 
-.dingtalk-host-select {
-  width: 100%;
-  height: 32px;
-  margin-bottom: 4px;
-  padding: 0 8px;
-  color: var(--color-token-text-primary);
-  background: var(--color-token-main-surface-primary);
-  border: 1px solid var(--color-token-border-default);
-  border-radius: var(--radius-md);
-  font: inherit;
-  font-size: var(--font-text-sm-size);
+.dingtalk-menu-retry:hover {
+  text-decoration: underline;
 }
 
 .dingtalk-menu-action {
@@ -1033,6 +1316,46 @@
   background: var(--color-token-list-hover-background);
 }
 
+.dingtalk-search-result--conversation {
+  align-items: flex-start;
+  min-height: 64px;
+  padding: 10px 8px;
+}
+
+.dingtalk-search-result--conversation .dingtalk-search-copy {
+  gap: 3px;
+}
+
+.dingtalk-search-result--conversation .dingtalk-search-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dingtalk-search-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-search-meta > *:not(:first-child)::before {
+  margin-right: 4px;
+  content: "·";
+}
+
+.dingtalk-search-meta .dingtalk-conversation-tag {
+  padding: 0 3px;
+  line-height: 14px;
+}
+
 .dingtalk-search-result--message {
   display: block;
   min-height: 0;
@@ -1097,7 +1420,7 @@
 }
 
 .dingtalk-search-mark {
-  color: var(--color-token-charts-orange);
+  color: var(--color-token-charts-orange, #e0721a);
   background: transparent;
 }
 

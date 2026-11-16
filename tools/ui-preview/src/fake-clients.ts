@@ -4,13 +4,12 @@ import type {
   CodexAgentRecord,
   CodexAgentSaveParams,
   DingTalkConversationsResult,
-  DingTalkDecideResult,
   DingTalkMessage,
   DingTalkMessagesResult,
   DingTalkResolveResult,
+  DingTalkResourceResult,
   DingTalkSearchResult,
   DingTalkSendResult,
-  DingTalkSettings,
   DingTalkStatus,
   DingTalkDispatchSettings,
 } from "@codexhost/shared-contracts";
@@ -22,15 +21,20 @@ import {
   agentSummaries,
   agents,
   conversations,
-  dingTalkSettings,
   dispatchSettings,
   messagesFor,
+  previewImageDataUrl,
+  remoteSearchGroups,
+  remoteSearchPeople,
 } from "./fixtures.js";
+
+export type FakeDingTalkStatus = "connected" | "not-logged-in" | "unreachable";
 
 export interface FakeDingTalkOptions {
   empty?: boolean;
   error?: boolean;
   messageDelayMs?: number;
+  status?: FakeDingTalkStatus;
 }
 
 const sleep = (milliseconds: number) =>
@@ -42,42 +46,79 @@ export function createFakeDingTalkClient(
   options: FakeDingTalkOptions = {},
 ): RendererDingTalkClient {
   const messageDelay = options.messageDelayMs ?? 120;
-  let currentSettings = { ...dingTalkSettings };
+  const statusState = options.status ?? "connected";
   const listeners = new Set<(conversationId: string | null) => void>();
 
-  const conversationsResult = (): DingTalkConversationsResult => ({
-    available: !options.error,
-    source: options.empty ? "empty" : "unread",
-    conversations: options.empty || options.error ? [] : conversations.map((row) => ({ ...row })),
-    cachedAt: Date.now(),
-    refreshing: false,
-    errorCode: options.error ? "cli_failed" : null,
-  });
+  const conversationsResult = (view: "unread" | "recent"): DingTalkConversationsResult => {
+    const rows =
+      view === "recent"
+        ? conversations.slice(0, 10).map((row) => ({
+            ...row,
+            unreadCount: 0,
+            preview: row.preview?.startsWith("我：") ? row.preview : `我：${row.preview ?? "收到"}`,
+          }))
+        : conversations.map((row) => ({ ...row }));
+    return {
+      available: !options.error,
+      source: options.empty ? "empty" : view,
+      conversations: options.empty || options.error ? [] : rows,
+      cachedAt: Date.now(),
+      refreshing: false,
+      errorCode: options.error ? "cli_failed" : null,
+    };
+  };
 
   return {
     available: () => true,
     async status(): Promise<DingTalkStatus> {
+      if (statusState === "not-logged-in") {
+        return {
+          installed: true,
+          authenticated: false,
+          userName: null,
+          userId: null,
+          corpName: null,
+          defaultHost: "tencent",
+          defaultHostId: "host-tencent",
+          errorCode: "not_logged_in",
+        };
+      }
+      if (statusState === "unreachable") {
+        return {
+          installed: true,
+          authenticated: false,
+          userName: null,
+          userId: null,
+          corpName: null,
+          defaultHost: "tencent",
+          defaultHostId: "host-tencent",
+          errorCode: "peer_unavailable",
+        };
+      }
       return {
         installed: true,
         authenticated: true,
-        userName: "预览用户",
+        userName: "示例用户",
         userId: "user-preview",
-        corpName: "示例公司",
-        defaultHost: currentSettings.effectiveHost,
-        defaultHostId: currentSettings.effectiveHostId,
+        corpName: "示例科技有限公司",
+        defaultHost: "tencent",
+        defaultHostId: "host-tencent",
         errorCode: null,
       };
     },
-    async settings(): Promise<DingTalkSettings> {
-      return { ...currentSettings, hosts: currentSettings.hosts.map((host) => ({ ...host })) };
-    },
-    async updateSettings(params) {
-      currentSettings = { ...currentSettings, defaultHost: params.defaultHost };
-      return currentSettings;
-    },
-    async conversations(): Promise<DingTalkConversationsResult> {
+    async conversations(params = {}): Promise<DingTalkConversationsResult> {
       await sleep(40);
-      return conversationsResult();
+      return conversationsResult(params.view ?? "unread");
+    },
+    async preview(conversationId) {
+      await sleep(20);
+      const row = conversations.find((item) => item.conversationId === conversationId);
+      return {
+        available: true,
+        preview: row?.preview || "吴菁：这条摘要由可见行懒加载。",
+        cachedAt: Date.now(),
+        errorCode: null,
+      };
     },
     async messages(params): Promise<DingTalkMessagesResult> {
       await sleep(messageDelay);
@@ -124,36 +165,68 @@ export function createFakeDingTalkClient(
       }
       return { ok: true, messageId: `sent-${sentAt}`, sentAt, errorCode: null };
     },
-    async decide(): Promise<DingTalkDecideResult> {
+    async resource(params): Promise<DingTalkResourceResult> {
+      await sleep(20);
+      if (params.resourceId === "media-preview-missing") {
+        return {
+          available: false,
+          dataUrl: null,
+          mimeType: null,
+          sizeBytes: null,
+          errorCode: "download_failed",
+        };
+      }
       return {
         available: true,
-        route: "messages",
-        messageQuery: "",
-        fromMe: false,
-        atMe: false,
-        days: 30,
-        conversationIds: [],
+        dataUrl: previewImageDataUrl,
+        mimeType: "image/png",
+        sizeBytes: 6800,
         errorCode: null,
       };
     },
     async search(params): Promise<DingTalkSearchResult> {
       await sleep(180);
       const query = params.query.trim().toLowerCase();
-      const matchedConversations = conversations
+      const local = conversations
         .filter((row) => `${row.title} ${row.preview ?? ""}`.toLowerCase().includes(query))
-        .slice(0, 8)
         .map((row) => ({ ...row }));
+      const groups = remoteSearchGroups
+        .filter((row) => row.title.toLowerCase().includes(query))
+        .map((row) => ({ ...row }));
+      const people = remoteSearchPeople
+        .filter((row) => row.name.toLowerCase().includes(query))
+        .map((row) => {
+          const conversation = conversations.find(
+            (item) => item.conversationId === row.conversationId,
+          );
+          return {
+            ...(conversation ?? {
+              conversationId: row.conversationId,
+              title: row.name,
+              singleChat: true,
+              unreadCount: 0,
+              lastMessageAt: null,
+              muted: false,
+            }),
+            subtitle: row.title,
+          };
+        });
+      const merged = [...local, ...groups, ...people].filter(
+        (row, index, all) =>
+          all.findIndex((item) => item.conversationId === row.conversationId) === index,
+      );
       const matchedMessages: DingTalkMessage[] = [];
-      for (const conversation of conversations) {
+      for (const conversation of [...conversations, ...remoteSearchGroups]) {
         for (const message of messagesFor(conversation.conversationId)) {
-          if (message.text.toLowerCase().includes(query)) matchedMessages.push(message);
+          if (`${message.text} ${message.cardTitle ?? ""}`.toLowerCase().includes(query)) {
+            matchedMessages.push(message);
+          }
         }
       }
       matchedMessages.sort((left, right) => right.createdAt - left.createdAt);
       return {
         available: true,
-        route: "messages",
-        conversations: matchedConversations,
+        conversations: merged.slice(0, 20),
         messages: matchedMessages.slice(0, 24),
         errorCode: null,
       };

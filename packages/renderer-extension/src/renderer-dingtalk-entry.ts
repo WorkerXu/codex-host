@@ -14,7 +14,7 @@ import {
   ROW_HIGHLIGHT_CLASSES,
   ROW_IDLE_CLASS,
 } from "./renderer-delegation-mention.js";
-import { findJarvisTrigger } from "./renderer-jarvis-mention.js";
+import { findJarvisTrigger, findNativeSuggestionList } from "./renderer-jarvis-mention.js";
 import { createDingTalkMark } from "./settings/dingtalk-icon.js";
 
 const SECTION_ATTRIBUTE = "data-codexhost-dingtalk-section";
@@ -22,7 +22,6 @@ const PANEL_ATTRIBUTE = "data-codexhost-dingtalk-panel";
 const MENU_MAX_HEIGHT = 120;
 const VIEWPORT_MARGIN = 8;
 const MENU_GAP = 4;
-const NATIVE_LIST_CLASS = "vertical-scroll-fade-mask";
 
 export interface RendererDingTalkEntryOptions {
   isComposerEditor(editor: HTMLElement): boolean;
@@ -48,31 +47,6 @@ function matchesEntry(query: string): boolean {
   if (query.length === 0) return true;
   const value = query.toLowerCase();
   return "钉钉".startsWith(value) || "dingtalk".startsWith(value);
-}
-
-function isVisible(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 && element.getClientRects().length > 0;
-}
-
-function nativeList(document: Document, anchor: Element | null): HTMLElement | null {
-  const anchorRect = anchor?.getBoundingClientRect();
-  const lists = [...document.querySelectorAll<HTMLElement>('[role="listbox"]')]
-    .filter(
-      (element) =>
-        !element.closest(
-          `[${SECTION_ATTRIBUTE}],[${PANEL_ATTRIBUTE}],[data-codexhost-jarvis-section],[data-codexhost-jarvis-panel]`,
-        ),
-    )
-    .filter(isVisible)
-    .map((element) => {
-      const scroll = element.querySelector<HTMLElement>(`.${NATIVE_LIST_CLASS}`) ?? element;
-      const rect = element.getBoundingClientRect();
-      const distance = anchorRect ? Math.abs(rect.top - anchorRect.bottom) : 0;
-      return { scroll, distance };
-    })
-    .sort((left, right) => left.distance - right.distance);
-  return lists[0]?.scroll ?? null;
 }
 
 function buildRow(document: Document, locale: string): HTMLElement {
@@ -123,13 +97,30 @@ export function installRendererDingTalkEntry(
 ): RendererDingTalkEntryControl {
   const view = ownerDocument.defaultView;
   if (!view) return { refresh: () => undefined, dispose: () => undefined };
-  let current: { trigger: Trigger; section: HTMLElement; panel: HTMLElement | null } | null = null;
+  let current: {
+    trigger: Trigger;
+    section: HTMLElement;
+    row: HTMLElement;
+    panel: HTMLElement | null;
+  } | null = null;
   let suppressed: string | null = null;
+  let selected = false;
 
   const remove = (): void => {
     current?.section.remove();
     current?.panel?.remove();
     current = null;
+    selected = false;
+  };
+
+  const highlight = (): void => {
+    if (!current) return;
+    current.row.setAttribute("aria-selected", String(selected));
+    for (const name of ROW_HIGHLIGHT_CLASSES) {
+      current.row.classList.toggle(name, selected);
+    }
+    current.row.classList.toggle(ROW_IDLE_CLASS, !selected);
+    if (selected) current.row.scrollIntoView({ block: "nearest" });
   };
 
   const readTrigger = (): Trigger | null => {
@@ -172,7 +163,7 @@ export function installRendererDingTalkEntry(
     const { element: section, row } = createDingTalkEntrySection(ownerDocument, locale);
     let panel: HTMLElement | null = null;
     const anchor = options.anchorForEditor(trigger.editor);
-    const native = nativeList(ownerDocument, anchor);
+    const native = findNativeSuggestionList(ownerDocument, anchor);
     if (native) {
       native.append(section);
     } else {
@@ -220,12 +211,13 @@ export function installRendererDingTalkEntry(
     });
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
-      row.setAttribute("aria-selected", "true");
-      for (const name of ROW_HIGHLIGHT_CLASSES) row.classList.add(name);
-      row.classList.remove(ROW_IDLE_CLASS);
+      selected = true;
+      highlight();
     });
     row.addEventListener("click", choose);
-    current = { trigger, section, panel };
+    current = { trigger, section, row, panel };
+    selected = false;
+    highlight();
   };
 
   const schedule = (): void => {
@@ -249,22 +241,76 @@ export function installRendererDingTalkEntry(
     attach(trigger);
   };
 
+  const nativeRows = (): HTMLElement[] => {
+    if (!current) return [];
+    const native = findNativeSuggestionList(
+      ownerDocument,
+      options.anchorForEditor(current.trigger.editor),
+    );
+    if (!native) return [];
+    return [...native.querySelectorAll<HTMLElement>('[role="option"]')].filter(
+      (row) => !row.closest(`[${SECTION_ATTRIBUTE}]`),
+    );
+  };
+
   const onPointerDown = (event: PointerEvent): void => {
     if (!current) return;
     const target = event.target as Node;
     if (current.section.contains(target) || current.panel?.contains(target)) return;
+    const native = findNativeSuggestionList(
+      ownerDocument,
+      options.anchorForEditor(current.trigger.editor),
+    );
+    if (native?.contains(target)) return;
     remove();
   };
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === "Escape" && current) {
+    if (event.isComposing) return;
+    if (event.key === "Escape" && !current) {
+      suppressed = readTrigger()?.query ?? null;
+      return;
+    }
+    if (!current) return;
+    let handled = true;
+    if (event.key === "ArrowDown") {
+      if (!selected) {
+        const rows = nativeRows();
+        const last = rows.at(-1);
+        if (rows.length === 0 || last?.getAttribute("aria-selected") === "true") {
+          selected = true;
+          highlight();
+        } else {
+          handled = false;
+        }
+      }
+    } else if (event.key === "ArrowUp") {
+      if (selected) {
+        selected = false;
+        highlight();
+        handled = false;
+      } else {
+        handled = false;
+      }
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      if (selected) current.row.click();
+      else handled = false;
+    } else if (event.key === "Escape") {
       suppressed = current.trigger.query;
       remove();
+    } else {
+      handled = false;
     }
+    if (!handled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
   };
   const observer = new MutationObserver(() => {
     if (!current) return;
     if (current.section.isConnected) return;
-    const native = nativeList(ownerDocument, options.anchorForEditor(current.trigger.editor));
+    const native = findNativeSuggestionList(
+      ownerDocument,
+      options.anchorForEditor(current.trigger.editor),
+    );
     if (native) {
       native.append(current.section);
       current.panel?.remove();

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Static preview server. It only listens on the loopback interface and serves
- * the preview bundle plus the locally installed Desktop stylesheet.
+ * the preview bundle plus the Desktop shadow-root context exported by the
+ * reviewer. The export lives outside this repository; never copy it in.
  */
 import { execFileSync } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
@@ -10,9 +11,7 @@ import path from "node:path";
 
 const previewRoot = import.meta.dirname;
 const distFile = path.join(previewRoot, "dist/preview.js");
-const cssPath =
-  process.env.CODEX_DESKTOP_CSS ??
-  "/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-reference/codex-desktop.css";
+const shadowContextPath = process.env.CODEX_SHADOW_CONTEXT ?? "";
 const host = "127.0.0.1";
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 
@@ -25,18 +24,36 @@ const types = new Map([
   [".js", "text/javascript; charset=utf-8"],
   [".map", "application/json; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
 ]);
 
-let desktopCss;
-function readDesktopCss() {
-  if (desktopCss !== undefined) return desktopCss;
-  try {
-    desktopCss = readFileSync(cssPath, "utf8");
-  } catch {
-    console.warn(`[ui-preview] ${cssPath} is missing; using the token stub only.`);
-    desktopCss = "";
+let context;
+function readShadowContext() {
+  if (context !== undefined) return context;
+  if (!shadowContextPath) {
+    throw new Error("CODEX_SHADOW_CONTEXT must point at the exported shadow-context.json");
   }
-  return desktopCss;
+  context = JSON.parse(readFileSync(shadowContextPath, "utf8"));
+  return context;
+}
+
+function shadowContextCss() {
+  const context = readShadowContext();
+  const declarations = Object.entries(context.vars ?? {})
+    .map(([name, value]) => `  ${name}: ${value};`)
+    .join("\n");
+  return `:root {\n${declarations}\n  font-family: ${context.fontFamily ?? "system-ui, sans-serif"};\n}\nhtml, body { font-family: ${context.fontFamily ?? "system-ui, sans-serif"}; }\n`;
+}
+
+function shadowContextMetadata() {
+  const context = readShadowContext();
+  return {
+    path: shadowContextPath,
+    varCount: Object.keys(context.vars ?? {}).length,
+    colorScheme: context.colorScheme ?? "light",
+    // The export carries light values; dark captures stay approximate.
+    darkApproximate: (context.colorScheme ?? "light") !== "dark",
+  };
 }
 
 function send(response, status, type, body) {
@@ -50,12 +67,30 @@ const server = createServer((request, response) => {
     send(response, 200, types.get(".html"), readFileSync(path.join(previewRoot, "index.html")));
     return;
   }
-  if (url.pathname === "/token-stub.css") {
-    send(response, 200, types.get(".css"), readFileSync(path.join(previewRoot, "token-stub.css")));
+  if (url.pathname === "/shadow-context.css") {
+    try {
+      send(response, 200, types.get(".css"), shadowContextCss());
+    } catch (error) {
+      send(
+        response,
+        500,
+        "text/plain; charset=utf-8",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return;
   }
-  if (url.pathname === "/codex-desktop.css") {
-    send(response, 200, types.get(".css"), readDesktopCss());
+  if (url.pathname === "/shadow-context.json") {
+    try {
+      send(response, 200, types.get(".json"), `${JSON.stringify(shadowContextMetadata())}\n`);
+    } catch (error) {
+      send(
+        response,
+        500,
+        "text/plain; charset=utf-8",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return;
   }
   if (url.pathname === "/preview.js" || url.pathname === "/preview.js.map") {
@@ -80,6 +115,6 @@ const server = createServer((request, response) => {
 server.listen(port, host, () => {
   console.log(`[ui-preview] http://${host}:${port}/`);
   console.log(
-    `[ui-preview] Desktop CSS: ${existsSync(cssPath) ? cssPath : "(missing, stub only)"}`,
+    `[ui-preview] shadow context: ${shadowContextPath || "(CODEX_SHADOW_CONTEXT is unset)"}`,
   );
 });

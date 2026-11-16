@@ -128,6 +128,14 @@
   padding-top: 14px;
 }
 
+.settings-layout[data-compact="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-layout[data-compact="true"] .settings-sidebar {
+  display: none;
+}
+
 .settings-header {
   display: flex;
   align-items: center;

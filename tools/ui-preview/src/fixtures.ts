@@ -5,7 +5,6 @@ import type {
   DingTalkConversation,
   DingTalkDispatchSettings,
   DingTalkMessage,
-  DingTalkSettings,
 } from "@codexhost/shared-contracts";
 
 import type {
@@ -26,6 +25,7 @@ function conversation(
   age: number,
   preview: string,
   muted = false,
+  extra: Partial<DingTalkConversation> = {},
 ): DingTalkConversation {
   return {
     conversationId: id,
@@ -35,6 +35,7 @@ function conversation(
     lastMessageAt: now - age,
     muted,
     preview,
+    ...extra,
   };
 }
 
@@ -46,9 +47,26 @@ export const conversations: DingTalkConversation[] = [
     3,
     5 * minute,
     "吴菁：发布窗口定在周五 20:00，今晚先冻结分支。",
+    false,
+    { groupType: "INTERNAL_GROUP", memberCount: 18, atMe: true },
   ),
-  conversation("cid-finance", "财务打款群", false, 12, 22 * minute, "李端：预算表我改完第二版了。"),
-  conversation("cid-wujing", "吴菁", true, 1, 47 * minute, "明天上午的评审还需要你确认一下。"),
+  conversation("cid-finance", "财务打款群", false, 12, 22 * minute, "", false, {
+    groupType: "INTERNAL_GROUP",
+    memberCount: 9,
+  }),
+  conversation(
+    "cid-wujing",
+    "吴菁",
+    true,
+    1,
+    47 * minute,
+    "明天上午的评审还需要你确认一下。",
+    false,
+    {
+      subtitle: "产品经理",
+      memberCount: 2,
+    },
+  ),
   conversation(
     "cid-design",
     "设计评审",
@@ -57,6 +75,7 @@ export const conversations: DingTalkConversation[] = [
     2 * hour,
     "陈默：[图片] 新版工作台视觉稿",
     true,
+    { groupType: "INTERNAL_GROUP", memberCount: 7 },
   ),
   conversation("cid-chenmo", "陈默", true, 99, 3 * hour, "收到，我晚点把数据补上。"),
   conversation(
@@ -184,6 +203,77 @@ function buildLongConversation(): DingTalkMessage[] {
       mine,
     });
   }
+  const missingImage = messages[193];
+  if (missingImage) {
+    missingImage.text = "";
+    missingImage.resources = [
+      {
+        kind: "image",
+        resourceId: "media-preview-missing",
+        resourceIdType: "mediaId",
+      },
+    ];
+  }
+  const richQuote = messages[195];
+  if (richQuote) {
+    richQuote.quotedMessage = {
+      senderName: "李端",
+      text: "预算表第二版已经发到群里，差旅和外包分开列了。",
+      messageId: "msg-launch-quote",
+      createdAt: richQuote.createdAt - 4 * minute,
+    };
+    richQuote.reactions = [
+      { emoji: "OK", count: 3 },
+      { emoji: "收到", count: 1 },
+    ];
+  }
+  const card = messages[196];
+  if (card) {
+    card.bot = true;
+    card.cardTitle = "【云监控】发布检查";
+    card.format = "markdown";
+    card.text =
+      ">- 服务: saas\n>- 环境: production\n>- 结论: 检查通过，可以继续发布\n\n[查看详情](https://example.com/detail)";
+    card.resources = [
+      {
+        kind: "image",
+        resourceId: "media-preview-card",
+        resourceIdType: "mediaId",
+      },
+    ];
+  }
+  const image = messages[197];
+  if (image) {
+    image.text = "";
+    image.resources = [
+      {
+        kind: "image",
+        resourceId: "media-preview-image",
+        resourceIdType: "mediaId",
+      },
+    ];
+  }
+  const file = messages[198];
+  if (file) {
+    file.text = "";
+    file.resources = [
+      {
+        kind: "file",
+        name: "发布检查清单.xlsx",
+        sizeBytes: 24_576,
+        resourceId: "file-preview-checklist",
+        resourceIdType: "fileId",
+      },
+    ];
+  }
+  const bot = messages[199];
+  if (bot) {
+    bot.bot = true;
+    bot.senderName = "发布机器人";
+    bot.format = "markdown";
+    bot.text =
+      "**发布窗口提醒**\n\n今晚 20:00 冻结分支，请各端在 19:30 前完成自测。\n\n- 后端：确认灰度开关\n- 前端：确认静态资源版本";
+  }
   return messages;
 }
 
@@ -229,16 +319,6 @@ export function messagesFor(conversationId: string): DingTalkMessage[] {
   return sorted;
 }
 
-export const dingTalkSettings: DingTalkSettings = {
-  defaultHost: null,
-  effectiveHost: "本机",
-  effectiveHostId: null,
-  hosts: [
-    { name: "本机", hostId: null, local: true },
-    { name: "tencent", hostId: "host-tencent", local: false },
-  ],
-};
-
 export const agents: CodexAgentRecord[] = [
   {
     fileName: "reviewer.toml",
@@ -257,6 +337,7 @@ export const agents: CodexAgentRecord[] = [
     model: "gpt-5.1",
     reasoningEffort: "medium",
     revision: "1760000001000-380",
+    lastDispatchedAt: now - 2 * 60 * 60 * 1000,
     developerInstructions: "Write concise Chinese documents with clear headings.",
   },
   {
@@ -267,6 +348,17 @@ export const agents: CodexAgentRecord[] = [
     reasoningEffort: null,
     revision: "1760000002000-421",
     developerInstructions: "Research the question and cite the sources you actually read.",
+  },
+  {
+    fileName: "ops-runner.toml",
+    name: "ops-runner",
+    description:
+      "接手发布检查、日志核对和线上问题复现；会先收集证据、标明影响范围，再给出可回滚的处理建议，避免在没有确认的情况下执行破坏性操作。",
+    model: null,
+    reasoningEffort: null,
+    revision: "1760000003000-640",
+    developerInstructions:
+      "Operate release checks and incident triage. Gather evidence before proposing any destructive action.",
   },
 ];
 
@@ -445,3 +537,61 @@ export const addMachineTargets: ProjectGroupAddMachineTarget[] = [
     harnessLabel: "Claude Code",
   },
 ];
+
+/** A group outside the unread list, returned only by `chat search`. */
+export const remoteSearchGroups: DingTalkConversation[] = [
+  {
+    conversationId: "cid-guansprint",
+    title: "【示例Sprint】 进度",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 2 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 15,
+  },
+  {
+    conversationId: "cid-guansprint-2",
+    title: "【示例Sprint】示例买",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 3 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 18,
+  },
+  {
+    conversationId: "cid-guansprint-3",
+    title: "示例Sprint 联调群",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 4 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 12,
+  },
+  {
+    conversationId: "cid-guansprint-4",
+    title: "示例Sprint 数据核对",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 5 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 8,
+  },
+];
+
+export const remoteSearchPeople = [
+  {
+    name: "吴菁",
+    title: "产品经理",
+    userId: "user-wujing",
+    openDingTalkId: "open-wujing",
+    conversationId: "cid-wujing",
+  },
+];
+
+/** 320×200 synthetic gradient used as the fake image download result. */
+export const previewImageDataUrl =
+  "data:image/png;base64,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";
