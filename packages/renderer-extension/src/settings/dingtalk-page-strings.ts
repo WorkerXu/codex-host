@@ -32,6 +32,18 @@ export interface DingTalkPageText {
   sendPlaceholder: string;
   newMessages: string;
   loadMoreFailed: string;
+  closeImage: string;
+  previousImage: string;
+  nextImage: string;
+  imageLoading: string;
+  imageFailed: string;
+  mentionMembers: string;
+  mentionAll: string;
+  mentionSearchPlaceholder: string;
+  noMatchingMembers: string;
+  membersFailed: string;
+  membersLoading: string;
+  removeMention: string;
 }
 
 const ZH: DingTalkPageText = {
@@ -65,6 +77,18 @@ const ZH: DingTalkPageText = {
   sendPlaceholder: "发送给 {name}",
   newMessages: "{count} 条新消息",
   loadMoreFailed: "更早的消息加载失败，请重试",
+  closeImage: "关闭图片",
+  previousImage: "上一张",
+  nextImage: "下一张",
+  imageLoading: "正在加载图片",
+  imageFailed: "图片加载失败",
+  mentionMembers: "选择要提醒的成员",
+  mentionAll: "所有人",
+  mentionSearchPlaceholder: "搜索成员",
+  noMatchingMembers: "没有匹配的成员",
+  membersFailed: "成员加载失败",
+  membersLoading: "正在加载成员",
+  removeMention: "移除",
 };
 
 const EN: DingTalkPageText = {
@@ -98,6 +122,18 @@ const EN: DingTalkPageText = {
   sendPlaceholder: "Send to {name}",
   newMessages: "{count} new messages",
   loadMoreFailed: "Could not load older messages. Try again.",
+  closeImage: "Close image",
+  previousImage: "Previous image",
+  nextImage: "Next image",
+  imageLoading: "Loading image",
+  imageFailed: "Could not load the image",
+  mentionMembers: "Mention a group member",
+  mentionAll: "Everyone",
+  mentionSearchPlaceholder: "Search members",
+  noMatchingMembers: "No matching members",
+  membersFailed: "Could not load members",
+  membersLoading: "Loading members",
+  removeMention: "Remove",
 };
 
 export function dingtalkPageStrings(locale: RendererSettingsLocale): DingTalkPageText {

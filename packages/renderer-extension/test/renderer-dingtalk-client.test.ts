@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   DINGTALK_CHANGED_METHOD,
   DINGTALK_CONVERSATIONS_METHOD,
+  DINGTALK_MEMBERS_METHOD,
   DINGTALK_MESSAGES_METHOD,
   DINGTALK_STATUS_METHOD,
+  DINGTALK_VIEWED_METHOD,
   type DingTalkStatus,
 } from "@codexhost/shared-contracts";
 
@@ -181,6 +183,48 @@ describe("DingTalk renderer routing", () => {
     await client.conversations();
     expect(remoteCalls).toHaveLength(2);
     expect(localCalls.filter((method) => method === DINGTALK_CONVERSATIONS_METHOD)).toHaveLength(1);
+  });
+
+  it("sends members and the active view state to the routed Host", async () => {
+    const local = manager([], { status: status() });
+    const requests: { method: string; params: unknown }[] = [];
+    const remote: RendererDingTalkManager = {
+      async sendRequest(method, params) {
+        requests.push({ method, params });
+        if (method === DINGTALK_STATUS_METHOD) return status();
+        if (method === DINGTALK_MEMBERS_METHOD) {
+          return {
+            available: true,
+            members: [{ openDingTalkId: "open-1", name: "王鹏远" }],
+            errorCode: null,
+          };
+        }
+        return {};
+      },
+    };
+    const client = createRendererDingTalkClient({
+      forHost: (hostId) =>
+        hostId === "local"
+          ? route("local", local)
+          : hostId === "host-tencent"
+            ? route("host-tencent", remote)
+            : null,
+    });
+    expect(await client.members("cidA==")).toMatchObject({
+      members: [{ openDingTalkId: "open-1", name: "王鹏远" }],
+    });
+    await client.markViewed("cidA==", 1_700_000_000_000, false);
+    expect(requests.map(({ method }) => method)).toEqual([
+      DINGTALK_STATUS_METHOD,
+      DINGTALK_MEMBERS_METHOD,
+      DINGTALK_VIEWED_METHOD,
+    ]);
+    expect(requests[1]?.params).toEqual({ conversationId: "cidA==" });
+    expect(requests[2]?.params).toEqual({
+      conversationId: "cidA==",
+      lastMessageAt: 1_700_000_000_000,
+      active: false,
+    });
   });
 });
 

@@ -2,6 +2,7 @@ import {
   DINGTALK_CHANGED_METHOD,
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_MEMBERS_METHOD,
   DINGTALK_PREVIEW_METHOD,
   DINGTALK_RESOURCE_METHOD,
   DINGTALK_RESOLVE_METHOD,
@@ -11,6 +12,7 @@ import {
   DINGTALK_VIEWED_METHOD,
   dingtalkConversationsResultSchema,
   dingtalkMessagesResultSchema,
+  dingtalkMembersResultSchema,
   dingtalkPreviewResultSchema,
   dingtalkResourceResultSchema,
   dingtalkResolveResultSchema,
@@ -21,6 +23,7 @@ import {
   type DingTalkMessage,
   type DingTalkMessagesParams,
   type DingTalkMessagesResult,
+  type DingTalkMembersResult,
   type DingTalkPreviewResult,
   type DingTalkResourceParams,
   type DingTalkResourceResult,
@@ -67,11 +70,12 @@ export interface RendererDingTalkClient {
   conversations(): Promise<DingTalkConversationsResult>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
+  members(conversationId: string): Promise<DingTalkMembersResult>;
   resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult>;
   send(params: DingTalkSendParams): Promise<DingTalkSendResult>;
   search(params: DingTalkSearchParams): Promise<DingTalkSearchResult>;
   resolve(conversationId: string, messageIds?: readonly string[]): Promise<DingTalkResolveResult>;
-  markViewed(conversationId: string, lastMessageAt: number): Promise<void>;
+  markViewed(conversationId: string, lastMessageAt: number, active?: boolean): Promise<void>;
   subscribe(listener: (conversationId: string | null) => void): () => void;
 }
 
@@ -296,6 +300,11 @@ export function createRendererDingTalkClient(
     async messages(params) {
       return dingtalkMessagesResultSchema.parse(await request(DINGTALK_MESSAGES_METHOD, params));
     },
+    async members(conversationId) {
+      return dingtalkMembersResultSchema.parse(
+        await request(DINGTALK_MEMBERS_METHOD, { conversationId }, 30_000),
+      );
+    },
     async resource(params) {
       return dingtalkResourceResultSchema.parse(
         await request(DINGTALK_RESOURCE_METHOD, params, 60_000),
@@ -317,9 +326,13 @@ export function createRendererDingTalkClient(
         }),
       );
     },
-    async markViewed(conversationId, lastMessageAt) {
+    async markViewed(conversationId, lastMessageAt, active) {
       try {
-        await request(DINGTALK_VIEWED_METHOD, { conversationId, lastMessageAt });
+        await request(DINGTALK_VIEWED_METHOD, {
+          conversationId,
+          lastMessageAt,
+          ...(active === undefined ? {} : { active }),
+        });
       } catch {
         // View state is an optimization; a failure must not hide messages.
       }
