@@ -11,7 +11,8 @@ import path from "node:path";
 import { chromium } from "@playwright/test";
 
 const previewRoot = import.meta.dirname;
-const baseUrl = "http://127.0.0.1:4417";
+const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
+const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "dingtalk-list",
   "dingtalk-open",
