@@ -27,7 +27,9 @@ const allScenarios = [
   "dingtalk-select",
   "dingtalk-empty",
   "dingtalk-error",
-  "agents-list",
+  "agents-cards",
+  "agents-cards-narrow",
+  "agents-empty",
   "agents-edit",
   "agents-dingtalk-settings",
   "agents-dingtalk-disabled",
@@ -96,8 +98,9 @@ const report = {
 
 for (const scenario of scenarios) {
   for (const theme of ["light", "dark"]) {
+    const width = scenario === "agents-cards-narrow" ? 720 : 1440;
     const page = await browser.newPage({
-      viewport: { width: 1440, height: 900 },
+      viewport: { width, height: 900 },
       deviceScaleFactor: 2,
       colorScheme: theme,
       locale: "zh-CN",
@@ -108,6 +111,9 @@ for (const scenario of scenarios) {
       waitUntil: "load",
     });
     await page.waitForSelector('body[data-ready="true"]', { timeout: 20_000 });
+    if (scenario === "agents-cards") {
+      await page.hover(".agent-card[data-agent-name]");
+    }
     const failure = await page.evaluate(() => document.body.dataset.error ?? null);
     if (failure) throw new Error(`${scenario}/${theme}: ${failure}`);
     await page.waitForTimeout(200);
@@ -367,16 +373,70 @@ for (const scenario of scenarios) {
       ) {
         check("list-empty-state", Boolean(query(".dingtalk-empty-list")));
       }
-      if (document.body.dataset.scenario === "agents-list") {
+      if (
+        document.body.dataset.scenario === "agents-cards" ||
+        document.body.dataset.scenario === "agents-cards-narrow"
+      ) {
+        const grid = query(".agents-grid");
+        const columns = grid
+          ? getComputedStyle(grid).gridTemplateColumns.split(/\s+/u).filter(Boolean).length
+          : 0;
+        const narrow = document.body.dataset.scenario === "agents-cards-narrow";
+        check("card-grid-columns", narrow ? columns === 2 : columns >= 3, `${columns} columns`);
+        check("agent-card-count", queryAll(".agent-card[data-agent-name]").length === 4);
+        check("new-agent-card", Boolean(query(".agent-card--new")));
+        const avatars = queryAll(".agent-card-avatar svg");
         check(
-          "three-agent-rows",
-          queryAll(".agent-row").length === 3,
-          `${queryAll(".agent-row").length}`,
+          "card-avatar-svg",
+          avatars.length === 4 && avatars.every((avatar) => avatar.getAttribute("width") === "48"),
+          `${avatars.length} avatars`,
+        );
+        check(
+          "card-avatar-no-initials",
+          avatars.every((avatar) => (avatar.textContent ?? "").trim() === ""),
+        );
+        const description = query(".agent-card-description");
+        check(
+          "card-description-clamped",
+          Boolean(description) && getComputedStyle(description).webkitLineClamp === "2",
+        );
+        check("card-participating-tags", queryAll(".agent-card-tag--dispatch").length === 2);
+        check(
+          "card-last-dispatch",
+          queryAll(".agent-card-tag").some((tag) => tag.textContent?.includes("最近派发")),
+        );
+        check(
+          "card-default-model",
+          queryAll(".agent-card-tag").some((tag) => tag.textContent?.includes("默认模型")),
+        );
+        check("card-no-status-dot", !query(".agent-card-status-dot"));
+        if (document.body.dataset.scenario === "agents-cards") {
+          const tools = query(".agent-card-tools");
+          check(
+            "card-hover-tools",
+            Boolean(tools) && getComputedStyle(tools).opacity === "1",
+            tools ? getComputedStyle(tools).opacity : "missing",
+          );
+          check(
+            "card-hover-action",
+            Boolean(query(".agent-card-action")?.textContent?.includes("空闲")),
+          );
+        }
+      }
+      if (document.body.dataset.scenario === "agents-empty") {
+        check("empty-new-card", queryAll(".agent-card--new").length === 1);
+        check("empty-no-agent-cards", queryAll(".agent-card[data-agent-name]").length === 0);
+        check(
+          "empty-copy",
+          query(".agents-empty-copy")?.textContent?.includes(
+            "还没有智能体，新建一个让它帮你处理任务",
+          ),
         );
       }
       if (document.body.dataset.scenario === "agents-edit") {
         const editor = query(".agent-editor");
         check("editor-open", Boolean(editor) && !editor.hidden);
+        check("editing-card-border", Boolean(query(".agent-card--editing")));
         check("editor-instructions", Boolean(query(".agent-instructions")));
         check(
           "instruction-character-count",

@@ -55,6 +55,7 @@ function mountSettings(
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
+  agentsEmpty = false,
 ) {
   const dingtalkClient = createFakeDingTalkClient({
     empty: dingtalkEmpty,
@@ -62,7 +63,7 @@ function mountSettings(
     status: dingtalkStatus,
     messageDelayMs: scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
   });
-  const agentsClient = createFakeCodexAgentsClient();
+  const agentsClient = createFakeCodexAgentsClient({ withAgents: !agentsEmpty });
   const dingtalkPage = createDingTalkSettingsPage(messages, {
     createClient: () => dingtalkClient,
     readLocale: () => locale,
@@ -337,17 +338,30 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-empty-list"));
   },
 
-  async "agents-list"() {
+  async "agents-cards"() {
     const { query } = mountSettings("codex-agents");
-    await waitFor(() => query(".agent-row:not(.agent-row--skeleton)"));
+    await waitFor(() => query(".agent-card:not(.agent-card--skeleton):not(.agent-card--new)"));
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+  },
+
+  async "agents-cards-narrow"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-card:not(.agent-card--skeleton):not(.agent-card--new)"));
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+  },
+
+  async "agents-empty"() {
+    const { query } = mountSettings("codex-agents", false, false, "connected", true);
+    await waitFor(() => query(".agent-card--new"));
+    await waitFor(() => query(".agents-empty-copy:not([hidden])"));
   },
 
   async "agents-edit"() {
     const { query } = mountSettings("codex-agents");
-    const row = await waitFor(() =>
-      query<HTMLButtonElement>(".agent-row:not(.agent-row--skeleton)"),
+    const card = await waitFor(() =>
+      query<HTMLElement>(".agent-card:not(.agent-card--skeleton):not(.agent-card--new)"),
     );
-    row.click();
+    card.click();
     await waitFor(() => query(".agent-editor:not([hidden])"));
   },
 

@@ -337,6 +337,7 @@ export const agents: CodexAgentRecord[] = [
     model: "gpt-5.1",
     reasoningEffort: "medium",
     revision: "1760000001000-380",
+    lastDispatchedAt: now - 2 * 60 * 60 * 1000,
     developerInstructions: "Write concise Chinese documents with clear headings.",
   },
   {
@@ -347,6 +348,17 @@ export const agents: CodexAgentRecord[] = [
     reasoningEffort: null,
     revision: "1760000002000-421",
     developerInstructions: "Research the question and cite the sources you actually read.",
+  },
+  {
+    fileName: "ops-runner.toml",
+    name: "ops-runner",
+    description:
+      "接手发布检查、日志核对和线上问题复现；会先收集证据、标明影响范围，再给出可回滚的处理建议，避免在没有确认的情况下执行破坏性操作。",
+    model: null,
+    reasoningEffort: null,
+    revision: "1760000003000-640",
+    developerInstructions:
+      "Operate release checks and incident triage. Gather evidence before proposing any destructive action.",
   },
 ];
 
