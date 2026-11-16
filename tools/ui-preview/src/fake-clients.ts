@@ -124,7 +124,7 @@ export function createFakeDingTalkClient(
       const row = conversations.find((item) => item.conversationId === conversationId);
       return {
         available: true,
-        preview: row?.preview || "吴菁：这条摘要由可见行懒加载。",
+        preview: row?.preview || "林晓：这条摘要由可见行懒加载。",
         cachedAt: Date.now(),
         errorCode: null,
       };

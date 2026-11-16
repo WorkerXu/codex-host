@@ -46,7 +46,7 @@ export const conversations: DingTalkConversation[] = [
     false,
     3,
     5 * minute,
-    "吴菁：发布窗口定在周五 20:00，今晚先冻结分支。",
+    "林晓：发布窗口定在周五 20:00，今晚先冻结分支。",
     false,
     { groupType: "INTERNAL_GROUP", memberCount: 18, atMe: true },
   ),
@@ -55,8 +55,8 @@ export const conversations: DingTalkConversation[] = [
     memberCount: 9,
   }),
   conversation(
-    "cid-wujing",
-    "吴菁",
+    "cid-linxiao",
+    "林晓",
     true,
     1,
     47 * minute,
@@ -73,14 +73,14 @@ export const conversations: DingTalkConversation[] = [
     false,
     28,
     2 * hour,
-    "陈默：[图片] 新版工作台视觉稿",
+    "钱程：[图片] 新版工作台视觉稿",
     true,
     { groupType: "INTERNAL_GROUP", memberCount: 7 },
   ),
-  conversation("cid-chenmo", "陈默", true, 99, 3 * hour, "收到，我晚点把数据补上。"),
+  conversation("cid-qiancheng", "钱程", true, 99, 3 * hour, "收到，我晚点把数据补上。"),
   conversation(
     "cid-customer",
-    "客户成功 · 腾讯云",
+    "客户成功 · 示例云",
     false,
     128,
     4 * hour,
@@ -95,16 +95,16 @@ export const conversations: DingTalkConversation[] = [
     6 * hour,
     "下周的联合发布会需要确定场地和直播链路。",
   ),
-  conversation("cid-liuqi", "刘琪", true, 0, 8 * hour, "文档已经发你了，麻烦看一下第三章。"),
+  conversation("cid-zhoulan", "周岚", true, 0, 8 * hour, "文档已经发你了，麻烦看一下第三章。"),
   conversation("cid-release", "版本发布协调", false, 2, 10 * hour, "v0.17.4 的签名包已上传。"),
   conversation("cid-hr", "入职与转正", false, 0, 13 * hour, "下周一有两位新同事入职。"),
-  conversation("cid-zhangyu", "张宇", true, 0, 18 * hour, "这个问题我复现了，稍后贴日志。"),
+  conversation("cid-wutong", "吴桐", true, 0, 18 * hour, "这个问题我复现了，稍后贴日志。"),
   conversation("cid-budget", "2027 年预算评审", false, 6, 21 * hour, "材料请在月底前提交财务。"),
   conversation("cid-security", "安全与合规", false, 0, 26 * hour, "本季度渗透测试报告已归档。"),
-  conversation("cid-wangfan", "王帆", true, 4, 30 * hour, "今晚有空对一下接口吗？"),
+  conversation("cid-zhengkai", "郑凯", true, 4, 30 * hour, "今晚有空对一下接口吗？"),
   conversation("cid-ops", "线上问题跟进", false, 15, 34 * hour, "网关超时告警已恢复，继续观察。"),
   conversation("cid-recruit", "招聘协作", false, 1, 2 * day, "候选人二面安排在下周三下午。"),
-  conversation("cid-sunlei", "孙磊", true, 0, 2 * day + 3 * hour, "好的，就按这个方案推进。"),
+  conversation("cid-fengyuan", "冯远", true, 0, 2 * day + 3 * hour, "好的，就按这个方案推进。"),
   conversation(
     "cid-weekly",
     "部门周会",
@@ -115,7 +115,7 @@ export const conversations: DingTalkConversation[] = [
   ),
   conversation("cid-support", "客户支持值班群", false, 36, 3 * day, "工单 #4821 已升级为 P1。"),
   conversation("cid-legal", "合同与法务", false, 0, 3 * day + 4 * hour, "补充协议已盖章寄出。"),
-  conversation("cid-xujing", "徐静", true, 2, 3 * day + 9 * hour, "截图我看到了，是缓存没刷新。"),
+  conversation("cid-chenxi", "陈曦", true, 2, 3 * day + 9 * hour, "截图我看到了，是缓存没刷新。"),
   conversation("cid-docs", "文档共建", false, 0, 4 * day, "工作台 UI 规范已经合并。"),
   conversation(
     "cid-data",
@@ -128,7 +128,7 @@ export const conversations: DingTalkConversation[] = [
   conversation("cid-lucy", "Lucy", true, 0, 5 * day, "The deck looks good to me."),
   conversation("cid-qa", "测试验收", false, 0, 5 * day + 2 * hour, "回归用例全部通过。"),
   conversation("cid-market", "市场活动", false, 18, 6 * day, "展位物料周五前要定稿。"),
-  conversation("cid-zhaomin", "赵敏", true, 0, 7 * day, "下周我在深圳，线上聊。"),
+  conversation("cid-chuning", "褚宁", true, 0, 7 * day, "下周我在深圳，线上聊。"),
   conversation("cid-arch", "架构评审", false, 0, 8 * day, "异步任务拆分方案已通过。"),
   conversation("cid-random", "老同事群", false, 0, 9 * day, "周末有人一起爬山吗？", true),
 ];
@@ -149,7 +149,7 @@ export const heavyConversation: DingTalkConversation = {
   atMe: true,
 };
 
-const heavySenders = ["系统", "吴菁", "李端", "陈默", "周舟", "我"];
+const heavySenders = ["系统", "林晓", "赵明", "钱程", "孙宁", "我"];
 
 function heavyMessage(index: number): DingTalkMessage {
   const createdAt = now - (199 - index) * 7 * minute;
@@ -176,7 +176,7 @@ function heavyMessage(index: number): DingTalkMessage {
     base.text = "";
   } else if (index % 33 === 0) {
     base.quotedMessage = {
-      senderName: "李端",
+      senderName: "赵明",
       text: "刚刚的转账失败率又上来了，先看下网关。",
       createdAt: createdAt - 2 * minute,
     };
@@ -200,7 +200,7 @@ export const heavyMessages: DingTalkMessage[] = Array.from({ length: 200 }, (_un
   heavyMessage(index),
 );
 
-const senderNames = ["吴菁", "李端", "陈默", "周舟", "我"];
+const senderNames = ["林晓", "赵明", "钱程", "孙宁", "我"];
 
 function textFor(index: number): string {
   const samples = [
@@ -254,7 +254,7 @@ function buildLongConversation(): DingTalkMessage[] {
     messages.push({
       messageId: `msg-launch-${String(index).padStart(3, "0")}`,
       conversationId: "cid-launch",
-      senderName: mine ? "我" : (senderNames[senderIndex] ?? "吴菁"),
+      senderName: mine ? "我" : (senderNames[senderIndex] ?? "林晓"),
       senderId: mine ? "me" : `user-${senderIndex}`,
       createdAt,
       text: unsupported
@@ -282,7 +282,7 @@ function buildLongConversation(): DingTalkMessage[] {
   const richQuote = messages[195];
   if (richQuote) {
     richQuote.quotedMessage = {
-      senderName: "李端",
+      senderName: "赵明",
       text: "预算表第二版已经发到群里，差旅和外包分开列了。",
       messageId: "msg-launch-quote",
       createdAt: richQuote.createdAt - 4 * minute,
@@ -351,7 +351,7 @@ function buildConversationMessages(conversation: DingTalkConversation, count: nu
     messages.push({
       messageId: `${conversation.conversationId}-msg-${index}`,
       conversationId: conversation.conversationId,
-      senderName: mine ? "我" : (senderNames[index % 4] ?? "吴菁"),
+      senderName: mine ? "我" : (senderNames[index % 4] ?? "林晓"),
       senderId: mine ? "me" : `user-${index % 4}`,
       createdAt,
       text:
@@ -651,11 +651,11 @@ export const remoteSearchGroups: DingTalkConversation[] = [
 
 export const remoteSearchPeople = [
   {
-    name: "吴菁",
+    name: "林晓",
     title: "产品经理",
-    userId: "user-wujing",
-    openDingTalkId: "open-wujing",
-    conversationId: "cid-wujing",
+    userId: "user-linxiao",
+    openDingTalkId: "open-linxiao",
+    conversationId: "cid-linxiao",
   },
 ];
 

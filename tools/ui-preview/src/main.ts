@@ -314,12 +314,12 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
       severity: 3,
       updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
     }),
-    previewBug(941, 4078, "示例买 · 消息通知", "示例买消息通知未送达", {
+    previewBug(941, 4078, "示例买增加app消息通知", "示例买消息通知未送达", {
       priority: 2,
       severity: 1,
       updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
     }),
-    previewBug(952, 4081, "示例买 · 标记迭代", "搜索结果列表未显示示例买标记", {
+    previewBug(952, 4081, "示例同行圈 示例买标记", "搜索结果列表未显示示例买标记", {
       status: 2,
       priority: 3,
       severity: 2,
@@ -588,11 +588,11 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-conversation"));
     const row = await waitFor(() =>
       queryAll<HTMLButtonElement>(".dingtalk-conversation").find(
-        (item) => item.textContent?.includes("吴菁") && !item.textContent?.includes("群"),
+        (item) => item.textContent?.includes("林晓") && !item.textContent?.includes("群"),
       ),
     );
     row.click();
-    await waitFor(() => query(".dingtalk-main-title")?.textContent === "吴菁");
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "林晓");
     await waitFor(() => query(".dingtalk-message"));
   },
 

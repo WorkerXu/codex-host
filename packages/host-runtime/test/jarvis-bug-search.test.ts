@@ -25,8 +25,8 @@ const KNOWN: JarvisProjectRow[] = [
   { id: 4029, name: "示例商城 · 迭代 A" },
 ];
 const VISIBLE: JarvisProjectRow[] = [
-  { id: 4078, name: "示例买 · 消息通知" },
-  { id: 4081, name: "示例买 · 标记迭代" },
+  { id: 4078, name: "示例买增加app消息通知" },
+  { id: 4081, name: "示例同行圈 示例买标记" },
 ];
 
 function bug(overrides: Partial<FakeBug> & Pick<FakeBug, "id" | "projectId">): FakeBug {

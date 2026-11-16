@@ -287,7 +287,7 @@ for (const scenario of scenarios) {
         );
       }
       if (document.body.dataset.scenario === "dingtalk-direct") {
-        check("direct-header-title", query(".dingtalk-main-title")?.textContent === "吴菁");
+        check("direct-header-title", query(".dingtalk-main-title")?.textContent === "林晓");
         check(
           "direct-header-subtitle",
           query(".dingtalk-main-subtitle")?.textContent === "产品经理",
@@ -309,6 +309,16 @@ for (const scenario of scenarios) {
           rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : "missing",
         );
         check("image-lazy", queryAll(".dingtalk-message-image--loaded").length > 0);
+        const imageBubble = query(".dingtalk-message-bubble--image");
+        check(
+          "image-direct-thumbnail",
+          Boolean(imageBubble) &&
+            getComputedStyle(imageBubble).paddingLeft === "0px" &&
+            getComputedStyle(imageBubble).backgroundColor === "rgba(0, 0, 0, 0)",
+          imageBubble
+            ? `${getComputedStyle(imageBubble).paddingLeft} / ${getComputedStyle(imageBubble).backgroundColor}`
+            : "missing",
+        );
         check(
           "image-unavailable-text",
           queryAll(".dingtalk-message-image-fallback").some((node) =>
@@ -387,6 +397,7 @@ for (const scenario of scenarios) {
         const sidebar = query(".dingtalk-sidebar");
         check("search-inside-left-column", Boolean(panel && sidebar && sidebar.contains(panel)));
         check("search-results-visible", visible(panel));
+        check("search-no-keyboard-hint", !query(".dingtalk-search-hint"));
         check(
           "search-highlight",
           queryAll(".dingtalk-search-mark").length > 0,
@@ -398,7 +409,6 @@ for (const scenario of scenarios) {
           queryAll(".dingtalk-search-more").length > 0,
           `${queryAll(".dingtalk-search-more").length} more buttons`,
         );
-        check("search-keyboard-hint", Boolean(query(".dingtalk-search-hint:not([hidden])")));
         check(
           "search-remote-group",
           queryAll(".dingtalk-search-title").some((row) => row.textContent.includes("示例Sprint")),
@@ -409,6 +419,14 @@ for (const scenario of scenarios) {
         document.body.dataset.scenario === "dingtalk-error"
       ) {
         check("list-empty-state", Boolean(query(".dingtalk-empty-list")));
+      }
+      if (document.body.dataset.scenario === "dingtalk-empty") {
+        const main = query(".dingtalk-main");
+        check(
+          "empty-hides-right-pane",
+          Boolean(main) && getComputedStyle(main).display === "none",
+          main ? getComputedStyle(main).display : "missing",
+        );
       }
       if (
         document.body.dataset.scenario === "agents-cards" ||

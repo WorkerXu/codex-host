@@ -95,14 +95,14 @@ describe("dws CLI output", () => {
       parsePersonSearch({
         result: [
           {
-            name: "吴菁",
+            name: "林晓",
             title: "产品经理",
             userId: "u1",
             openDingTalkId: "open-1",
           },
         ],
       }),
-    ).toEqual([{ name: "吴菁", title: "产品经理", userId: "u1", openDingTalkId: "open-1" }]);
+    ).toEqual([{ name: "林晓", title: "产品经理", userId: "u1", openDingTalkId: "open-1" }]);
   });
 
   it("parses the group directory and at-me hits", () => {
@@ -184,7 +184,7 @@ describe("dws CLI output", () => {
               },
             ],
             quotedMessage: {
-              sender: "李端",
+              sender: "赵明",
               content: "预算表第二版",
               openMessageId: "m0",
               createTime: "2026-11-13 15:20:00",
@@ -222,7 +222,7 @@ describe("dws CLI output", () => {
       bot: true,
       cardTitle: "【云监控】发布检查",
       format: "markdown",
-      quotedMessage: { senderName: "李端", text: "预算表第二版" },
+      quotedMessage: { senderName: "赵明", text: "预算表第二版" },
       reactions: [{ emoji: "OK", count: 3 }],
       resources: [{ kind: "image", resourceId: "@media-1", resourceIdType: "mediaId" }],
     });

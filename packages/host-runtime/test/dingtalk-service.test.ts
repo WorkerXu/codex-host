@@ -289,7 +289,7 @@ describe("DingTalk conversation views", () => {
     const received: DingTalkMessage = {
       messageId: "m1",
       conversationId: "a",
-      senderName: "吴菁",
+      senderName: "林晓",
       createdAt: 100,
       text: "预算表我改完第二版了。",
       unsupported: false,
@@ -303,7 +303,7 @@ describe("DingTalk conversation views", () => {
     });
     const first = await service.preview("a");
     const second = await service.preview("a");
-    expect(first.preview).toBe("吴菁：预算表我改完第二版了。");
+    expect(first.preview).toBe("林晓：预算表我改完第二版了。");
     expect(second.preview).toBe(first.preview);
     expect(fake.messageCalls).toBe(2);
     service.dispose();
@@ -314,7 +314,7 @@ describe("DingTalk conversation views", () => {
     const received: DingTalkMessage = {
       messageId: "m1",
       conversationId: "a",
-      senderName: "吴菁",
+      senderName: "林晓",
       createdAt: 100,
       text: "收到",
       unsupported: false,
@@ -344,7 +344,7 @@ describe("DingTalk keyword search", () => {
     const env = await environment();
     const searches: unknown[] = [];
     const fake = state({
-      unread: [{ ...conversation("local", 100), title: "示例货本地群" }],
+      unread: [{ ...conversation("local", 100), title: "示例本地群" }],
       groups: [
         {
           conversationId: "remote-group",
@@ -359,7 +359,7 @@ describe("DingTalk keyword search", () => {
       ],
       people: [
         {
-          name: "吴菁",
+          name: "林晓",
           title: "产品经理",
           userId: "u1",
           openDingTalkId: "open-1",
@@ -369,9 +369,9 @@ describe("DingTalk keyword search", () => {
         {
           messageId: "m1",
           conversationId: "message-conv",
-          senderName: "李端",
+          senderName: "赵明",
           createdAt: 90,
-          text: "示例货的预算表在这里",
+          text: "示例的预算表在这里",
           unsupported: false,
           mine: false,
         },
@@ -379,7 +379,7 @@ describe("DingTalk keyword search", () => {
       info: {
         "message-conv": {
           ...conversation("message-conv", 90),
-          title: "示例货消息群",
+          title: "示例消息群",
         },
       },
     });
@@ -389,8 +389,8 @@ describe("DingTalk keyword search", () => {
       return { messages: fake.messages, errorCode: null };
     };
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
-    const result = await service.search({ query: "示例货" });
-    expect(searches).toEqual([{ query: "示例货", days: 30, limit: 30 }]);
+    const result = await service.search({ query: "示例" });
+    expect(searches).toEqual([{ query: "示例", days: 30, limit: 30 }]);
     expect(result.available).toBe(true);
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual([
       "local",
