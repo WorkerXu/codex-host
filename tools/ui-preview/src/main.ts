@@ -1044,8 +1044,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     await openFirstConversation(query);
     const list = query<HTMLElement>(".dingtalk-message-list");
     if (!list) throw new Error("Message list is missing");
-    list.scrollTop = 0;
-    list.dispatchEvent(new Event("scroll"));
+    await previewWheel(list, -100_000);
     await waitFor(() => query(".dingtalk-loading-older:not([hidden])"));
     await delay(120);
   },
