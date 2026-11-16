@@ -623,10 +623,10 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleFailed: "The console could not be opened",
   jarvis: {
     description:
-      "Find and reference Jarvis projects, requirements, tasks and bugs from Codex's @ menu. The Gemini API key stays on this machine.",
+      "Search the complete Jarvis bug set from Codex's @ menu. The Gemini API key stays on this machine.",
     geminiSection: "Gemini Decision",
     geminiDescription:
-      "Classifies whether the query refers to Jarvis items and ranks candidates. The key is stored on the local Host; remote machines never need it.",
+      "Fills the search conditions the rules cannot settle. The key is stored on the local Host; remote machines never need it.",
     geminiKeyPlaceholder: "Enter a Gemini API key",
     geminiKeyConfigured: "API key is saved",
     geminiKeyMissing: "No API key configured",
@@ -638,9 +638,9 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     geminiTest: "Test",
     geminiTestOk: "Connection works in {latency} ms",
     geminiTestFailed: "Connection failed: {reason}",
-    thresholdSection: "Recognition threshold",
+    thresholdSection: "Condition threshold",
     thresholdDescription:
-      "Minimum confidence (0–1) for treating input as a Jarvis item. Defaults to 0.5; higher is more conservative.",
+      "Minimum confidence (0–1) for accepting a model-decided search condition. Defaults to 0.5; higher is more conservative.",
     thresholdSave: "Save threshold",
     thresholdInvalid: "Enter a number between 0 and 1",
     machinesSection: "Machines",
@@ -959,10 +959,10 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleFailed: "控制台打开失败",
   jarvis: {
     description:
-      "在 Codex 的 @ 菜单中查找并引用 Jarvis 项目、需求、任务和 Bug。Gemini API Key 只保存在本机。",
+      "在 Codex 的 @ 菜单中按条件搜索完整 Jarvis Bug 集合。Gemini API Key 只保存在本机。",
     geminiSection: "Gemini 判定",
     geminiDescription:
-      "用于判断输入是否指向 Jarvis 条目并排序候选。Key 保存在本机 Host，远程机器不需要也无法读取。",
+      "用于补全规则无法确定的搜索条件。Key 保存在本机 Host，远程机器不需要也无法读取。",
     geminiKeyPlaceholder: "输入 Gemini API Key",
     geminiKeyConfigured: "已保存 API Key",
     geminiKeyMissing: "尚未配置 API Key",
@@ -974,8 +974,8 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     geminiTest: "测试",
     geminiTestOk: "连接正常，耗时 {latency} ms",
     geminiTestFailed: "连接失败：{reason}",
-    thresholdSection: "识别阈值",
-    thresholdDescription: "输入判定为 Jarvis 条目的最低置信度（0–1），默认 0.5。越高越保守。",
+    thresholdSection: "条件识别阈值",
+    thresholdDescription: "模型补充搜索条件的最低置信度（0–1），默认 0.5。越高越保守。",
     thresholdSave: "保存阈值",
     thresholdInvalid: "请输入 0 到 1 之间的数字",
     machinesSection: "机器状态",

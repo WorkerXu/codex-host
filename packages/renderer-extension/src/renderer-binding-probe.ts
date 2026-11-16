@@ -3645,7 +3645,7 @@ export function installRendererBindingProbe(
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
     },
-    suggest: (hostId, query) => jarvisClient.suggest(hostId, query),
+    search: (hostId, params) => jarvisClient.searchBugs(hostId, params),
     readLocale: () => settingsLifecycle.locale,
     anchorForEditor: (editor) =>
       editor.closest("[data-composer-body]") ?? composerForElement(editor),

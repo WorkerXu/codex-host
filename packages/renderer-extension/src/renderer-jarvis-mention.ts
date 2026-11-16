@@ -1,44 +1,60 @@
 /**
- * Jarvis rows in Codex Desktop's native `@` suggestion menu.
+ * Jarvis inside Codex Desktop's native `@` menu.
  *
- * Desktop owns the `@` menu: rows, keyboard navigation and selection stay
- * native. Once the query settles, the Host is asked for Jarvis suggestions and
- * the rows are appended below the native results in Desktop's own menu
- * container. When Desktop has no native results (or re-renders the container
- * away), the same rows move to a floating panel anchored to the Composer.
- * Selecting a row replaces `@query` with a native mention chip whose path is
- * `jarvis://…`; the Host expands that carrier on submission.
+ * Typing after `@` only reveals one 「Jarvis」 row in the 「工作台」 group; it
+ * never searches by itself. Selecting the row switches the same native popup
+ * list into a bug search mode: a back header, a focused search field and the
+ * complete matching set below. Choosing a bug inserts the native mention chip
+ * whose `jarvis://bug/<projectId>/<bugId>` path the Host expands on submit.
  */
 import {
   formatJarvisMentionLink,
   jarvisMentionPath,
-  type JarvisKind,
-  type JarvisSuggestion,
+  type JarvisBug,
+  type JarvisBugCondition,
+  type JarvisBugSearchParams,
+  type JarvisBugSearchResult,
 } from "@codexhost/shared-contracts";
 
 import {
   HEADER_CLASS,
-  LIST_CLASS,
-  MENU_CLASS,
-  ROW_CLASS,
-  ROW_CONTENT_CLASS,
   ROW_HIGHLIGHT_CLASSES,
   ROW_IDLE_CLASS,
 } from "./renderer-delegation-mention.js";
+import {
+  JARVIS_MODE_ATTRIBUTE,
+  JARVIS_SECTION_ATTRIBUTE,
+  createJarvisEntryRow,
+  createJarvisModeChrome,
+  jarvisBugLabel,
+  renderJarvisBugRows,
+  renderJarvisEmpty,
+  renderJarvisLoading,
+} from "./renderer-jarvis-bug-view.js";
+import { jarvisErrorText } from "./renderer-jarvis-client.js";
 import {
   insertNativeAgentMention,
   type NativeTextRange,
 } from "./renderer-native-composer-controller.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
-const SECTION_ATTRIBUTE = "data-codexhost-jarvis-section";
+export {
+  createJarvisEntryRow,
+  createJarvisEntrySection,
+  jarvisBugLabel,
+  jarvisPriorityText,
+  jarvisRelativeTime,
+  jarvisSeverityText,
+  jarvisStatusText,
+  truncateJarvisText,
+} from "./renderer-jarvis-bug-view.js";
+
+const SECTION_ATTRIBUTE = JARVIS_SECTION_ATTRIBUTE;
+const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const PANEL_ATTRIBUTE = "data-codexhost-jarvis-panel";
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
 const MAX_QUERY_LENGTH = 64;
-const MENU_MAX_HEIGHT = 420;
-const VIEWPORT_MARGIN = 8;
-const MENU_GAP = 4;
 const NATIVE_LIST_CLASS = "vertical-scroll-fade-mask";
 
 export interface RendererJarvisTrigger {
@@ -55,69 +71,25 @@ export function findJarvisTrigger(textBeforeCaret: string): RendererJarvisTrigge
   return { query, start: textBeforeCaret.length - query.length - 1 };
 }
 
-const KIND_ORDER: readonly JarvisKind[] = ["project", "requirement", "task", "bug"];
-
-export function jarvisKindLabel(kind: JarvisKind, locale: RendererSettingsLocale): string {
-  if (locale === "zh-CN") {
-    return kind === "project"
-      ? "项目"
-      : kind === "requirement"
-        ? "需求"
-        : kind === "task"
-          ? "任务"
-          : "Bug";
-  }
-  return kind === "project"
-    ? "Project"
-    : kind === "requirement"
-      ? "Requirement"
-      : kind === "task"
-        ? "Task"
-        : "Bug";
+/** The row appears for an empty query or a prefix of its own name. */
+export function matchesJarvisEntry(query: string): boolean {
+  if (query.length === 0) return true;
+  const value = query.toLocaleLowerCase();
+  return "jarvis".startsWith(value) || "贾维斯".startsWith(value);
 }
 
-export function truncateJarvisText(value: string, limit: number): string {
-  const text = value.trim().replace(/\s+/gu, " ");
-  return text.length > limit ? `${text.slice(0, Math.max(1, limit - 1))}…` : text;
-}
+export type JarvisEntryAction = "none" | "entry" | "search";
 
-/** Chip and row label, e.g. `Bug #928 填写已查码的序列号…`. */
-export function jarvisSuggestionLabel(
-  suggestion: JarvisSuggestion,
-  locale: RendererSettingsLocale,
-): string {
-  return `${jarvisKindLabel(suggestion.kind, locale)} #${suggestion.id} ${truncateJarvisText(
-    suggestion.title,
-    28,
-  )}`;
-}
-
-export function jarvisStatusText(
-  suggestion: JarvisSuggestion,
-  locale: RendererSettingsLocale,
-): string {
-  if (suggestion.statusLabel) return suggestion.statusLabel;
-  if (suggestion.status === undefined) return "";
-  if (suggestion.kind === "bug") {
-    const labels =
-      locale === "zh-CN"
-        ? ({ 1: "待处理", 2: "已解决", 3: "已关闭" } as Record<number, string>)
-        : ({ 1: "Open", 2: "Resolved", 3: "Closed" } as Record<number, string>);
-    return (
-      labels[suggestion.status] ??
-      (locale === "zh-CN" ? `状态 ${suggestion.status}` : `Status ${suggestion.status}`)
-    );
-  }
-  return locale === "zh-CN" ? `状态 ${suggestion.status}` : `Status ${suggestion.status}`;
-}
-
-export function groupJarvisSuggestions(
-  suggestions: readonly JarvisSuggestion[],
-): { kind: JarvisKind; suggestions: JarvisSuggestion[] }[] {
-  return KIND_ORDER.flatMap((kind) => {
-    const group = suggestions.filter((suggestion) => suggestion.kind === kind);
-    return group.length > 0 ? [{ kind, suggestions: group }] : [];
-  });
+/**
+ * Entry gating policy. Typing after `@` can only reveal the row; a search
+ * request is possible only after the row was selected.
+ */
+export function jarvisEntryAction(input: {
+  query: string;
+  selectedEntry: boolean;
+}): JarvisEntryAction {
+  if (!matchesJarvisEntry(input.query)) return "none";
+  return input.selectedEntry ? "search" : "entry";
 }
 
 function isVisible(element: HTMLElement): boolean {
@@ -138,7 +110,7 @@ export function findNativeSuggestionList(
     .filter(
       (element) =>
         !element.closest(
-          `[${SECTION_ATTRIBUTE}],[${PANEL_ATTRIBUTE}],[data-codexhost-delegation-mention-menu]`,
+          `[${SECTION_ATTRIBUTE}],[${MODE_ATTRIBUTE}],[${PANEL_ATTRIBUTE}],[data-codexhost-delegation-mention-menu]`,
         ),
     )
     .filter(isVisible)
@@ -169,8 +141,8 @@ export interface RendererJarvisMentionOptions {
   isComposerEditor(editor: HTMLElement): boolean;
   /** Desktop Host that runs the Composer's Thread; null while unknown. */
   readHostId(editor: HTMLElement): string | null;
-  /** Classify, fetch candidates on the Host and rank on the local Host. */
-  suggest(hostId: string, query: string): Promise<{ suggestions: JarvisSuggestion[] } | null>;
+  /** Runs the structured Host search; only called after Jarvis was selected. */
+  search(hostId: string, params: JarvisBugSearchParams): Promise<JarvisBugSearchResult>;
   readLocale(): RendererSettingsLocale;
   anchorForEditor(editor: HTMLElement): Element | null;
 }
@@ -180,7 +152,7 @@ export interface RendererJarvisMentionControl {
   dispose(): void;
 }
 
-interface ActiveTrigger {
+interface Trigger {
   editor: HTMLElement;
   node: Text;
   start: number;
@@ -188,11 +160,30 @@ interface ActiveTrigger {
   query: string;
 }
 
-interface RenderedState {
-  trigger: ActiveTrigger;
+interface EntryState {
+  trigger: Trigger;
+  row: HTMLElement;
   section: HTMLElement;
-  entries: { suggestion: JarvisSuggestion; row: HTMLElement }[];
-  panel: HTMLElement | null;
+  selected: boolean;
+}
+
+interface ModeState {
+  trigger: Trigger;
+  section: HTMLElement;
+  back: HTMLButtonElement;
+  input: HTMLInputElement;
+  chips: HTMLElement;
+  summary: HTMLElement;
+  results: HTMLElement;
+  entries: { bug: JarvisBug; row: HTMLElement }[];
+  selected: number;
+  generation: number;
+  loading: boolean;
+  omit: Set<string>;
+  lastQuery: string;
+  hidden: Map<HTMLElement, string>;
+  locale: RendererSettingsLocale;
+  timer: number | null;
 }
 
 export function installRendererJarvisMention(
@@ -202,188 +193,51 @@ export function installRendererJarvisMention(
   const view = ownerDocument.defaultView;
   if (!view) return { refresh: () => undefined, dispose: () => undefined };
 
-  let active: RenderedState | null = null;
-  let timer: number | null = null;
-  let generation = 0;
-  let selected = -1;
+  let entry: EntryState | null = null;
+  let mode: ModeState | null = null;
+  let suppressed: string | null = null;
   let composing = false;
   let inserting = false;
   let reattachScheduled = false;
   let reattachAttempts = 0;
-  let suppressedQuery: string | null = null;
 
-  const clearTimer = (): void => {
-    if (timer !== null) view.clearTimeout(timer);
-    timer = null;
+  const isInside = (node: Node | null, element: Element | null): boolean =>
+    node !== null && element !== null && element.contains(node);
+
+  const nativeList = (editor: HTMLElement): HTMLElement | null =>
+    findNativeSuggestionList(ownerDocument, options.anchorForEditor(editor));
+
+  const removeEntry = (): void => {
+    entry?.row.remove();
+    // Only remove the section we created; the DingTalk group is shared.
+    if (entry?.section.hasAttribute(SECTION_ATTRIBUTE)) entry.section.remove();
+    entry = null;
   };
 
-  const removeSection = (): void => {
-    active?.section.remove();
-    active?.panel?.remove();
-    active = null;
-    selected = -1;
-  };
-
-  const close = (): void => {
-    clearTimer();
-    generation += 1;
-    removeSection();
-  };
-
-  const rowMeta = (suggestion: JarvisSuggestion, locale: RendererSettingsLocale): string => {
-    const parts = [`#${suggestion.id}`];
-    const status = jarvisStatusText(suggestion, locale);
-    if (status) parts.push(status);
-    if (suggestion.kind === "bug") {
-      if (suggestion.assigneeName) {
-        parts.push(
-          locale === "zh-CN"
-            ? `指派 ${suggestion.assigneeName}`
-            : `Assigned ${suggestion.assigneeName}`,
-        );
-      }
-      if (suggestion.creatorName) {
-        parts.push(
-          locale === "zh-CN" ? `创建 ${suggestion.creatorName}` : `By ${suggestion.creatorName}`,
-        );
-      }
+  const removeMode = (): void => {
+    if (!mode) return;
+    if (mode.timer !== null) view.clearTimeout(mode.timer);
+    mode.section.remove();
+    for (const [element, display] of mode.hidden) {
+      if (!element.isConnected) continue;
+      element.style.display = display;
     }
-    return parts.join(" · ");
+    mode.hidden.clear();
+    mode = null;
   };
 
-  const buildSection = (
-    trigger: ActiveTrigger,
-    suggestions: readonly JarvisSuggestion[],
-  ): RenderedState => {
-    const locale = options.readLocale();
-    const section = ownerDocument.createElement("div");
-    section.setAttribute(SECTION_ATTRIBUTE, "true");
-    section.className = "flex w-full flex-col";
-    const header = ownerDocument.createElement("div");
-    header.className = HEADER_CLASS;
-    header.textContent = "Jarvis";
-    section.append(header);
-    const entries: RenderedState["entries"] = [];
-    for (const group of groupJarvisSuggestions(suggestions)) {
-      const groupHeader = ownerDocument.createElement("div");
-      groupHeader.className = "text-codex-description px-row-x py-1 text-xs";
-      groupHeader.textContent = jarvisKindLabel(group.kind, locale);
-      section.append(groupHeader);
-      for (const suggestion of group.suggestions) {
-        if (suggestion.kind === "bug" && !suggestion.projectId) continue;
-        const row = ownerDocument.createElement("div");
-        row.setAttribute("role", "option");
-        row.setAttribute("aria-selected", "false");
-        row.setAttribute("data-jarvis-kind", suggestion.kind);
-        row.setAttribute("data-jarvis-id", String(suggestion.id));
-        row.className = ROW_CLASS;
-        const content = ownerDocument.createElement("div");
-        content.className = ROW_CONTENT_CLASS;
-        const label = ownerDocument.createElement("span");
-        label.className = "min-w-0 shrink truncate";
-        label.textContent = suggestion.title;
-        const meta = ownerDocument.createElement("span");
-        meta.className = "flex-1 truncate text-codex-description";
-        meta.textContent = rowMeta(suggestion, locale);
-        content.append(label, meta);
-        row.append(content);
-        const index = entries.length;
-        row.addEventListener("pointermove", (event) => {
-          event.stopPropagation();
-          select(index);
-        });
-        row.addEventListener("mousedown", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        });
-        row.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const entry = entries.find((candidate) => candidate.row === row);
-          if (entry) void choose(entry.suggestion);
-        });
-        entries.push({ suggestion, row });
-        row.dataset.jarvisIndex = String(index);
-        section.append(row);
-      }
+  const hideNativeChildren = (state: ModeState, list: HTMLElement): void => {
+    for (const child of [...list.children]) {
+      if (!(child instanceof HTMLElement)) continue;
+      if (child === state.section) continue;
+      if (child.hasAttribute(SECTION_ATTRIBUTE) || child.hasAttribute(MODE_ATTRIBUTE)) continue;
+      if (state.hidden.has(child)) continue;
+      state.hidden.set(child, child.style.display);
+      child.style.display = "none";
     }
-    return { trigger, section, entries, panel: null };
   };
 
-  const highlight = (): void => {
-    if (!active) return;
-    active.entries.forEach(({ row }, index) => {
-      const isSelected = index === selected;
-      row.setAttribute("aria-selected", String(isSelected));
-      for (const name of ROW_HIGHLIGHT_CLASSES) row.classList.toggle(name, isSelected);
-      row.classList.toggle(ROW_IDLE_CLASS, !isSelected);
-      if (isSelected) row.scrollIntoView({ block: "nearest" });
-    });
-  };
-
-  const select = (index: number): void => {
-    if (!active) return;
-    selected = index >= 0 && index < active.entries.length ? index : -1;
-    highlight();
-  };
-
-  const attachSection = (state: RenderedState, allowFallback: boolean): void => {
-    const anchor = options.anchorForEditor(state.trigger.editor);
-    const native = findNativeSuggestionList(ownerDocument, anchor);
-    if (native) {
-      native.append(state.section);
-      state.panel?.remove();
-      state.panel = null;
-      return;
-    }
-    if (!allowFallback) {
-      close();
-      return;
-    }
-    // Desktop's menu has no native rows (or closed); keep Jarvis results
-    // visible in a panel attached to the Composer.
-    if (!state.panel) {
-      state.panel = ownerDocument.createElement("div");
-      state.panel.setAttribute(PANEL_ATTRIBUTE, "true");
-      state.panel.className = MENU_CLASS;
-      Object.assign(state.panel.style, {
-        display: "flex",
-        position: "fixed",
-        zIndex: "2147483647",
-        maxHeight: `min(${MENU_MAX_HEIGHT}px, calc(100vh - ${VIEWPORT_MARGIN * 2}px))`,
-        padding: "var(--spacing)",
-      } satisfies Partial<CSSStyleDeclaration>);
-      const list = ownerDocument.createElement("div");
-      list.className = LIST_CLASS;
-      list.setAttribute("role", "listbox");
-      state.panel.append(list);
-      ownerDocument.body.append(state.panel);
-    }
-    const list = state.panel.querySelector(`.${NATIVE_LIST_CLASS.split(" ")[0]}`) ?? state.panel;
-    list.append(state.section);
-    positionPanel(state);
-  };
-
-  const positionPanel = (state: RenderedState): void => {
-    const panelElement = state.panel;
-    if (!panelElement) return;
-    const anchor = options.anchorForEditor(state.trigger.editor) ?? state.trigger.editor;
-    const rect = anchor.getBoundingClientRect();
-    const width = Math.min(rect.width, view.innerWidth - VIEWPORT_MARGIN * 2);
-    const left = Math.max(
-      VIEWPORT_MARGIN,
-      Math.min(rect.left, view.innerWidth - width - VIEWPORT_MARGIN),
-    );
-    panelElement.style.width = `${width}px`;
-    panelElement.style.left = `${left}px`;
-    const height = panelElement.getBoundingClientRect().height;
-    const above = rect.top >= height + MENU_GAP + VIEWPORT_MARGIN;
-    panelElement.style.top = above
-      ? `${rect.top - height - MENU_GAP}px`
-      : `${Math.min(view.innerHeight - height - VIEWPORT_MARGIN, rect.bottom + MENU_GAP)}px`;
-  };
-
-  const readTrigger = (): ActiveTrigger | null => {
+  const readTrigger = (): Trigger | null => {
     const selection = ownerDocument.getSelection();
     if (!selection?.isCollapsed || selection.rangeCount === 0) return null;
     const node = selection.anchorNode;
@@ -392,7 +246,7 @@ export function installRendererJarvisMention(
     if (!editor || !options.isComposerEditor(editor)) return null;
     const text = node as Text;
     const found = findJarvisTrigger(text.data.slice(0, selection.anchorOffset));
-    if (!found || found.query.length === 0) return null;
+    if (!found) return null;
     return {
       editor,
       node: text,
@@ -402,92 +256,268 @@ export function installRendererJarvisMention(
     };
   };
 
-  const schedule = (): void => {
-    if (inserting || composing) return;
-    const trigger = readTrigger();
-    if (!trigger) {
-      suppressedQuery = null;
-      close();
-      return;
-    }
-    if (suppressedQuery !== null && suppressedQuery === trigger.query) return;
-    suppressedQuery = null;
-    if (active?.trigger.query === trigger.query && active.trigger.node === trigger.node) {
-      active.trigger = trigger;
-      return;
-    }
-    close();
-    const requestGeneration = generation;
-    const hostId = options.readHostId(trigger.editor);
-    if (!hostId) return;
-    timer = view.setTimeout(() => {
-      timer = null;
-      if (requestGeneration !== generation) return;
-      const query = trigger.query;
-      void Promise.resolve(options.suggest(hostId, query))
-        .then((result) => {
-          if (requestGeneration !== generation || !trigger.node.isConnected) return;
-          if (!result || result.suggestions.length === 0) return;
-          const state = buildSection(trigger, result.suggestions);
-          active = state;
-          selected = -1;
-          attachSection(state, true);
-          highlight();
-        })
-        .catch(() => undefined);
-    }, DEBOUNCE_MS);
+  const triggerIntact = (trigger: Trigger): boolean =>
+    trigger.node.isConnected &&
+    trigger.node.data.slice(trigger.start, trigger.end) === `@${trigger.query}`;
+
+  const highlightEntry = (state: EntryState, selected: boolean): void => {
+    state.selected = selected;
+    state.row.setAttribute("aria-selected", String(selected));
+    for (const name of ROW_HIGHLIGHT_CLASSES) state.row.classList.toggle(name, selected);
+    state.row.classList.toggle(ROW_IDLE_CLASS, !selected);
+    if (selected) state.row.scrollIntoView({ block: "nearest" });
   };
 
-  const runWithInsertionGuard = async (operation: () => Promise<void>): Promise<void> => {
-    inserting = true;
-    try {
-      await operation();
-    } finally {
-      inserting = false;
+  const attachEntry = (trigger: Trigger): void => {
+    if (!matchesJarvisEntry(trigger.query)) return;
+    const list = nativeList(trigger.editor);
+    if (!list) return;
+    const locale = options.readLocale();
+    const row = createJarvisEntryRow(ownerDocument, locale);
+    let section: HTMLElement;
+    const dingtalk = list.querySelector<HTMLElement>("[data-codexhost-dingtalk-section]");
+    if (dingtalk) {
+      section = dingtalk;
+      dingtalk.append(row);
+    } else {
+      section = ownerDocument.createElement("div");
+      section.setAttribute(SECTION_ATTRIBUTE, "true");
+      section.className = "flex w-full flex-col";
+      const header = ownerDocument.createElement("div");
+      header.className = HEADER_CLASS;
+      header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
+      section.append(header, row);
+      list.append(section);
     }
-  };
+    const state: EntryState = { trigger, row, section, selected: false };
+    entry = state;
 
-  const choose = async (suggestion: JarvisSuggestion): Promise<void> => {
-    const state = active;
-    if (!state) return;
-    const trigger = state.trigger;
-    const expected = `@${trigger.query}`;
-    if (trigger.node.data.slice(trigger.start, trigger.end) !== expected) {
-      close();
-      return;
-    }
-    const label = jarvisSuggestionLabel(suggestion, options.readLocale());
-    const target = {
-      kind: suggestion.kind,
-      id: suggestion.id,
-      ...(suggestion.projectId ? { projectId: suggestion.projectId } : {}),
-    };
-    const path = jarvisMentionPath(target);
-    const range: NativeTextRange = {
-      node: trigger.node,
-      start: trigger.start,
-      end: trigger.end,
-      expected,
-    };
-    close();
-    await runWithInsertionGuard(async () => {
-      if (
-        insertNativeAgentMention(trigger.editor, range, {
-          name: `jarvis-${suggestion.kind}-${suggestion.id}`,
-          displayName: label,
-          path,
-        })
-      ) {
-        return;
-      }
-      if (!(await selectTriggerText(trigger))) return;
-      const carrier = `${formatJarvisMentionLink({ ...target, label })} `;
-      const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
-      if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
+    row.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    row.addEventListener("pointermove", (event) => {
+      event.stopPropagation();
+      highlightEntry(state, true);
+    });
+    row.addEventListener("pointerleave", () => highlightEntry(state, false));
+    row.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (entry !== state) return;
+      enterMode(state.trigger);
     });
   };
 
-  const selectTriggerText = async (trigger: ActiveTrigger): Promise<boolean> => {
+  const buildMode = (trigger: Trigger): ModeState => {
+    const locale = options.readLocale();
+    const chrome = createJarvisModeChrome(ownerDocument, locale);
+    chrome.section.setAttribute(MODE_ATTRIBUTE, "true");
+    return {
+      ...chrome,
+      trigger,
+      entries: [],
+      selected: -1,
+      generation: 0,
+      loading: false,
+      omit: new Set(),
+      lastQuery: "",
+      hidden: new Map(),
+      locale,
+      timer: null,
+    };
+  };
+
+  const renderLoading = (state: ModeState): void => {
+    state.loading = true;
+    state.section.setAttribute("aria-busy", "true");
+    state.entries = [];
+    state.selected = -1;
+    state.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
+    state.chips.replaceChildren();
+    state.chips.hidden = true;
+    renderJarvisLoading(ownerDocument, state.results);
+  };
+
+  const selectRow = (state: ModeState, index: number): void => {
+    state.selected = index >= 0 && index < state.entries.length ? index : -1;
+    state.entries.forEach(({ row }, current) => {
+      const selected = current === state.selected;
+      row.setAttribute("aria-selected", String(selected));
+      for (const name of ROW_HIGHLIGHT_CLASSES) row.classList.toggle(name, selected);
+      row.classList.toggle(ROW_IDLE_CLASS, !selected);
+      if (selected) row.scrollIntoView({ block: "nearest" });
+    });
+  };
+
+  const renderChips = (state: ModeState, conditions: readonly JarvisBugCondition[]): void => {
+    state.chips.replaceChildren();
+    for (const condition of conditions) {
+      const chip = ownerDocument.createElement("button");
+      chip.type = "button";
+      chip.className =
+        "inline-flex max-w-full items-center gap-1 truncate rounded-sm border border-default px-1 text-xs text-tertiary";
+      chip.setAttribute("data-jarvis-chip", condition.key);
+      const label = ownerDocument.createElement("span");
+      label.className = "truncate";
+      label.textContent = condition.label;
+      const close = ownerDocument.createElement("span");
+      close.className = "shrink-0";
+      close.textContent = "×";
+      chip.append(label, close);
+      chip.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      chip.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.omit.add(condition.key);
+        state.input.focus({ preventScroll: true });
+        void requestSearch(state, state.input.value);
+      });
+      state.chips.append(chip);
+    }
+    state.chips.hidden = conditions.length === 0;
+  };
+
+  const renderRows = (state: ModeState, bugs: readonly JarvisBug[]): void => {
+    state.selected = -1;
+    state.entries = renderJarvisBugRows(ownerDocument, state.results, bugs, state.locale, {
+      onSelect: (index) => selectRow(state, index),
+      onChoose: (bug) => void choose(state, bug),
+    });
+  };
+
+  const renderEmpty = (state: ModeState, result: JarvisBugSearchResult): void => {
+    state.entries = [];
+    state.selected = -1;
+    let message: string;
+    if (!result.available) {
+      message =
+        result.errorCode === "not_logged_in"
+          ? state.locale === "zh-CN"
+            ? "Jarvis 未安装或未登录"
+            : "Jarvis is not installed or signed in"
+          : jarvisErrorText(result.errorCode, state.locale);
+    } else if (result.errorCode) {
+      message = jarvisErrorText(result.errorCode, state.locale);
+    } else {
+      message =
+        state.locale === "zh-CN"
+          ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
+          : "No matching bugs. Try removing a condition or rephrasing.";
+    }
+    renderJarvisEmpty(ownerDocument, state.results, message);
+  };
+
+  const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
+    state.loading = false;
+    state.section.removeAttribute("aria-busy");
+    state.lastQuery = state.input.value.trim();
+    renderChips(state, result.conditions);
+    const labels = result.conditions.map((condition) => condition.label);
+    const count = result.capped
+      ? state.locale === "zh-CN"
+        ? `${result.total} 条，仅显示前 ${result.bugs.length} 条`
+        : `${result.total}, showing the first ${result.bugs.length}`
+      : state.locale === "zh-CN"
+        ? `${result.total} 条`
+        : `${result.total} bugs`;
+    state.summary.textContent = [...labels, count].join(" · ");
+    if (result.bugs.length === 0) {
+      renderEmpty(state, result);
+    } else {
+      renderRows(state, result.bugs);
+    }
+  };
+
+  const requestSearch = async (state: ModeState, query: string): Promise<void> => {
+    state.generation += 1;
+    const generation = state.generation;
+    renderLoading(state);
+    const hostId = options.readHostId(state.trigger.editor);
+    if (!hostId) {
+      state.loading = false;
+      state.section.removeAttribute("aria-busy");
+      state.summary.textContent = "";
+      renderEmpty(state, {
+        available: false,
+        errorCode: "jarvis_failed",
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
+      });
+      return;
+    }
+    const result = await options
+      .search(hostId, { query, omit: [...state.omit] })
+      .catch((): JarvisBugSearchResult => ({
+        available: false,
+        errorCode: "jarvis_failed",
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
+      }));
+    if (mode !== state || generation !== state.generation || !state.section.isConnected) return;
+    renderResult(state, result);
+  };
+
+  const scheduleSearch = (state: ModeState): void => {
+    if (state.timer !== null) view.clearTimeout(state.timer);
+    state.timer = view.setTimeout(() => {
+      state.timer = null;
+      if (mode !== state) return;
+      void requestSearch(state, state.input.value.trim());
+    }, DEBOUNCE_MS);
+  };
+
+  function enterMode(trigger: Trigger): void {
+    if (!triggerIntact(trigger)) {
+      removeEntry();
+      return;
+    }
+    removeEntry();
+    removeMode();
+    const list = nativeList(trigger.editor);
+    if (!list) return;
+    const state = buildMode(trigger);
+    list.append(state.section);
+    hideNativeChildren(state, list);
+    mode = state;
+
+    state.back.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    state.back.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      exitMode(true);
+    });
+    state.input.addEventListener("pointerdown", (event) => event.stopPropagation());
+    state.input.addEventListener("input", () => {
+      if (state.input.value.trim() !== state.lastQuery) state.omit.clear();
+      scheduleSearch(state);
+    });
+    state.input.addEventListener("keydown", (event) => event.stopPropagation());
+    state.input.focus({ preventScroll: true });
+    void requestSearch(state, "");
+  }
+
+  function exitMode(refocusComposer: boolean): void {
+    if (!mode) return;
+    const trigger = mode.trigger;
+    suppressed = trigger.query;
+    removeMode();
+    if (refocusComposer && trigger.node.isConnected) {
+      trigger.editor.focus({ preventScroll: true });
+    }
+  }
+
+  const selectTriggerText = async (trigger: Trigger): Promise<boolean> => {
     const selection = ownerDocument.getSelection();
     if (!selection) return false;
     const range = ownerDocument.createRange();
@@ -500,56 +530,147 @@ export function installRendererJarvisMention(
     return true;
   };
 
-  const nativeRows = (): HTMLElement[] => {
-    if (!active) return [];
-    const native = findNativeSuggestionList(
-      ownerDocument,
-      options.anchorForEditor(active.trigger.editor),
+  async function choose(state: ModeState, bug: JarvisBug): Promise<void> {
+    if (mode !== state || inserting) return;
+    const trigger = state.trigger;
+    if (!triggerIntact(trigger)) {
+      exitMode(false);
+      return;
+    }
+    const expected = `@${trigger.query}`;
+    const label = jarvisBugLabel(bug);
+    const path = jarvisMentionPath({ kind: "bug", id: bug.id, projectId: bug.projectId });
+    const range: NativeTextRange = {
+      node: trigger.node,
+      start: trigger.start,
+      end: trigger.end,
+      expected,
+    };
+    suppressed = trigger.query;
+    removeMode();
+    inserting = true;
+    try {
+      if (
+        insertNativeAgentMention(trigger.editor, range, {
+          name: `jarvis-bug-${bug.id}`,
+          displayName: label,
+          path,
+        })
+      ) {
+        return;
+      }
+      if (!(await selectTriggerText(trigger))) return;
+      const carrier = `${formatJarvisMentionLink({
+        kind: "bug",
+        id: bug.id,
+        projectId: bug.projectId,
+        label,
+      })} `;
+      const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
+      if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
+    } finally {
+      inserting = false;
+    }
+  }
+
+  const nativeRows = (editor: HTMLElement): HTMLElement[] => {
+    const list = nativeList(editor);
+    if (!list) return [];
+    return [...list.querySelectorAll<HTMLElement>('[role="option"]')].filter(
+      (element) =>
+        !element.closest(`[${SECTION_ATTRIBUTE}]`) &&
+        !element.closest(`[${MODE_ATTRIBUTE}]`) &&
+        !element.closest("[data-codexhost-dingtalk-section]"),
     );
-    if (!native) return [];
-    return [...native.querySelectorAll<HTMLElement>('[role="option"]')].filter(
-      (element) => !element.closest(`[${SECTION_ATTRIBUTE}]`),
-    );
+  };
+
+  const schedule = (event?: Event): void => {
+    if (inserting || composing) return;
+    if (mode) {
+      const target = event?.target ?? null;
+      if (target && isInside(target as Node, mode.section)) return;
+      if (event?.type === "input") {
+        // Focus moved back to the Composer; the search field is no longer the
+        // active surface, so leave the submenu.
+        exitMode(false);
+      }
+      return;
+    }
+    const trigger = readTrigger();
+    if (!trigger) {
+      suppressed = null;
+      removeEntry();
+      return;
+    }
+    if (suppressed !== null && suppressed === trigger.query) return;
+    suppressed = null;
+    if (entry && entry.trigger.query === trigger.query && entry.trigger.node === trigger.node) {
+      entry.trigger = trigger;
+      return;
+    }
+    removeEntry();
+    attachEntry(trigger);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.isComposing) return;
-    if (event.key === "Escape" && !active) {
-      // Native Esc closes its menu; do not reopen Jarvis for the same text.
-      suppressedQuery = readTrigger()?.query ?? null;
+    if (mode) {
+      const state = mode;
+      let handled = true;
+      if (event.key === "Escape") {
+        exitMode(true);
+      } else if (event.key === "ArrowDown") {
+        if (state.entries.length === 0) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        selectRow(state, state.selected < 0 ? 0 : (state.selected + 1) % state.entries.length);
+      } else if (event.key === "ArrowUp") {
+        if (state.entries.length === 0) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        selectRow(state, state.selected <= 0 ? state.entries.length - 1 : state.selected - 1);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        const picked = state.selected >= 0 ? state.entries[state.selected] : undefined;
+        if (picked) void choose(state, picked.bug);
+      } else {
+        handled = false;
+      }
+      if (!handled) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
       return;
     }
-    if (!active) return;
-    const count = active.entries.length;
-    if (count === 0) return;
+    if (!entry) return;
     let handled = true;
     if (event.key === "ArrowDown") {
-      if (selected < 0) {
-        const rows = nativeRows();
-        const current = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
-        if (rows.length === 0 || current === rows.length - 1) select(0);
-        else handled = false;
+      const rows = nativeRows(entry.trigger.editor);
+      const current = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
+      if (rows.length === 0 || current === rows.length - 1) {
+        highlightEntry(entry, true);
       } else {
-        select((selected + 1) % count);
+        handled = false;
       }
     } else if (event.key === "ArrowUp") {
-      if (selected > 0) select(selected - 1);
-      else if (selected === 0) {
-        select(-1);
+      if (!entry.selected) handled = false;
+      else {
+        highlightEntry(entry, false);
+        // Let the native menu move from its own last selected row.
         handled = false;
-      } else handled = false;
+      }
     } else if (event.key === "Enter" || event.key === "Tab") {
-      const entry = selected >= 0 ? active.entries[selected] : undefined;
-      if (entry) void choose(entry.suggestion);
-      else handled = false;
+      if (!entry.selected) handled = false;
+      else enterMode(entry.trigger);
     } else if (event.key === "Escape") {
-      if (selected >= 0) {
-        select(-1);
-        suppressedQuery = active.trigger.query;
-        close();
-      } else {
-        suppressedQuery = active.trigger.query;
+      if (!entry.selected) {
+        suppressed = entry.trigger.query;
         handled = false;
+      } else {
+        suppressed = entry.trigger.query;
+        removeEntry();
       }
     } else handled = false;
     if (!handled) return;
@@ -558,20 +679,17 @@ export function installRendererJarvisMention(
   };
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (!active) return;
-    const target = event.target as Node;
-    if (active.panel?.contains(target) || active.section.contains(target)) return;
-    const native = findNativeSuggestionList(
-      ownerDocument,
-      options.anchorForEditor(active.trigger.editor),
-    );
-    if (native?.contains(target)) return;
-    suppressedQuery = active.trigger.query;
-    close();
-  };
-
-  const onViewportChange = (): void => {
-    if (active?.panel) positionPanel(active);
+    const target = event.target as Node | null;
+    if (mode) {
+      if (isInside(target, mode.section)) return;
+      exitMode(false);
+      return;
+    }
+    if (!entry) return;
+    if (isInside(target, entry.section)) return;
+    const list = nativeList(entry.trigger.editor);
+    if (list?.contains(target)) return;
+    removeEntry();
   };
 
   const onCompositionStart = (): void => {
@@ -583,52 +701,52 @@ export function installRendererJarvisMention(
   };
 
   const ensureAttached = (): void => {
-    if (!active || reattachScheduled) return;
+    if (reattachScheduled) return;
     reattachScheduled = true;
     view.setTimeout(() => {
       reattachScheduled = false;
-      if (!active) return;
-      if (active.panel) {
-        reattachAttempts = 0;
-        const native = findNativeSuggestionList(
-          ownerDocument,
-          options.anchorForEditor(active.trigger.editor),
-        );
-        if (native) {
-          native.append(active.section);
-          active.panel.remove();
-          active.panel = null;
-          highlight();
-        } else if (!active.panel.isConnected) {
-          close();
-        } else if (!active.panel.contains(active.section)) {
-          active.panel.append(active.section);
+      if (mode) {
+        const list = nativeList(mode.trigger.editor);
+        if (list) {
+          if (!mode.section.isConnected) list.append(mode.section);
+          hideNativeChildren(mode, list);
+          return;
         }
-        return;
-      }
-      if (active.section.isConnected) {
+        if (reattachAttempts < 3) {
+          reattachAttempts += 1;
+          ensureAttached();
+          return;
+        }
         reattachAttempts = 0;
+        exitMode(false);
         return;
       }
-      // Desktop may briefly replace its menu subtree. Retry a few frames before
-      // treating the menu as dismissed; a closed menu stays closed.
-      const native = findNativeSuggestionList(
-        ownerDocument,
-        options.anchorForEditor(active.trigger.editor),
-      );
-      if (native) {
-        native.append(active.section);
-        reattachAttempts = 0;
-        highlight();
+      if (!entry) return;
+      const list = nativeList(entry.trigger.editor);
+      if (!list) {
+        removeEntry();
         return;
       }
-      if (reattachAttempts < 3) {
-        reattachAttempts += 1;
-        ensureAttached();
+      const dingtalk = list.querySelector<HTMLElement>("[data-codexhost-dingtalk-section]");
+      if (dingtalk && entry.row.parentElement !== dingtalk) {
+        dingtalk.append(entry.row);
+        if (entry.section !== dingtalk) entry.section.remove();
+        entry.section = dingtalk;
         return;
       }
-      reattachAttempts = 0;
-      close();
+      if (!dingtalk && entry.section === entry.row.parentElement && entry.section.isConnected) {
+        return;
+      }
+      if (entry.row.isConnected) return;
+      const own = ownerDocument.createElement("div");
+      own.setAttribute(SECTION_ATTRIBUTE, "true");
+      own.className = "flex w-full flex-col";
+      const header = ownerDocument.createElement("div");
+      header.className = HEADER_CLASS;
+      header.textContent = options.readLocale() === "zh-CN" ? "工作台" : "Workbench";
+      own.append(header, entry.row);
+      list.append(own);
+      entry.section = own;
     }, 60);
   };
 
@@ -641,13 +759,12 @@ export function installRendererJarvisMention(
   ownerDocument.addEventListener("compositionstart", onCompositionStart, true);
   ownerDocument.addEventListener("compositionend", onCompositionEnd, true);
   ownerDocument.addEventListener("pointerdown", onPointerDown, true);
-  view.addEventListener("resize", onViewportChange);
-  view.addEventListener("scroll", onViewportChange, true);
 
   return {
     refresh: schedule,
     dispose() {
-      close();
+      removeMode();
+      removeEntry();
       observer.disconnect();
       view.removeEventListener("keydown", onKeyDown, true);
       ownerDocument.removeEventListener("input", schedule, true);
@@ -655,13 +772,11 @@ export function installRendererJarvisMention(
       ownerDocument.removeEventListener("compositionstart", onCompositionStart, true);
       ownerDocument.removeEventListener("compositionend", onCompositionEnd, true);
       ownerDocument.removeEventListener("pointerdown", onPointerDown, true);
-      view.removeEventListener("resize", onViewportChange);
-      view.removeEventListener("scroll", onViewportChange, true);
     },
   };
 }
 
-/** Returns true when the editor consumed the paste. */
+/** Mirrors Desktop's restore path when its controller is unavailable. */
 function dispatchPlainTextPaste(editor: HTMLElement, text: string): boolean {
   const view = editor.ownerDocument.defaultView;
   if (!view?.DataTransfer || !view.ClipboardEvent) return false;

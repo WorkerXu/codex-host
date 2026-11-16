@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
+
 import {
   createRendererJarvisClient,
   jarvisCodeFromError,
@@ -7,39 +9,53 @@ import {
 } from "../src/renderer-jarvis-client.js";
 import {
   findJarvisTrigger,
-  groupJarvisSuggestions,
+  jarvisBugLabel,
+  jarvisEntryAction,
+  jarvisPriorityText,
+  jarvisRelativeTime,
+  jarvisSeverityText,
   jarvisStatusText,
-  jarvisSuggestionLabel,
+  matchesJarvisEntry,
   truncateJarvisText,
 } from "../src/renderer-jarvis-mention.js";
 
 describe("Jarvis @ trigger", () => {
-  it("detects a query that starts a word", () => {
+  it("detects the token without implying a search", () => {
     expect(findJarvisTrigger("@")).toEqual({ query: "", start: 0 });
     expect(findJarvisTrigger("hello @测试新提给我的bug")).toEqual({
       query: "测试新提给我的bug",
       start: 6,
     });
-  });
-
-  it("ignores emails, a leading digit-free rule is not applied to Jarvis queries", () => {
     expect(findJarvisTrigger("user@example.com")).toBeNull();
-    expect(findJarvisTrigger("@928")).toEqual({ query: "928", start: 0 });
-  });
-
-  it("rejects an overlong query", () => {
-    expect(findJarvisTrigger(`@${"x".repeat(65)}`)).toBeNull();
   });
 });
 
-describe("Jarvis suggestion presentation", () => {
+describe("Jarvis entry gating", () => {
+  it("shows the row only for its own name or an empty query", () => {
+    expect(matchesJarvisEntry("")).toBe(true);
+    expect(matchesJarvisEntry("jar")).toBe(true);
+    expect(matchesJarvisEntry("贾")).toBe(true);
+    expect(matchesJarvisEntry("示例买")).toBe(false);
+  });
+
+  it("never searches before the row is selected", () => {
+    expect(jarvisEntryAction({ query: "", selectedEntry: false })).toBe("entry");
+    expect(jarvisEntryAction({ query: "jarvis", selectedEntry: false })).toBe("entry");
+    expect(jarvisEntryAction({ query: "示例买", selectedEntry: false })).toBe("none");
+    expect(jarvisEntryAction({ query: "示例买", selectedEntry: true })).toBe("none");
+    expect(jarvisEntryAction({ query: "", selectedEntry: true })).toBe("search");
+  });
+});
+
+describe("Jarvis bug presentation", () => {
   const bug = {
-    kind: "bug" as const,
     id: 928,
     projectId: 4029,
     title: "填写已查码的序列号给新的查码任务，无法进行下一步",
     status: 1,
-    assigneeId: 10058,
+    priority: 1,
+    severity: 2,
+    updatedAt: "2026-11-16 09:50:00",
   };
 
   it("truncates long titles with an ellipsis", () => {
@@ -47,97 +63,69 @@ describe("Jarvis suggestion presentation", () => {
     expect(truncateJarvisText("x".repeat(30), 10)).toBe(`${"x".repeat(9)}…`);
   });
 
-  it("builds the chip label in Chinese and English", () => {
-    expect(jarvisSuggestionLabel({ ...bug, score: 1 }, "zh-CN")).toBe(
-      "Bug #928 填写已查码的序列号给新的查码任务，无法进行下一步",
-    );
-    expect(jarvisSuggestionLabel({ ...bug, score: 1 }, "en")).toContain("Bug #928 ");
+  it("builds the chip label", () => {
+    expect(jarvisBugLabel(bug)).toBe("Bug #928 填写已查码的序列号给新的查码任务，无法进行下一步");
   });
 
-  it("maps bug status and keeps unknown statuses readable", () => {
-    expect(jarvisStatusText({ ...bug, score: 1 }, "zh-CN")).toBe("待处理");
-    expect(jarvisStatusText({ ...bug, score: 1, status: 9 }, "zh-CN")).toBe("状态 9");
-    expect(jarvisStatusText({ ...bug, score: 1, status: undefined }, "zh-CN")).toBe("");
+  it("maps status, priority and severity in both locales", () => {
+    expect(jarvisStatusText(1, "zh-CN")).toBe("未解决");
+    expect(jarvisStatusText(9, "zh-CN")).toBe("状态 9");
+    expect(jarvisStatusText(undefined, "zh-CN")).toBe("");
+    expect(jarvisPriorityText(1, "zh-CN")).toBe("高优先级");
+    expect(jarvisSeverityText(2, "zh-CN")).toBe("严重");
+    expect(jarvisPriorityText(2, "en")).toBe("Medium priority");
   });
 
-  it("groups rows in project, requirement, task, bug order", () => {
-    const suggestions = [
-      { ...bug, score: 1 },
-      { kind: "task" as const, id: 3, title: "t", score: 1 },
-      { kind: "project" as const, id: 1, title: "p", score: 1 },
-    ];
-    expect(groupJarvisSuggestions(suggestions).map(({ kind }) => kind)).toEqual([
-      "project",
-      "task",
-      "bug",
-    ]);
+  it("renders a relative update time", () => {
+    const now = Date.parse("2026-11-16T10:00:00");
+    expect(jarvisRelativeTime("2026-11-16 09:59:30", "zh-CN", now)).toBe("刚刚");
+    expect(jarvisRelativeTime("2026-11-16 09:30:00", "zh-CN", now)).toBe("30 分钟前");
+    expect(jarvisRelativeTime("2026-11-15 10:00:00", "zh-CN", now)).toBe("1 天前");
+    expect(jarvisRelativeTime("2026-01-02 10:00:00", "zh-CN", now)).toBe("01-02");
+    expect(jarvisRelativeTime(undefined, "zh-CN", now)).toBe("");
   });
 });
 
 describe("Renderer Jarvis client", () => {
-  const localManager = {
-    sendRequest: vi.fn(async (method: string, params: unknown) => {
-      if (method === "codexhost/jarvis/classify") {
-        return { available: true, isJarvis: true, kind: "bug", confidence: 0.9 };
-      }
-      if (method === "codexhost/jarvis/rank") {
-        const input = params as { candidates: { id: number }[]; user: { id: number } };
-        return {
-          available: true,
-          suggestions: [{ kind: "bug", id: 928, projectId: 4029, title: "序列号", score: 1.6 }].map(
-            (item) => ({ ...item, ...(input.candidates.find(({ id }) => id === 928) ? {} : {}) }),
-          ),
-        };
-      }
-      return {};
-    }),
-  };
-  const remoteManager = {
-    sendRequest: vi.fn(async () => ({
-      available: true,
-      candidates: [{ kind: "bug", id: 928, projectId: 4029, title: "序列号", status: 1 }],
-      user: { id: 10058, name: "示例用户" },
-      fetchedAt: "2026-11-13T00:00:00.000Z",
-    })),
+  const result: JarvisBugSearchResult = {
+    available: true,
+    errorCode: null,
+    conditions: [{ key: "scope:assigned", kind: "scope", label: "指派给我" }],
+    bugs: [
+      {
+        id: 928,
+        projectId: 4029,
+        projectName: "示例商城 · 迭代 A",
+        title: "序列号",
+        status: 1,
+      },
+    ],
+    total: 1,
+    capped: false,
   };
 
-  it("classifies on the local Host, fetches candidates on the target and ranks locally", async () => {
+  it("sends the structured search to the thread Host", async () => {
+    const sendRequest = vi.fn(async () => result);
     const client = createRendererJarvisClient({
-      forHost: (hostId) => {
-        if (hostId === "local") return { hostId, manager: localManager };
-        if (hostId === "remote-1") return { hostId, manager: remoteManager };
-        return null;
-      },
+      forHost: (hostId) => ({ hostId, manager: { sendRequest } }),
     });
-    const result = await client.suggest("remote-1", "测试新提给我的bug");
-    expect(result?.suggestions[0]).toMatchObject({ id: 928, kind: "bug" });
-    expect(localManager.sendRequest).toHaveBeenCalledWith(
-      "codexhost/jarvis/classify",
-      { query: "测试新提给我的bug" },
+    expect(await client.searchBugs("remote-1", { query: "未解决的bug", omit: ["time"] })).toEqual(
+      result,
+    );
+    expect(sendRequest).toHaveBeenCalledWith(
+      "codexhost/jarvis/bug/search",
+      { query: "未解决的bug", omit: ["time"] },
       expect.any(Object),
     );
-    expect(remoteManager.sendRequest).toHaveBeenCalledWith(
-      "codexhost/jarvis/candidates",
-      { kind: "bug" },
-      expect.any(Object),
-    );
-    const rankParams = localManager.sendRequest.mock.calls.find(
-      ([method]) => method === "codexhost/jarvis/rank",
-    )?.[1] as { user: { id: number } };
-    expect(rankParams.user).toEqual({ id: 10058, name: "示例用户" });
   });
 
-  it("returns null for ordinary text, not a Jarvis query", async () => {
-    const classify = vi.fn(async () => ({
-      available: true,
-      isJarvis: false,
-      kind: "none" as const,
-      confidence: 0.1,
-    }));
-    const client = createRendererJarvisClient({
-      forHost: () => ({ hostId: "local", manager: { sendRequest: classify } }),
+  it("returns an unavailable result when the Host route is missing", async () => {
+    const client = createRendererJarvisClient({ forHost: () => null });
+    expect(await client.searchBugs("remote-1", { query: "bug" })).toMatchObject({
+      available: false,
+      errorCode: "jarvis_failed",
+      bugs: [],
     });
-    expect(await client.suggest("local", "修复登录")).toBeNull();
   });
 
   it("keeps settings local and reports hasKey without exposing the key", async () => {
