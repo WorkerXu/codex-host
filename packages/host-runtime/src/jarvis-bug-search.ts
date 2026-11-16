@@ -223,7 +223,7 @@ export class JarvisBugSearcher {
     const cappedByFetch = outcomes.some((outcome) => outcome.capped);
 
     const bugs = this.#filterAndSort(outcomes, projectNames, plan);
-    let capped = cappedByFetch || bugs.length > JARVIS_MAX_SEARCH_BUGS;
+    const capped = cappedByFetch || bugs.length > JARVIS_MAX_SEARCH_BUGS;
     const serverTotal = outcomes.reduce((sum, outcome) => sum + outcome.total, 0);
     const total =
       capped && plan.severities === null && plan.since === null
