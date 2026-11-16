@@ -114,6 +114,15 @@ function previewOf(text: string): string {
   return normalized.length > 120 ? `${normalized.slice(0, 119)}…` : normalized;
 }
 
+function plainSnippet(text: string): string {
+  return previewOf(
+    text
+      .replace(/^\s*(?:#{1,6}|>|[-*]|\d+\.)\s?/gmu, "")
+      .replace(/\*\*([^*\n]+)\*\*/gu, "$1")
+      .replace(/\[([^\]\n]+)\]\([^)\n]+\)/gu, "$1"),
+  );
+}
+
 /** One-line list summary for the newest message, including its sender. */
 export function dingtalkMessageSummary(message: DingTalkMessage): string {
   const image = message.resources?.find(({ kind }) => kind === "image");
@@ -121,7 +130,7 @@ export function dingtalkMessageSummary(message: DingTalkMessage): string {
   const file = message.resources?.find(({ kind }) => kind === "file");
   if (file) return file.name ? `[文件] ${file.name}` : "[文件]";
   if (message.cardTitle) return message.cardTitle;
-  if (message.text.trim()) return previewOf(message.text);
+  if (message.text.trim()) return plainSnippet(message.text);
   if (message.unsupported) return "[非文本消息]";
   return "";
 }
