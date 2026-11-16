@@ -14,6 +14,7 @@ const previewRoot = import.meta.dirname;
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
+  "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-status-connected",
   "dingtalk-status-not-logged-in",
@@ -21,10 +22,8 @@ const allScenarios = [
   "dingtalk-open",
   "dingtalk-direct",
   "dingtalk-scrolled-top",
-  "dingtalk-recent",
   "dingtalk-search",
   "dingtalk-search-more",
-  "dingtalk-select",
   "dingtalk-empty",
   "dingtalk-error",
   "agents-cards",
@@ -90,7 +89,9 @@ if (!(await serverIsUp())) {
   }
 }
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({
+  args: ["--enable-precise-memory-info", "--js-flags=--expose-gc"],
+});
 await mkdir(outputDirectory, { recursive: true });
 const shadowContext = await fetch(`${baseUrl}/shadow-context.json`).then((response) =>
   response.json(),
@@ -188,7 +189,41 @@ for (const scenario of scenarios) {
           Boolean(sidebar) && getComputedStyle(sidebar).display === "none",
         );
         check("default-conversation-open", queryAll(".dingtalk-message").length > 0);
-        check("list-switch", queryAll(".dingtalk-list-switch-button").length === 2);
+        check("no-view-switch", !query(".dingtalk-list-switch"));
+        const firstRow = query(".dingtalk-conversation");
+        const firstRowStyle = firstRow ? getComputedStyle(firstRow) : null;
+        const firstRowRect = firstRow?.getBoundingClientRect();
+        check(
+          "row-native-height",
+          Boolean(firstRowRect) && Math.abs(firstRowRect.height - 64) <= 1,
+          firstRowRect ? `${Math.round(firstRowRect.height)}px` : "missing",
+        );
+        check(
+          "row-native-padding",
+          firstRowStyle?.paddingLeft === "12px",
+          firstRowStyle?.paddingLeft ?? "missing",
+        );
+        const avatar = query(".dingtalk-conversation .dingtalk-avatar");
+        const avatarRect = avatar?.getBoundingClientRect();
+        check(
+          "avatar-native-size",
+          Boolean(avatarRect) && Math.abs(avatarRect.width - 40) <= 1,
+          avatarRect ? `${Math.round(avatarRect.width)}px` : "missing",
+        );
+        check(
+          "avatar-native-radius",
+          Boolean(avatar) && getComputedStyle(avatar).borderRadius === "10px",
+          avatar ? getComputedStyle(avatar).borderRadius : "missing",
+        );
+        check("muted-bell-icon", Boolean(query(".dingtalk-conversation-muted")));
+        if (firstRow && firstRowRect) {
+          const listRect = query(".dingtalk-conversation-list")?.getBoundingClientRect();
+          check(
+            "row-inset",
+            Boolean(listRect) && Math.abs(firstRowRect.left - listRect.left - 6) <= 1,
+            listRect ? `${Math.round(firstRowRect.left - listRect.left)}px` : "missing",
+          );
+        }
       }
       if (document.body.dataset.scenario.startsWith("dingtalk-status-")) {
         const text = query(".dingtalk-menu-status-text")?.textContent ?? "";
@@ -273,7 +308,7 @@ for (const scenario of scenarios) {
             Math.abs(rect.width / rect.height - 1.6) < 0.06,
           rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : "missing",
         );
-        check("image-no-loading-strip", !query(".dingtalk-message-image--loading"));
+        check("image-lazy", queryAll(".dingtalk-message-image--loaded").length > 0);
         check(
           "image-unavailable-text",
           queryAll(".dingtalk-message-image-fallback").some((node) =>
@@ -305,14 +340,18 @@ for (const scenario of scenarios) {
         check("no-raw-media-tags", !/mediaId|<imageContent>|fileId:/u.test(bodies));
         check("header-member-count", Boolean(query(".dingtalk-main-subtitle")?.textContent));
       }
-      if (document.body.dataset.scenario === "dingtalk-recent") {
-        const rows = queryAll(".dingtalk-conversation");
-        check("recent-rows", rows.length > 0 && rows.length <= 10, `${rows.length} rows`);
+      if (document.body.dataset.scenario === "dingtalk-heavy") {
+        const heavy = window.__dingtalkHeavy;
+        check("heavy-messages", heavy?.renderedMessages === 200, String(heavy?.renderedMessages));
         check(
-          "recent-mine-preview",
-          queryAll(".dingtalk-conversation-preview").every((row) =>
-            row.textContent.startsWith("我："),
-          ),
+          "heavy-long-task",
+          Boolean(heavy) && heavy.longestLongTaskMs <= 100,
+          `${Math.round(heavy?.longestLongTaskMs ?? 0)} ms`,
+        );
+        check(
+          "heavy-shadow-nodes",
+          Boolean(heavy) && heavy.shadowNodes <= 3_000,
+          String(heavy?.shadowNodes ?? 0),
         );
       }
       if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
@@ -363,14 +402,6 @@ for (const scenario of scenarios) {
         check(
           "search-remote-group",
           queryAll(".dingtalk-search-title").some((row) => row.textContent.includes("示例Sprint")),
-        );
-      }
-      if (document.body.dataset.scenario === "dingtalk-select") {
-        const bar = query(".dingtalk-selection-bar");
-        check(
-          "selection-bar",
-          Boolean(bar) && !bar.hidden && bar.textContent.includes("已选 3 条"),
-          bar?.textContent ?? "",
         );
       }
       if (
@@ -604,12 +635,51 @@ for (const scenario of scenarios) {
       }
       return result;
     });
+    const heavyOpen =
+      scenario === "dingtalk-heavy"
+        ? await page.evaluate(() => {
+            const heavy = window.__dingtalkHeavy;
+            if (!heavy) return null;
+            return {
+              openToListMs: heavy.openToListMs,
+              openToMessagesMs: heavy.openToMessagesMs,
+              renderTimeMs: heavy.renderTimeMs,
+              renderedMessages: heavy.renderedMessages,
+              shadowNodes: heavy.shadowNodes,
+              heapBaselineBytes: heavy.heapBaselineBytes,
+              heapAfterOpenBytes: heavy.heapAfterOpenBytes,
+              longestLongTaskMs: heavy.longestLongTaskMs,
+              longTasks: heavy.longTasks,
+              scenarioStartedAt: heavy.scenarioStartedAt,
+              heapSupported: heavy.heapSupported,
+            };
+          })
+        : null;
     const filename = `${scenario}-${theme}.png`;
     await page.screenshot({
       path: path.join(outputDirectory, filename),
       fullPage: false,
       animations: "disabled",
     });
+    let metrics = null;
+    if (heavyOpen) {
+      const heavyClose = await page.evaluate(() => window.__dingtalkHeavy?.close() ?? null);
+      metrics = {
+        ...heavyOpen,
+        ...(heavyClose ?? {}),
+        heapAfterOpenDeltaBytes: heavyOpen.heapAfterOpenBytes - heavyOpen.heapBaselineBytes,
+        heapAfterCloseDeltaBytes:
+          (heavyClose?.heapAfterCloseBytes ?? heavyOpen.heapAfterOpenBytes) -
+          heavyOpen.heapBaselineBytes,
+      };
+      checks.push({
+        name: "heavy-heap-after-close",
+        ok: !heavyOpen.heapSupported || metrics.heapAfterCloseDeltaBytes <= 10 * 1024 * 1024,
+        detail: heavyOpen.heapSupported
+          ? `${(metrics.heapAfterCloseDeltaBytes / (1024 * 1024)).toFixed(1)} MB`
+          : "performance.memory unavailable",
+      });
+    }
     report.captures.push({
       scenario,
       theme,
@@ -617,6 +687,7 @@ for (const scenario of scenarios) {
       screenshot: path.join(outputDirectory, filename),
       pageErrors: errors,
       checks,
+      ...(metrics ? { metrics } : {}),
       ok: errors.length === 0 && checks.every((check) => check.ok),
     });
     await page.close();

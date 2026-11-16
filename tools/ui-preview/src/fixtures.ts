@@ -135,6 +135,71 @@ export const conversations: DingTalkConversation[] = [
 
 export { now as fixtureNow };
 
+/** A 200-message regression case for separator-like bot cards and images. */
+export const heavyConversation: DingTalkConversation = {
+  conversationId: "cid-heavy",
+  title: "[监控]示例报警群",
+  singleChat: false,
+  unreadCount: 6,
+  lastMessageAt: now - 2 * minute,
+  muted: false,
+  preview: "系统：----- 报警 ----- 转账失败率升高",
+  groupType: "INTERNAL_GROUP",
+  memberCount: 12,
+  atMe: true,
+};
+
+const heavySenders = ["系统", "吴菁", "李端", "陈默", "周舟", "我"];
+
+function heavyMessage(index: number): DingTalkMessage {
+  const createdAt = now - (199 - index) * 7 * minute;
+  const sender = index % 5 === 0 ? "我" : (heavySenders[index % heavySenders.length] ?? "系统");
+  const mine = sender === "我";
+  const base: DingTalkMessage = {
+    messageId: `msg-heavy-${String(index).padStart(3, "0")}`,
+    conversationId: "cid-heavy",
+    senderName: sender,
+    senderId: mine ? "me" : `user-${index % 4}`,
+    createdAt,
+    text: textFor(index),
+    unsupported: false,
+    mine,
+  };
+  if (index % 10 === 0) {
+    base.resources = [
+      {
+        kind: "image",
+        resourceId: `media-heavy-${index}`,
+        resourceIdType: "mediaId",
+      },
+    ];
+    base.text = "";
+  } else if (index % 33 === 0) {
+    base.quotedMessage = {
+      senderName: "李端",
+      text: "刚刚的转账失败率又上来了，先看下网关。",
+      createdAt: createdAt - 2 * minute,
+    };
+    base.reactions = [
+      { emoji: "OK", count: 2 },
+      { emoji: "收到", count: 1 },
+    ];
+  } else if (index % 41 === 0) {
+    base.text = `${longText(index)}${longText(index + 1)}${"补充说明。".repeat(1_600)}`;
+  } else if (index % 17 === 0) {
+    base.bot = true;
+    base.cardTitle = "【转账监控】报警";
+    base.format = "markdown";
+    base.text =
+      "----- 报警 -----\n\n**转账失败率** 超过阈值\n\n>- 服务: payment\n>- 环境: production\n>- 结论: 需要人工确认\n\n[查看详情](https://example.com/monitor)";
+  }
+  return base;
+}
+
+export const heavyMessages: DingTalkMessage[] = Array.from({ length: 200 }, (_unused, index) =>
+  heavyMessage(index),
+);
+
 const senderNames = ["吴菁", "李端", "陈默", "周舟", "我"];
 
 function textFor(index: number): string {
@@ -311,9 +376,11 @@ export function messagesFor(conversationId: string): DingTalkMessage[] {
   if (cached) return cached;
   const found = conversations.find((row) => row.conversationId === conversationId);
   const messages =
-    conversationId === "cid-launch"
-      ? buildLongConversation()
-      : buildConversationMessages(found ?? conversations[0]!, 40);
+    conversationId === "cid-heavy"
+      ? heavyMessages
+      : conversationId === "cid-launch"
+        ? buildLongConversation()
+        : buildConversationMessages(found ?? conversations[0]!, 40);
   const sorted = [...messages].sort((left, right) => left.createdAt - right.createdAt);
   messageCache.set(conversationId, sorted);
   return sorted;
