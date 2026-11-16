@@ -16,10 +16,8 @@ import {
   type JarvisBugSearchResult,
 } from "@codexhost/shared-contracts";
 
-import { ROW_HIGHLIGHT_CLASSES, ROW_IDLE_CLASS } from "./renderer-delegation-mention.js";
 import {
   JARVIS_MODE_ATTRIBUTE,
-  JARVIS_SECTION_ATTRIBUTE,
   createJarvisConditionChip,
   createJarvisEntryRow,
   createJarvisModeChrome,
@@ -58,7 +56,6 @@ export {
 
 export { findNativeSuggestionList } from "./renderer-native-at-menu.js";
 
-const SECTION_ATTRIBUTE = JARVIS_SECTION_ATTRIBUTE;
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
@@ -164,7 +161,7 @@ interface ModeState {
   loading: boolean;
   omit: Set<string>;
   lastQuery: string;
-  hidden: Map<HTMLElement, string>;
+  hiddenPanel: { element: HTMLElement; visibility: string } | null;
   locale: RendererSettingsLocale;
   timer: number | null;
   slowTimer: number | null;
@@ -215,23 +212,25 @@ export function installRendererJarvisMention(
     mode.section.remove();
     mode.detachedHost?.remove();
     mode.detachedHost = null;
-    for (const [element, display] of mode.hidden) {
-      if (!element.isConnected) continue;
-      element.style.display = display;
+    const hiddenPanel = mode.hiddenPanel;
+    mode.hiddenPanel = null;
+    if (hiddenPanel?.element.isConnected) {
+      hiddenPanel.element.style.visibility = hiddenPanel.visibility;
     }
-    mode.hidden.clear();
     mode = null;
   };
 
-  const hideNativeChildren = (state: ModeState, list: HTMLElement): void => {
-    for (const child of [...list.children]) {
-      if (!(child instanceof HTMLElement)) continue;
-      if (child === state.section) continue;
-      if (child.hasAttribute(SECTION_ATTRIBUTE) || child.hasAttribute(MODE_ATTRIBUTE)) continue;
-      if (state.hidden.has(child)) continue;
-      state.hidden.set(child, child.style.display);
-      child.style.display = "none";
-    }
+  /**
+   * The Native popup only supplies the anchor rectangle. Keeping its panel
+   * visible behind the Jarvis panel would show native rows and an old height,
+   * so hide it for the lifetime of the mode.
+   */
+  const hideNativePanel = (state: ModeState, list: HTMLElement): void => {
+    if (state.hiddenPanel) return;
+    const panel =
+      list.closest<HTMLElement>('[class*="suggestionMenu"]') ?? list.parentElement ?? list;
+    state.hiddenPanel = { element: panel, visibility: panel.style.visibility };
+    panel.style.visibility = "hidden";
   };
 
   const readTrigger = (): Trigger | null => {
@@ -325,7 +324,7 @@ export function installRendererJarvisMention(
       loading: false,
       omit: new Set(),
       lastQuery: "",
-      hidden: new Map(),
+      hiddenPanel: null,
       locale,
       timer: null,
       slowTimer: null,
@@ -367,8 +366,9 @@ export function installRendererJarvisMention(
     state.entries.forEach(({ row }, current) => {
       const selected = current === state.selected;
       row.setAttribute("aria-selected", String(selected));
-      for (const name of ROW_HIGHLIGHT_CLASSES) row.classList.toggle(name, selected);
-      row.classList.toggle(ROW_IDLE_CLASS, !selected);
+      row.style.background = selected
+        ? "var(--color-token-interactive-bg-secondary-hover, rgba(127, 127, 127, 0.08))"
+        : "transparent";
       if (selected) row.scrollIntoView({ block: "nearest" });
     });
   };
@@ -521,18 +521,55 @@ export function installRendererJarvisMention(
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
   };
 
-  /** Keep the mode visible at the popup's old position if the popup closes. */
+  const TEXT_PRIMARY = "var(--color-token-text-primary, #0d0d0d)";
+  const BORDER = "var(--color-token-border-default, rgba(13, 13, 13, 0.08))";
+
+  /**
+   * Host the Jarvis panel ourselves instead of reusing the Native popup.
+   *
+   * The panel is bottom-anchored to the Composer's top edge and grows upward,
+   * exactly like the native `@` popup. Its height follows the content, so a
+   * one-result search shrinks back to the Composer instead of leaving the
+   * native popup's previous height behind. The result list inside the section
+   * is the scrolling surface.
+   */
   const detachMode = (state: ModeState): void => {
     if (state.detachedHost) return;
     const rect = state.lastRect ?? { left: 24, top: 120, width: 360, height: 320 };
+    const anchor = options.anchorForEditor(state.trigger.editor);
+    const anchorRect = anchor?.getBoundingClientRect() ?? null;
+    // The native popup lives inside Desktop's window-zoom subtree; this host
+    // is a direct body child, so convert the same way the Agent picker does.
+    const rawZoom = getComputedStyle(ownerDocument.documentElement)
+      .getPropertyValue("--codex-window-zoom")
+      .trim();
+    const parsedZoom = Number.parseFloat(rawZoom);
+    const zoom = Number.isFinite(parsedZoom) && parsedZoom > 0 ? parsedZoom : 1;
+    const viewportWidth = view.innerWidth / zoom;
+    const viewportHeight = view.innerHeight / zoom;
+    const anchorTop =
+      anchorRect && anchorRect.top > 8
+        ? anchorRect.top / zoom
+        : Math.max(8, (rect.top + rect.height) / zoom);
+    const width = Math.max(
+      280,
+      Math.min((anchorRect?.width ?? rect.width) / zoom, viewportWidth - 16),
+    );
+    const left = Math.min(
+      Math.max(8, (anchorRect?.left ?? rect.left) / zoom),
+      Math.max(8, viewportWidth - width - 8),
+    );
     const host = ownerDocument.createElement("div");
     host.setAttribute("data-codexhost-jarvis-detached", "true");
-    host.className =
-      "fixed z-[2147483647] flex flex-col overflow-hidden rounded-[var(--radius-suggestion-menu,var(--radius-2xl))] border border-default bg-surface-elevated-secondary text-sm shadow-lg";
-    host.style.left = `${Math.max(8, rect.left)}px`;
-    host.style.top = `${Math.max(8, rect.top)}px`;
-    host.style.width = `${Math.max(240, rect.width)}px`;
-    host.style.maxHeight = `${Math.max(160, rect.height)}px`;
+    host.className = "fixed z-[2147483647] flex flex-col overflow-hidden";
+    host.style.cssText =
+      "position:fixed;z-index:2147483647;display:flex;flex-direction:column;overflow:hidden;" +
+      `box-sizing:border-box;left:${left}px;width:${width}px;` +
+      `bottom:${Math.max(8, viewportHeight - anchorTop + 4)}px;` +
+      `max-height:${Math.max(160, anchorTop - 12)}px;` +
+      `border:1px solid ${BORDER};border-radius:12px;` +
+      "background:var(--color-token-dropdown-background, var(--color-surface-elevated-secondary, #fff));" +
+      `color:${TEXT_PRIMARY};box-shadow:0 12px 32px rgba(0, 0, 0, 0.18);`;
     host.append(state.section);
     ownerDocument.body.append(host);
     state.detachedHost = host;
@@ -551,15 +588,9 @@ export function installRendererJarvisMention(
     state.insertAtSelection = insertAtSelection;
     if (prefill) state.input.value = prefill;
     state.clear.style.display = state.input.value.length === 0 ? "none" : "inline-flex";
-    if (list) {
-      state.lastRect = panelRectOf(list);
-      list.append(state.section);
-      hideNativeChildren(state, list);
-      list.scrollTop = 0;
-    } else {
-      state.lastRect = fallbackRect;
-      detachMode(state);
-    }
+    state.lastRect = list ? panelRectOf(list) : fallbackRect;
+    if (list) hideNativePanel(state, list);
+    detachMode(state);
     mode = state;
 
     state.back.addEventListener("click", (event) => {
@@ -777,17 +808,9 @@ export function installRendererJarvisMention(
     view.setTimeout(() => {
       reattachScheduled = false;
       if (mode) {
-        if (mode.detachedHost) return;
-        const list = nativeList(mode.trigger.editor);
-        if (list) {
-          mode.lastRect = panelRectOf(list);
-          if (mode.section.parentElement !== list) list.append(mode.section);
-          hideNativeChildren(mode, list);
-          return;
-        }
-        // Focusing the icon-less search input can blur the Composer and close
-        // the native popup; keep the mode at the popup's last position.
-        detachMode(mode);
+        // The Jarvis panel is always hosted by the controller; the native
+        // popup may close without taking the mode with it.
+        if (!mode.detachedHost) detachMode(mode);
         return;
       }
       if (!entry) {

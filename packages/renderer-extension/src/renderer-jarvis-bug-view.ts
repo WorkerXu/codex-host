@@ -1,13 +1,16 @@
 /**
  * View builders for the Jarvis `@` row and its bug-search mode.
  *
- * These functions only create DOM using Desktop's own menu classes. The
- * controller in `renderer-jarvis-mention.ts` owns state, requests and
- * keyboard handling.
+ * These functions only create DOM. The controller in
+ * `renderer-jarvis-mention.ts` owns state, requests, hosting and keyboard
+ * handling. Every color is a Desktop token with an explicit fallback so the
+ * panel still renders when a token is absent from the current Desktop theme.
  */
+import createElement from "lucide/dist/esm/createElement.mjs";
+import Bug from "lucide/dist/esm/icons/bug.mjs";
+
 import type { JarvisBug, JarvisBugCondition } from "@codexhost/shared-contracts";
 
-import { ROW_CLASS } from "./renderer-delegation-mention.js";
 import {
   createWorkbenchRow,
   createWorkbenchSection,
@@ -22,6 +25,17 @@ export const JARVIS_ENTRY_ROW_ATTRIBUTE = "data-codexhost-jarvis-entry-row";
 export const JARVIS_BUG_ROW_ATTRIBUTE = "data-codexhost-jarvis-bug";
 export const JARVIS_SKELETON_ATTRIBUTE = "data-codexhost-jarvis-skeleton";
 export const JARVIS_SEARCH_PLACEHOLDER = "搜索 Bug，如「我还没处理完成的bug」";
+
+const TEXT_PRIMARY = "var(--color-token-text-primary, #0d0d0d)";
+const TEXT_TERTIARY =
+  "var(--color-text-tertiary, var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5)))";
+const BORDER = "var(--color-token-border-default, rgba(13, 13, 13, 0.08))";
+const HOVER = "var(--color-token-interactive-bg-secondary-hover, rgba(127, 127, 127, 0.08))";
+const ORANGE = "var(--color-chart-orange, #fb6a22)";
+const GREEN = "var(--color-chart-green, #04b84c)";
+const RED = "var(--color-chart-red, #fa423e)";
+const ROW_MIN_HEIGHT = "48px";
+const ROW_PADDING_X = "12px";
 
 export function truncateJarvisText(value: string, limit: number): string {
   const text = value.trim().replace(/\s+/gu, " ");
@@ -100,6 +114,90 @@ export function jarvisRelativeTime(
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+function style(element: HTMLElement, values: Record<string, string>): void {
+  for (const [property, value] of Object.entries(values))
+    element.style.setProperty(property, value);
+}
+
+function statusColor(status: number | undefined): string {
+  if (status === 1) return ORANGE;
+  if (status === 2) return GREEN;
+  return TEXT_TERTIARY;
+}
+
+function priorityColor(priority: number | undefined): string {
+  if (priority === 1) return RED;
+  if (priority === 2) return ORANGE;
+  return TEXT_TERTIARY;
+}
+
+function text(
+  document: Document,
+  value: string,
+  values: Record<string, string> = {},
+): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.textContent = value;
+  style(span, {
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+    ...values,
+  });
+  return span;
+}
+
+function bugIcon(document: Document, color: string): SVGElement {
+  const icon = createElement(Bug, {
+    width: 16,
+    height: 16,
+    "aria-hidden": "true",
+    focusable: "false",
+    "stroke-width": 1.8,
+  }) as SVGElement;
+  icon.style.color = color;
+  icon.style.flex = "0 0 auto";
+  return icon;
+}
+
+function statusPill(document: Document, label: string, color: string): HTMLSpanElement {
+  const pill = document.createElement("span");
+  pill.setAttribute("data-jarvis-status", "");
+  pill.textContent = label;
+  style(pill, {
+    display: "inline-flex",
+    "align-items": "center",
+    "flex-shrink": "0",
+    padding: "1px 7px",
+    "border-radius": "999px",
+    color,
+    background: `color-mix(in srgb, ${color} 14%, transparent)`,
+    font: "500 11px/16px system-ui, sans-serif",
+    "white-space": "nowrap",
+  });
+  return pill;
+}
+
+function projectTag(document: Document, label: string): HTMLSpanElement {
+  const tag = document.createElement("span");
+  tag.setAttribute("data-jarvis-project", "");
+  tag.textContent = label;
+  style(tag, {
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+    "flex-shrink": "1",
+    padding: "0 6px",
+    "border-radius": "4px",
+    background: HOVER,
+    color: TEXT_TERTIARY,
+    font: "400 11px/18px system-ui, sans-serif",
+  });
+  return tag;
+}
+
 /** The single 「Jarvis」 row for previews and the entry section. */
 export function createJarvisEntryRow(
   document: Document,
@@ -134,15 +232,25 @@ export function createJarvisConditionChip(
 ): HTMLButtonElement {
   const chip = document.createElement("button");
   chip.type = "button";
-  chip.className =
-    "inline-flex max-w-full items-center gap-1 truncate rounded-sm border border-default px-1 text-xs text-tertiary";
   chip.setAttribute("data-jarvis-chip", condition.key);
-  const label = document.createElement("span");
-  label.className = "truncate";
-  label.textContent = condition.label;
+  style(chip, {
+    display: "inline-flex",
+    "align-items": "center",
+    gap: "4px",
+    "max-width": "100%",
+    padding: "1px 7px",
+    border: `1px solid ${BORDER}`,
+    "border-radius": "999px",
+    color: TEXT_TERTIARY,
+    background: "transparent",
+    font: "400 12px/18px system-ui, sans-serif",
+    cursor: "pointer",
+  });
+  const label = text(document, condition.label);
+  label.style.flex = "0 1 auto";
   const close = document.createElement("span");
-  close.className = "shrink-0";
   close.textContent = "×";
+  style(close, { flex: "0 0 auto", color: TEXT_TERTIARY });
   chip.append(label, close);
   keepEditorFocusOnPress(chip);
   return chip;
@@ -158,49 +266,94 @@ export interface JarvisModeChrome {
   results: HTMLElement;
 }
 
-/** Header, focused search field, chip row, summary and result area. */
+/** Header, focused search field, chip row, summary and scrolling result area. */
 export function createJarvisModeChrome(
   document: Document,
   locale: RendererSettingsLocale,
 ): JarvisModeChrome {
   const section = document.createElement("div");
   section.setAttribute(JARVIS_SECTION_ATTRIBUTE, "true");
-  section.className = "flex w-full flex-col";
+  style(section, {
+    display: "flex",
+    "flex-direction": "column",
+    width: "100%",
+    "min-height": "0",
+    "max-height": "100%",
+    flex: "1 1 auto",
+    color: TEXT_PRIMARY,
+    "font-family": "system-ui, -apple-system, sans-serif",
+  });
 
   const header = document.createElement("div");
-  header.className =
-    "sticky top-0 z-10 flex items-center gap-1 px-row-x py-1 text-sm bg-surface-elevated-secondary";
+  style(header, {
+    display: "flex",
+    "align-items": "center",
+    gap: "6px",
+    "flex-shrink": "0",
+    padding: "8px 12px",
+    "border-bottom": `1px solid ${BORDER}`,
+  });
   const back = document.createElement("button");
   back.type = "button";
   back.setAttribute("aria-label", locale === "zh-CN" ? "返回" : "Back");
-  back.className =
-    "inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-default hover:bg-primary-ghost-hover";
+  back.style.cssText =
+    "display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;" +
+    "border:0;border-radius:6px;background:transparent;color:inherit;font:400 18px/1 system-ui,sans-serif;" +
+    "cursor:pointer;flex:0 0 auto;padding:0";
   back.textContent = "‹";
   keepEditorFocusOnPress(back);
+  const mark = createJarvisMark(document, 16);
+  mark.style.flex = "0 0 auto";
   const title = document.createElement("span");
-  title.className = "min-w-0 truncate text-sm text-default";
-  title.textContent = "Jarvis · Bug";
-  header.append(back, title);
+  title.textContent = "Jarvis";
+  style(title, { color: TEXT_PRIMARY, font: "600 13px/18px system-ui, sans-serif" });
+  const separator = document.createElement("span");
+  separator.textContent = "·";
+  style(separator, { color: TEXT_TERTIARY, font: "400 13px/18px system-ui, sans-serif" });
+  const subtitle = document.createElement("span");
+  subtitle.textContent = "Bug";
+  style(subtitle, { color: TEXT_TERTIARY, font: "400 13px/18px system-ui, sans-serif" });
+  header.append(back, mark, title, separator, subtitle);
 
   const searchWrap = document.createElement("div");
-  searchWrap.className = "relative px-row-x pb-1";
+  style(searchWrap, {
+    position: "relative",
+    display: "flex",
+    "flex-shrink": "0",
+    padding: "8px 12px",
+  });
   const input = document.createElement("input");
   // A text input avoids the heavy UA clear button of `type=search`.
   input.type = "text";
-  input.className =
-    "w-full min-w-0 rounded-sm border border-default bg-transparent px-2 py-1 pr-8 text-sm text-default outline-none";
   input.placeholder = JARVIS_SEARCH_PLACEHOLDER;
   input.maxLength = 200;
   input.spellcheck = false;
   input.autocomplete = "off";
   input.value = "";
+  style(input, {
+    width: "100%",
+    "min-width": "0",
+    height: "30px",
+    padding: "0 28px 0 8px",
+    border: `1px solid ${BORDER}`,
+    "border-radius": "6px",
+    background: "transparent",
+    color: TEXT_PRIMARY,
+    font: "400 13px/18px system-ui, sans-serif",
+    outline: "none",
+    "box-sizing": "border-box",
+  });
   const clear = document.createElement("button");
   clear.type = "button";
   clear.style.display = "none";
   clear.setAttribute("data-jarvis-clear", "true");
   clear.setAttribute("aria-label", locale === "zh-CN" ? "清除" : "Clear");
-  clear.className =
-    "absolute right-2 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-tertiary hover:text-default";
+  clear.style.cssText =
+    "position:absolute;right:20px;top:50%;transform:translateY(-50%);" +
+    "display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;" +
+    "border:0;border-radius:4px;background:transparent;color:" +
+    TEXT_TERTIARY +
+    ";cursor:pointer;padding:0";
   const clearIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   clearIcon.setAttribute("viewBox", "0 0 12 12");
   clearIcon.setAttribute("width", "12");
@@ -218,35 +371,98 @@ export function createJarvisModeChrome(
   searchWrap.append(input, clear);
 
   const chips = document.createElement("div");
-  chips.className = "flex flex-wrap gap-1 px-row-x pb-1";
+  style(chips, {
+    display: "flex",
+    "flex-wrap": "wrap",
+    gap: "4px",
+    "flex-shrink": "0",
+    padding: "0 12px 8px",
+  });
   chips.hidden = true;
   const summary = document.createElement("div");
-  summary.className = "px-row-x py-1 text-xs text-tertiary";
   summary.setAttribute("data-jarvis-summary", "true");
+  style(summary, {
+    "flex-shrink": "0",
+    padding: "0 12px 6px",
+    color: TEXT_TERTIARY,
+    font: "400 12px/16px system-ui, sans-serif",
+  });
   const results = document.createElement("div");
-  results.className = "flex w-full flex-col";
+  style(results, {
+    display: "flex",
+    "flex-direction": "column",
+    gap: "2px",
+    flex: "1 1 auto",
+    "min-height": "0",
+    overflow: "hidden",
+    padding: "0 6px 6px",
+  });
+  // Results inside the panel are the only scrolling surface; the panel itself
+  // grows upward from the Composer and stops at the available space.
+  const scroller = document.createElement("div");
+  scroller.setAttribute("data-jarvis-results", "true");
+  style(scroller, {
+    display: "flex",
+    "flex-direction": "column",
+    gap: "2px",
+    flex: "1 1 auto",
+    "min-height": "0",
+    "overflow-y": "auto",
+    "overscroll-behavior": "contain",
+  });
+  results.append(scroller);
 
   section.append(header, searchWrap, chips, summary, results);
   return { section, back, input, clear, chips, summary, results };
 }
 
+/** The scrollable list that owns bug rows. */
+export function jarvisResultsScroller(results: HTMLElement): HTMLElement {
+  return results.querySelector<HTMLElement>('[data-jarvis-results="true"]') ?? results;
+}
+
 /** Three placeholder rows while the Host search is running. */
 export function renderJarvisLoading(document: Document, results: HTMLElement): void {
-  results.replaceChildren();
+  const scroller = jarvisResultsScroller(results);
+  scroller.replaceChildren();
+  scroller.scrollTop = 0;
   for (let index = 0; index < 3; index += 1) {
     const row = document.createElement("div");
-    row.className = `${ROW_CLASS} pointer-events-none`;
+    style(row, {
+      display: "flex",
+      "align-items": "center",
+      gap: "10px",
+      "min-height": ROW_MIN_HEIGHT,
+      padding: `6px ${ROW_PADDING_X}`,
+      "pointer-events": "none",
+    });
     row.setAttribute(JARVIS_SKELETON_ATTRIBUTE, "true");
     row.setAttribute("aria-hidden", "true");
     const content = document.createElement("div");
-    content.className = "flex w-full min-w-0 flex-col gap-1";
+    style(content, {
+      display: "flex",
+      "flex-direction": "column",
+      gap: "6px",
+      width: "100%",
+    });
     const first = document.createElement("div");
-    first.className = "h-3 w-2/3 rounded-sm bg-primary-ghost-hover";
+    style(first, {
+      height: "10px",
+      width: "64%",
+      "border-radius": "4px",
+      background: HOVER,
+    });
     const second = document.createElement("div");
-    second.className = "h-2 w-1/3 rounded-sm bg-primary-ghost-hover opacity-60";
+    style(second, {
+      height: "8px",
+      width: "36%",
+      "border-radius": "4px",
+      background: HOVER,
+      opacity: "0.6",
+    });
     content.append(first, second);
     row.append(content);
-    results.append(row);
+    scroller.append(row);
   }
 }
 
@@ -255,7 +471,7 @@ export interface JarvisBugRowHandlers {
   onChoose(bug: JarvisBug): void;
 }
 
-/** Result rows; the controller owns keyboard selection on top of them. */
+/** Two-line native-density rows: id/title/status, then project/priority/time. */
 export function renderJarvisBugRows(
   document: Document,
   results: HTMLElement,
@@ -263,50 +479,99 @@ export function renderJarvisBugRows(
   locale: RendererSettingsLocale,
   handlers: JarvisBugRowHandlers,
 ): { bug: JarvisBug; row: HTMLElement }[] {
-  results.replaceChildren();
+  const scroller = jarvisResultsScroller(results);
+  scroller.replaceChildren();
+  scroller.scrollTop = 0;
   const entries: { bug: JarvisBug; row: HTMLElement }[] = [];
   bugs.forEach((bug, index) => {
     const row = document.createElement("div");
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", "false");
     row.setAttribute(JARVIS_BUG_ROW_ATTRIBUTE, `${bug.projectId}:${bug.id}`);
-    row.className = ROW_CLASS;
+    style(row, {
+      display: "flex",
+      "align-items": "center",
+      gap: "10px",
+      width: "100%",
+      "min-height": ROW_MIN_HEIGHT,
+      padding: `6px ${ROW_PADDING_X}`,
+      "box-sizing": "border-box",
+      "border-radius": "8px",
+      background: "transparent",
+      cursor: "pointer",
+      "text-align": "left",
+    });
+
+    const color = statusColor(bug.status);
+    const icon = bugIcon(document, color);
+    icon.style.margin = "0 2px";
+
     const content = document.createElement("div");
-    content.className = "flex w-full min-w-0 flex-col gap-0.5";
+    style(content, {
+      display: "flex",
+      "flex-direction": "column",
+      gap: "2px",
+      "min-width": "0",
+      flex: "1 1 auto",
+    });
+
     const first = document.createElement("div");
-    first.className = "flex w-full min-w-0 items-center gap-1";
-    const id = document.createElement("span");
-    id.className = "shrink-0 text-xs text-tertiary";
-    id.textContent = `#${bug.id}`;
-    const title = document.createElement("span");
-    title.className = "min-w-0 flex-1 truncate text-sm text-default";
-    title.textContent = bug.title;
+    style(first, {
+      display: "flex",
+      "align-items": "center",
+      gap: "8px",
+      "min-width": "0",
+      width: "100%",
+    });
+    const id = text(document, `#${bug.id}`, {
+      color: TEXT_TERTIARY,
+      font: "400 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace",
+      "flex-shrink": "0",
+    });
+    const title = text(document, bug.title, {
+      color: TEXT_PRIMARY,
+      font: "500 13px/18px system-ui, sans-serif",
+      flex: "1 1 auto",
+    });
     first.append(id, title);
     const status = jarvisStatusText(bug.status, locale);
-    if (status) {
-      const pill = document.createElement("span");
-      pill.className = "shrink-0 rounded-sm border border-default px-1 text-xs text-tertiary";
-      pill.textContent = status;
-      first.append(pill);
-    }
+    if (status) first.append(statusPill(document, status, color));
+
     const second = document.createElement("div");
-    second.className = "flex w-full min-w-0 items-center gap-1 text-xs text-tertiary";
-    const project = document.createElement("span");
-    project.className = "min-w-0 flex-1 truncate";
-    project.textContent = bug.projectName ?? "";
+    style(second, {
+      display: "flex",
+      "align-items": "center",
+      gap: "6px",
+      "min-width": "0",
+      width: "100%",
+      color: TEXT_TERTIARY,
+      font: "400 11px/16px system-ui, sans-serif",
+    });
+    if (bug.projectName) second.append(projectTag(document, bug.projectName));
     const priority = jarvisPriorityText(bug.priority, locale);
+    if (priority) {
+      const dot = document.createElement("span");
+      style(dot, {
+        display: "inline-block",
+        width: "6px",
+        height: "6px",
+        "border-radius": "999px",
+        background: priorityColor(bug.priority),
+        "flex-shrink": "0",
+      });
+      dot.setAttribute("aria-hidden", "true");
+      second.append(dot, text(document, priority));
+    }
     const severity = jarvisSeverityText(bug.severity, locale);
-    const level = document.createElement("span");
-    level.className = "shrink-0";
-    level.textContent = [priority, severity].filter(Boolean).join(" · ");
-    const time = document.createElement("span");
-    time.className = "shrink-0";
-    time.textContent = jarvisRelativeTime(bug.updatedAt ?? bug.createdAt, locale);
-    second.append(project);
-    if (level.textContent) second.append(level);
-    if (time.textContent) second.append(time);
+    if (severity) second.append(text(document, `· ${severity}`));
+    const time = text(document, jarvisRelativeTime(bug.updatedAt ?? bug.createdAt, locale), {
+      "margin-left": "auto",
+      "flex-shrink": "0",
+    });
+    second.append(time);
+
     content.append(first, second);
-    row.append(content);
+    row.append(icon, content);
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
       handlers.onSelect(index);
@@ -321,7 +586,7 @@ export function renderJarvisBugRows(
       handlers.onChoose(bug);
     });
     entries.push({ bug, row });
-    results.append(row);
+    scroller.append(row);
   });
   return entries;
 }
@@ -337,18 +602,28 @@ export function renderJarvisEmpty(
   message: string,
   action?: JarvisEmptyAction,
 ): void {
-  results.replaceChildren();
+  const scroller = jarvisResultsScroller(results);
+  scroller.replaceChildren();
+  scroller.scrollTop = 0;
   const empty = document.createElement("div");
-  empty.className = "px-row-x py-2 text-xs text-tertiary";
-  const text = document.createElement("span");
-  text.textContent = message;
-  empty.append(text);
+  style(empty, {
+    padding: "10px 12px",
+    color: TEXT_TERTIARY,
+    font: "400 12px/18px system-ui, sans-serif",
+    "white-space": "normal",
+  });
+  const messageText = document.createElement("span");
+  messageText.textContent = message;
+  empty.append(messageText);
   if (action) {
     const link = document.createElement("button");
     link.type = "button";
     link.setAttribute("data-jarvis-settings", "true");
-    link.className = "ml-1 text-default underline underline-offset-2";
     link.textContent = action.label;
+    link.style.cssText =
+      "margin-left:4px;border:0;background:transparent;color:" +
+      TEXT_PRIMARY +
+      ";font:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer;padding:0";
     keepEditorFocusOnPress(link);
     link.addEventListener("click", (event) => {
       event.preventDefault();
@@ -357,5 +632,5 @@ export function renderJarvisEmpty(
     });
     empty.append(link);
   }
-  results.append(empty);
+  scroller.append(empty);
 }
