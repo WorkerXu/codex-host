@@ -70,18 +70,20 @@ async function waitFor<T>(read: () => T | null | undefined, timeout = 4_000): Pr
   }
 }
 
-function mountSettings(
+function prepareSettings(
   pageId: "dingtalk" | "codex-agents",
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
   agentsEmpty = false,
+  dingtalkHeavy = false,
 ) {
   const dingtalkClient = createFakeDingTalkClient({
     empty: dingtalkEmpty,
     error: dingtalkError,
     status: dingtalkStatus,
-    messageDelayMs: scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
+    heavy: dingtalkHeavy,
+    messageDelayMs: dingtalkHeavy ? 20 : scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
   });
   const agentsClient = createFakeCodexAgentsClient({ withAgents: !agentsEmpty });
   const dingtalkPage = createDingTalkSettingsPage(messages, {
@@ -93,14 +95,38 @@ function mountSettings(
     createClient: () => agentsClient,
   });
   const shell = installRendererSettingsShell([dingtalkPage, agentsPage], messages);
-  shell.openSettings(undefined, pageId);
   const shadow = shell.root.shadowRoot;
   if (!shadow) throw new Error("Settings shell shadow root is missing");
   const query = <T extends Element>(selector: string) => shadow.querySelector<T>(selector);
   const queryAll = <T extends Element>(selector: string) => [
     ...shadow.querySelectorAll<T>(selector),
   ];
-  return { shell, query, queryAll };
+  return {
+    shell,
+    query,
+    queryAll,
+    open: () => shell.openSettings(undefined, pageId),
+  };
+}
+
+function mountSettings(
+  pageId: "dingtalk" | "codex-agents",
+  dingtalkEmpty = false,
+  dingtalkError = false,
+  dingtalkStatus: FakeDingTalkStatus = "connected",
+  agentsEmpty = false,
+  dingtalkHeavy = false,
+) {
+  const prepared = prepareSettings(
+    pageId,
+    dingtalkEmpty,
+    dingtalkError,
+    dingtalkStatus,
+    agentsEmpty,
+    dingtalkHeavy,
+  );
+  prepared.open();
+  return prepared;
 }
 
 async function openPageMenu(query: <T extends Element>(selector: string) => T | null) {
@@ -770,6 +796,110 @@ async function mountJarvisSearch(
 }
 
 const scenarios: Record<string, () => Promise<void>> = {
+  async "dingtalk-heavy"() {
+    interface HeavyMetrics {
+      openToListMs: number;
+      openToMessagesMs: number;
+      renderTimeMs: number;
+      renderedMessages: number;
+      shadowNodes: number;
+      heapBaselineBytes: number;
+      heapAfterOpenBytes: number;
+      longestLongTaskMs: number;
+      longTasks: { start: number; duration: number }[];
+      scenarioStartedAt: number;
+      heapSupported: boolean;
+      close(): Promise<{
+        heapAfterCloseBytes: number;
+        shadowNodesAfterClose: number;
+        closeMs: number;
+      }>;
+    }
+    const previewWindow = window as Window & {
+      gc?: () => void;
+      performance: Performance & { memory?: { usedJSHeapSize: number } };
+      __dingtalkHeavy?: HeavyMetrics;
+    };
+    const heap = (): number => previewWindow.performance.memory?.usedJSHeapSize ?? 0;
+    const longTasks: { start: number; duration: number }[] = [];
+    let observer: PerformanceObserver | null = null;
+    try {
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          longTasks.push({ start: entry.startTime, duration: entry.duration });
+        }
+      });
+      observer.observe({ type: "longtask" });
+    } catch {
+      observer = null;
+    }
+    const prepared = prepareSettings("dingtalk", false, false, "connected", false, true);
+    previewWindow.gc?.();
+    await delay(60);
+    previewWindow.gc?.();
+    const baseline = heap();
+    const started = performance.now();
+    prepared.open();
+    const { query, queryAll, shell } = prepared;
+    await waitFor(() => query(".dingtalk-conversation"));
+    const openToListMs = performance.now() - started;
+    await waitFor(() => query(".dingtalk-message"));
+    const openToMessagesMs = performance.now() - started;
+    for (let page = 0; page < 8; page += 1) {
+      const list = query<HTMLElement>(".dingtalk-message-list");
+      if (!list) break;
+      const before = queryAll(".dingtalk-message").length;
+      if (before >= 200) break;
+      list.scrollTop = 0;
+      list.dispatchEvent(new Event("scroll"));
+      try {
+        await waitFor(() => (queryAll(".dingtalk-message").length > before ? true : null), 3_000);
+      } catch {
+        break;
+      }
+    }
+    const renderTimeMs = performance.now() - started;
+    const renderedMessages = queryAll(".dingtalk-message").length;
+    await delay(200);
+    previewWindow.gc?.();
+    await delay(60);
+    previewWindow.gc?.();
+    const heapAfterOpen = heap();
+    const shadow = shell.root.shadowRoot;
+    const shadowNodes = shadow ? shadow.querySelectorAll("*").length : 0;
+    const relevantLongTasks = longTasks.filter((task) => task.start >= started);
+    const longestLongTaskMs = relevantLongTasks.reduce(
+      (max, task) => Math.max(max, task.duration),
+      0,
+    );
+    observer?.disconnect();
+    previewWindow.__dingtalkHeavy = {
+      openToListMs,
+      openToMessagesMs,
+      renderTimeMs,
+      renderedMessages,
+      shadowNodes,
+      heapBaselineBytes: baseline,
+      heapAfterOpenBytes: heapAfterOpen,
+      longestLongTaskMs,
+      longTasks: relevantLongTasks,
+      scenarioStartedAt: started,
+      heapSupported: Boolean(previewWindow.performance.memory),
+      async close() {
+        const closeStarted = performance.now();
+        shell.close();
+        previewWindow.gc?.();
+        await delay(60);
+        previewWindow.gc?.();
+        return {
+          heapAfterCloseBytes: heap(),
+          shadowNodesAfterClose: shadow ? shadow.querySelectorAll("*").length : 0,
+          closeMs: performance.now() - closeStarted,
+        };
+      },
+    };
+  },
+
   async "dingtalk-list"() {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
@@ -799,6 +929,12 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
+    // Warm the synthetic missing image, then return to the newest messages.
+    query('[data-message-id="msg-launch-193"]')?.scrollIntoView({ block: "center" });
+    await delay(200);
+    const list = query<HTMLElement>(".dingtalk-message-list");
+    if (list) list.scrollTop = list.scrollHeight;
+    await delay(200);
   },
 
   async "dingtalk-direct"() {
@@ -806,11 +942,11 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-conversation"));
     const row = await waitFor(() =>
       queryAll<HTMLButtonElement>(".dingtalk-conversation").find(
-        (item) => item.textContent?.includes("吴菁") && !item.textContent?.includes("群"),
+        (item) => item.textContent?.includes("林晓") && !item.textContent?.includes("群"),
       ),
     );
     row.click();
-    await waitFor(() => query(".dingtalk-main-title")?.textContent === "吴菁");
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "林晓");
     await waitFor(() => query(".dingtalk-message"));
   },
 
@@ -824,19 +960,6 @@ const scenarios: Record<string, () => Promise<void>> = {
     list.dispatchEvent(new Event("scroll"));
     await waitFor(() => query(".dingtalk-loading-older:not([hidden])"));
     await delay(120);
-  },
-
-  async "dingtalk-recent"() {
-    const { query, queryAll } = mountSettings("dingtalk");
-    await waitFor(() => query(".dingtalk-conversation"));
-    const button = queryAll<HTMLButtonElement>(".dingtalk-list-switch-button")[1];
-    if (!button) throw new Error("Recent button is missing");
-    button.click();
-    await waitFor(
-      () =>
-        queryAll(".dingtalk-conversation").length > 0 &&
-        query(".dingtalk-conversation-preview")?.textContent?.startsWith("我："),
-    );
   },
 
   async "dingtalk-search"() {
@@ -867,18 +990,6 @@ const scenarios: Record<string, () => Promise<void>> = {
     more.click();
     await waitFor(() => queryAll(".dingtalk-search-result--conversation").length >= 4);
     await delay(120);
-  },
-
-  async "dingtalk-select"() {
-    const { query, queryAll } = mountSettings("dingtalk");
-    await waitFor(() => query(".dingtalk-conversation"));
-    await openFirstConversation(query);
-    const checks = queryAll<HTMLInputElement>(".dingtalk-message-check");
-    for (const check of checks.slice(-3)) {
-      check.checked = true;
-      check.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-    await waitFor(() => query(".dingtalk-selection-bar:not([hidden])"));
   },
 
   async "dingtalk-empty"() {

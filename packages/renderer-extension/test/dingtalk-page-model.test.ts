@@ -53,10 +53,10 @@ describe("DingTalk page model", () => {
   it("uses native two-character avatar labels without punctuation", () => {
     expect(dingtalkInitial(" 财务打款群 ")).toBe("财务");
     expect(dingtalkInitial("")).toBe("钉");
-    expect(dingtalkAvatarLabel("【示例Sprint】 进度", false)).toBe("示例货");
+    expect(dingtalkAvatarLabel("【示例Sprint】 进度", false)).toBe("示例");
     expect(dingtalkAvatarLabel("【线上系统问题反馈群】", false)).toBe("线上");
     expect(dingtalkAvatarLabel("  [设计评审]", false)).toBe("设计");
-    expect(dingtalkAvatarLabel("吴菁", true)).toBe("吴菁");
+    expect(dingtalkAvatarLabel("林晓", true)).toBe("林晓");
     expect(dingtalkAvatarLabel("Lucy", true)).toBe("L");
     expect(dingtalkAvatarLabel("【】[]", false)).toBe("钉");
   });

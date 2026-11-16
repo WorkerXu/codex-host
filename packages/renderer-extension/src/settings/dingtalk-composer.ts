@@ -7,8 +7,6 @@ export interface DingTalkComposerOptions {
   document: Document;
   text: DingTalkPageText;
   onSend(): void;
-  onEmbedSelected(): void;
-  onCancelSelection(): void;
 }
 
 export interface DingTalkComposer {
@@ -19,10 +17,9 @@ export interface DingTalkComposer {
   focus(): void;
   setPlaceholder(name: string): void;
   setSendEnabled(enabled: boolean): void;
-  setSelection(selectedCount: number, hasConversation: boolean): void;
 }
 
-/** Composer-like input plus the multi-select bar that replaces it. */
+/** Composer-like input above the conversation. */
 export function createDingTalkComposer(options: DingTalkComposerOptions): DingTalkComposer {
   const { document, text } = options;
   const area = createElementNode(document, "div", "dingtalk-composer-area");
@@ -38,24 +35,7 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
   send.title = text.send;
   send.disabled = true;
   composer.append(input, send);
-
-  const selectionBar = createElementNode(document, "div", "dingtalk-selection-bar");
-  const count = createElementNode(document, "span", "dingtalk-selection-count");
-  const embed = document.createElement("button");
-  embed.type = "button";
-  embed.className = "dingtalk-selection-embed";
-  embed.textContent = text.embedToConversation;
-  embed.addEventListener("click", options.onEmbedSelected);
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "dingtalk-selection-cancel";
-  cancel.textContent = text.cancelSelection;
-  cancel.addEventListener("click", options.onCancelSelection);
-  const actions = createElementNode(document, "div", "dingtalk-selection-actions");
-  actions.append(embed, cancel);
-  selectionBar.append(count, actions);
-  selectionBar.hidden = true;
-  area.append(composer, selectionBar);
+  area.append(composer);
 
   const grow = (): void => {
     input.style.height = "auto";
@@ -89,13 +69,6 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
     },
     setSendEnabled(enabled) {
       send.disabled = !enabled;
-    },
-    setSelection(selectedCount, hasConversation) {
-      const selecting = selectedCount > 0;
-      selectionBar.hidden = !selecting;
-      composer.hidden = selecting || !hasConversation;
-      count.textContent = text.selectedCount.replace("{count}", String(selectedCount));
-      embed.disabled = selectedCount === 0;
     },
   };
 }

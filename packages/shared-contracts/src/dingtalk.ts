@@ -283,18 +283,13 @@ export const dingtalkSettingsSetParamsSchema = z
   .strict();
 export type DingTalkSettingsSetParams = z.infer<typeof dingtalkSettingsSetParamsSchema>;
 
-export const dingtalkConversationsParamsSchema = z
-  .object({
-    view: z.enum(["unread", "recent"]).optional(),
-    refresh: z.boolean().optional(),
-  })
-  .strict();
+export const dingtalkConversationsParamsSchema = z.object({}).strict();
 export type DingTalkConversationsParams = z.infer<typeof dingtalkConversationsParamsSchema>;
 
 export const dingtalkConversationsResultSchema = z
   .object({
     available: z.boolean(),
-    source: z.enum(["unread", "recent", "empty"]),
+    source: z.enum(["unread", "empty"]),
     conversations: z.array(dingtalkConversationSchema).max(DINGTALK_MAX_CONVERSATIONS),
     cachedAt: z.number().int().nonnegative().nullable(),
     refreshing: z.boolean(),

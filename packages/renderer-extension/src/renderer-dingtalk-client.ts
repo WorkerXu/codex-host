@@ -17,7 +17,6 @@ import {
   dingtalkSearchResultSchema,
   dingtalkSendResultSchema,
   dingtalkStatusSchema,
-  type DingTalkConversationsParams,
   type DingTalkConversationsResult,
   type DingTalkMessage,
   type DingTalkMessagesParams,
@@ -54,12 +53,18 @@ export interface RendererDingTalkRoute {
 
 export interface RendererDingTalkClientOptions {
   forHost(hostId: string): RendererDingTalkRoute | null;
+  /** Window that carries raw Host notification frames; injectable for tests. */
+  notificationTarget?: EventTarget | null;
 }
 
 export interface RendererDingTalkClient {
   available(): boolean;
+  /** Starts a fresh page session; the DingTalk data Host is resolved again. */
+  beginSession(): void;
+  /** Releases the page session route and drops any routed subscription. */
+  endSession(): void;
   status(): Promise<DingTalkStatus>;
-  conversations(params?: DingTalkConversationsParams): Promise<DingTalkConversationsResult>;
+  conversations(): Promise<DingTalkConversationsResult>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
   resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult>;
@@ -126,22 +131,143 @@ function errorCode(error: unknown): string | null {
 export function createRendererDingTalkClient(
   options: RendererDingTalkClientOptions,
 ): RendererDingTalkClient {
-  const route = (): RendererDingTalkRoute | null => options.forHost("local");
+  const notificationTarget =
+    options.notificationTarget ?? (typeof window === "undefined" ? null : window);
+  const listeners = new Set<(conversationId: string | null) => void>();
+  let session = 0;
+  let statusPromise: Promise<DingTalkStatus> | null = null;
+  let resolving: Promise<RendererDingTalkRoute | null> | null = null;
+  let resolvedRoute: RendererDingTalkRoute | null = null;
+  let routedSubscription: (() => void) | null = null;
+  let subscribedRoute: RendererDingTalkRoute | null = null;
+
+  const localRoute = (): RendererDingTalkRoute | null => options.forHost("local");
+
+  const emit = (value: unknown): void => {
+    const params =
+      typeof value === "object" && value !== null && "params" in value
+        ? (value as { params?: unknown }).params
+        : undefined;
+    const conversationId =
+      typeof params === "object" && params !== null
+        ? (params as { conversationId?: unknown }).conversationId
+        : undefined;
+    for (const listener of listeners) {
+      try {
+        listener(typeof conversationId === "string" ? conversationId : null);
+      } catch {
+        /* One page listener must not block the others. */
+      }
+    }
+  };
+
+  const detachRoute = (): void => {
+    routedSubscription?.();
+    routedSubscription = null;
+    subscribedRoute = null;
+  };
+
+  const attachRoute = (): void => {
+    const route = resolvedRoute;
+    if (!route || listeners.size === 0) {
+      if (!route) detachRoute();
+      return;
+    }
+    if (subscribedRoute === route) return;
+    detachRoute();
+    const unsubscribe = route.manager.addNotificationCallback?.(DINGTALK_CHANGED_METHOD, emit);
+    const onMessage = (event: Event): void => {
+      const message = (event as MessageEvent).data;
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        (message as { type?: unknown }).type !== "mcp-notification" ||
+        (message as { method?: unknown }).method !== DINGTALK_CHANGED_METHOD
+      ) {
+        return;
+      }
+      // Desktop may fan every Host's frames into this window; keep only the
+      // DingTalk Host the page is reading from.
+      const hostId = (message as { hostId?: unknown }).hostId;
+      if (typeof hostId === "string" && hostId !== route.hostId) return;
+      emit(message);
+    };
+    notificationTarget?.addEventListener("message", onMessage);
+    routedSubscription = () => {
+      unsubscribe?.();
+      notificationTarget?.removeEventListener("message", onMessage);
+    };
+    subscribedRoute = route;
+  };
+
+  const applyStatus = (status: DingTalkStatus): void => {
+    const remote =
+      status.defaultHost !== "local" && status.defaultHostId
+        ? options.forHost(status.defaultHostId)
+        : null;
+    const next = remote ?? localRoute();
+    resolvedRoute = next;
+    if (statusPromise === null && resolving === null) attachRoute();
+    else if (next === null) detachRoute();
+  };
+
+  const readStatus = (): Promise<DingTalkStatus> => {
+    statusPromise ??= (async () => {
+      const generation = session;
+      const current = localRoute();
+      if (!current) throw new Error("peer_unavailable: Host Runtime is unavailable");
+      const status = dingtalkStatusSchema.parse(
+        await current.manager.sendRequest(DINGTALK_STATUS_METHOD, {}, { timeoutMs: 45_000 }),
+      );
+      if (generation === session) applyStatus(status);
+      return status;
+    })().finally(() => {
+      statusPromise = null;
+      attachRoute();
+    });
+    return statusPromise;
+  };
+
+  /** The DingTalk Host route for this page session; local forwarding otherwise. */
+  const dataRoute = (): Promise<RendererDingTalkRoute | null> => {
+    if (resolvedRoute) return Promise.resolve(resolvedRoute);
+    const generation = session;
+    resolving ??= (async () => {
+      const status = await readStatus().catch(() => null);
+      if (generation !== session) return null;
+      if (status) applyStatus(status);
+      return resolvedRoute ?? localRoute();
+    })().finally(() => {
+      resolving = null;
+      attachRoute();
+    });
+    return resolving;
+  };
 
   const request = async (method: string, params: unknown, timeoutMs = 45_000): Promise<unknown> => {
-    const current = route();
+    const current = await dataRoute();
     if (!current) throw new Error("peer_unavailable: Host Runtime is unavailable");
     return await current.manager.sendRequest(method, params, { timeoutMs });
   };
 
   return {
-    available: () => route() !== null,
-    async status() {
-      return dingtalkStatusSchema.parse(await request(DINGTALK_STATUS_METHOD, {}));
+    available: () => localRoute() !== null,
+    beginSession() {
+      session += 1;
+      resolvedRoute = null;
+      detachRoute();
     },
-    async conversations(params = {}) {
+    endSession() {
+      session += 1;
+      resolvedRoute = null;
+      detachRoute();
+    },
+    async status() {
+      return await readStatus();
+    },
+    async conversations() {
       return dingtalkConversationsResultSchema.parse(
-        await request(DINGTALK_CONVERSATIONS_METHOD, params),
+        await request(DINGTALK_CONVERSATIONS_METHOD, {}),
       );
     },
     async preview(conversationId) {
@@ -181,36 +307,12 @@ export function createRendererDingTalkClient(
       }
     },
     subscribe(listener) {
-      const current = route();
-      const emit = (value: unknown): void => {
-        const conversationId =
-          typeof value === "object" &&
-          value !== null &&
-          "params" in value &&
-          typeof (value as { params?: unknown }).params === "object"
-            ? (value as { params?: { conversationId?: unknown } }).params?.conversationId
-            : null;
-        listener(typeof conversationId === "string" ? conversationId : null);
-      };
-      const unsubscribe = current?.manager.addNotificationCallback?.(DINGTALK_CHANGED_METHOD, emit);
-      // Desktop's app-server method table may drop custom notifications before
-      // the native manager callback; observe the real Host frame as a fallback.
-      const onMessage = (event: MessageEvent): void => {
-        const message = event.data;
-        if (
-          typeof message !== "object" ||
-          message === null ||
-          (message as { type?: unknown }).type !== "mcp-notification" ||
-          (message as { method?: unknown }).method !== DINGTALK_CHANGED_METHOD
-        ) {
-          return;
-        }
-        emit(message);
-      };
-      window.addEventListener("message", onMessage);
+      listeners.add(listener);
+      if (resolvedRoute) attachRoute();
+      else void dataRoute().catch(() => undefined);
       return () => {
-        unsubscribe?.();
-        window.removeEventListener("message", onMessage);
+        listeners.delete(listener);
+        if (listeners.size === 0) detachRoute();
       };
     },
   };
