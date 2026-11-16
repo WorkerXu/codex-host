@@ -1,5 +1,6 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import type { IconNode } from "lucide";
+import BellOffIcon from "lucide/dist/esm/icons/bell-off.mjs";
 
 import type {
   DingTalkConversation,
@@ -20,6 +21,9 @@ import {
 } from "./dingtalk-page-model.js";
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import { appendDingTalkMarkdown } from "./dingtalk-markdown.js";
+
+const LONG_TEXT_LIMIT = 8_000;
+const LONG_TEXT_PREVIEW = 1_500;
 
 export function createElementNode<K extends keyof HTMLElementTagNameMap>(
   document: Document,
@@ -69,7 +73,7 @@ export function createIconButton(
 export function createAvatar(
   document: Document,
   conversation: Pick<DingTalkConversation, "conversationId" | "title" | "singleChat">,
-  size: 36 | 28 = 36,
+  size: 40 | 28 = 40,
 ): HTMLElement {
   const avatar = createElementNode(document, "span", `dingtalk-avatar dingtalk-avatar--${size}`);
   avatar.style.setProperty("--avatar-tone", avatarTone(conversation.conversationId));
@@ -109,8 +113,21 @@ export function createConversationRow(
   const row = document.createElement("button");
   row.type = "button";
   row.className = "dingtalk-conversation";
-  row.dataset.conversationId = conversation.conversationId;
   row.setAttribute("role", "option");
+  row.addEventListener("click", onSelect);
+  updateConversationRow(document, row, conversation, text, active);
+  return row;
+}
+
+/** Rewrites one row in place so list updates never rebuild the whole column. */
+export function updateConversationRow(
+  document: Document,
+  row: HTMLButtonElement,
+  conversation: DingTalkConversation,
+  text: DingTalkPageText,
+  active: boolean,
+): void {
+  row.dataset.conversationId = conversation.conversationId;
   row.setAttribute("aria-selected", String(active));
   row.classList.toggle("dingtalk-conversation--active", active);
   const copy = createElementNode(document, "span", "dingtalk-conversation-copy");
@@ -152,14 +169,22 @@ export function createConversationRow(
     conversation.preview ?? "",
   );
   meta.append(preview);
+  if (conversation.muted) {
+    const muted = createIcon(
+      document,
+      BellOffIcon,
+      13,
+      "dingtalk-icon dingtalk-conversation-muted",
+    );
+    muted.setAttribute("aria-label", "消息免打扰");
+    meta.append(muted);
+  }
   copy.append(line, meta);
   const avatar = createElementNode(document, "span", "dingtalk-avatar-wrap");
   avatar.append(createAvatar(document, conversation));
   const badge = unreadBadge(document, conversation);
   if (badge) avatar.append(badge);
-  row.append(avatar, copy);
-  row.addEventListener("click", onSelect);
-  return row;
+  row.replaceChildren(avatar, copy);
 }
 
 export function appendHighlighted(
@@ -270,15 +295,15 @@ export function createSearchMessageRow(
 
 export interface MessageRowOptions {
   continuation: boolean;
-  selected: boolean;
   /** The centered time separator already carries this group's time. */
   suppressTime?: boolean;
-  onSelect(checked: boolean): void;
-  onActivate(): void;
   onRetry?(): void;
-  /** Resolves one image resource to a data URL; null shows a placeholder. */
-  loadImage?(resource: DingTalkMessageResource): Promise<string | null>;
-  onImageLoaded?(wasNearBottom: boolean): void;
+  /** Hands the empty image frame to the list controller for viewport loading. */
+  attachImage?(
+    frame: HTMLElement,
+    message: DingTalkMessage,
+    resource: DingTalkMessageResource,
+  ): void;
 }
 
 function appendFileChip(
@@ -299,7 +324,7 @@ function appendFileChip(
   parent.append(chip);
 }
 
-function imageBox(width: number, height: number): { width: number; height: number } {
+export function dingtalkImageBox(width: number, height: number): { width: number; height: number } {
   const maxWidth = 240;
   const maxHeight = 240;
   const minWidth = 120;
@@ -326,7 +351,7 @@ function imageBox(width: number, height: number): { width: number; height: numbe
   return { width: Math.round(fittedWidth), height: Math.round(fittedHeight) };
 }
 
-function showImageUnavailable(document: Document, frame: HTMLElement): void {
+export function showImageUnavailable(document: Document, frame: HTMLElement): void {
   frame.classList.remove("dingtalk-message-image--loading", "dingtalk-message-image--loaded");
   frame.classList.add("dingtalk-message-image--unavailable");
   frame.style.removeProperty("width");
@@ -352,41 +377,15 @@ function appendImage(
     createElementNode(document, "span", "dingtalk-skeleton dingtalk-message-image-skeleton"),
   );
   parent.append(frame);
-  if (!options.loadImage) {
+  if (!options.attachImage) {
     showImageUnavailable(document, frame);
     return;
   }
-  void options
-    .loadImage(resource)
-    .then((dataUrl) => {
-      if (!frame.isConnected) return;
-      if (!dataUrl) {
-        showImageUnavailable(document, frame);
-        return;
-      }
-      const scroller = frame.closest<HTMLElement>(".dingtalk-message-list");
-      const nearBottom = scroller
-        ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 80
-        : false;
-      const image = document.createElement("img");
-      image.className = "dingtalk-message-image-content";
-      image.alt = message.text || "图片";
-      image.onload = () => {
-        if (!frame.isConnected) return;
-        const box = imageBox(image.naturalWidth || 1, image.naturalHeight || 1);
-        frame.style.width = `${box.width}px`;
-        frame.style.height = `${box.height}px`;
-        frame.classList.remove("dingtalk-message-image--loading");
-        frame.classList.add("dingtalk-message-image--loaded");
-        frame.replaceChildren(image);
-        options.onImageLoaded?.(nearBottom);
-      };
-      image.onerror = () => {
-        if (frame.isConnected) showImageUnavailable(document, frame);
-      };
-      image.src = dataUrl;
-    })
-    .catch(() => showImageUnavailable(document, frame));
+  try {
+    options.attachImage(frame, message, resource);
+  } catch {
+    showImageUnavailable(document, frame);
+  }
 }
 
 function bubbleContent(
@@ -423,7 +422,25 @@ function bubbleContent(
       createElementNode(document, "div", "dingtalk-message-card-title", message.cardTitle),
     );
   }
-  if (message.format === "markdown") {
+  if (message.text.length > LONG_TEXT_LIMIT) {
+    // Very long bodies are kept as one plain text node; building markdown for
+    // tens of thousands of characters is what froze the Desktop.
+    const preview = createElementNode(
+      document,
+      "div",
+      "dingtalk-message-text dingtalk-message-text--long",
+      `${message.text.slice(0, LONG_TEXT_PREVIEW)}…`,
+    );
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "dingtalk-message-expand";
+    expand.textContent = "展开";
+    expand.addEventListener("click", () => {
+      preview.textContent = message.text;
+      expand.remove();
+    });
+    bubble.append(preview, expand);
+  } else if (message.format === "markdown") {
     const markdown = createElementNode(document, "div", "dingtalk-message-markdown");
     appendDingTalkMarkdown(document, markdown, message.text);
     bubble.append(markdown);
@@ -451,42 +468,69 @@ export function createMessageRow(
   text: DingTalkPageText,
   options: MessageRowOptions,
 ): HTMLElement {
+  try {
+    return buildMessageRow(document, message, text, options);
+  } catch {
+    return createPlainMessageRow(document, message, text, options);
+  }
+}
+
+function createPlainMessageRow(
+  document: Document,
+  message: DingTalkMessage & { pending?: boolean; failed?: boolean },
+  _text: DingTalkPageText,
+  options: MessageRowOptions,
+): HTMLElement {
+  const row = createElementNode(document, "div", "dingtalk-message dingtalk-message--plain");
+  row.dataset.messageId = message.messageId;
+  row.classList.toggle("dingtalk-message--mine", message.mine);
+  row.classList.toggle("dingtalk-message--failed", Boolean(message.failed));
+  const body = createElementNode(document, "div", "dingtalk-message-body");
+  const bubble = createElementNode(document, "div", "dingtalk-message-bubble");
+  bubble.append(
+    createElementNode(
+      document,
+      "span",
+      "dingtalk-message-text",
+      message.text.slice(0, LONG_TEXT_PREVIEW) || unsupportedSummary(message),
+    ),
+  );
+  if (message.failed) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "dingtalk-send-retry";
+    retry.textContent = "!";
+    retry.addEventListener("click", () => options.onRetry?.());
+    body.append(bubble, retry);
+  } else {
+    body.append(bubble);
+  }
+  row.append(body);
+  return row;
+}
+
+function buildMessageRow(
+  document: Document,
+  message: DingTalkMessage & { pending?: boolean; failed?: boolean },
+  text: DingTalkPageText,
+  options: MessageRowOptions,
+): HTMLElement {
   const row = createElementNode(document, "div", "dingtalk-message");
   row.dataset.messageId = message.messageId;
   row.classList.toggle("dingtalk-message--mine", message.mine);
   row.classList.toggle("dingtalk-message--continuation", options.continuation);
-  row.classList.toggle("dingtalk-message--selected", options.selected);
   row.classList.toggle("dingtalk-message--pending", Boolean(message.pending));
   row.classList.toggle("dingtalk-message--failed", Boolean(message.failed));
   row.classList.toggle("dingtalk-message--bot", Boolean(message.bot));
   row.classList.toggle("dingtalk-message--card", Boolean(message.cardTitle));
 
-  const check = document.createElement("input");
-  check.type = "checkbox";
-  check.className = "dingtalk-message-check";
-  check.checked = options.selected;
-  check.setAttribute("aria-label", text.selectMessage);
-  check.title = text.selectMessage;
-  check.addEventListener("change", () => options.onSelect(check.checked));
-  row.addEventListener("click", (event) => {
-    if (
-      event.target instanceof Element &&
-      event.target.closest(".dingtalk-send-retry, .dingtalk-message-check")
-    ) {
-      return;
-    }
-    options.onActivate();
-  });
-
   if (!message.mine && !options.continuation) {
     const sender = createElementNode(document, "span", "dingtalk-message-avatar");
     sender.style.setProperty("--avatar-tone", avatarTone(message.senderId ?? message.senderName));
     sender.textContent = dingtalkAvatarLabel(message.senderName || "?", true);
-    row.append(check, sender);
+    row.append(sender);
   } else if (!message.mine) {
-    row.append(check, createElementNode(document, "span", "dingtalk-message-avatar-spacer"));
-  } else {
-    row.append(check);
+    row.append(createElementNode(document, "span", "dingtalk-message-avatar-spacer"));
   }
 
   const body = createElementNode(document, "div", "dingtalk-message-body");

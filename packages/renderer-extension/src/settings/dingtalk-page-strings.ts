@@ -16,9 +16,6 @@ export interface DingTalkPageText {
   searchKeyboardHint: string;
   noSearchResults: string;
   searchFailed: string;
-  recentReplied: string;
-  unread: string;
-  noConversations: string;
   noUnreadConversations: string;
   listFailedReason: string;
   retry: string;
@@ -27,13 +24,9 @@ export interface DingTalkPageText {
   messagesFailed: string;
   notLoaded: string;
   unnamed: string;
-  selectMessage: string;
   embedConversation: string;
   embedFailed: string;
   refreshMessages: string;
-  selectedCount: string;
-  embedToConversation: string;
-  cancelSelection: string;
   send: string;
   sendFailed: string;
   retrySend: string;
@@ -57,10 +50,7 @@ const ZH: DingTalkPageText = {
   searchKeyboardHint: "↑↓ 移动 · ↵ 打开 · Esc 退出",
   noSearchResults: "没有找到相关会话或消息",
   searchFailed: "搜索失败，请稍后重试",
-  recentReplied: "最近回复",
-  unread: "未读",
-  noConversations: "暂无会话",
-  noUnreadConversations: "暂无未读会话",
+  noUnreadConversations: "最近 48 小时没有未读消息",
   listFailedReason: "钉钉连接不可用，请稍后重试",
   retry: "重试",
   selectConversation: "选择一个会话",
@@ -68,13 +58,9 @@ const ZH: DingTalkPageText = {
   messagesFailed: "消息加载失败，请稍后重试",
   notLoaded: "这条消息还没有加载，请继续向上滚动",
   unnamed: "未命名会话",
-  selectMessage: "选择消息",
   embedConversation: "嵌入会话到对话",
   embedFailed: "无法嵌入：请重新打开该对话的输入框",
   refreshMessages: "刷新消息",
-  selectedCount: "已选 {count} 条",
-  embedToConversation: "嵌入到对话",
-  cancelSelection: "取消",
   send: "发送",
   sendFailed: "发送失败，点击重试",
   retrySend: "重试发送",
@@ -98,10 +84,7 @@ const EN: DingTalkPageText = {
   searchKeyboardHint: "↑↓ Move · ↵ Open · Esc Exit",
   noSearchResults: "No matching conversations or messages",
   searchFailed: "Search failed. Try again.",
-  recentReplied: "Recently replied",
-  unread: "Unread",
-  noConversations: "No conversations",
-  noUnreadConversations: "No unread conversations",
+  noUnreadConversations: "No unread messages in the last 48 hours",
   listFailedReason: "DingTalk is unavailable. Try again.",
   retry: "Retry",
   selectConversation: "Select a conversation",
@@ -109,13 +92,9 @@ const EN: DingTalkPageText = {
   messagesFailed: "Could not load messages. Try again.",
   notLoaded: "This message is not loaded yet; scroll up",
   unnamed: "Untitled conversation",
-  selectMessage: "Select message",
   embedConversation: "Embed conversation in chat",
   embedFailed: "Could not embed: reopen the Composer that opened this page",
   refreshMessages: "Refresh messages",
-  selectedCount: "{count} selected",
-  embedToConversation: "Embed in conversation",
-  cancelSelection: "Cancel",
   send: "Send",
   sendFailed: "Send failed. Click to retry.",
   retrySend: "Retry sending",

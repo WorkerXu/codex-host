@@ -1,35 +1,27 @@
 import SearchIcon from "lucide/dist/esm/icons/search.mjs";
 import XIcon from "lucide/dist/esm/icons/x.mjs";
 
-import type {
-  DingTalkConversation,
-  DingTalkMention,
-  DingTalkMessage,
-} from "@codexhost/shared-contracts";
+import type { DingTalkConversation, DingTalkMention } from "@codexhost/shared-contracts";
 
 import type { RendererDingTalkClient } from "../renderer-dingtalk-client.js";
 import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext } from "./core.js";
 import type { RendererSettingsLocale, RendererSettingsMessages } from "./localization.js";
 import {
-  continuesDingTalkGroup,
   conversationMention,
-  dayKey,
   type DingTalkPageState,
   type ViewMessage,
 } from "./dingtalk-page-model.js";
 import {
-  createConversationRow,
-  createDateSeparator,
   createElementNode,
   createIcon,
   createIconButton,
   createListEmpty,
   createListSkeleton,
-  createMessageRow,
   createMessageSkeleton,
   createOlderMessagesSkeleton,
-  createTimeSeparator,
 } from "./dingtalk-page-view.js";
+import { createDingTalkConversationList } from "./dingtalk-conversation-list.js";
+import { createDingTalkMessageList } from "./dingtalk-message-list.js";
 import { createDingTalkComposer } from "./dingtalk-composer.js";
 import { createDingTalkMainHeader } from "./dingtalk-main-header.js";
 import { createDingTalkPageMenu } from "./dingtalk-page-menu.js";
@@ -39,15 +31,17 @@ import { dingtalkPageStrings } from "./dingtalk-page-strings.js";
 
 /**
  * Chat state machine for the DingTalk workbench. DOM builders live in
- * dingtalk-page-view, -menu, -composer and -search-panel; the remaining
- * actions share one message/search/selection state, so they stay together.
+ * dingtalk-page-view, -menu, -composer and -search-panel; the transcript and
+ * conversation column own their incremental rendering.
  */
 const SEARCH_DEBOUNCE_MS = 450;
 const HIGHLIGHT_MS = 2_500;
 const INITIAL_MESSAGE_LIMIT = 30;
 const OLDER_MESSAGE_LIMIT = 30;
+const MAX_MESSAGE_WINDOW = 200;
 const PREVIEW_CONCURRENCY = 3;
-const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation";
+const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation.unread";
+const LEGACY_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation";
 
 export interface RendererDingTalkPageOptions {
   createClient(): RendererDingTalkClient | null;
@@ -69,17 +63,16 @@ export function createDingTalkSettingsPage(
       const view = document.defaultView ?? window;
       const locale = options.readLocale();
       const client = options.createClient();
+      client?.beginSession();
       const text = dingtalkPageStrings(locale);
       const state: DingTalkPageState = {
         source: "empty",
-        view: "unread",
         conversations: [],
         selectedId: null,
         currentConversation: null,
         messages: [],
         hasMore: false,
         nextCursor: null,
-        selectedMessages: new Set(),
         search: null,
         searchQuery: "",
         searchPending: false,
@@ -101,13 +94,10 @@ export function createDingTalkSettingsPage(
       let searchExpanded = { conversations: false, messages: false };
       let searchCursor = -1;
       let loadingOlderRequest = false;
-      let openedInitialConversation = false;
       const previews = new Map<string, string | null>();
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
       let previewActive = 0;
-      const images = new Map<string, string | null>();
-      const imageRequests = new Map<string, Promise<string | null>>();
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
 
@@ -129,25 +119,23 @@ export function createDingTalkSettingsPage(
       const pageMenu = createDingTalkPageMenu({
         document,
         text,
-        onRefresh: () => void loadConversations(true),
+        onRefresh: () => void loadConversations(),
         onRetry: () => {
           void loadStatus();
-          void loadConversations(true);
+          void loadConversations();
         },
       });
       sidebarHead.append(searchBox, pageMenu.moreButton);
 
-      const listSwitch = createElementNode(document, "div", "dingtalk-list-switch");
-      const unreadButton = createElementNode(document, "button", "dingtalk-list-switch-button");
-      unreadButton.type = "button";
-      unreadButton.textContent = text.unread;
-      const recentButton = createElementNode(document, "button", "dingtalk-list-switch-button");
-      recentButton.type = "button";
-      recentButton.textContent = text.recentReplied;
-      listSwitch.append(unreadButton, recentButton);
       const conversationList = createElementNode(document, "div", "dingtalk-conversation-list");
       conversationList.setAttribute("role", "listbox");
       conversationList.setAttribute("aria-label", text.brand);
+      const conversationRows = createDingTalkConversationList({
+        document,
+        container: conversationList,
+        text,
+        onSelect: (conversationId) => void selectConversation(conversationId),
+      });
       const searchPanel = createDingTalkSearchPanel({
         document,
         text,
@@ -169,7 +157,7 @@ export function createDingTalkSettingsPage(
         text.searchKeyboardHint,
       );
       searchHint.hidden = true;
-      sidebar.append(sidebarHead, listSwitch, conversationList, searchPanel.element, searchHint);
+      sidebar.append(sidebarHead, conversationList, searchPanel.element, searchHint);
 
       const main = createElementNode(document, "section", "dingtalk-main");
       const mainHead = createDingTalkMainHeader({
@@ -201,19 +189,37 @@ export function createDingTalkSettingsPage(
       newPill.hidden = true;
       pane.append(messageList, mainState, newPill);
 
+      const messageListView = createDingTalkMessageList({
+        document,
+        container: messageList,
+        text,
+        loadResource: async (message, resource) => {
+          if (!client) {
+            return {
+              available: false,
+              dataUrl: null,
+              mimeType: null,
+              sizeBytes: null,
+              errorCode: "peer_unavailable",
+            };
+          }
+          return await client.resource({
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            resourceId: resource.resourceId,
+            resourceIdType: resource.resourceIdType,
+          });
+        },
+        onImageLoaded: (wasNearBottom) => {
+          if (wasNearBottom) scrollToBottom();
+        },
+        onRetry: (message) => void deliver(message),
+      });
+
       const composer = createDingTalkComposer({
         document,
         text,
         onSend: () => sendMessage(),
-        onEmbedSelected: () => {
-          if (!state.selectedId) return;
-          void embed(
-            conversationMention(state.currentConversation, state.selectedId, [
-              ...state.selectedMessages,
-            ]),
-          );
-        },
-        onCancelSelection: () => clearSelection(),
       });
 
       main.append(mainHead.element, notice, pane, composer.element);
@@ -235,7 +241,6 @@ export function createDingTalkSettingsPage(
         conversationList.hidden = searching;
         searchPanel.element.hidden = !searching;
         searchHint.hidden = !searching;
-        listSwitch.hidden = searching || state.listError;
       };
 
       const applySearchCursor = (): void => {
@@ -302,58 +307,33 @@ export function createDingTalkSettingsPage(
             );
 
       const renderList = (): void => {
-        conversationList.replaceChildren();
-        unreadButton.setAttribute("aria-pressed", String(state.view === "unread"));
-        recentButton.setAttribute("aria-pressed", String(state.view === "recent"));
-        unreadButton.classList.toggle(
-          "dingtalk-list-switch-button--active",
-          state.view === "unread",
-        );
-        recentButton.classList.toggle(
-          "dingtalk-list-switch-button--active",
-          state.view === "recent",
-        );
         if (state.listError) {
-          conversationList.append(
+          conversationRows.clear();
+          conversationList.replaceChildren(
             createListEmpty(document, text.listFailedReason, {
               label: text.retry,
-              onClick: () => void loadConversations(true),
+              onClick: () => void loadConversations(),
             }),
           );
           syncColumnMode();
           return;
         }
         if (state.listLoading && state.conversations.length === 0) {
-          conversationList.append(createListSkeleton(document));
+          conversationRows.clear();
+          conversationList.replaceChildren(createListSkeleton(document));
           syncColumnMode();
           return;
         }
-        const rows = state.conversations.map((conversation) => ({
-          ...conversation,
-          ...(previews.has(conversation.conversationId) && !conversation.preview
-            ? { preview: previews.get(conversation.conversationId) ?? undefined }
-            : {}),
-        }));
-        for (const conversation of rows) {
-          const row = createConversationRow(
-            document,
-            conversation,
-            text,
-            conversation.conversationId === state.selectedId,
-            () => void selectConversation(conversation.conversationId),
-          );
-          conversationList.append(row);
+        conversationRows.render(state.conversations, state.selectedId);
+        for (const conversation of state.conversations) {
           if (previews.has(conversation.conversationId)) continue;
+          const row = conversationRows.elementFor(conversation.conversationId);
+          if (!row) continue;
           if (!conversation.preview && previewObserver) previewObserver.observe(row);
           else if (!conversation.preview) requestPreview(conversation.conversationId);
         }
-        if (rows.length === 0) {
-          conversationList.append(
-            createListEmpty(
-              document,
-              state.view === "unread" ? text.noUnreadConversations : text.noConversations,
-            ),
-          );
+        if (state.conversations.length === 0) {
+          conversationList.append(createListEmpty(document, text.noUnreadConversations));
         }
         syncColumnMode();
       };
@@ -378,47 +358,10 @@ export function createDingTalkSettingsPage(
         if (content) mainState.append(content);
       };
 
-      const updateSelectionUi = (): void => {
-        const selecting = state.selectedMessages.size > 0;
-        root.classList.toggle("dingtalk-workbench--selecting", selecting);
-        composer.setSelection(state.selectedMessages.size, state.selectedId !== null);
-      };
-
       const updateHeader = (): void => {
         const conversation = state.currentConversation;
         mainHead.setConversation(conversation);
         composer.setPlaceholder(conversation?.title || "");
-      };
-
-      const loadImage = (
-        message: DingTalkMessage,
-        resource: NonNullable<DingTalkMessage["resources"]>[number],
-      ): Promise<string | null> => {
-        const key = `${message.conversationId}:${message.messageId}:${resource.resourceId}`;
-        if (images.has(key)) return Promise.resolve(images.get(key) ?? null);
-        const pending = imageRequests.get(key);
-        if (pending) return pending;
-        if (!client) return Promise.resolve(null);
-        const request = client
-          .resource({
-            conversationId: message.conversationId,
-            messageId: message.messageId,
-            resourceId: resource.resourceId,
-            resourceIdType: resource.resourceIdType,
-          })
-          .then((result) => (result.available ? result.dataUrl : null))
-          .catch(() => null)
-          .then((dataUrl) => {
-            images.set(key, dataUrl);
-            imageRequests.delete(key);
-            if (images.size > 80) {
-              const oldest = images.keys().next().value;
-              if (oldest !== undefined) images.delete(oldest);
-            }
-            return dataUrl;
-          });
-        imageRequests.set(key, request);
-        return request;
       };
 
       const distanceFromBottom = (): number => messageList.scrollHeight - messageList.scrollTop;
@@ -441,31 +384,21 @@ export function createDingTalkSettingsPage(
         )}`;
       };
 
-      const setMessageSelected = (messageId: string, checked: boolean): void => {
-        if (checked) state.selectedMessages.add(messageId);
-        else state.selectedMessages.delete(messageId);
-        const row = messageList.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(messageId)}"]`,
-        );
-        row?.classList.toggle("dingtalk-message--selected", checked);
-        const check = row?.querySelector<HTMLInputElement>(".dingtalk-message-check");
-        if (check) check.checked = checked;
-        updateSelectionUi();
-      };
-
       const renderMessages = (behavior?: { scroll?: "bottom"; distance?: number }): void => {
-        messageList.replaceChildren();
         if (state.selectedId === null) {
+          messageListView.clear();
           renderMainState(createListEmpty(document, text.emptyMessages));
           renderPill();
           return;
         }
         if (state.loadingMessages) {
+          messageListView.clear();
           renderMainState(createMessageSkeleton(document));
           renderPill();
           return;
         }
         if (state.messagesError) {
+          messageListView.clear();
           renderMainState(
             createListEmpty(document, text.messagesFailed, {
               label: text.retry,
@@ -476,77 +409,21 @@ export function createDingTalkSettingsPage(
           return;
         }
         renderMainState(null);
+        messageListView.reset(state.messages, behavior);
+        if (state.messages.length === 0) {
+          messageList.append(
+            createElementNode(document, "div", "dingtalk-message-empty", text.emptyMessages),
+          );
+        }
         if (state.loadMoreError) {
           const retry = document.createElement("button");
           retry.type = "button";
           retry.className = "dingtalk-load-more-error";
           retry.textContent = text.loadMoreFailed;
           retry.addEventListener("click", () => void loadOlder(true));
-          messageList.append(retry);
-        }
-        if (state.messages.length === 0) {
-          messageList.append(
-            createElementNode(document, "div", "dingtalk-message-empty", text.emptyMessages),
-          );
-        }
-        let previous: DingTalkMessage | undefined;
-        let previousDay = "";
-        let afterTimeSeparator = false;
-        for (const message of state.messages) {
-          const key = dayKey(message.createdAt);
-          if (key !== previousDay) {
-            messageList.append(createDateSeparator(document, message.createdAt));
-            previous = undefined;
-            previousDay = key;
-            afterTimeSeparator = false;
-          } else if (
-            previous !== undefined &&
-            message.createdAt - previous.createdAt > 5 * 60_000
-          ) {
-            messageList.append(createTimeSeparator(document, message.createdAt));
-            previous = undefined;
-            afterTimeSeparator = true;
-          }
-          const continuation = continuesDingTalkGroup(previous, message);
-          messageList.append(
-            createMessageRow(document, message, text, {
-              continuation,
-              suppressTime: afterTimeSeparator,
-              selected: state.selectedMessages.has(message.messageId),
-              onSelect: (checked) => setMessageSelected(message.messageId, checked),
-              onActivate: () =>
-                setMessageSelected(
-                  message.messageId,
-                  !state.selectedMessages.has(message.messageId),
-                ),
-              onRetry: () => void deliver(message),
-              loadImage: (resource) => loadImage(message, resource),
-              onImageLoaded: (wasNearBottom) => {
-                if (wasNearBottom) scrollToBottom();
-              },
-            }),
-          );
-          previous = message;
-          afterTimeSeparator = false;
-        }
-        if (behavior?.scroll === "bottom") scrollToBottom();
-        else if (behavior?.distance !== undefined) {
-          messageList.scrollTop = messageList.scrollHeight - behavior.distance;
+          messageList.prepend(retry);
         }
         renderPill();
-      };
-
-      const clearSelection = (): void => {
-        state.selectedMessages.clear();
-        for (const row of messageList.querySelectorAll(".dingtalk-message--selected")) {
-          row.classList.remove("dingtalk-message--selected");
-        }
-        for (const check of messageList.querySelectorAll<HTMLInputElement>(
-          ".dingtalk-message-check",
-        )) {
-          check.checked = false;
-        }
-        updateSelectionUi();
       };
 
       const selectConversation = async (conversationId: string, force = false): Promise<void> => {
@@ -567,7 +444,6 @@ export function createDingTalkSettingsPage(
         state.messagesError = false;
         state.loadMoreError = false;
         state.pendingNewCount = 0;
-        clearSelection();
         updateHeader();
         renderList();
         renderMessages();
@@ -634,6 +510,10 @@ export function createDingTalkSettingsPage(
           renderMessages({ distance });
           return;
         }
+        const known = new Set(state.messages.map((message) => message.messageId));
+        const older = result.messages
+          .filter((message) => !known.has(message.messageId))
+          .sort((left, right) => left.createdAt - right.createdAt);
         const merged = new Map<string, ViewMessage>();
         for (const message of [...state.messages, ...result.messages]) {
           merged.set(message.messageId, message);
@@ -641,10 +521,17 @@ export function createDingTalkSettingsPage(
         state.messages = [...merged.values()].sort(
           (left, right) => left.createdAt - right.createdAt,
         );
+        const overflow = Math.max(0, state.messages.length - MAX_MESSAGE_WINDOW);
+        if (overflow > 0) {
+          state.messages = state.messages.slice(0, -overflow);
+          messageListView.removeNewest(overflow);
+        }
+        if (older.length > 0) messageListView.prepend(older);
+        messageList.scrollTop = messageList.scrollHeight - distance;
         state.hasMore = result.hasMore;
         state.nextCursor = result.nextCursor;
         state.loadMoreError = false;
-        renderMessages({ distance });
+        renderPill();
       };
 
       const refreshLatest = async (conversationId: string): Promise<void> => {
@@ -652,7 +539,6 @@ export function createDingTalkSettingsPage(
         const generation = messageGeneration;
         const known = new Set(state.messages.map((message) => message.messageId));
         const nearBottom = distanceFromBottom() <= 80;
-        const distance = distanceFromBottom();
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
           .catch(() => null);
@@ -672,21 +558,45 @@ export function createDingTalkSettingsPage(
           state.currentConversation = result.conversation;
           updateHeader();
         }
-        const fresh = result.messages.filter((message) => !known.has(message.messageId)).length;
+        const fresh = result.messages
+          .filter((message) => !known.has(message.messageId))
+          .sort((left, right) => left.createdAt - right.createdAt);
         state.messages = [...merged.values()].sort(
           (left, right) => left.createdAt - right.createdAt,
         );
+        const overflow = Math.max(0, state.messages.length - MAX_MESSAGE_WINDOW);
+        if (overflow > 0) {
+          state.messages = state.messages.slice(overflow);
+          messageListView.removeOldest(overflow);
+        }
+        if (fresh.length > 0) messageListView.append(fresh);
         if (nearBottom) {
-          renderMessages({ scroll: "bottom" });
+          scrollToBottom();
         } else {
-          state.pendingNewCount += fresh;
-          renderMessages({ distance });
+          state.pendingNewCount += fresh.length;
+          renderPill();
         }
         const newest = state.messages.at(-1);
         if (newest) void client.markViewed(conversationId, newest.createdAt);
       };
 
-      const loadConversations = async (refresh: boolean): Promise<void> => {
+      const rememberedConversation = (): string | null => {
+        for (const key of [LAST_CONVERSATION_KEY, LEGACY_CONVERSATION_KEY]) {
+          let remembered: string | null = null;
+          try {
+            remembered = view.localStorage.getItem(key);
+          } catch {
+            remembered = null;
+          }
+          const found = remembered
+            ? state.conversations.find((row) => row.conversationId === remembered)
+            : undefined;
+          if (found) return found.conversationId;
+        }
+        return state.conversations[0]?.conversationId ?? null;
+      };
+
+      const loadConversations = async (): Promise<void> => {
         if (!client) {
           state.listError = true;
           state.listLoading = false;
@@ -694,10 +604,9 @@ export function createDingTalkSettingsPage(
           return;
         }
         const generation = ++listGeneration;
-        const viewName = state.view;
         state.listLoading = true;
         if (state.conversations.length === 0) renderList();
-        const result = await client.conversations({ view: viewName, refresh }).catch(() => null);
+        const result = await client.conversations().catch(() => null);
         if (disposed || generation !== listGeneration) return;
         state.listLoading = false;
         if (!result) {
@@ -706,42 +615,43 @@ export function createDingTalkSettingsPage(
           void loadStatus();
           return;
         }
-        state.conversations = result.conversations;
+        state.conversations = result.conversations.map((conversation) => ({
+          ...conversation,
+          ...(previews.has(conversation.conversationId) && !conversation.preview
+            ? { preview: previews.get(conversation.conversationId) ?? undefined }
+            : {}),
+        }));
         state.source = result.source;
         state.listError = !result.available;
         if (!result.available) void loadStatus();
-        renderList();
-        if (state.selectedId) {
+        let choose = state.selectedId === null;
+        if (!choose && state.selectedId) {
           const selected = conversationFor(state.selectedId);
           if (selected) {
             state.currentConversation = selected;
             updateHeader();
           } else {
-            state.selectedId = null;
-            state.currentConversation = null;
-            state.messages = [];
-            updateHeader();
-            renderMessages();
+            choose = true;
           }
         }
-        if (
-          !openedInitialConversation &&
-          state.selectedId === null &&
-          state.conversations.length > 0
-        ) {
-          openedInitialConversation = true;
-          let remembered: string | null = null;
-          try {
-            remembered = view.localStorage.getItem(LAST_CONVERSATION_KEY);
-          } catch {
-            remembered = null;
-          }
-          const target =
-            (remembered &&
-              state.conversations.find((row) => row.conversationId === remembered)
-                ?.conversationId) ||
-            state.conversations[0]?.conversationId;
+        if (choose) {
+          const target = rememberedConversation();
+          state.selectedId = null;
+          state.currentConversation = null;
+          state.messages = [];
+          updateHeader();
+          renderMessages();
+          renderList();
           if (target) void selectConversation(target);
+          return;
+        }
+        renderList();
+        if (state.conversations.length === 0) {
+          state.selectedId = null;
+          state.currentConversation = null;
+          state.messages = [];
+          updateHeader();
+          renderMessages();
         }
       };
 
@@ -816,16 +726,16 @@ export function createDingTalkSettingsPage(
       const deliver = async (message: ViewMessage): Promise<void> => {
         if (!client || state.selectedId === null) return;
         const conversationId = state.selectedId;
+        const previousId = message.messageId;
         message.pending = true;
         message.failed = false;
-        const distance = distanceFromBottom();
-        renderMessages({ distance });
+        messageListView.update(message, previousId);
         const result = await client.send({ conversationId, text: message.text }).catch(() => null);
         if (disposed || state.selectedId !== conversationId) return;
         message.pending = false;
         if (!result?.ok) {
           message.failed = true;
-          renderMessages({ distance });
+          messageListView.update(message, previousId);
           return;
         }
         message.messageId = result.messageId ?? message.messageId;
@@ -840,7 +750,8 @@ export function createDingTalkSettingsPage(
             : row,
         );
         previews.set(conversationId, `我：${message.text}`);
-        renderMessages({ scroll: "bottom" });
+        messageListView.update(message, previousId);
+        scrollToBottom();
         renderList();
       };
 
@@ -859,8 +770,14 @@ export function createDingTalkSettingsPage(
           pending: true,
         };
         composer.clear();
+        const overflow = Math.max(0, state.messages.length + 1 - MAX_MESSAGE_WINDOW);
+        if (overflow > 0) {
+          state.messages.splice(0, overflow);
+          messageListView.removeOldest(overflow);
+        }
         state.messages.push(pending);
-        renderMessages({ scroll: "bottom" });
+        messageListView.append([pending]);
+        scrollToBottom();
         void deliver(pending);
       };
 
@@ -878,22 +795,6 @@ export function createDingTalkSettingsPage(
         if (!disposed) pageMenu.setStatus(status);
       };
 
-      unreadButton.addEventListener("click", () => {
-        if (state.view === "unread") return;
-        state.view = "unread";
-        state.conversations = [];
-        state.listLoading = true;
-        renderList();
-        void loadConversations(false);
-      });
-      recentButton.addEventListener("click", () => {
-        if (state.view === "recent") return;
-        state.view = "recent";
-        state.conversations = [];
-        state.listLoading = true;
-        renderList();
-        void loadConversations(false);
-      });
       searchInput.addEventListener("input", () => {
         const query = searchInput.value.trim();
         state.searchQuery = query;
@@ -988,12 +889,6 @@ export function createDingTalkSettingsPage(
           event.stopPropagation();
           return;
         }
-        if (state.selectedMessages.size > 0) {
-          clearSelection();
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
         if (state.searchQuery.length > 0) {
           clearSearch();
           event.preventDefault();
@@ -1007,7 +902,7 @@ export function createDingTalkSettingsPage(
       const unsubscribe =
         client?.subscribe((conversationId) => {
           if (disposed) return;
-          void loadConversations(false).then(() => {
+          void loadConversations().then(() => {
             if (conversationId && conversationId === state.selectedId) {
               void refreshLatest(conversationId);
             }
@@ -1015,10 +910,9 @@ export function createDingTalkSettingsPage(
         }) ?? (() => undefined);
 
       updateHeader();
-      updateSelectionUi();
       renderMessages();
       void loadStatus();
-      void loadConversations(false).then(() => {
+      void loadConversations().then(() => {
         const pending = consumeDingTalkReveal();
         if (pending?.conversationId) void revealTarget(pending);
       });
@@ -1029,9 +923,15 @@ export function createDingTalkSettingsPage(
         messageGeneration += 1;
         searchGeneration += 1;
         previewObserver?.disconnect();
+        previewQueue.length = 0;
+        previewPending.clear();
+        previews.clear();
+        conversationRows.clear();
+        messageListView.dispose();
         if (searchTimer !== null) view.clearTimeout(searchTimer);
         if (highlightTimer !== null) view.clearTimeout(highlightTimer);
         unsubscribe();
+        client?.endSession();
         view.removeEventListener("codexhost:dingtalk-reveal", onReveal);
         document.removeEventListener("pointerdown", onPointerDown, true);
         document.removeEventListener("keydown", onKey, true);

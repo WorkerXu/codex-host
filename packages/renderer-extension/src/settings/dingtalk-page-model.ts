@@ -172,15 +172,13 @@ export function formatDingTalkFileSize(bytes: number | null | undefined): string
 }
 
 export interface DingTalkPageState {
-  source: "unread" | "recent" | "empty";
-  view: "unread" | "recent";
+  source: "unread" | "empty";
   conversations: DingTalkConversation[];
   selectedId: string | null;
   currentConversation: DingTalkConversation | null;
   messages: ViewMessage[];
   hasMore: boolean;
   nextCursor: number | null;
-  selectedMessages: Set<string>;
   search: DingTalkSearchResult | null;
   searchQuery: string;
   searchPending: boolean;
@@ -210,8 +208,4 @@ export function highlightSegments(text: string, query: string): HighlightSegment
   }
   if (cursor < text.length) segments.push({ text: text.slice(cursor), match: false });
   return segments.length > 0 ? segments : [{ text, match: false }];
-}
-
-export function selectedMessageIds(selected: ReadonlySet<string>): string[] {
-  return [...selected];
 }
