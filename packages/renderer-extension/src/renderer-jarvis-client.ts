@@ -1,6 +1,5 @@
 import {
-  JARVIS_CANDIDATES_METHOD,
-  JARVIS_CLASSIFY_METHOD,
+  JARVIS_BUG_SEARCH_METHOD,
   JARVIS_DOWNLOAD_CHUNK_METHOD,
   JARVIS_DOWNLOAD_START_METHOD,
   JARVIS_INSTALL_METHOD,
@@ -8,13 +7,11 @@ import {
   JARVIS_LOGIN_FORWARD_METHOD,
   JARVIS_LOGIN_START_METHOD,
   JARVIS_LOGIN_STOP_METHOD,
-  JARVIS_RANK_METHOD,
   JARVIS_SETTINGS_GET_METHOD,
   JARVIS_SETTINGS_SET_METHOD,
   JARVIS_SETTINGS_TEST_METHOD,
   JARVIS_STATUS_METHOD,
-  jarvisCandidatesResultSchema,
-  jarvisClassifyResultSchema,
+  jarvisBugSearchResultSchema,
   jarvisDownloadChunkResultSchema,
   jarvisDownloadStartResultSchema,
   jarvisInstallResultSchema,
@@ -24,11 +21,9 @@ import {
   jarvisSettingsResultSchema,
   jarvisSettingsTestResultSchema,
   jarvisStatusSchema,
-  jarvisSuggestionsResultSchema,
-  type JarvisCandidatesResult,
-  type JarvisClassifyResult,
+  type JarvisBugSearchParams,
+  type JarvisBugSearchResult,
   type JarvisInstallResult,
-  type JarvisKind,
   type JarvisLoginForwardResult,
   type JarvisLoginStartResult,
   type JarvisRelease,
@@ -36,7 +31,6 @@ import {
   type JarvisSettingsSetParams,
   type JarvisSettingsTestResult,
   type JarvisStatus,
-  type JarvisSuggestionsResult,
 } from "@codexhost/shared-contracts";
 
 import type { RendererSettingsLocale } from "./settings/localization.js";
@@ -93,9 +87,7 @@ export interface RendererJarvisClient {
   settings(): Promise<JarvisSettingsResult>;
   updateSettings(input: JarvisSettingsSetParams): Promise<JarvisSettingsResult>;
   testSettings(): Promise<JarvisSettingsTestResult>;
-  suggest(hostId: string, query: string): Promise<JarvisSuggestionsResult | null>;
-  classify(query: string): Promise<JarvisClassifyResult>;
-  candidates(hostId: string, kind: JarvisKind, refresh?: boolean): Promise<JarvisCandidatesResult>;
+  searchBugs(hostId: string, params: JarvisBugSearchParams): Promise<JarvisBugSearchResult>;
   install(
     hostId: string,
     onProgress?: (progress: RendererJarvisInstallProgress) => void,
@@ -306,55 +298,21 @@ export function createRendererJarvisClient(
         ),
       );
     },
-    async classify(query) {
-      const missing: JarvisClassifyResult = {
+    async searchBugs(hostId, params) {
+      const missing: JarvisBugSearchResult = {
         available: false,
-        isJarvis: false,
-        kind: "none",
-        confidence: 0,
-      };
-      return await request(
-        "local",
-        JARVIS_CLASSIFY_METHOD,
-        { query },
-        jarvisClassifyResultSchema,
-        { priority: "interactive", timeoutMs: 12_000 },
-        missing,
-      );
-    },
-    async candidates(hostId, kind, refresh = false) {
-      const missing: JarvisCandidatesResult = {
-        available: false,
-        candidates: [],
-        user: null,
-        fetchedAt: null,
+        errorCode: "jarvis_failed",
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
       };
       return await request(
         hostId,
-        JARVIS_CANDIDATES_METHOD,
-        { kind, ...(refresh ? { refresh: true } : {}) },
-        jarvisCandidatesResultSchema,
+        JARVIS_BUG_SEARCH_METHOD,
+        params,
+        jarvisBugSearchResultSchema,
         { priority: "interactive", timeoutMs: 90_000 },
-        missing,
-      );
-    },
-    async suggest(hostId, query) {
-      const classified = await client.classify(query);
-      if (!classified.available || !classified.isJarvis || classified.kind === "none") return null;
-      const pool = await client.candidates(hostId, classified.kind);
-      if (!pool.available || pool.candidates.length === 0) return null;
-      const missing: JarvisSuggestionsResult = { available: false, suggestions: [] };
-      return await request(
-        "local",
-        JARVIS_RANK_METHOD,
-        {
-          query,
-          kind: classified.kind,
-          candidates: pool.candidates.slice(0, 200),
-          user: pool.user,
-        },
-        jarvisSuggestionsResultSchema,
-        { priority: "interactive", timeoutMs: 15_000 },
         missing,
       );
     },

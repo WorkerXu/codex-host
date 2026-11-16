@@ -23,19 +23,14 @@ function fakeService(overrides: Partial<Record<keyof JarvisService, unknown>> = 
       userId: 10058,
       errorCode: null,
     })),
-    classify: vi.fn(async () => ({
+    searchBugs: vi.fn(async () => ({
       available: true,
-      isJarvis: true,
-      kind: "bug",
-      confidence: 0.9,
+      errorCode: null,
+      conditions: [{ key: "scope:assigned", kind: "scope", label: "指派给我" }],
+      bugs: [{ id: 928, projectId: 4029, title: "序列号" }],
+      total: 1,
+      capped: false,
     })),
-    candidates: vi.fn(async () => ({
-      available: true,
-      candidates: [{ kind: "bug", id: 928, projectId: 4029, title: "序列号" }],
-      user: { id: 10058, name: "示例用户" },
-      fetchedAt: "2026-11-13T00:00:00.000Z",
-    })),
-    rank: vi.fn(async () => ({ available: true, suggestions: [] })),
     settings: vi.fn(async () => ({ hasKey: true, threshold: 0.5 })),
     updateSettings: vi.fn(async () => ({ hasKey: true, threshold: 0.4 })),
     testSettings: vi.fn(async () => ({ ok: true, latencyMs: 30, errorCode: null })),
@@ -103,7 +98,7 @@ describe("Host Jarvis RPC", () => {
     }
   });
 
-  it("serves status, classify, candidates and settings from the connected Host", async () => {
+  it("serves status, structured bug search and settings from the connected Host", async () => {
     const fixture = createFixture({ jarvis: fakeService() });
     try {
       await fixture.ready;
@@ -113,19 +108,11 @@ describe("Host Jarvis RPC", () => {
       });
       writeRequest(fixture.desktopInput, {
         id: 2,
-        method: "codexhost/jarvis/classify",
-        params: { query: "测试新提给我的bug" },
+        method: "codexhost/jarvis/bug/search",
+        params: { query: "我还没处理完成的bug" },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 2))).toMatchObject({
-        result: { isJarvis: true, kind: "bug" },
-      });
-      writeRequest(fixture.desktopInput, {
-        id: 3,
-        method: "codexhost/jarvis/candidates",
-        params: { kind: "bug" },
-      });
-      expect(await fixture.collector.waitFor((message) => requestId(message, 3))).toMatchObject({
-        result: { available: true, candidates: [{ id: 928 }] },
+        result: { available: true, total: 1, bugs: [{ id: 928 }] },
       });
       writeRequest(fixture.desktopInput, {
         id: 4,
@@ -146,8 +133,8 @@ describe("Host Jarvis RPC", () => {
       await fixture.ready;
       writeRequest(fixture.desktopInput, {
         id: 1,
-        method: "codexhost/jarvis/candidates",
-        params: { kind: "epic" },
+        method: "codexhost/jarvis/bug/search",
+        params: { query: 42 },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 1))).toMatchObject({
         error: { code: -32094, message: "invalid_params" },

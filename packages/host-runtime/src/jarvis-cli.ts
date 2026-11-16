@@ -4,10 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  jarvisCandidateSchema,
+  jarvisBugSchema,
   jarvisStatusSchema,
-  type JarvisCandidate,
-  type JarvisKind,
+  type JarvisBug,
   type JarvisMention,
   type JarvisStatus,
   type JarvisUser,
@@ -30,15 +29,37 @@ export interface JarvisCliOptions {
   timeoutMs?: number;
 }
 
+export interface JarvisBugListOptions {
+  createdByMe?: boolean;
+  statuses?: readonly number[];
+  priorities?: readonly number[];
+  title?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface JarvisBugPage {
+  list: Record<string, unknown>[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface JarvisProjectRow {
+  id: number;
+  name: string;
+}
+
 export interface JarvisCli {
   executable(): Promise<string | null>;
   run(args: readonly string[], timeoutMs?: number): Promise<JarvisCommandResult>;
   status(): Promise<JarvisStatus>;
   user(): Promise<JarvisUser | null>;
-  projects(): Promise<Record<string, unknown>[]>;
-  bugs(projectId: number, options?: { createdByMe?: boolean }): Promise<Record<string, unknown>[]>;
-  requirements(userId: number): Promise<Record<string, unknown>[]>;
-  tasks(userId: number): Promise<Record<string, unknown>[]>;
+  /** Projects linked to my bugs. */
+  projects(): Promise<JarvisProjectRow[]>;
+  /** Visible project search used only when the query names a project. */
+  searchProjects(name: string): Promise<JarvisProjectRow[]>;
+  bugs(projectId: number, options?: JarvisBugListOptions): Promise<JarvisBugPage>;
   detail(mention: JarvisMention): Promise<JarvisCommandResult>;
 }
 
@@ -207,6 +228,17 @@ export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
       : [];
   };
 
+  const projectsFrom = (rows: Record<string, unknown>[]): JarvisProjectRow[] =>
+    rows.flatMap((row) =>
+      typeof row.id === "number" &&
+      Number.isSafeInteger(row.id) &&
+      row.id > 0 &&
+      typeof row.name === "string" &&
+      row.name.trim().length > 0
+        ? [{ id: row.id, name: row.name.trim() }]
+        : [],
+    );
+
   return {
     executable: resolve,
     run,
@@ -255,149 +287,103 @@ export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
         : null;
     },
     async projects() {
-      return await list(["project", "list", "--json"]);
+      return projectsFrom(await list(["project", "list", "--json"]));
+    },
+    async searchProjects(name) {
+      return projectsFrom(
+        await list(["project", "list", "--scope", "visible", "--name", name, "--json"]),
+      );
     },
     async bugs(projectId, bugOptions = {}) {
-      return await list([
+      const page = bugOptions.page ?? 1;
+      const pageSize = bugOptions.pageSize ?? 100;
+      const result = await run([
         "bug",
         "list",
         "--project-id",
         String(projectId),
         ...(bugOptions.createdByMe ? ["--created-by-me"] : []),
+        ...(bugOptions.statuses && bugOptions.statuses.length > 0
+          ? ["--status", bugOptions.statuses.join(",")]
+          : []),
+        ...(bugOptions.priorities && bugOptions.priorities.length > 0
+          ? ["--priority", bugOptions.priorities.join(",")]
+          : []),
+        ...(bugOptions.title ? ["--title", bugOptions.title] : []),
+        "--page",
+        String(page),
         "--page-size",
-        "100",
+        String(pageSize),
         "--json",
       ]);
-    },
-    async requirements(userId) {
-      return await list([
-        "requirement",
-        "list",
-        "--assignee-id",
-        String(userId),
-        "--page-size",
-        "100",
-        "--json",
-      ]);
-    },
-    async tasks(userId) {
-      const end = new Date();
-      end.setDate(end.getDate() + 1);
-      const start = new Date();
-      start.setDate(start.getDate() - 120);
-      const date = (value: Date): string => value.toISOString().slice(0, 10);
-      return await list([
-        "task",
-        "list",
-        "--user-ids",
-        String(userId),
-        "--start-date",
-        date(start),
-        "--end-date",
-        date(end),
-        "--page-size",
-        "100",
-        "--json",
-      ]);
+      const data = dataObject(result);
+      const rows = Array.isArray(data?.list)
+        ? data.list.filter(
+            (item): item is Record<string, unknown> =>
+              typeof item === "object" && item !== null && !Array.isArray(item),
+          )
+        : [];
+      return {
+        list: rows,
+        total: typeof data?.total === "number" ? data.total : rows.length,
+        page: typeof data?.page === "number" ? data.page : page,
+        pageSize: typeof data?.pageSize === "number" ? data.pageSize : pageSize,
+      };
     },
     async detail(mention) {
-      if (mention.kind === "bug") {
-        const args = [
-          "bug",
-          "context",
-          "--project-id",
-          String(mention.projectId),
-          "--bug-id",
-          String(mention.id),
-          "--json",
-        ];
-        const context = await run(args);
-        if (context.ok) return context;
-        return await run([
-          "bug",
-          "detail",
-          "--project-id",
-          String(mention.projectId),
-          "--bug-id",
-          String(mention.id),
-          "--json",
-        ]);
-      }
-      if (mention.kind === "requirement") {
-        return await run([
-          "requirement",
-          "detail",
-          "--requirement-id",
-          String(mention.id),
-          "--json",
-        ]);
-      }
-      if (mention.kind === "task") {
-        return await run(["task", "detail", "--task-id", String(mention.id), "--json"]);
-      }
-      return await run(["project", "detail", "--project-id", String(mention.id), "--json"]);
+      const args = [
+        "bug",
+        "context",
+        "--project-id",
+        String(mention.projectId),
+        "--bug-id",
+        String(mention.id),
+        "--json",
+      ];
+      const context = await run(args);
+      if (context.ok) return context;
+      return await run([
+        "bug",
+        "detail",
+        "--project-id",
+        String(mention.projectId),
+        "--bug-id",
+        String(mention.id),
+        "--json",
+      ]);
     },
   };
 }
 
-/** Map CLI rows to the Host's candidate shape; unknown rows are dropped. */
-export function candidateFromJarvisRow(
-  kind: JarvisKind,
+/** Map a CLI bug row to the search result shape; unknown rows are dropped. */
+export function bugFromJarvisRow(
   row: Record<string, unknown>,
   projects: ReadonlyMap<number, string>,
-): JarvisCandidate | null {
+): JarvisBug | null {
   const number = (value: unknown): number | undefined =>
     typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
   const string = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim() ? value.trim() : undefined;
-  const common = {
-    projectId: number(row.projectId) ?? number(row.originProjectId),
-    projectName:
-      projects.get(number(row.projectId) ?? number(row.originProjectId) ?? -1) ?? undefined,
-    creatorId: number(row.creatorId),
-    assigneeId: number(row.assigneeId),
-    status: typeof row.status === "number" ? row.status : undefined,
-    createdAt:
-      string(row.createTime) ??
-      string(row.startDate) ??
-      string(row.updateTime) ??
-      string(row.expectedCompletionDate),
+  const projectId = number(row.projectId);
+  const id = number(row.id);
+  const title = string(row.bugTitle);
+  if (!projectId || !id || !title) return null;
+  const bug = {
+    id,
+    projectId,
+    projectName: projects.get(projectId),
+    title,
+    ...(typeof row.status === "number" ? { status: row.status } : {}),
+    ...(typeof row.priority === "number" ? { priority: row.priority } : {}),
+    ...(typeof row.severity === "number" ? { severity: row.severity } : {}),
+    ...(number(row.creatorId) ? { creatorId: number(row.creatorId) } : {}),
+    ...(number(row.assigneeId) ? { assigneeId: number(row.assigneeId) } : {}),
+    ...(string(row.createTime) ? { createdAt: string(row.createTime) } : {}),
+    ...(string(row.updateTime) ? { updatedAt: string(row.updateTime) } : {}),
   };
-  const candidate = (() => {
-    if (kind === "project") {
-      const id = number(row.id);
-      const title = string(row.name);
-      return id && title ? { kind, id, title } : null;
-    }
-    if (kind === "bug") {
-      const id = number(row.id);
-      const title = string(row.bugTitle);
-      return id && title && common.projectId
-        ? { kind, id, title, ...common, projectId: common.projectId }
-        : null;
-    }
-    if (kind === "requirement") {
-      const id = number(row.id);
-      const title = string(row.requireTitle);
-      return id && title ? { kind, id, title, ...common } : null;
-    }
-    const id = number(row.taskId);
-    const title = string(row.taskName);
-    return id && title ? { kind, id, title, ...common } : null;
-  })();
-  return candidate ? jarvisCandidateSchema.parse(candidate) : null;
+  return jarvisBugSchema.parse(bug);
 }
 
-export function jarvisItemUrl(mention: Pick<JarvisMention, "kind" | "id" | "projectId">): string {
-  const base = "https://jarvis.eshetang.com";
-  if (mention.kind === "bug") {
-    return `${base}/bugs/form?projectId=${mention.projectId}&bugId=${mention.id}&mode=view`;
-  }
-  if (mention.kind === "requirement") {
-    return `${base}/requirements/form?requirementId=${mention.id}&mode=view`;
-  }
-  if (mention.kind === "task") {
-    return `${base}/tasks/form?taskId=${mention.id}&mode=view`;
-  }
-  return `${base}/projects/form?projectId=${mention.id}&mode=view`;
+export function jarvisBugUrl(mention: Pick<JarvisMention, "id" | "projectId">): string {
+  return `https://jarvis.eshetang.com/bugs/form?projectId=${mention.projectId}&bugId=${mention.id}&mode=view`;
 }

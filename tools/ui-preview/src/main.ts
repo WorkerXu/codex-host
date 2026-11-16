@@ -3,6 +3,10 @@ import {
   createDingTalkEntrySection,
   installRendererDingTalkEntry,
 } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
+import {
+  createJarvisEntryRow,
+  installRendererJarvisMention,
+} from "../../../packages/renderer-extension/src/renderer-jarvis-mention.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
@@ -19,6 +23,7 @@ import type {
   ProjectGroupAddMachineTarget,
 } from "../../../packages/renderer-extension/src/renderer-project-groups-model.js";
 import { addMachineTargets, projectGroupView } from "./fixtures.js";
+import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
 
 const parameters = new URLSearchParams(location.search);
 const scenarioName = parameters.get("scenario") ?? "dingtalk-list";
@@ -154,7 +159,26 @@ async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
   await delay(160);
 }
 
+/**
+ * Native-DOM scenarios render in the light DOM of the Desktop window, which
+ * uses the global Desktop stylesheet. Shadow-root workbench pages never load it.
+ */
+async function loadDesktopCss(): Promise<void> {
+  if (document.querySelector("link[data-preview-desktop-css]")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/codex-desktop.css";
+  link.dataset.previewDesktopCss = "";
+  const loaded = new Promise<void>((resolve) => {
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener("error", () => resolve(), { once: true });
+  });
+  document.head.append(link);
+  await loaded;
+}
+
 async function mountNativeAtMenu(open: boolean): Promise<void> {
+  await loadDesktopCss();
   const stage = mountStage(`
     <main class="preview-canvas preview-canvas--composer">
       <div class="preview-composer-card">
@@ -214,6 +238,181 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
     new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
   );
   await waitFor(() => document.body.dataset.entryOpened === "true");
+}
+
+interface JarvisPreviewResult {
+  result: JarvisBugSearchResult;
+  delayMs?: number;
+  pending?: boolean;
+}
+
+function previewBug(
+  id: number,
+  projectId: number,
+  projectName: string,
+  title: string,
+  overrides: Partial<JarvisBugSearchResult["bugs"][number]> = {},
+): JarvisBugSearchResult["bugs"][number] {
+  return {
+    id,
+    projectId,
+    projectName,
+    title,
+    status: 1,
+    priority: 3,
+    severity: 3,
+    updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    ...overrides,
+  };
+}
+
+const jarvisPreviewResults: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [
+    { key: "scope:assigned", kind: "scope", label: "指派给我" },
+    { key: "status:1", kind: "status", label: "未解决" },
+    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
+    { key: "order:newest", kind: "order", label: "最新" },
+  ],
+  bugs: [
+    previewBug(
+      928,
+      4029,
+      "示例商城 · 迭代 A",
+      "填写已查码的序列号给新的查码任务，无法进行下一步",
+      { priority: 1, severity: 2, updatedAt: new Date(Date.now() - 3 * 60_000).toISOString() },
+    ),
+    previewBug(936, 4041, "示例后台 · 迭代 B", "加盟商鉴定任务的查码成本判断", {
+      priority: 3,
+      severity: 3,
+      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    }),
+    previewBug(941, 4078, "示例买 · 消息通知", "示例买消息通知未送达", {
+      priority: 2,
+      severity: 1,
+      updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+    }),
+    previewBug(952, 4081, "示例买 · 标记迭代", "搜索结果列表未显示示例买标记", {
+      status: 2,
+      priority: 3,
+      severity: 2,
+      updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    }),
+  ],
+  total: 4,
+  capped: false,
+};
+
+const jarvisPreviewConditions: JarvisBugSearchResult = {
+  ...jarvisPreviewResults,
+  conditions: [
+    { key: "scope:assigned", kind: "scope", label: "指派给我" },
+    { key: "status:1", kind: "status", label: "未解决" },
+    { key: "priority:1", kind: "priority", label: "高优先级" },
+    { key: "severity:1", kind: "severity", label: "严重" },
+    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
+    { key: "time", kind: "time", label: "最近 7 天" },
+    { key: "title", kind: "title", label: "标题含「登录」" },
+    { key: "order:newest", kind: "order", label: "最新" },
+  ],
+  bugs: jarvisPreviewResults.bugs.slice(0, 2),
+  total: 2,
+};
+
+const jarvisPreviewEmpty: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [
+    { key: "scope:assigned", kind: "scope", label: "指派给我" },
+    { key: "status:3", kind: "status", label: "已关闭" },
+    { key: "severity:1", kind: "severity", label: "严重" },
+  ],
+  bugs: [],
+  total: 0,
+  capped: false,
+};
+
+async function mountJarvisSearch(
+  preview: JarvisPreviewResult,
+  query: string,
+  clickEntry = true,
+  ready?: (mode: HTMLElement) => boolean,
+): Promise<void> {
+  await loadDesktopCss();
+  const stage = mountStage(`
+    <main class="preview-canvas preview-canvas--composer">
+      <div class="preview-composer-card" data-composer-body>
+        <div class="preview-composer-editor" contenteditable="true">@</div>
+        <div class="preview-at-menu vertical-scroll-fade-mask" role="listbox" aria-label="提及">
+          <div class="preview-native-header">文件</div>
+          <div class="preview-native-row">图片</div>
+          <div class="preview-native-header">智能体</div>
+          <div class="preview-native-row">Codex</div>
+        </div>
+      </div>
+    </main>`);
+  const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
+  const card = stage.querySelector<HTMLElement>("[data-composer-body]");
+  if (!editor || !card) throw new Error("Composer preview is missing");
+  const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
+  previewWindow.__jarvisPreviewSearchCalls = 0;
+  const control = installRendererJarvisMention(document, {
+    isComposerEditor: (element) => element === editor,
+    readHostId: () => "local",
+    readLocale: () => locale,
+    anchorForEditor: () => card,
+    search: async (_hostId, params) => {
+      previewWindow.__jarvisPreviewSearchCalls =
+        (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
+      const result = {
+        ...preview.result,
+        conditions: preview.result.conditions.filter(
+          (condition) => !params.omit?.includes(condition.key),
+        ),
+      };
+      if (preview.pending) return new Promise(() => undefined);
+      return await new Promise((resolve) => {
+        setTimeout(() => resolve(result), preview.delayMs ?? 80);
+      });
+    },
+  });
+  control.refresh();
+  editor.focus();
+  const text = editor.firstChild;
+  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
+  const range = document.createRange();
+  range.setStart(text, text.textContent?.length ?? 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+  const row = await waitFor(() =>
+    document.querySelector<HTMLElement>("[data-codexhost-jarvis-entry-row]"),
+  );
+  if (!clickEntry) {
+    await delay(80);
+    return;
+  }
+  row.click();
+  const mode = await waitFor(() =>
+    document.querySelector<HTMLElement>("[data-codexhost-jarvis-mode]"),
+  );
+  const input = mode.querySelector<HTMLInputElement>("input");
+  if (!input) throw new Error("Jarvis search field is missing");
+  input.value = query;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  if (preview.pending) {
+    await waitFor(() => mode.getAttribute("aria-busy") === "true");
+  } else {
+    await waitFor(
+      () =>
+        (ready?.(mode) ?? Boolean(mode.querySelector("[data-codexhost-jarvis-bug]"))) ? mode : null,
+      4_000,
+    );
+  }
+  await delay(120);
 }
 
 const scenarios: Record<string, () => Promise<void>> = {
@@ -429,6 +628,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "at-entry"() {
+    await loadDesktopCss();
     const stage = mountStage(`
       <main class="preview-canvas preview-canvas--composer">
         <div class="preview-composer-card">
@@ -445,7 +645,9 @@ const scenarios: Record<string, () => Promise<void>> = {
       </main>`);
     const menu = stage.querySelector(".preview-native-scroll");
     if (!menu) throw new Error("At menu is missing");
-    menu.append(createDingTalkEntrySection(document, locale).element);
+    const workbench = createDingTalkEntrySection(document, locale).element;
+    workbench.append(createJarvisEntryRow(document, locale));
+    menu.append(workbench);
     await delay(80);
   },
 
@@ -455,6 +657,50 @@ const scenarios: Record<string, () => Promise<void>> = {
 
   async "at-entry-native-visible"() {
     await mountNativeAtMenu(false);
+  },
+
+  async "jarvis-entry"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "", false);
+  },
+
+  async "jarvis-mode-loading"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "示例买的最近的bug");
+  },
+
+  async "jarvis-mode-results"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, delayMs: 120 }, "我还没处理完成的bug");
+  },
+
+  async "jarvis-mode-empty"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewEmpty, delayMs: 80 },
+      "已关闭的严重bug",
+      true,
+      (mode) => mode.textContent?.includes("没有符合条件的 Bug") === true,
+    );
+  },
+
+  async "jarvis-mode-conditions"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewConditions, delayMs: 80 },
+      "我还没处理完成的严重登录bug",
+      true,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+    );
+  },
+
+  async "jarvis-mode-chip-removed"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewConditions, delayMs: 80 },
+      "我还没处理完成的严重登录bug",
+      true,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+    );
+    const chip = document.querySelector<HTMLElement>('[data-jarvis-chip="status:1"]');
+    if (!chip) throw new Error("Status chip is missing");
+    chip.click();
+    await waitFor(() => document.querySelector('[data-jarvis-chip="status:1"]') === null, 4_000);
+    await delay(120);
   },
 };
 

@@ -62,7 +62,6 @@ const RECENT_LIMIT = 10;
 const UNREAD_LIMIT = 50;
 const SEARCH_WINDOW_DAYS = 30;
 const RECENT_WINDOW_DAYS = 90;
-const GROUP_META_LIMIT = 200;
 
 export type DingTalkConversationView = "unread" | "recent";
 

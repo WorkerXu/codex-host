@@ -199,7 +199,7 @@ export function createAgentAvatar(
   resting = false,
 ): SVGSVGElement {
   const seed = hash(name);
-  const color = PALETTE[seed % PALETTE.length] ?? PALETTE[0]!;
+  const color = PALETTE[seed % PALETTE.length] as (typeof PALETTE)[number];
   const svg = svgNode(document, "svg", {
     viewBox: "0 0 48 48",
     width: 48,

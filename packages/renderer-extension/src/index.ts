@@ -197,15 +197,21 @@ export type {
   RendererJarvisLoginSession,
 } from "./renderer-jarvis-client.js";
 export {
+  createJarvisEntryRow,
+  createJarvisEntrySection,
   findJarvisTrigger,
-  groupJarvisSuggestions,
   installRendererJarvisMention,
-  jarvisKindLabel,
+  jarvisBugLabel,
+  jarvisEntryAction,
+  jarvisPriorityText,
+  jarvisRelativeTime,
+  jarvisSeverityText,
   jarvisStatusText,
-  jarvisSuggestionLabel,
+  matchesJarvisEntry,
   truncateJarvisText,
 } from "./renderer-jarvis-mention.js";
 export type {
+  JarvisEntryAction,
   RendererJarvisMentionControl,
   RendererJarvisMentionOptions,
   RendererJarvisTrigger,

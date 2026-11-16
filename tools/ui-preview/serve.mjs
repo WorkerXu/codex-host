@@ -12,6 +12,8 @@ import path from "node:path";
 const previewRoot = import.meta.dirname;
 const distFile = path.join(previewRoot, "dist/preview.js");
 const shadowContextPath = process.env.CODEX_SHADOW_CONTEXT ?? "";
+// Global Desktop stylesheet for native-DOM scenarios (Composer @ popup).
+const desktopCssPath = process.env.CODEX_DESKTOP_CSS ?? "";
 const host = "127.0.0.1";
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 
@@ -80,6 +82,11 @@ const server = createServer((request, response) => {
     }
     return;
   }
+  if (url.pathname === "/codex-desktop.css") {
+    const css = desktopCssPath && existsSync(desktopCssPath) ? readFileSync(desktopCssPath) : "";
+    send(response, 200, types.get(".css"), css);
+    return;
+  }
   if (url.pathname === "/shadow-context.json") {
     try {
       send(response, 200, types.get(".json"), `${JSON.stringify(shadowContextMetadata())}\n`);
@@ -117,4 +124,5 @@ server.listen(port, host, () => {
   console.log(
     `[ui-preview] shadow context: ${shadowContextPath || "(CODEX_SHADOW_CONTEXT is unset)"}`,
   );
+  console.log(`[ui-preview] Desktop CSS: ${desktopCssPath || "(CODEX_DESKTOP_CSS is unset)"}`);
 });

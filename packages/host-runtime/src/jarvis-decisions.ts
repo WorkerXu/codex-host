@@ -1,13 +1,7 @@
 import {
   DEFAULT_JARVIS_THRESHOLD,
-  JARVIS_MAX_RANK_CANDIDATES,
-  JARVIS_MAX_SUGGESTIONS,
-  JARVIS_MIN_SUGGESTION_SCORE,
-  type JarvisCandidate,
-  type JarvisClassifyResult,
-  type JarvisKind,
-  type JarvisSuggestion,
-  type JarvisUser,
+  JARVIS_MAX_SEARCH_BUGS,
+  type JarvisBug,
 } from "@codexhost/shared-contracts";
 
 export const JARVIS_DECISIONS_ENDPOINT =
@@ -15,8 +9,8 @@ export const JARVIS_DECISIONS_ENDPOINT =
 export const JARVIS_DECISIONS_MODEL = "gemini-decision-1";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
-const CLASSIFY_CACHE_TTL_MS = 5 * 60_000;
-const RANK_CACHE_TTL_MS = 60_000;
+const INTERPRET_CACHE_TTL_MS = 5 * 60_000;
+const ORDER_CACHE_TTL_MS = 60_000;
 const MAX_CACHE_ENTRIES = 200;
 
 export class JarvisDecisionError extends Error {
@@ -29,6 +23,28 @@ export class JarvisDecisionError extends Error {
   }
 }
 
+export const JARVIS_DECISION_FIELDS = [
+  "scope",
+  "status",
+  "priority",
+  "severity",
+  "order",
+  "time",
+  "mentionsProject",
+] as const;
+export type JarvisDecisionField = (typeof JARVIS_DECISION_FIELDS)[number];
+
+export interface JarvisBugInterpretation {
+  scope?: "assigned" | "created" | "both";
+  /** null means 「不限状态」 was chosen. */
+  statuses?: number[] | null;
+  priorities?: number[] | null;
+  severities?: number[] | null;
+  order?: "newest" | "oldest";
+  timeWindow?: "today" | "week" | "month" | "any";
+  mentionsProject?: boolean;
+}
+
 export interface JarvisDecisionsOptions {
   readApiKey(): Promise<string | null>;
   fetchImpl?: typeof fetch;
@@ -38,38 +54,18 @@ export interface JarvisDecisionsOptions {
 }
 
 export interface JarvisDecisions {
-  classify(
+  interpret(
     query: string,
+    fields: readonly JarvisDecisionField[],
     threshold?: number,
-  ): Promise<JarvisClassifyResult & { available: boolean }>;
-  rank(
+  ): Promise<{ available: boolean; values: JarvisBugInterpretation }>;
+  orderBugs(
     query: string,
-    kind: JarvisKind,
-    candidates: readonly JarvisCandidate[],
-    user: JarvisUser | null,
-  ): Promise<{ available: boolean; suggestions: JarvisSuggestion[] }>;
+    bugs: readonly JarvisBug[],
+  ): Promise<{ available: boolean; bugs: JarvisBug[] }>;
   test(): Promise<{ ok: boolean; latencyMs: number | null; errorCode: string | null }>;
   clear(): void;
 }
-
-const CLASSIFY_INSTRUCTIONS =
-  "判断用户输入是否在指代 Jarvis 项目管理系统中的条目（项目、需求、任务或 Bug）。" +
-  "普通代码、文件、命令或闲聊不是 Jarvis 条目。";
-const KIND_INSTRUCTIONS =
-  "判断用户想引用的 Jarvis 条目类型；无法判断或不是 Jarvis 条目时选择 none。";
-const KIND_CRITERIA = {
-  project: "项目",
-  requirement: "需求",
-  task: "任务",
-  bug: "Bug",
-  none: "不是 Jarvis 条目",
-} as const;
-const RANK_INSTRUCTIONS =
-  "结合用户查询、当前用户与当前日期，判断该候选是否就是用户所指的 Jarvis 条目。" +
-  "标题语义最重要，其次参考状态、创建人/指派人和创建时间。不要因为类型相同就给高分。" +
-  "如果用户说“新提给我”，近期创建、尚未解决且创建人不是当前用户的条目更相关；" +
-  "如果用户点名创建人、模块、状态或时间，只有符合这些条件的候选才给高分。";
-const SCORE_CRITERIA = ["不相关", "有点相关", "高度相关"] as const;
 
 export interface JarvisDecisionRequest {
   model: string;
@@ -77,65 +73,128 @@ export interface JarvisDecisionRequest {
   questions: Record<string, Record<string, unknown>>;
 }
 
-export function buildClassifyRequest(query: string): JarvisDecisionRequest {
+const CHOICES = {
+  scope: {
+    assigned: "指派给我",
+    created: "我创建的",
+    both: "指派给我和我创建的",
+  },
+  status: {
+    any: "不限状态",
+    active: "未解决 / 激活 / 待处理",
+    resolved: "已解决 / 待验收",
+    closed: "已关闭",
+  },
+  priority: {
+    any: "不限优先级",
+    high: "高优先级 / 紧急",
+    medium: "中优先级",
+    low: "低优先级",
+  },
+  severity: {
+    any: "不限严重程度",
+    high: "致命 / 严重 / 崩溃",
+    medium: "一般",
+    low: "轻微 / 低",
+  },
+  order: {
+    newest: "最新优先",
+    oldest: "最早优先",
+  },
+  time: {
+    any: "不限时间",
+    today: "今天",
+    week: "本周",
+    month: "最近 30 天",
+  },
+} as const;
+
+const INSTRUCTIONS: Record<JarvisDecisionField, string> = {
+  scope:
+    "判断用户要查的 Bug 归属：指派给我、我创建的，还是两者。只有用户明确表达时才改变默认值；否则选择「指派给我」。",
+  status:
+    "判断用户要求的 Bug 状态。没处理完、未解决、待处理、激活属于 active；已解决、待验收属于 resolved；已关闭属于 closed。没有提到状态时选择「不限状态」。",
+  priority:
+    "判断用户要求的优先级。高优先级、紧急、加急属于 high；中优先级属于 medium；低优先级、不急属于 low。没有提到时选择「不限优先级」。",
+  severity:
+    "判断用户要求的严重程度。严重、致命、崩溃、闪退、阻塞属于 high；轻微、小问题属于 low。没有提到时选择「不限严重程度」。",
+  order:
+    "判断用户要求的时间顺序。最近、最新、近期选择「最新优先」；最早、最旧选择「最早优先」。没有明确方向时选择「最新优先」。",
+  time: "判断用户要求的时间范围。今天、本周、最近 30 天分别选择对应项；没有提到时间范围时选择「不限时间」。",
+  mentionsProject:
+    "判断用户是否在点名一个 Jarvis 项目（项目名称，而不是普通标题关键词）。只有明确像项目名时才给高分。",
+};
+
+function choiceQuestion(field: Exclude<JarvisDecisionField, "mentionsProject">) {
   return {
-    model: JARVIS_DECISIONS_MODEL,
-    input: query,
-    questions: {
-      is_jarvis: { type: "noul", instructions: CLASSIFY_INSTRUCTIONS },
-      kind: { type: "choice", instructions: KIND_INSTRUCTIONS, criteria: KIND_CRITERIA },
-    },
+    type: "choice",
+    instructions: INSTRUCTIONS[field],
+    criteria: CHOICES[field === "time" ? "time" : field],
   };
 }
 
-function candidateLine(candidate: JarvisCandidate, index: number): string {
+export function buildBugInterpretRequest(input: {
+  query: string;
+  fields: readonly JarvisDecisionField[];
+  today?: string;
+}): JarvisDecisionRequest {
+  const questions: Record<string, Record<string, unknown>> = {};
+  for (const field of input.fields) {
+    if (field === "mentionsProject") {
+      questions.mentions_project = {
+        type: "noul",
+        instructions: INSTRUCTIONS.mentionsProject,
+      };
+    } else {
+      const key = field === "time" ? "time_window" : field;
+      questions[key] = choiceQuestion(field);
+    }
+  }
+  return {
+    model: JARVIS_DECISIONS_MODEL,
+    input: `用户查询：${input.query}\n当前日期：${input.today ?? new Date().toISOString().slice(0, 10)}`,
+    questions,
+  };
+}
+
+function bugLine(bug: JarvisBug, index: number): string {
   const parts = [
     `${index + 1}.`,
-    `类型=${candidate.kind}`,
-    `id=${candidate.id}`,
-    `标题=${JSON.stringify(candidate.title)}`,
+    `id=${bug.id}`,
+    `项目ID=${bug.projectId}`,
+    `标题=${JSON.stringify(bug.title)}`,
   ];
-  if (candidate.statusLabel) parts.push(`状态=${candidate.statusLabel}`);
-  else if (candidate.status !== undefined) parts.push(`状态=${candidate.status}`);
-  if (candidate.projectName) parts.push(`项目=${JSON.stringify(candidate.projectName)}`);
-  if (candidate.creatorName) parts.push(`创建人=${JSON.stringify(candidate.creatorName)}`);
-  else if (candidate.creatorId !== undefined) parts.push(`创建人ID=${candidate.creatorId}`);
-  if (candidate.assigneeName) parts.push(`指派给=${JSON.stringify(candidate.assigneeName)}`);
-  else if (candidate.assigneeId !== undefined) parts.push(`指派给ID=${candidate.assigneeId}`);
-  if (candidate.createdAt) parts.push(`创建时间=${candidate.createdAt}`);
+  if (bug.status !== undefined) parts.push(`状态=${bug.status}`);
+  if (bug.priority !== undefined) parts.push(`优先级=${bug.priority}`);
+  if (bug.severity !== undefined) parts.push(`严重程度=${bug.severity}`);
+  if (bug.createdAt) parts.push(`创建时间=${bug.createdAt}`);
+  if (bug.updatedAt) parts.push(`更新时间=${bug.updatedAt}`);
   return parts.join(" ");
 }
 
-/** One score question per candidate keeps the response shape flat and ordered. */
-export function buildRankRequest(input: {
+const ORDER_INSTRUCTIONS =
+  "结合用户查询判断该 Bug 与描述的相关程度。只有标题语义明显相关才给高分；" +
+  "状态、优先级、时间只作为辅助。排序不会删除任何结果。";
+const SCORE_CRITERIA = ["不相关", "有点相关", "高度相关"] as const;
+
+export function buildBugOrderRequest(input: {
   query: string;
-  kind: JarvisKind;
-  candidates: readonly JarvisCandidate[];
-  user: JarvisUser | null;
-  today?: string;
+  bugs: readonly JarvisBug[];
 }): JarvisDecisionRequest {
-  const candidates = input.candidates.slice(0, JARVIS_MAX_RANK_CANDIDATES);
-  const lines = [
-    `用户查询：${input.query}`,
-    `当前日期：${input.today ?? new Date().toISOString().slice(0, 10)}`,
-    `当前用户：${input.user ? `${input.user.name} (ID ${input.user.id})` : "未知"}`,
-    `候选类型：${input.kind}`,
-    "候选列表：",
-    ...candidates.map(candidateLine),
-  ];
+  const bugs = input.bugs.slice(0, JARVIS_MAX_SEARCH_BUGS);
   const questions: Record<string, Record<string, unknown>> = {};
-  candidates.forEach((candidate, index) => {
-    // The Decisions API applies one question to the whole input, so each
-    // score question must describe the candidate it is scoring.
+  bugs.forEach((bug, index) => {
+    // Each score question must describe its own candidate: the Decisions API
+    // applies one question to the whole input.
     questions[`rel_${index}`] = {
       type: "score",
-      instructions: `${RANK_INSTRUCTIONS}\n候选项：${candidateLine(candidate, index)}`,
+      instructions: `${ORDER_INSTRUCTIONS}\n候选项：${bugLine(bug, index)}`,
       criteria: [...SCORE_CRITERIA],
     };
   });
   return {
     model: JARVIS_DECISIONS_MODEL,
-    input: lines.join("\n"),
+    input: `用户查询：${input.query}\n候选列表：\n${bugs.map(bugLine).join("\n")}`,
     questions,
   };
 }
@@ -148,42 +207,74 @@ function unit(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
-export interface JarvisClassifyAnswers {
-  noul: number;
-  kind: JarvisClassifyResult["kind"];
+export interface JarvisChoiceAnswer {
+  choice: string;
   confidence: number;
 }
 
-/** Raw model answers, so the caller can apply its configured threshold. */
-export function parseClassifyAnswers(value: unknown): JarvisClassifyAnswers {
-  const answers = record(value) && record(value.answers) ? value.answers : null;
-  const isJarvis = answers && record(answers.is_jarvis) ? answers.is_jarvis : null;
-  const kind = answers && record(answers.kind) ? answers.kind : null;
-  const choice = typeof kind?.choice === "string" ? kind.choice : "none";
-  const valid =
-    choice === "project" ||
-    choice === "requirement" ||
-    choice === "task" ||
-    choice === "bug" ||
-    choice === "none";
-  return {
-    noul: unit(isJarvis?.noul),
-    kind: valid ? (choice as JarvisClassifyResult["kind"]) : "none",
-    confidence: unit(kind?.confidence ?? isJarvis?.confidence),
-  };
+export interface JarvisBugDecisionAnswers {
+  scope?: JarvisChoiceAnswer;
+  status?: JarvisChoiceAnswer;
+  priority?: JarvisChoiceAnswer;
+  severity?: JarvisChoiceAnswer;
+  order?: JarvisChoiceAnswer;
+  timeWindow?: JarvisChoiceAnswer;
+  mentionsProject?: number;
 }
 
-export function parseClassifyResponse(value: unknown): JarvisClassifyResult {
-  const answers = parseClassifyAnswers(value);
-  return {
-    available: true,
-    isJarvis: answers.noul >= DEFAULT_JARVIS_THRESHOLD && answers.kind !== "none",
-    kind: answers.kind,
-    confidence: answers.confidence,
-  };
+function readChoice(
+  answers: Record<string, unknown>,
+  key: string,
+  allowed: readonly string[],
+): JarvisChoiceAnswer | undefined {
+  const answer = answers[key];
+  if (!record(answer) || typeof answer.choice !== "string") return undefined;
+  if (!allowed.includes(answer.choice)) return undefined;
+  return { choice: answer.choice, confidence: unit(answer.confidence) };
 }
 
-export function parseRankResponse(value: unknown, count: number): number[] {
+export function parseBugDecisionAnswers(value: unknown): JarvisBugDecisionAnswers {
+  const answers = record(value) && record(value.answers) ? value.answers : {};
+  const mentions = answers.mentions_project;
+  const result: JarvisBugDecisionAnswers = {};
+  const scope = readChoice(answers, "scope", Object.keys(CHOICES.scope));
+  if (scope) result.scope = scope;
+  const status = readChoice(answers, "status", Object.keys(CHOICES.status));
+  if (status) result.status = status;
+  const priority = readChoice(answers, "priority", Object.keys(CHOICES.priority));
+  if (priority) result.priority = priority;
+  const severity = readChoice(answers, "severity", Object.keys(CHOICES.severity));
+  if (severity) result.severity = severity;
+  const order = readChoice(answers, "order", Object.keys(CHOICES.order));
+  if (order) result.order = order;
+  const timeWindow = readChoice(answers, "time_window", Object.keys(CHOICES.time));
+  if (timeWindow) result.timeWindow = timeWindow;
+  if (record(mentions)) result.mentionsProject = unit(mentions.noul);
+  return result;
+}
+
+function statusValues(choice: string): number[] | null {
+  if (choice === "active") return [1];
+  if (choice === "resolved") return [2];
+  if (choice === "closed") return [3];
+  return null;
+}
+
+function priorityValues(choice: string): number[] | null {
+  if (choice === "high") return [1];
+  if (choice === "medium") return [2];
+  if (choice === "low") return [3];
+  return null;
+}
+
+function severityValues(choice: string): number[] | null {
+  if (choice === "high") return [1, 2];
+  if (choice === "medium") return [3];
+  if (choice === "low") return [4];
+  return null;
+}
+
+export function parseBugOrderResponse(value: unknown, count: number): number[] {
   const answers = record(value) && record(value.answers) ? value.answers : null;
   return Array.from({ length: count }, (_unused, index) => {
     const answer = answers && record(answers[`rel_${index}`]) ? answers[`rel_${index}`] : null;
@@ -198,8 +289,8 @@ export function createJarvisDecisions(options: JarvisDecisionsOptions): JarvisDe
   const endpoint = options.endpoint ?? JARVIS_DECISIONS_ENDPOINT;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = options.now ?? Date.now;
-  const classifyCache = new Map<string, { value: JarvisClassifyResult; expiresAt: number }>();
-  const rankCache = new Map<string, { value: JarvisSuggestion[]; expiresAt: number }>();
+  const interpretCache = new Map<string, { value: JarvisBugInterpretation; expiresAt: number }>();
+  const orderCache = new Map<string, { value: JarvisBug[]; expiresAt: number }>();
 
   const remember = <T>(
     cache: Map<string, { value: T; expiresAt: number }>,
@@ -258,43 +349,56 @@ export function createJarvisDecisions(options: JarvisDecisionsOptions): JarvisDe
   };
 
   return {
-    async classify(query, threshold = DEFAULT_JARVIS_THRESHOLD) {
-      const cacheKey = `${threshold}\u0000${query}`;
-      const cached = classifyCache.get(cacheKey);
-      if (cached && cached.expiresAt > now()) return cached.value;
-      const answers = parseClassifyAnswers(await request(buildClassifyRequest(query)));
-      const value: JarvisClassifyResult = {
-        available: true,
-        isJarvis: answers.noul >= threshold && answers.kind !== "none",
-        kind: answers.kind,
-        confidence: answers.confidence,
-      };
-      remember(classifyCache, cacheKey, value, CLASSIFY_CACHE_TTL_MS);
-      return value;
+    async interpret(query, fields, threshold = DEFAULT_JARVIS_THRESHOLD) {
+      const requested = JARVIS_DECISION_FIELDS.filter((field) => fields.includes(field));
+      if (requested.length === 0) return { available: true, values: {} };
+      const cacheKey = `${threshold}\u0000${requested.join(",")}\u0000${query}`;
+      const cached = interpretCache.get(cacheKey);
+      if (cached && cached.expiresAt > now()) {
+        return { available: true, values: cached.value };
+      }
+      const answers = parseBugDecisionAnswers(
+        await request(buildBugInterpretRequest({ query, fields: requested })),
+      );
+      const values: JarvisBugInterpretation = {};
+      const accept = (answer: JarvisChoiceAnswer | undefined): string | null =>
+        answer && answer.confidence >= threshold ? answer.choice : null;
+      const scope = accept(answers.scope);
+      if (scope === "assigned" || scope === "created" || scope === "both") values.scope = scope;
+      const status = accept(answers.status);
+      if (status) values.statuses = statusValues(status);
+      const priority = accept(answers.priority);
+      if (priority) values.priorities = priorityValues(priority);
+      const severity = accept(answers.severity);
+      if (severity) values.severities = severityValues(severity);
+      const order = accept(answers.order);
+      if (order === "newest" || order === "oldest") values.order = order;
+      const window = accept(answers.timeWindow);
+      if (window === "today" || window === "week" || window === "month" || window === "any") {
+        values.timeWindow = window;
+      }
+      if (answers.mentionsProject !== undefined) {
+        values.mentionsProject = answers.mentionsProject >= threshold;
+      }
+      remember(interpretCache, cacheKey, values, INTERPRET_CACHE_TTL_MS);
+      return { available: true, values };
     },
-    async rank(query, kind, candidates, user) {
-      const capped = candidates.slice(0, JARVIS_MAX_RANK_CANDIDATES);
-      if (capped.length === 0) return { available: true, suggestions: [] };
-      const cacheKey = `${query}\u0000${kind}\u0000${user?.id ?? ""}\u0000${capped
-        .map((candidate) => `${candidate.kind}:${candidate.id}`)
-        .join(",")}`;
-      const cached = rankCache.get(cacheKey);
-      if (cached && cached.expiresAt > now()) return { available: true, suggestions: cached.value };
-      const scores = parseRankResponse(
-        await request(buildRankRequest({ query, kind, candidates: capped, user })),
+    async orderBugs(query, bugs) {
+      const capped = bugs.slice(0, JARVIS_MAX_SEARCH_BUGS);
+      if (capped.length === 0) return { available: true, bugs: [] };
+      const cacheKey = `${query}\u0000${capped.map((bug) => `${bug.projectId}:${bug.id}`).join(",")}`;
+      const cached = orderCache.get(cacheKey);
+      if (cached && cached.expiresAt > now()) return { available: true, bugs: cached.value };
+      const scores = parseBugOrderResponse(
+        await request(buildBugOrderRequest({ query, bugs: capped })),
         capped.length,
       );
-      const suggestions = capped
-        .flatMap((candidate, index) => {
-          const score = scores[index] ?? 0;
-          return score >= JARVIS_MIN_SUGGESTION_SCORE
-            ? [{ ...candidate, score: Math.round(score * 1000) / 1000 }]
-            : [];
-        })
-        .sort((left, right) => right.score - left.score)
-        .slice(0, JARVIS_MAX_SUGGESTIONS);
-      remember(rankCache, cacheKey, suggestions, RANK_CACHE_TTL_MS);
-      return { available: true, suggestions };
+      const ordered = capped
+        .map((bug, index) => ({ bug, score: scores[index] ?? 0, index }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map(({ bug }) => bug);
+      remember(orderCache, cacheKey, ordered, ORDER_CACHE_TTL_MS);
+      return { available: true, bugs: ordered };
     },
     async test() {
       const started = now();
@@ -302,7 +406,12 @@ export function createJarvisDecisions(options: JarvisDecisionsOptions): JarvisDe
         await request({
           model: JARVIS_DECISIONS_MODEL,
           input: "测试连接",
-          questions: { is_jarvis: { type: "noul", instructions: CLASSIFY_INSTRUCTIONS } },
+          questions: {
+            mentions_project: {
+              type: "noul",
+              instructions: INSTRUCTIONS.mentionsProject,
+            },
+          },
         });
         return { ok: true, latencyMs: now() - started, errorCode: null };
       } catch (error) {
@@ -314,8 +423,8 @@ export function createJarvisDecisions(options: JarvisDecisionsOptions): JarvisDe
       }
     },
     clear() {
-      classifyCache.clear();
-      rankCache.clear();
+      interpretCache.clear();
+      orderCache.clear();
     },
   };
 }

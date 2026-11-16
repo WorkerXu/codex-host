@@ -93,7 +93,7 @@ export function avatarTone(conversationId: string): string {
     const code = character.codePointAt(0) ?? 0;
     hash = (code + (hash << 6) + (hash << 16) - hash) >>> 0;
   }
-  return AVATAR_TONES[hash % AVATAR_TONES.length] ?? AVATAR_TONES[0]!;
+  return AVATAR_TONES[hash % AVATAR_TONES.length] as (typeof AVATAR_TONES)[number];
 }
 
 const AVATAR_STRIP_PATTERN =
