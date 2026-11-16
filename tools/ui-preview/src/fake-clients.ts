@@ -147,13 +147,22 @@ export function createFakeDingTalkClient(
       }
       return { ok: true, messageId: `sent-${sentAt}`, sentAt, errorCode: null };
     },
-    async resource(): Promise<DingTalkResourceResult> {
+    async resource(params): Promise<DingTalkResourceResult> {
       await sleep(20);
+      if (params.resourceId === "media-preview-missing") {
+        return {
+          available: false,
+          dataUrl: null,
+          mimeType: null,
+          sizeBytes: null,
+          errorCode: "download_failed",
+        };
+      }
       return {
         available: true,
         dataUrl: previewImageDataUrl,
         mimeType: "image/png",
-        sizeBytes: 68,
+        sizeBytes: 6800,
         errorCode: null,
       };
     },

@@ -264,6 +264,24 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(260);
   },
 
+  async "dingtalk-search-more"() {
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+    const input = query<HTMLInputElement>(".dingtalk-search-input");
+    if (!input) throw new Error("Search input is missing");
+    input.value = "示例Sprint";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const more = await waitFor(() =>
+      query<HTMLButtonElement>(".dingtalk-search-result--conversation")
+        ? query<HTMLButtonElement>(".dingtalk-search-more")
+        : null,
+    );
+    more.click();
+    await waitFor(() => queryAll(".dingtalk-search-result--conversation").length >= 4);
+    await delay(120);
+  },
+
   async "dingtalk-select"() {
     const { query, queryAll } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));

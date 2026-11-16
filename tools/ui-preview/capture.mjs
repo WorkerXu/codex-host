@@ -20,6 +20,7 @@ const allScenarios = [
   "dingtalk-scrolled-top",
   "dingtalk-recent",
   "dingtalk-search",
+  "dingtalk-search-more",
   "dingtalk-select",
   "dingtalk-empty",
   "dingtalk-error",
@@ -224,6 +225,25 @@ for (const scenario of scenarios) {
         check("direct-messages", queryAll(".dingtalk-message").length > 0);
       }
       if (document.body.dataset.scenario === "dingtalk-open") {
+        const image = query(".dingtalk-message-image--loaded");
+        const rect = image?.getBoundingClientRect();
+        check(
+          "image-thumbnail-size",
+          Boolean(rect) &&
+            rect.width >= 120 &&
+            rect.width <= 240 &&
+            rect.height >= 80 &&
+            rect.height <= 240 &&
+            Math.abs(rect.width / rect.height - 1.6) < 0.06,
+          rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : "missing",
+        );
+        check("image-no-loading-strip", !query(".dingtalk-message-image--loading"));
+        check(
+          "image-unavailable-text",
+          queryAll(".dingtalk-message-image-fallback").some((node) =>
+            node.textContent?.includes("[图片] 在手机上查看"),
+          ),
+        );
         const scroller = query(".dingtalk-message-list");
         const distance = scroller
           ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop
@@ -261,6 +281,31 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
         check("loading-older-visible", Boolean(query(".dingtalk-loading-older:not([hidden])")));
+      }
+      if (
+        document.body.dataset.scenario === "dingtalk-search" ||
+        document.body.dataset.scenario === "dingtalk-search-more"
+      ) {
+        const title = query(".dingtalk-search-result--conversation .dingtalk-search-title");
+        const meta = query(".dingtalk-search-result--conversation .dingtalk-search-meta");
+        const titleRect = title?.getBoundingClientRect();
+        const metaRect = meta?.getBoundingClientRect();
+        check(
+          "search-title-full-width",
+          Boolean(titleRect && titleRect.width > 200),
+          titleRect ? `${Math.round(titleRect.width)}px` : "missing",
+        );
+        check(
+          "search-meta-second-line",
+          Boolean(titleRect && metaRect && metaRect.top >= titleRect.top + 10),
+        );
+        if (document.body.dataset.scenario === "dingtalk-search-more") {
+          check(
+            "search-expanded",
+            queryAll(".dingtalk-search-result--conversation").length >= 4,
+            `${queryAll(".dingtalk-search-result--conversation").length} rows`,
+          );
+        }
       }
       if (document.body.dataset.scenario === "dingtalk-search") {
         const panel = query(".dingtalk-search-results");
