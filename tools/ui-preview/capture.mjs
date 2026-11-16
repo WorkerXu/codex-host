@@ -46,12 +46,15 @@ const allScenarios = [
   "at-entry",
   "at-entry-native",
   "at-entry-native-visible",
+  "harness-picker",
   "jarvis-entry",
   "jarvis-entry-query",
   "jarvis-mode-prefilled",
   "jarvis-mode-detached",
   "jarvis-mode-loading",
   "jarvis-mode-results",
+  "jarvis-mode-single",
+  "jarvis-mode-many",
   "jarvis-mode-empty",
   "jarvis-mode-error",
   "jarvis-mode-slow",
@@ -101,6 +104,95 @@ if (!(await serverIsUp())) {
   }
 }
 
+const hoverSelectors = new Map([
+  ["agents-menu", ".agent-menu-item"],
+  ["at-entry", "[data-codexhost-jarvis-entry-row]"],
+  ["at-entry-native-visible", "[data-codexhost-dingtalk-entry]"],
+  ["jarvis-mode-results", "[data-codexhost-jarvis-bug]"],
+  ["jarvis-mode-single", "[data-codexhost-jarvis-bug]"],
+  ["jarvis-mode-many", "[data-codexhost-jarvis-bug]"],
+  ["harness-picker", '#preview-harness-picker-agent-menu button[data-agent="grok"]'],
+]);
+
+/** Real input bridge: the preview scenario awaits Playwright's mouse/keyboard. */
+async function installPreviewInput(page) {
+  await page.addInitScript(() => {
+    const elements = new Map();
+    let sequence = 0;
+    window.__codexhostPreviewElement = (id) => elements.get(id) ?? null;
+    window.__codexhostPreviewInput = {
+      request(element, action, options) {
+        return new Promise((resolve) => {
+          const id = `preview-input-${++sequence}`;
+          elements.set(id, element);
+          element.setAttribute("data-preview-input-id", id);
+          window.__codexhostPreviewRequest = { id, action, options: options ?? null };
+          window.__codexhostPreviewResolve = () => {
+            element.removeAttribute("data-preview-input-id");
+            elements.delete(id);
+            window.__codexhostPreviewRequest = null;
+            window.__codexhostPreviewResolve = null;
+            resolve();
+          };
+        });
+      },
+    };
+  });
+}
+
+async function runPreviewInputs(page) {
+  for (;;) {
+    const request = await page.evaluate(() => window.__codexhostPreviewRequest ?? null);
+    if (!request) return;
+    const box = await page.evaluate((id) => {
+      const element = window.__codexhostPreviewElement(id);
+      if (!element) return null;
+      element.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }, request.id);
+    if (!box) throw new Error(`Preview input target disappeared: ${request.id}`);
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    if (request.action === "type") {
+      await page.evaluate((id) => window.__codexhostPreviewElement(id)?.focus(), request.id);
+      await page.keyboard.insertText(request.options?.text ?? "");
+    } else if (request.action === "key") {
+      await page.evaluate((id) => window.__codexhostPreviewElement(id)?.focus(), request.id);
+      await page.keyboard.press(request.options?.key ?? "");
+    } else {
+      await page.mouse.move(x, y);
+      if (request.action === "click") {
+        await page.mouse.down();
+        await page.mouse.up();
+      } else if (request.action === "wheel") {
+        await page.mouse.wheel(0, request.options?.deltaY ?? 0);
+      }
+    }
+    await page.waitForTimeout(60);
+    await page.evaluate(() => window.__codexhostPreviewResolve());
+    await page.waitForFunction(
+      () => document.body.dataset.ready === "true" || window.__codexhostPreviewRequest,
+      undefined,
+      { timeout: 20_000 },
+    );
+  }
+}
+
+async function hoverPreviewElement(page, selector) {
+  const box = await page.evaluate((value) => {
+    const shell = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+    const element = shell?.querySelector(value) ?? document.querySelector(value);
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }, selector);
+  if (!box) return false;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(150);
+  return true;
+}
+
 const browser = await chromium.launch({
   args: ["--enable-precise-memory-info", "--js-flags=--expose-gc"],
 });
@@ -126,13 +218,41 @@ for (const scenario of scenarios) {
     });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    await installPreviewInput(page);
     await page.goto(`${baseUrl}/?scenario=${scenario}&theme=${theme}`, {
       waitUntil: "load",
     });
+    await page.waitForFunction(
+      () => document.body.dataset.ready === "true" || window.__codexhostPreviewRequest,
+      undefined,
+      { timeout: 20_000 },
+    );
+    await runPreviewInputs(page);
     await page.waitForSelector('body[data-ready="true"]', { timeout: 20_000 });
+    const wheelScenario = scenario === "jarvis-mode-many";
+    if (wheelScenario) {
+      const box = await page.evaluate(() => {
+        const element = document.querySelector('[data-jarvis-results="true"]');
+        if (!element) return null;
+        window.__jarvisScrollBefore = element.scrollTop;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      if (!box) throw new Error(`${scenario}/${theme}: Jarvis results are missing`);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 480);
+      await page.waitForTimeout(250);
+      await page.evaluate(() => {
+        const element = document.querySelector('[data-jarvis-results="true"]');
+        document.body.dataset.jarvisScrolled = String(
+          Boolean(element) && element.scrollTop > window.__jarvisScrollBefore,
+        );
+      });
+    }
     if (scenario === "agents-cards") {
       await page.hover(".agent-card[data-agent-name]");
     }
+    const hoverSelector = hoverSelectors.get(scenario);
     const failure = await page.evaluate(() => document.body.dataset.error ?? null);
     if (failure) throw new Error(`${scenario}/${theme}: ${failure}`);
     await page.waitForTimeout(200);
@@ -692,6 +812,16 @@ for (const scenario of scenarios) {
           ),
         );
       }
+      if (document.body.dataset.scenario === "harness-picker") {
+        check("picker-selected-agent", document.body.dataset.selectedAgent === "claude-code");
+        check("picker-toolbar-survived", document.body.dataset.toolbarTornDown !== "true");
+        const menu = query("#preview-harness-picker-agent-menu");
+        check("picker-menu-open", Boolean(menu) && menu.matches(":popover-open"));
+        check(
+          "picker-rows",
+          Boolean(menu) && menu.querySelectorAll("button[data-agent]").length >= 3,
+        );
+      }
       if (document.body.dataset.scenario === "at-entry") {
         const row = query("[data-codexhost-dingtalk-entry]");
         const section = query("[data-codexhost-workbench-section]");
@@ -818,16 +948,35 @@ for (const scenario of scenarios) {
         document.body.dataset.scenario === "jarvis-mode-error" ||
         document.body.dataset.scenario === "jarvis-mode-slow" ||
         document.body.dataset.scenario === "jarvis-mode-conditions" ||
+        document.body.dataset.scenario === "jarvis-mode-single" ||
+        document.body.dataset.scenario === "jarvis-mode-many" ||
         document.body.dataset.scenario === "jarvis-mode-chip-removed"
       ) {
         const mode = query("[data-codexhost-jarvis-mode]");
-        const scroller = query("[data-mention-list-scroll-area]");
-        check("mode-inside-native-list", Boolean(mode) && Boolean(scroller?.contains(mode)));
+        const host = query("[data-codexhost-jarvis-detached]");
+        check("mode-hosted-panel", Boolean(mode) && Boolean(host?.contains(mode)));
         check(
           "mode-no-overlay",
           !query("[data-codexhost-dingtalk-panel]") && !query("[data-codexhost-jarvis-panel]"),
         );
-        check("mode-header", Boolean(mode?.textContent?.includes("Jarvis · Bug")));
+        const composer = query("[data-composer-body]");
+        const hostRect = host?.getBoundingClientRect();
+        const composerRect = composer?.getBoundingClientRect();
+        check(
+          "mode-anchored-above-composer",
+          Boolean(hostRect && composerRect) && Math.abs(hostRect.bottom - composerRect.top) <= 12,
+          hostRect && composerRect
+            ? `${Math.round(composerRect.top - hostRect.bottom)}px gap`
+            : "missing",
+        );
+        check(
+          "mode-header",
+          Boolean(
+            mode?.textContent?.includes("Jarvis") &&
+            mode.textContent.includes("Bug") &&
+            mode.querySelector("svg"),
+          ),
+        );
         check("no-footer-hint", !mode?.textContent?.includes("↑↓ 选择"));
         const input = mode?.querySelector("input");
         check("search-field", Boolean(input));
@@ -838,6 +987,43 @@ for (const scenario of scenarios) {
           Boolean(input) && document.activeElement === input,
           document.activeElement?.tagName ?? "",
         );
+        const row = mode?.querySelector("[data-codexhost-jarvis-bug]");
+        if (row) {
+          const rowRect = row.getBoundingClientRect();
+          check("mode-row-native-density", rowRect.height >= 44, `${Math.round(rowRect.height)}px`);
+          check(
+            "mode-row-horizontal-padding",
+            getComputedStyle(row).paddingLeft === "12px",
+            getComputedStyle(row).paddingLeft,
+          );
+          check("mode-row-bug-icon", Boolean(row.querySelector("svg")));
+          check("mode-status-pill", Boolean(row.querySelector("[data-jarvis-status]")));
+          check("mode-project-tag", Boolean(row.querySelector("[data-jarvis-project]")));
+        }
+        if (document.body.dataset.scenario === "jarvis-mode-single") {
+          check(
+            "mode-single-shrinks",
+            Boolean(hostRect) && hostRect.height < 300,
+            hostRect ? `${Math.round(hostRect.height)}px` : "missing",
+          );
+        }
+        if (document.body.dataset.scenario === "jarvis-mode-many") {
+          const statuses = [...(mode?.querySelectorAll("[data-jarvis-status]") ?? [])].map(
+            (pill) => pill.textContent,
+          );
+          check(
+            "mode-status-matches-conditions",
+            statuses.length > 0 && statuses.every((status) => status === "未解决"),
+            statuses.join(","),
+          );
+          const results = mode?.querySelector("[data-jarvis-results]");
+          check(
+            "mode-results-scrollable",
+            Boolean(results) && results.scrollHeight > results.clientHeight,
+            results ? `${results.scrollHeight}/${results.clientHeight}` : "missing",
+          );
+          check("mode-wheel-scrolled", document.body.dataset.jarvisScrolled === "true");
+        }
       }
       if (document.body.dataset.scenario === "jarvis-entry-query") {
         const row = query("[data-codexhost-jarvis-entry-row]");
@@ -892,13 +1078,12 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "jarvis-mode-loading") {
         check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
+        const nativePanel = document
+          .querySelector("[data-mention-list-scroll-area]")
+          ?.closest('[class*="suggestionMenu"]');
         check(
           "native-rows-hidden",
-          [
-            ...document.querySelectorAll(
-              "[data-mention-list-scroll-area] > [data-mention-section-id]",
-            ),
-          ].every((section) => getComputedStyle(section).display === "none"),
+          Boolean(nativePanel) && getComputedStyle(nativePanel).visibility === "hidden",
         );
       }
       if (document.body.dataset.scenario === "jarvis-mode-results") {
@@ -1012,6 +1197,24 @@ for (const scenario of scenarios) {
       fullPage: false,
       animations: "disabled",
     });
+    if (hoverSelector !== undefined && (await hoverPreviewElement(page, hoverSelector))) {
+      const hoverFile = `${scenario}-hover-${theme}.png`;
+      await page.screenshot({
+        path: path.join(outputDirectory, hoverFile),
+        fullPage: false,
+        animations: "disabled",
+      });
+      report.captures.push({
+        scenario: `${scenario}-hover`,
+        theme,
+        approximate: theme === "dark" && shadowContext.darkApproximate === true,
+        screenshot: path.join(outputDirectory, hoverFile),
+        pageErrors: errors,
+        checks: [],
+        ok: errors.length === 0,
+      });
+      console.log(`[ui-preview] ${hoverFile}`);
+    }
     let metrics = null;
     if (heavyOpen) {
       const heavyClose = await page.evaluate(() => window.__dingtalkHeavy?.close() ?? null);

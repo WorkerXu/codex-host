@@ -23,7 +23,11 @@ class FakeElement {
   className = "";
   textContent = "";
   type = "";
-  style: Record<string, string> = {};
+  style: Record<string, string> & { setProperty(name: string, value: string): void } = {
+    setProperty(name: string, value: string) {
+      this[name] = value;
+    },
+  };
   isDocumentRoot = false;
   readonly listeners = new Map<string, ((event: Event) => void)[]>();
 

@@ -114,8 +114,11 @@ export function openAgentMenu(options: {
     options.onClose?.();
   };
 
+  // The menu lives inside the settings shadow root while this listener runs
+  // on the outer document, so `event.target` is retargeted to the shadow host.
+  // Only `composedPath()` still exposes the menu's own node.
   function onPointerDown(event: PointerEvent): void {
-    if (event.target instanceof Node && menu.contains(event.target)) return;
+    if (event.composedPath().includes(menu)) return;
     close();
   }
 
@@ -130,7 +133,9 @@ export function openAgentMenu(options: {
       close();
       return;
     }
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const current = buttons.indexOf(
+      (menu.getRootNode() as Document | ShadowRoot).activeElement as HTMLButtonElement,
+    );
     const next = agentMenuFocusIndex(current, event.key, buttons.length);
     if (next === null) return;
     event.preventDefault();
@@ -138,7 +143,7 @@ export function openAgentMenu(options: {
   }
 
   function onScroll(event: Event): void {
-    if (event.target instanceof Node && menu.contains(event.target)) return;
+    if (event.composedPath().includes(menu)) return;
     close();
   }
 
