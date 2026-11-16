@@ -122,18 +122,20 @@ vi.mock("../src/renderer-project-groups-bootstrap.js", () => ({
 vi.mock("../src/renderer-project-groups-dom.js", () => ({
   PROJECT_COLLAPSED_ATTRIBUTE: "data-app-action-sidebar-project-collapsed",
   SECTION_COLLAPSED_ATTRIBUTE: "data-app-action-sidebar-section-collapsed",
-  findProjectsSection: () => ({}),
+  findProjectsSection: () => ({ querySelectorAll: () => [] }),
   findProjectsShowMoreButton: () => (mocks.showMore ? {} : null),
   newChatButton: () => null,
   probeProjectGroupsContract: () => mocks.contract,
-  projectRowForUnit: () => ({}),
+  projectRowForUnit: () => ({ getAttribute: () => "false" }),
   projectRowOutsideSection: () => (mocks.rowOutside ? {} : null),
-  projectUnitForId: () => ({}),
+  projectUnitForId: () => ({ setAttribute: () => undefined, removeAttribute: () => undefined }),
+  projectUnitHasThreads: () => true,
   readNativeProjectSnapshots: () => mocks.snapshots,
   statusIconState: () => "connected",
 }));
 
 vi.mock("../src/renderer-project-groups-layout.js", () => ({
+  PROJECT_GROUP_EMPTY_ATTRIBUTE: "data-codexhost-project-group-empty",
   ProjectGroupLayoutStyle: class {
     apply(groups: LayoutGroup[]): void {
       mocks.calls.layoutApply.push(groups);
@@ -297,7 +299,7 @@ describe("project group controller", () => {
       {
         id: mocks.group.id,
         name: "Cross-host",
-        machineSummary: "2 台",
+        machineSummary: "1 台",
         machineSummaryTitle: "本机 · oracle-sg",
         projectIds: ["local-alpha"],
       },

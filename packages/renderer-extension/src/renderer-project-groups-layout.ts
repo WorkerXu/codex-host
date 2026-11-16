@@ -10,6 +10,7 @@ const GROUP_ORDER_SPAN = 1_000;
 const MEMBER_ORDER_OFFSET = 10;
 const PLACEHOLDER_ORDER_OFFSET = 900;
 const MEMBER_INDENT = "12px";
+export const PROJECT_GROUP_EMPTY_ATTRIBUTE = "data-codexhost-project-group-empty";
 
 export interface ProjectGroupLayoutMember {
   projectId: string;
@@ -119,6 +120,9 @@ export function projectGroupLayoutCss(groups: readonly ProjectGroupLayoutGroup[]
       lines.push(...projectGroupSubtitleCss(group, member));
     });
   });
+  lines.push(
+    `${list} > div[role="listitem"][${PROJECT_GROUP_EMPTY_ATTRIBUTE}="true"] { display: none !important; }`,
+  );
   return lines.join("\n");
 }
 

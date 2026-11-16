@@ -9,6 +9,7 @@ import {
   projectRowForUnit,
   projectRowOutsideSection,
   projectUnitForId,
+  projectUnitHasThreads,
   readNativeProjectSnapshots,
   statusIconState,
   PROJECT_COLLAPSED_ATTRIBUTE,
@@ -19,6 +20,7 @@ import {
   buildProjectIndex,
   mergeMachineState,
   projectGroupAddMachineTargets,
+  projectGroupEmptyVisibility,
   projectGroupMachineSummary,
   projectHostKey,
   projectMachineName,
@@ -34,6 +36,7 @@ import {
 } from "./renderer-project-groups-header.js";
 import {
   ProjectGroupLayoutStyle,
+  PROJECT_GROUP_EMPTY_ATTRIBUTE,
   type ProjectGroupLayoutGroup,
   type ProjectGroupLayoutMember,
 } from "./renderer-project-groups-layout.js";
@@ -126,6 +129,9 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #views: ProjectGroupView[] = [];
   #nativeOrder = new Map<string, number>();
   #placeholders = new Map<string, number>();
+  #emptyProjectIds = new Set<string>();
+  #hiddenProjectIds = new Set<string>();
+  #summaries = new Map<string, { text: string; title: string }>();
   #collapsed = new Set<string>();
   #status: RendererProjectGroupsStatus = {
     state: "probing",
@@ -375,10 +381,33 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
     }, delay);
   }
 
+  /**
+   * Track projects that are expanded and have no native thread row. A thread
+   * appearing clears the marker, so the machine block returns automatically.
+   */
+  #refreshEmptyProjects(
+    section: HTMLElement,
+    snapshots: ReturnType<typeof readNativeProjectSnapshots>,
+  ): void {
+    for (const snapshot of snapshots) {
+      const unit = projectUnitForId(section, snapshot.projectId);
+      const row = unit ? projectRowForUnit(unit) : null;
+      if (!unit || !row) continue;
+      if (projectUnitHasThreads(unit)) {
+        this.#emptyProjectIds.delete(snapshot.projectId);
+        continue;
+      }
+      if (row.getAttribute(PROJECT_COLLAPSED_ATTRIBUTE) === "false") {
+        this.#emptyProjectIds.add(snapshot.projectId);
+      }
+    }
+  }
+
   #renderActive(section: HTMLElement): void {
     const catalog = this.#catalog;
     if (!catalog) return;
     const snapshots = readNativeProjectSnapshots(section);
+    this.#refreshEmptyProjects(section, snapshots);
     const projectStatus = new Map<string, MachineConnectionState>();
     for (const snapshot of snapshots) {
       const unit = projectUnitForId(section, snapshot.projectId);
@@ -401,6 +430,18 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       snapshots,
       machineState,
     });
+    this.#hiddenProjectIds = new Set();
+    this.#summaries = new Map();
+    for (const view of this.#views) {
+      const visibility = projectGroupEmptyVisibility(view, this.#emptyProjectIds);
+      for (const projectId of visibility.hiddenProjectIds) {
+        this.#hiddenProjectIds.add(projectId);
+      }
+      this.#summaries.set(
+        view.group.id,
+        projectGroupMachineSummary(view.machines, visibility.visibleMachines),
+      );
+    }
     this.#nativeOrder = new Map(
       snapshots.map((snapshot, position) => [snapshot.projectId, position]),
     );
@@ -473,7 +514,8 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
   #paint(): void {
     const layoutGroups: ProjectGroupLayoutGroup[] = [];
     const items: ProjectGroupHeaderItem[] = this.#views.map((view) => {
-      const summary = projectGroupMachineSummary(view.machines);
+      const summary =
+        this.#summaries.get(view.group.id) ?? projectGroupMachineSummary(view.machines);
       // Follow the native DOM order so Desktop's own drag-to-reorder keeps
       // working inside a group instead of being overridden by config order.
       const members = this.#layoutMembers(view);
@@ -496,6 +538,17 @@ class RendererProjectGroups implements RendererProjectGroupsHandle {
       collapsedGroups: this.#collapsed,
       placeholders: this.#placeholders,
     });
+    const section = findProjectsSection(this.#document);
+    if (section) {
+      for (const unit of section.querySelectorAll<HTMLElement>(
+        `[${PROJECT_GROUP_EMPTY_ATTRIBUTE}]`,
+      )) {
+        unit.removeAttribute(PROJECT_GROUP_EMPTY_ATTRIBUTE);
+      }
+      for (const projectId of this.#hiddenProjectIds) {
+        projectUnitForId(section, projectId)?.setAttribute(PROJECT_GROUP_EMPTY_ATTRIBUTE, "true");
+      }
+    }
   }
 
   #toggleGroup(groupId: string): void {

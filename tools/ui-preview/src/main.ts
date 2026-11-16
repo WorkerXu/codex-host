@@ -9,6 +9,15 @@ import {
 } from "../../../packages/renderer-extension/src/renderer-jarvis-mention.js";
 import { createWorkbenchSection } from "../../../packages/renderer-extension/src/renderer-native-at-menu.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
+import {
+  ProjectGroupHeaders,
+  type ProjectGroupHeaderItem,
+} from "../../../packages/renderer-extension/src/renderer-project-groups-header.js";
+import {
+  ProjectGroupLayoutStyle,
+  PROJECT_GROUP_EMPTY_ATTRIBUTE,
+  type ProjectGroupLayoutMember,
+} from "../../../packages/renderer-extension/src/renderer-project-groups-layout.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
 import { rendererSettingsMessages } from "../../../packages/renderer-extension/src/settings/localization.js";
@@ -19,9 +28,14 @@ import {
   createFakeDingTalkClient,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
-import type {
-  ProjectGroupAddMachineResult,
-  ProjectGroupAddMachineTarget,
+import {
+  projectGroupEmptyVisibility,
+  projectGroupMachineSummary,
+  type ProjectGroupAddMachineResult,
+  type ProjectGroupAddMachineTarget,
+  type ProjectGroupMachineView,
+  type ProjectGroupProjectView,
+  type ProjectGroupView,
 } from "../../../packages/renderer-extension/src/renderer-project-groups-model.js";
 import { addMachineTargets, projectGroupView } from "./fixtures.js";
 import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
@@ -148,6 +162,161 @@ function openProjectMenu(onAddMachine: AddMachineHandler): ProjectGroupNewChatPi
   });
   picker.open(projectGroupView, anchor);
   return picker;
+}
+
+interface PreviewProjectMachine {
+  key: string;
+  label: string;
+  projectId: string;
+  threads: string[];
+}
+
+/** Native-shaped sidebar used by the empty-machine preview scenarios. */
+async function mountProjectGroupMachineScene(
+  machines: readonly PreviewProjectMachine[],
+): Promise<void> {
+  await loadDesktopCss();
+  const groupName = "示例工作台";
+  const stage = mountStage(`
+    <aside class="preview-projects preview-native-sidebar">
+      <div class="preview-projects-heading">项目</div>
+      <section data-app-action-sidebar-section data-app-action-sidebar-section-heading="Projects"
+               data-app-action-sidebar-section-collapsed="false">
+        <div class="preview-native-section-body">
+          <div role="list" class="preview-native-project-list"></div>
+        </div>
+      </section>
+    </aside>
+    <main class="preview-canvas preview-canvas--composer"></main>`);
+  const list = stage.querySelector<HTMLElement>(".preview-native-project-list");
+  if (!list) throw new Error("Native project list is missing");
+  for (const machine of machines) {
+    const unit = document.createElement("div");
+    unit.setAttribute("role", "listitem");
+    unit.className = "preview-project-unit";
+    const wrapper = document.createElement("div");
+    wrapper.setAttribute("role", "listitem");
+    wrapper.setAttribute("aria-label", machine.label);
+    const row = document.createElement("div");
+    row.className = "preview-native-project-row";
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-expanded", "true");
+    row.setAttribute("data-app-action-sidebar-project-row", "");
+    row.setAttribute("data-app-action-sidebar-project-id", machine.projectId);
+    row.setAttribute("data-app-action-sidebar-project-label", groupName);
+    row.setAttribute("data-app-action-sidebar-project-collapsed", "false");
+    const leading = document.createElement("div");
+    leading.className = "preview-native-project-leading";
+    const kind = document.createElement("span");
+    kind.setAttribute("data-sidebar-project-kind", machine.key === "local" ? "local" : "remote");
+    const label = document.createElement("span");
+    label.textContent = groupName;
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.textContent = "+";
+    leading.append(kind, label, plus);
+    const trailing = document.createElement("div");
+    trailing.className = "preview-native-project-trailing";
+    trailing.textContent = "···";
+    row.append(leading, trailing);
+    wrapper.append(row);
+    const conversations = document.createElement("div");
+    conversations.setAttribute("data-app-action-sidebar-project-list-id", machine.projectId);
+    const conversationList = document.createElement("div");
+    conversationList.setAttribute("role", "list");
+    if (machine.threads.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "preview-empty-chat";
+      empty.textContent = "暂无聊天";
+      conversationList.append(empty);
+    } else {
+      for (const thread of machine.threads) {
+        const threadRow = document.createElement("div");
+        threadRow.className = "preview-thread-row";
+        threadRow.setAttribute("data-app-action-sidebar-thread-row", "");
+        threadRow.textContent = thread;
+        conversationList.append(threadRow);
+      }
+    }
+    conversations.append(conversationList);
+    wrapper.append(conversations);
+    unit.append(wrapper);
+    list.append(unit);
+  }
+
+  const projects = machines.map(
+    (machine) =>
+      ({
+        project: {
+          member: {
+            projectId: machine.projectId,
+            projectKind: machine.key === "local" ? "local" : "remote",
+          },
+          entry: { projectId: machine.projectId },
+          missing: null,
+        },
+        mounted: true,
+        newChatAvailable: true,
+      }) as unknown as ProjectGroupProjectView,
+  );
+  const machineViews: ProjectGroupMachineView[] = machines.map((machine, index) => ({
+    key: machine.key,
+    label: machine.label,
+    state: "connected",
+    projects: [projects[index]!],
+  }));
+  const group = {
+    id: "preview-group",
+    name: groupName,
+    order: 0,
+    collapsed: false,
+    members: [],
+  };
+  const view = {
+    group,
+    projects,
+    machines: machineViews,
+    unresolved: [],
+  } as unknown as ProjectGroupView;
+  const emptyIds = new Set(
+    machines.filter((machine) => machine.threads.length === 0).map((machine) => machine.projectId),
+  );
+  const visibility = projectGroupEmptyVisibility(view, emptyIds);
+  const members: ProjectGroupLayoutMember[] = machines.map((machine) => ({
+    projectId: machine.projectId,
+    label: groupName,
+    machineName: machine.label,
+    kind: machine.key === "local" ? "local" : "remote",
+  }));
+  new ProjectGroupLayoutStyle(document).apply([
+    { id: group.id, name: group.name, collapsed: false, members },
+  ]);
+  const summary = projectGroupMachineSummary(machineViews, visibility.visibleMachines);
+  const items: ProjectGroupHeaderItem[] = [
+    {
+      id: group.id,
+      name: group.name,
+      machineSummary: summary.text,
+      machineSummaryTitle: summary.title,
+      projectIds: machines.map((machine) => machine.projectId),
+    },
+  ];
+  new ProjectGroupHeaders(document, {
+    toggleGroup: () => undefined,
+    openNewChat: () => undefined,
+    openManager: () => undefined,
+    showMoreProjects: () => undefined,
+  }).render(items, { collapsedGroups: new Set(), placeholders: new Map() });
+  for (const projectId of visibility.hiddenProjectIds) {
+    document
+      .querySelector(
+        `[data-app-action-sidebar-project-row][data-app-action-sidebar-project-id="${projectId}"]`,
+      )
+      ?.closest(".preview-project-unit")
+      ?.setAttribute(PROJECT_GROUP_EMPTY_ATTRIBUTE, "true");
+  }
+  document.body.dataset.previewGroupEmpty = String(visibility.hiddenProjectIds.size);
+  await delay(120);
 }
 
 async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
@@ -777,6 +946,25 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(100);
     page.scrollTop = page.scrollHeight;
     await delay(120);
+  },
+
+  async "project-group-empty-machine"() {
+    await mountProjectGroupMachineScene([
+      {
+        key: "remote",
+        label: "示例新加坡",
+        projectId: "preview-machine-remote",
+        threads: ["示例：列表页加载失败", "示例：筛选条件未生效"],
+      },
+      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
+    ]);
+  },
+
+  async "project-group-all-empty"() {
+    await mountProjectGroupMachineScene([
+      { key: "remote", label: "示例新加坡", projectId: "preview-machine-remote", threads: [] },
+      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
+    ]);
   },
 
   async "group-plus-menu"() {

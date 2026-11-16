@@ -35,6 +35,8 @@ const allScenarios = [
   "agents-dingtalk-disabled",
   "group-plus-menu",
   "group-add-machine",
+  "project-group-empty-machine",
+  "project-group-all-empty",
   "group-add-machine-busy",
   "group-add-machine-error",
   "at-entry",
@@ -478,6 +480,39 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "group-plus-menu") {
         check("add-machine-row", Boolean(query("[data-codexhost-add-machine-row]")));
+      }
+      if (
+        document.body.dataset.scenario === "project-group-empty-machine" ||
+        document.body.dataset.scenario === "project-group-all-empty"
+      ) {
+        const units = [...document.querySelectorAll(".preview-project-unit")];
+        const hidden = units.filter(
+          (unit) => unit.getAttribute("data-codexhost-project-group-empty") === "true",
+        );
+        const visible = units.filter((unit) => !hidden.includes(unit));
+        const summary = query("[data-codexhost-project-group-header] span[aria-label]");
+        check("native-units-retained", units.length === 2, String(units.length));
+        check("one-machine-hidden", hidden.length === 1, String(hidden.length));
+        check("one-machine-visible", visible.length === 1, String(visible.length));
+        check(
+          "hidden-machine-display-none",
+          hidden.every((unit) => getComputedStyle(unit).display === "none"),
+        );
+        check(
+          "visible-machine-display",
+          visible.every((unit) => getComputedStyle(unit).display !== "none"),
+        );
+        check("visible-machine-count", summary?.textContent === "1 台", summary?.textContent ?? "");
+        check(
+          "hover-title-all-machines",
+          summary?.getAttribute("title") === "示例新加坡 · 本机",
+          summary?.getAttribute("title") ?? "",
+        );
+        check(
+          "empty-placeholder-kept-in-first-machine",
+          document.body.dataset.scenario !== "project-group-all-empty" ||
+            Boolean(visible[0]?.textContent?.includes("暂无聊天")),
+        );
       }
       if (document.body.dataset.scenario === "group-add-machine") {
         check("machine-menu", Boolean(query("[data-codexhost-add-machine-menu]")));

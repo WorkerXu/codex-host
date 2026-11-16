@@ -5,11 +5,13 @@ import {
   buildProjectGroupViews,
   buildProjectIndex,
   mergeMachineState,
+  projectGroupEmptyVisibility,
   projectGroupMachineSummary,
   projectHostKey,
   resolveGroupProject,
   worseConnectionState,
   type NativeProjectSnapshot,
+  type ProjectGroupView,
 } from "../src/renderer-project-groups-model.js";
 
 const catalog: DesktopProjectsCatalog = {
@@ -203,5 +205,67 @@ describe("Project group model", () => {
         { key: "remote", label: "colab", state: "connected", projects: [] },
       ]),
     ).toEqual({ text: "2 台", title: "本机 · colab" });
+    expect(
+      projectGroupMachineSummary(
+        [
+          { key: "local", label: "本机", state: "connected", projects: [] },
+          { key: "remote", label: "colab", state: "connected", projects: [] },
+        ],
+        [{ key: "remote", label: "colab", state: "connected", projects: [] }],
+      ),
+    ).toEqual({ text: "1 台", title: "本机 · colab" });
+  });
+
+  it("hides empty machines but keeps the first when every machine is empty", () => {
+    const project = (projectId: string) =>
+      ({
+        project: {
+          member: { projectId },
+          entry: { projectId },
+          missing: null,
+        },
+        mounted: true,
+        newChatAvailable: true,
+      }) as unknown as ProjectGroupView["projects"][number];
+    const view = {
+      group: { id: "g", name: "g", order: 0, members: [] },
+      projects: [],
+      machines: [
+        { key: "remote", label: "远程", state: "connected", projects: [project("p1")] },
+        { key: "local", label: "本机", state: "connected", projects: [project("p2")] },
+      ],
+      unresolved: [],
+    } as unknown as ProjectGroupView;
+    const oneEmpty = projectGroupEmptyVisibility(view, new Set(["p2"]));
+    expect(oneEmpty.visibleMachines.map(({ key }) => key)).toEqual(["remote"]);
+    expect(oneEmpty.hiddenProjectIds).toEqual(new Set(["p2"]));
+    const allEmpty = projectGroupEmptyVisibility(view, new Set(["p1", "p2"]));
+    expect(allEmpty.visibleMachines.map(({ key }) => key)).toEqual(["remote"]);
+    expect(allEmpty.hiddenProjectIds).toEqual(new Set(["p2"]));
+  });
+
+  it("hides only the empty project when a machine has another active project", () => {
+    const project = (projectId: string) =>
+      ({
+        project: { member: { projectId }, entry: { projectId }, missing: null },
+        mounted: true,
+        newChatAvailable: true,
+      }) as unknown as ProjectGroupView["projects"][number];
+    const view = {
+      group: { id: "g", name: "g", order: 0, members: [] },
+      projects: [],
+      machines: [
+        {
+          key: "remote",
+          label: "远程",
+          state: "connected",
+          projects: [project("empty"), project("active")],
+        },
+      ],
+      unresolved: [],
+    } as unknown as ProjectGroupView;
+    const visibility = projectGroupEmptyVisibility(view, new Set(["empty"]));
+    expect(visibility.visibleMachines.map(({ key }) => key)).toEqual(["remote"]);
+    expect(visibility.hiddenProjectIds).toEqual(new Set(["empty"]));
   });
 });

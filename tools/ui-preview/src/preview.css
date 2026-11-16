@@ -208,3 +208,71 @@ html[data-theme="dark"] {
   --color-background-danger-solid: #f87171;
   --shadow-card: 0 4px 14px rgb(0 0 0 / 30%);
 }
+
+/* Native-shaped project sidebar used by the empty-machine scenarios. */
+.preview-native-section-body {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.preview-native-project-list {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.preview-native-project-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.preview-native-project-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+.preview-native-project-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-native-project-trailing {
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: 12px;
+}
+
+.preview-thread-row {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  margin-left: 34px;
+  overflow: hidden;
+  padding: 0 8px;
+  color: var(--color-token-text-primary, #0d0d0d);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 6px;
+}
+
+.preview-thread-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+.preview-empty-chat {
+  margin-left: 34px;
+  padding: 6px 8px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: 12px;
+}
+
+html[data-theme="dark"] .preview-projects {
+  background: #1f1f1f;
+  border-right-color: rgb(255 255 255 / 10%);
+}

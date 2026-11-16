@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  PROJECT_GROUP_EMPTY_ATTRIBUTE,
   PROJECT_GROUP_NON_MEMBER_ORDER,
   ProjectGroupLayoutStyle,
   projectGroupHeaderOrder,
@@ -98,6 +99,13 @@ describe("Project group layout CSS", () => {
   it("hides members of a collapsed group", () => {
     const css = projectGroupLayoutCss([group({ collapsed: true })]);
     expect(css).toContain("display: none !important");
+  });
+
+  it("hides a native unit marked as an empty machine", () => {
+    const css = projectGroupLayoutCss([group()]);
+    expect(css).toContain(
+      `div[role="listitem"][${PROJECT_GROUP_EMPTY_ATTRIBUTE}="true"] { display: none !important; }`,
+    );
   });
 
   it("orders multiple groups in sequence and de-duplicates shared members", () => {
