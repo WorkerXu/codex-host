@@ -163,10 +163,6 @@ export function installRendererDingTalkEntry(
       }
       options.open(trigger.editor);
     };
-    row.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
       highlightWorkbenchRow(ownerDocument, state.row);

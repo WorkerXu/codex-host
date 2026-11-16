@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createJarvisConditionChip,
+  createJarvisModeChrome,
+} from "../src/renderer-jarvis-bug-view.js";
+import {
   createWorkbenchRow,
   ensureWorkbenchSection,
   findNativeSuggestionList,
@@ -21,6 +25,7 @@ class FakeElement {
   type = "";
   style: Record<string, string> = {};
   isDocumentRoot = false;
+  readonly listeners = new Map<string, ((event: Event) => void)[]>();
 
   constructor(tagName: string) {
     this.tagName = tagName.toUpperCase();
@@ -150,7 +155,15 @@ class FakeElement {
 
   scrollIntoView(): void {}
 
-  addEventListener(): void {}
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    const list = this.listeners.get(type) ?? [];
+    list.push(listener);
+    this.listeners.set(type, list);
+  }
+
+  dispatch(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
 
   private matchesSimple(selector: string): boolean {
     if (!selector) return false;
@@ -347,6 +360,49 @@ describe("shared workbench section", () => {
     expect([...row.querySelectorAll("span")].some((node) => node.textContent === "钉钉")).toBe(
       true,
     );
+  });
+});
+
+describe("focus-safe press", () => {
+  const press = (): Event & { preventDefault: ReturnType<typeof vi.fn> } => {
+    const event = {
+      type: "mousedown",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    return event as unknown as Event & { preventDefault: ReturnType<typeof vi.fn> };
+  };
+
+  it("keeps the editor focused when a workbench row is pressed with the mouse", () => {
+    const { document } = documentWithView();
+    const row = createWorkbenchRow(document as unknown as Document, {
+      rowAttribute: "data-codexhost-dingtalk-entry",
+      icon: element("span") as unknown as Element,
+      label: "钉钉",
+      description: "打开钉钉工作台",
+    }) as unknown as FakeElement;
+    const event = press();
+    row.dispatch("mousedown", event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+  });
+
+  it("keeps focus for the Jarvis back button and condition chips", () => {
+    const { document } = documentWithView();
+    const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
+    const backEvent = press();
+    (chrome.back as unknown as FakeElement).dispatch("mousedown", backEvent);
+    expect(backEvent.preventDefault).toHaveBeenCalled();
+
+    const chip = createJarvisConditionChip(document as unknown as Document, {
+      key: "status:1",
+      kind: "status",
+      label: "未解决",
+    }) as unknown as FakeElement;
+    const chipEvent = press();
+    chip.dispatch("mousedown", chipEvent);
+    expect(chipEvent.preventDefault).toHaveBeenCalled();
+    expect(chipEvent.stopPropagation).toHaveBeenCalled();
   });
 });
 

@@ -223,6 +223,20 @@ export function removeWorkbenchSectionIfEmpty(section: HTMLElement | null): void
   section.remove();
 }
 
+/**
+ * Keep the ProseMirror editor focused. A button's default mousedown moves
+ * focus out of the Composer, which closes Desktop's native `@` popup before
+ * the click can be handled.
+ */
+export function keepEditorFocusOnPress(element: HTMLElement): void {
+  const prevent = (event: Event): void => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  element.addEventListener("pointerdown", prevent);
+  element.addEventListener("mousedown", prevent);
+}
+
 /** A native row: button, row classes, menu row content, icon slot, label. */
 export function createWorkbenchRow(
   ownerDocument: Document,
@@ -255,11 +269,14 @@ export function createWorkbenchRow(
   wrapper.append(group);
   content.append(iconSlot, wrapper);
   row.append(content);
+  keepEditorFocusOnPress(row);
   return row;
 }
 
-/** Apply the native highlighted-row state (aria-current + classes). */
-export function setWorkbenchRowHighlight(row: HTMLElement, selected: boolean): void {
+/** Apply the native highlighted-row state (aria-current + classes). */ export function setWorkbenchRowHighlight(
+  row: HTMLElement,
+  selected: boolean,
+): void {
   if (selected) row.setAttribute("aria-current", "true");
   else row.removeAttribute("aria-current");
   for (const name of HIGHLIGHT_CLASSES) row.classList.toggle(name, selected);

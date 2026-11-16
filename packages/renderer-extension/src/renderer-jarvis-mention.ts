@@ -20,6 +20,7 @@ import { ROW_HIGHLIGHT_CLASSES, ROW_IDLE_CLASS } from "./renderer-delegation-men
 import {
   JARVIS_MODE_ATTRIBUTE,
   JARVIS_SECTION_ATTRIBUTE,
+  createJarvisConditionChip,
   createJarvisEntryRow,
   createJarvisModeChrome,
   jarvisBugLabel,
@@ -244,10 +245,6 @@ export function installRendererJarvisMention(
     };
     entry = state;
 
-    row.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
       highlightWorkbenchRow(ownerDocument, state.row);
@@ -326,22 +323,7 @@ export function installRendererJarvisMention(
   const renderChips = (state: ModeState, conditions: readonly JarvisBugCondition[]): void => {
     state.chips.replaceChildren();
     for (const condition of conditions) {
-      const chip = ownerDocument.createElement("button");
-      chip.type = "button";
-      chip.className =
-        "inline-flex max-w-full items-center gap-1 truncate rounded-sm border border-default px-1 text-xs text-tertiary";
-      chip.setAttribute("data-jarvis-chip", condition.key);
-      const label = ownerDocument.createElement("span");
-      label.className = "truncate";
-      label.textContent = condition.label;
-      const close = ownerDocument.createElement("span");
-      close.className = "shrink-0";
-      close.textContent = "×";
-      chip.append(label, close);
-      chip.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
+      const chip = createJarvisConditionChip(ownerDocument, condition);
       chip.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -462,10 +444,6 @@ export function installRendererJarvisMention(
     list.scrollTop = 0;
     mode = state;
 
-    state.back.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
     state.back.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

@@ -5,10 +5,14 @@
  * controller in `renderer-jarvis-mention.ts` owns state, requests and
  * keyboard handling.
  */
-import type { JarvisBug } from "@codexhost/shared-contracts";
+import type { JarvisBug, JarvisBugCondition } from "@codexhost/shared-contracts";
 
 import { ROW_CLASS } from "./renderer-delegation-mention.js";
-import { createWorkbenchRow, createWorkbenchSection } from "./renderer-native-at-menu.js";
+import {
+  createWorkbenchRow,
+  createWorkbenchSection,
+  keepEditorFocusOnPress,
+} from "./renderer-native-at-menu.js";
 import { createJarvisMark } from "./settings/jarvis-icon.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
@@ -117,6 +121,27 @@ export function createJarvisEntrySection(
   return { element: section.element, row };
 }
 
+/** A removable parsed-condition chip; mousedown must not blur the search field. */
+export function createJarvisConditionChip(
+  document: Document,
+  condition: JarvisBugCondition,
+): HTMLButtonElement {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className =
+    "inline-flex max-w-full items-center gap-1 truncate rounded-sm border border-default px-1 text-xs text-tertiary";
+  chip.setAttribute("data-jarvis-chip", condition.key);
+  const label = document.createElement("span");
+  label.className = "truncate";
+  label.textContent = condition.label;
+  const close = document.createElement("span");
+  close.className = "shrink-0";
+  close.textContent = "×";
+  chip.append(label, close);
+  keepEditorFocusOnPress(chip);
+  return chip;
+}
+
 export interface JarvisModeChrome {
   section: HTMLElement;
   back: HTMLButtonElement;
@@ -144,6 +169,7 @@ export function createJarvisModeChrome(
   back.className =
     "inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-default hover:bg-primary-ghost-hover";
   back.textContent = "‹";
+  keepEditorFocusOnPress(back);
   const title = document.createElement("span");
   title.className = "min-w-0 truncate text-sm text-default";
   title.textContent = "Jarvis · Bug";
