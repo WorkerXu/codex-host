@@ -12,10 +12,15 @@ import type {
   DingTalkSendResult,
   DingTalkStatus,
   DingTalkDispatchSettings,
+  JarvisStatus,
 } from "@codexhost/shared-contracts";
 
 import type { RendererCodexAgentsClient } from "../../../packages/renderer-extension/src/renderer-codex-agents-client.js";
 import type { RendererDingTalkClient } from "../../../packages/renderer-extension/src/renderer-dingtalk-client.js";
+import type {
+  RendererJarvisClient,
+  RendererJarvisHost,
+} from "../../../packages/renderer-extension/src/renderer-jarvis-client.js";
 import {
   agentCatalog,
   agentSummaries,
@@ -306,22 +311,97 @@ export function createFakeCodexAgentsClient(
     },
     async dispatchSettings() {
       await sleep(60);
-      return {
-        ...dispatch,
-        eventTypes: [...dispatch.eventTypes],
-        participatingAgents: [...dispatch.participatingAgents],
-      };
+      return cloneDispatch(dispatch);
     },
     async saveDispatchSettings(settings) {
-      // Long enough for the disabled-state screenshot to see the greyed body.
+      // Long enough for the saving state to be visible in a screenshot.
       await sleep(800);
-      dispatch = {
-        ...settings,
-        eventTypes: [...settings.eventTypes],
-        participatingAgents: [...settings.participatingAgents],
-      };
-      return { ...dispatch };
+      dispatch = cloneDispatch(settings);
+      return cloneDispatch(dispatch);
     },
+  };
+}
+
+function cloneDispatch(settings: DingTalkDispatchSettings): DingTalkDispatchSettings {
+  return {
+    threshold: settings.threshold,
+    agents: Object.fromEntries(
+      Object.entries(settings.agents).map(([fileName, agent]) => [
+        fileName,
+        { ...agent, eventTypes: [...agent.eventTypes] },
+      ]),
+    ),
+  };
+}
+
+export function createFakeJarvisClient(): RendererJarvisClient {
+  let hasKey = true;
+  const hosts: RendererJarvisHost[] = [
+    { hostId: "local", displayName: "本机", local: true, reachable: true },
+    { hostId: "host-nl", displayName: "荷兰", local: false, reachable: true },
+    { hostId: "host-sh", displayName: "腾讯上海", local: false, reachable: true },
+    { hostId: "host-google", displayName: "谷歌主机", local: false, reachable: true },
+    { hostId: "host-sg", displayName: "甲骨文新加坡", local: false, reachable: true },
+  ];
+  const installed: JarvisStatus = {
+    installed: true,
+    version: "0.20.1",
+    platform: "darwin-arm64",
+    authenticated: true,
+    userName: "示例用户",
+    userId: 1,
+    errorCode: null,
+  };
+  const missing: JarvisStatus = {
+    installed: false,
+    version: null,
+    platform: null,
+    authenticated: false,
+    userName: null,
+    userId: null,
+    errorCode: null,
+  };
+  return {
+    async hosts() {
+      await sleep(30);
+      return hosts.map((host) => ({ ...host }));
+    },
+    localAvailable: () => true,
+    async status(hostId) {
+      await sleep(30);
+      return { ...(hostId === "local" ? installed : missing) };
+    },
+    async settings() {
+      await sleep(30);
+      return { hasKey, threshold: 0.5 };
+    },
+    async updateSettings(input) {
+      await sleep(120);
+      if (input.geminiApiKey !== undefined) hasKey = input.geminiApiKey !== null;
+      return { hasKey, threshold: 0.5 };
+    },
+    async testSettings() {
+      await sleep(120);
+      return hasKey
+        ? { ok: true, latencyMs: 240, errorCode: null }
+        : { ok: false, latencyMs: null, errorCode: "missing_key" };
+    },
+    async searchBugs() {
+      throw new Error("not used in preview");
+    },
+    async install(hostId) {
+      return { state: "installed", status: { ...installed } };
+    },
+    async login() {
+      return {
+        authUrl: "",
+        callbackPort: 0,
+        forwardId: null,
+        forwardErrorCode: null,
+        close() {},
+      };
+    },
+    stopLogin() {},
   };
 }
 

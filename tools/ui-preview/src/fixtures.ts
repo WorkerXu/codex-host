@@ -400,11 +400,19 @@ export const agentCatalog: CodexAgentCatalogResult = {
 };
 
 export const dispatchSettings: DingTalkDispatchSettings = {
-  enabled: true,
-  eventTypes: ["mention_me", "mention_all"],
-  matchThreshold: 0.85,
-  replyScope: "group",
-  participatingAgents: ["reviewer", "writer"],
+  threshold: 0.85,
+  agents: {
+    "reviewer.toml": {
+      enabled: true,
+      eventTypes: ["mention_me", "mention_all"],
+      replyScope: "group",
+    },
+    "writer.toml": {
+      enabled: true,
+      eventTypes: ["mention_me", "approval_pending"],
+      replyScope: "direct",
+    },
+  },
 };
 
 export const projectGroupView: ProjectGroupView = {
