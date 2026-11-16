@@ -1,3 +1,7 @@
+import type { IconNode } from "lucide";
+import Ellipsis from "lucide/dist/esm/icons/ellipsis.mjs";
+import Folders from "lucide/dist/esm/icons/folders.mjs";
+import Plus from "lucide/dist/esm/icons/plus.mjs";
 import {
   findProjectList,
   findProjectsSection,
@@ -43,44 +47,54 @@ function style(element: HTMLElement, values: Record<string, string>): void {
     element.style.setProperty(property, value);
 }
 
-function groupIcon(document: Document): HTMLElement {
-  const icon = document.createElement("span");
-  style(icon, {
-    position: "relative",
-    width: "16px",
-    height: "16px",
+function lucideIcon(document: Document, node: IconNode, size: number): HTMLElement {
+  const wrapper = document.createElement("span");
+  style(wrapper, {
+    width: `${size}px`,
+    height: `${size}px`,
     flex: "0 0 auto",
     display: "inline-flex",
     "align-items": "center",
     "justify-content": "center",
   });
-  for (const [inset, opacity] of [
-    ["2px", "0.55"],
-    ["0", "1"],
-  ] as const) {
-    const layer = document.createElement("span");
-    style(layer, {
-      position: "absolute",
-      inset,
-      border: `1px solid ${TEXT_COLOR}`,
-      "border-radius": "3px",
-      opacity,
-    });
-    icon.append(layer);
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  for (const [name, value] of Object.entries({
+    width: String(size),
+    height: String(size),
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.75",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  }))
+    svg.setAttribute(name, value);
+  for (const [tag, attributes] of node) {
+    const child = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attributes)) child.setAttribute(name, String(value));
+    svg.append(child);
   }
-  icon.setAttribute("aria-hidden", "true");
+  wrapper.append(svg);
+  wrapper.setAttribute("aria-hidden", "true");
+  return wrapper;
+}
+
+function groupIcon(document: Document): HTMLElement {
+  const icon = lucideIcon(document, Folders, 16);
+  icon.style.setProperty("color", TEXT_COLOR);
   return icon;
 }
 
 function iconButton(
   document: Document,
   label: string,
-  text: string,
+  icon: IconNode,
   onClick: (event: MouseEvent) => void,
 ): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = text;
+  button.append(lucideIcon(document, icon, 14));
   button.setAttribute("aria-label", label);
   button.title = label;
   style(button, {
@@ -289,10 +303,10 @@ export class ProjectGroupHeaders {
     row.append(machines);
 
     actions.append(
-      iconButton(document, "新建对话", "+", (event) =>
+      iconButton(document, "新建对话", Plus, (event) =>
         this.#handlers.openNewChat(group.id, event.currentTarget as HTMLElement),
       ),
-      iconButton(document, "管理项目组", "⋯", () => this.#handlers.openManager(group.id)),
+      iconButton(document, "管理项目组", Ellipsis, () => this.#handlers.openManager(group.id)),
     );
     row.append(actions);
 

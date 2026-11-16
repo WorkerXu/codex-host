@@ -139,6 +139,7 @@ class FakeElement {
 function fakeDocument(): Document {
   return {
     createElement: (tagName: string) => new FakeElement(tagName),
+    createElementNS: (_namespace: string, tagName: string) => new FakeElement(tagName),
     head: new FakeElement("head"),
     documentElement: new FakeElement("html"),
     body: new FakeElement("body"),
