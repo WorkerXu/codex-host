@@ -155,6 +155,38 @@ describe("Jarvis structured bug search", () => {
     });
   });
 
+  it("never turns a matched project into a title keyword for Gemini", async () => {
+    const decisions = {
+      interpret: vi.fn(async () => ({
+        available: true,
+        values: { mentionsProject: false },
+      })),
+      orderBugs: vi.fn(async (_query: string, bugs: readonly JarvisBug[]) => ({
+        available: false,
+        bugs: [...bugs],
+      })),
+    };
+    const cli = fakeCli([bug({ id: 13, projectId: 4078 })]);
+    const result = await searcher(cli, decisions, true).search({
+      query: "示例买的最近的bug",
+    });
+    expect(result.conditions).toContainEqual({
+      key: "project:示例买",
+      kind: "project",
+      label: "示例买 ×2 个项目",
+    });
+    expect(result.conditions.some(({ kind }) => kind === "title")).toBe(false);
+  });
+
+  it("starts auth, project list and project-name search together", async () => {
+    const cli = fakeCli([]);
+    const pending = searcher(cli).search({ query: "示例买的bug" });
+    expect(cli.user).toHaveBeenCalledTimes(1);
+    expect(cli.projects).toHaveBeenCalledTimes(1);
+    expect(cli.searchProjects).toHaveBeenCalledWith("示例买");
+    await pending;
+  });
+
   it("merges assigned and created scopes and de-duplicates by project and bug id", async () => {
     const cli = fakeCli([
       bug({ id: 20, projectId: 4041, assigned: true, created: true }),
@@ -279,7 +311,7 @@ describe("Jarvis structured bug search", () => {
     const fields = decisions.interpret.mock.calls[0]?.[1] as readonly string[];
     expect(fields).toContain("scope");
     expect(fields).toContain("status");
-    expect(fields).toContain("mentionsProject");
+    expect(fields).not.toContain("mentionsProject");
     expect(fields).not.toContain("order");
     expect(cli.bugs).toHaveBeenCalledWith(
       4078,
