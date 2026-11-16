@@ -3,6 +3,23 @@
  * text nodes and anchors; no raw HTML from a message ever reaches the DOM.
  */
 const INLINE_PATTERN = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\))/gu;
+const RULE_PATTERN = /^\s*(?:---|___)\s*$/u;
+// `s`: a heading may contain U+2028/U+2029, which `.` does not match otherwise.
+const HEADING_PATTERN = /^\s*(#{1,6})\s+(.*)$/su;
+const QUOTE_PATTERN = /^\s*>\s?/u;
+const BULLET_PATTERN = /^\s*[-*]\s+/u;
+const ORDERED_PATTERN = /^\s*\d+\.\s+/u;
+
+/** Exactly the lines the block branches below consume; anything else is paragraph text. */
+function startsBlock(line: string): boolean {
+  return (
+    RULE_PATTERN.test(line) ||
+    HEADING_PATTERN.test(line) ||
+    QUOTE_PATTERN.test(line) ||
+    BULLET_PATTERN.test(line) ||
+    ORDERED_PATTERN.test(line)
+  );
+}
 
 function createNode<K extends keyof HTMLElementTagNameMap>(
   document: Document,
@@ -69,12 +86,12 @@ export function appendDingTalkMarkdown(
       index += 1;
       continue;
     }
-    if (/^\s*(?:---|___)\s*$/u.test(line)) {
+    if (RULE_PATTERN.test(line)) {
       container.append(createNode(document, "hr", "dingtalk-md-rule"));
       index += 1;
       continue;
     }
-    const heading = /^\s*(#{1,6})\s+(.*)$/u.exec(line);
+    const heading = HEADING_PATTERN.exec(line);
     if (heading) {
       const node = createNode(
         document,
@@ -86,35 +103,35 @@ export function appendDingTalkMarkdown(
       index += 1;
       continue;
     }
-    if (/^\s*>\s?/u.test(line)) {
+    if (QUOTE_PATTERN.test(line)) {
       const quote = createNode(document, "blockquote", "dingtalk-md-quote");
       const quoteLines: string[] = [];
-      while (index < lines.length && /^\s*>\s?/u.test(lines[index] ?? "")) {
-        quoteLines.push((lines[index] ?? "").replace(/^\s*>\s?/u, ""));
+      while (index < lines.length && QUOTE_PATTERN.test(lines[index] ?? "")) {
+        quoteLines.push((lines[index] ?? "").replace(QUOTE_PATTERN, ""));
         index += 1;
       }
       appendLines(document, quote, quoteLines);
       container.append(quote);
       continue;
     }
-    if (/^\s*[-*]\s+/u.test(line)) {
+    if (BULLET_PATTERN.test(line)) {
       const list = document.createElement("ul");
       list.className = "dingtalk-md-list";
-      while (index < lines.length && /^\s*[-*]\s+/u.test(lines[index] ?? "")) {
+      while (index < lines.length && BULLET_PATTERN.test(lines[index] ?? "")) {
         const item = document.createElement("li");
-        appendInline(document, item, (lines[index] ?? "").replace(/^\s*[-*]\s+/u, ""));
+        appendInline(document, item, (lines[index] ?? "").replace(BULLET_PATTERN, ""));
         list.append(item);
         index += 1;
       }
       container.append(list);
       continue;
     }
-    if (/^\s*\d+\.\s+/u.test(line)) {
+    if (ORDERED_PATTERN.test(line)) {
       const list = document.createElement("ol");
       list.className = "dingtalk-md-list";
-      while (index < lines.length && /^\s*\d+\.\s+/u.test(lines[index] ?? "")) {
+      while (index < lines.length && ORDERED_PATTERN.test(lines[index] ?? "")) {
         const item = document.createElement("li");
-        appendInline(document, item, (lines[index] ?? "").replace(/^\s*\d+\.\s+/u, ""));
+        appendInline(document, item, (lines[index] ?? "").replace(ORDERED_PATTERN, ""));
         list.append(item);
         index += 1;
       }
@@ -122,12 +139,13 @@ export function appendDingTalkMarkdown(
       continue;
     }
     const paragraph = createNode(document, "div", "dingtalk-md-paragraph");
-    const paragraphLines: string[] = [];
+    // The current line is not a block start, so the paragraph always consumes
+    // it; every iteration of the outer loop therefore advances.
+    const paragraphLines: string[] = [line];
+    index += 1;
     while (index < lines.length) {
       const next = lines[index] ?? "";
-      if (!next.trim() || /^\s*(?:#{1,6}\s|>\s?|[-*]\s|\d+\.\s|---|___)/u.test(next)) {
-        break;
-      }
+      if (!next.trim() || startsBlock(next)) break;
       paragraphLines.push(next);
       index += 1;
     }
