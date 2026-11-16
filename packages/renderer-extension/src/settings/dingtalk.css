@@ -723,9 +723,11 @@
 }
 
 .dingtalk-message-image {
-  display: flex;
-  max-width: 260px;
-  min-height: 72px;
+  display: inline-flex;
+  max-width: 240px;
+  max-height: 240px;
+  min-width: 120px;
+  min-height: 80px;
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -738,18 +740,39 @@
   margin-bottom: 0;
 }
 
+.dingtalk-message-image--loading {
+  width: 240px;
+  height: 150px;
+}
+
 .dingtalk-message-image-content {
   display: block;
-  max-width: 100%;
-  max-height: 320px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
+.dingtalk-message-image-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dingtalk-message-image--unavailable {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  min-width: 160px;
+  min-height: 0;
+  padding: 8px 12px;
+}
+
 .dingtalk-message-image-fallback {
-  padding: 16px 24px;
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
+  white-space: nowrap;
 }
 
 .dingtalk-message-file {
@@ -1287,6 +1310,46 @@
 .dingtalk-search-more:hover {
   color: var(--color-token-text-primary);
   background: var(--color-token-list-hover-background);
+}
+
+.dingtalk-search-result--conversation {
+  align-items: flex-start;
+  min-height: 64px;
+  padding: 10px 8px;
+}
+
+.dingtalk-search-result--conversation .dingtalk-search-copy {
+  gap: 3px;
+}
+
+.dingtalk-search-result--conversation .dingtalk-search-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.dingtalk-search-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-search-meta > *:not(:first-child)::before {
+  margin-right: 4px;
+  content: "·";
+}
+
+.dingtalk-search-meta .dingtalk-conversation-tag {
+  padding: 0 3px;
+  line-height: 14px;
 }
 
 .dingtalk-search-result--message {

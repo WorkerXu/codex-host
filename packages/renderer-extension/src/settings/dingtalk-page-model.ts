@@ -83,14 +83,15 @@ export function continuesDingTalkGroup(
   return message.createdAt - previous.createdAt <= 3 * MINUTE;
 }
 
-const AVATAR_TONES = ["#3296FA", "#1E7BE0", "#4AA8FF", "#2E86DE", "#5B8FF9", "#3D7EFF"];
+// DingTalk blue plus four nearby cyan/indigo/violet hues at similar saturation.
+const AVATAR_TONES = ["#3296FA", "#22A7D8", "#3F7FEA", "#5A6BF5", "#2C8CE0"];
 
-/** FNV-1a picks a stable DingTalk-blue avatar background for the id. */
+/** sdbm spreads neighbouring ids across the DingTalk-blue palette. */
 export function avatarTone(conversationId: string): string {
-  let hash = 0x811c9dc5;
+  let hash = 0;
   for (const character of conversationId) {
-    hash ^= character.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    const code = character.codePointAt(0) ?? 0;
+    hash = (code + (hash << 6) + (hash << 16) - hash) >>> 0;
   }
   return AVATAR_TONES[hash % AVATAR_TONES.length] ?? AVATAR_TONES[0]!;
 }
