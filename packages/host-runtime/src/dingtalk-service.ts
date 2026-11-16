@@ -9,7 +9,6 @@ import {
   dingtalkSettingsSchema,
   dingtalkStatusSchema,
   type DingTalkConversation,
-  type DingTalkConversationsParams,
   type DingTalkConversationsResult,
   type DingTalkMessage,
   type DingTalkMessagesParams,
@@ -50,20 +49,12 @@ import { DingTalkViewedStore } from "./dingtalk-viewed.js";
 import { DingTalkEventListener } from "./dingtalk-listener.js";
 import type { PeerSpawn } from "./peer-transport.js";
 
-const LIST_TTL_MS = 30_000;
-const RECENT_TTL_MS = 120_000;
-const MESSAGES_TTL_MS = 60_000;
-const PREVIEW_TTL_MS = 60_000;
 const GROUP_META_TTL_MS = 10 * 60_000;
-const AT_ME_TTL_MS = 2 * 60_000;
 const VIEWED_WRITE_DELAY_MS = 500;
 const NOTIFY_DELAY_MS = 250;
-const RECENT_LIMIT = 10;
 const UNREAD_LIMIT = 50;
+const UNREAD_WINDOW_MS = 48 * 60 * 60_000;
 const SEARCH_WINDOW_DAYS = 30;
-const RECENT_WINDOW_DAYS = 90;
-
-export type DingTalkConversationView = "unread" | "recent";
 
 export class DingTalkServiceError extends Error {
   constructor(
@@ -90,22 +81,10 @@ export interface DingTalkServiceOptions {
 }
 
 interface ConversationCache {
-  source: "unread" | "recent" | "empty";
+  source: "unread" | "empty";
   rows: DingTalkConversation[];
   fetchedAt: number;
   errorCode: string | null;
-}
-
-interface MessageCache {
-  messages: DingTalkMessage[];
-  hasMore: boolean;
-  nextCursor: number | null;
-  fetchedAt: number;
-}
-
-interface PreviewCache {
-  preview: string | null;
-  fetchedAt: number;
 }
 
 function previewOf(text: string): string {
@@ -163,21 +142,16 @@ export class DingTalkService {
   readonly #now: () => number;
   readonly #onChange: ((event: { conversationId: string | null }) => void) | undefined;
   readonly #conversations = new Map<string, DingTalkConversation>();
-  readonly #messages = new Map<string, MessageCache>();
-  readonly #previews = new Map<string, PreviewCache>();
+  readonly #inflight = new Map<string, Promise<unknown>>();
   readonly #viewedAt = new Map<string, number>();
   #viewedLoaded = false;
   #viewedWriteTimer: ReturnType<typeof setTimeout> | null = null;
-  readonly #lists: Record<DingTalkConversationView, ConversationCache | null> = {
-    unread: null,
-    recent: null,
-  };
-  readonly #refreshing = new Map<DingTalkConversationView, Promise<void>>();
-  readonly #refreshQueued = new Set<DingTalkConversationView>();
+  #list: ConversationCache | null = null;
+  #refreshing: Promise<void> | null = null;
+  #refreshQueued = false;
   #groupMeta: Map<string, DingTalkGroupMeta> | null = null;
   #groupMetaAt = 0;
   #atMe = new Map<string, number>();
-  #atMeAt = 0;
   #ready: Promise<void> | null = null;
   #lastAuth: Awaited<ReturnType<DingTalkCli["authStatus"]>> | null = null;
   readonly #events: DingTalkEventListener;
@@ -281,42 +255,30 @@ export class DingTalkService {
     }
     await this.#settings.write(value);
     await this.#transport.refresh();
-    this.#lists.unread = null;
-    this.#lists.recent = null;
+    this.#list = null;
     this.#conversations.clear();
-    this.#messages.clear();
-    this.#previews.clear();
+    this.#inflight.clear();
     this.#groupMeta = null;
     this.#groupMetaAt = 0;
     this.#atMe = new Map();
-    this.#atMeAt = 0;
     return dingtalkSettingsSchema.parse(
       await readDingTalkSettings(this.#environment, this.#settings),
     );
   }
 
-  async conversations(
-    params: DingTalkConversationsParams = {},
-  ): Promise<DingTalkConversationsResult> {
+  async conversations(): Promise<DingTalkConversationsResult> {
     await this.#ensure();
     this.#events.touch();
-    const view = params.view ?? "unread";
-    const cache = this.#lists[view];
-    if (!cache || params.refresh === true) {
-      await this.#refresh(view);
-    } else {
-      const ttl = view === "unread" ? LIST_TTL_MS : RECENT_TTL_MS;
-      if (this.#now() - cache.fetchedAt >= ttl) {
-        void this.#refresh(view).catch(() => undefined);
-      }
-    }
-    const list = this.#lists[view];
+    // The workbench always reads current data; concurrent identical reads share
+    // one dws call instead of arriving at a result cache.
+    await this.#refresh();
+    const list = this.#list;
     return dingtalkConversationsResultSchema.parse({
       available: list !== null && list.errorCode === null,
       source: list?.source ?? "empty",
       conversations: list?.rows ?? [],
       cachedAt: list?.fetchedAt ?? null,
-      refreshing: this.#refreshing.has(view),
+      refreshing: false,
       errorCode: list?.errorCode ?? null,
     });
   }
@@ -324,27 +286,18 @@ export class DingTalkService {
   /** Newest-message summary for one visible row. */
   async preview(conversationId: string): Promise<DingTalkPreviewResult> {
     await this.#ensure();
-    const cached = this.#previews.get(conversationId);
-    if (cached && this.#now() - cached.fetchedAt < PREVIEW_TTL_MS) {
+    return await this.#dedupe(`preview:${conversationId}`, async () => {
+      const page = await this.#cli.messages({ conversationId, limit: 1 }).catch(() => null);
+      const newest = page?.messages[0];
+      const preview = newest
+        ? `${newest.mine ? "我" : newest.senderName}：${dingtalkMessageSummary(newest)}`
+        : null;
       return dingtalkPreviewResultSchema.parse({
-        available: true,
-        preview: cached.preview,
-        cachedAt: cached.fetchedAt,
-        errorCode: null,
+        available: page?.errorCode === null,
+        preview,
+        cachedAt: null,
+        errorCode: page?.errorCode ?? null,
       });
-    }
-    const page = await this.#cli.messages({ conversationId, limit: 1 }).catch(() => null);
-    const newest = page?.messages[0];
-    const preview = newest
-      ? `${newest.mine ? "我" : newest.senderName}：${dingtalkMessageSummary(newest)}`
-      : null;
-    const entry = { preview, fetchedAt: this.#now() };
-    this.#previews.set(conversationId, entry);
-    return dingtalkPreviewResultSchema.parse({
-      available: page?.errorCode === null,
-      preview,
-      cachedAt: entry.fetchedAt,
-      errorCode: page?.errorCode ?? null,
     });
   }
 
@@ -353,51 +306,30 @@ export class DingTalkService {
     this.#events.touch();
     const conversationId = params.conversationId;
     const limit = params.limit ?? 40;
-    let cache = this.#messages.get(conversationId);
-    if (!params.before && cache && this.#now() - cache.fetchedAt < MESSAGES_TTL_MS) {
-      return await this.#messagesResult(conversationId, cache);
-    }
-    const page = await this.#cli.messages({
-      conversationId,
-      limit,
-      ...(params.before !== undefined
-        ? { before: params.before, direction: "older" as const }
-        : {}),
-    });
-    if (page.errorCode !== null) {
-      return dingtalkMessagesResultSchema.parse({
-        available: false,
-        conversation: await this.#conversationFor(conversationId),
-        messages: cache?.messages ?? [],
-        hasMore: cache?.hasMore ?? false,
-        nextCursor: cache?.nextCursor ?? null,
-        cachedAt: cache?.fetchedAt ?? null,
-        errorCode: page.errorCode,
-      });
-    }
-    if (!params.before) {
-      cache = {
-        messages: page.messages,
-        hasMore: page.hasMore,
-        nextCursor: page.nextCursor,
-        fetchedAt: this.#now(),
-      };
-      this.#messages.set(conversationId, cache);
-      this.#previews.delete(conversationId);
-      return await this.#messagesResult(conversationId, cache);
-    }
-    const merged = new Map<string, DingTalkMessage>();
-    for (const message of [...(cache?.messages ?? []), ...page.messages]) {
-      merged.set(message.messageId, message);
-    }
-    cache = {
-      messages: [...merged.values()].sort((left, right) => right.createdAt - left.createdAt),
-      hasMore: page.hasMore,
-      nextCursor: page.nextCursor,
-      fetchedAt: cache?.fetchedAt ?? this.#now(),
-    };
-    this.#messages.set(conversationId, cache);
-    return await this.#messagesResult(conversationId, cache);
+    return await this.#dedupe(
+      `messages:${conversationId}:${params.before ?? "latest"}:${limit}`,
+      async () => {
+        const [page, conversation] = await Promise.all([
+          this.#cli.messages({
+            conversationId,
+            limit,
+            ...(params.before !== undefined
+              ? { before: params.before, direction: "older" as const }
+              : {}),
+          }),
+          this.#conversationFor(conversationId),
+        ]);
+        return dingtalkMessagesResultSchema.parse({
+          available: page.errorCode === null,
+          conversation,
+          messages: page.messages,
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+          cachedAt: null,
+          errorCode: page.errorCode,
+        });
+      },
+    );
   }
 
   async resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult> {
@@ -426,36 +358,18 @@ export class DingTalkService {
     const result = await this.#cli.send(params.conversationId, params.text);
     if (result.ok) {
       const sentAt = this.#now();
-      const cached = this.#messages.get(params.conversationId);
-      if (cached) {
-        cached.messages = [
-          {
-            messageId: `codexhost-${sentAt}`,
-            conversationId: params.conversationId,
-            senderName: "我",
-            createdAt: sentAt,
-            text: params.text,
-            unsupported: false,
-            mine: true,
-          },
-          ...cached.messages,
-        ];
-      }
       const conversation = this.#conversations.get(params.conversationId);
       if (conversation) {
         conversation.lastMessageAt = sentAt;
         conversation.preview = `我：${previewOf(params.text)}`;
       }
-      for (const view of ["unread", "recent"] as const) {
-        const list = this.#lists[view];
-        if (!list) continue;
-        list.rows = list.rows.map((row) =>
+      if (this.#list) {
+        this.#list.rows = this.#list.rows.map((row) =>
           row.conversationId === params.conversationId
             ? { ...row, lastMessageAt: sentAt, preview: `我：${previewOf(params.text)}` }
             : row,
         );
       }
-      this.#previews.delete(params.conversationId);
       this.#notify(params.conversationId);
     }
     return dingtalkSendResultSchema.parse({
@@ -473,7 +387,7 @@ export class DingTalkService {
       this.#viewedAt.set(conversationId, lastMessageAt);
       this.#scheduleViewedWrite();
     }
-    const list = this.#lists.unread;
+    const list = this.#list;
     if (list?.source === "unread") {
       const rows = list.rows.filter(
         (conversation) =>
@@ -481,8 +395,8 @@ export class DingTalkService {
           (conversation.lastMessageAt ?? 0) > lastMessageAt,
       );
       if (rows.length !== list.rows.length) {
-        this.#lists.unread = { ...list, rows };
-        if (rows.length === 0) void this.#refresh("unread").catch(() => undefined);
+        this.#list = { ...list, rows };
+        if (rows.length === 0) void this.#refresh().catch(() => undefined);
         this.#notify(conversationId);
       }
     }
@@ -496,23 +410,21 @@ export class DingTalkService {
   async search(params: DingTalkSearchParams): Promise<DingTalkSearchResult> {
     await this.#ensure();
     this.#events.touch();
-    if (!this.#lists.unread) await this.#refresh("unread");
+    if (!this.#list) await this.#refresh();
     const query = params.query.trim();
     const needle = query.toLowerCase();
     const local: DingTalkConversation[] = [];
     const localSeen = new Set<string>();
-    for (const view of ["unread", "recent"] as const) {
-      for (const row of this.#lists[view]?.rows ?? []) {
-        if (localSeen.has(row.conversationId)) continue;
-        if (
-          !row.title.toLowerCase().includes(needle) &&
-          !(row.preview ?? "").toLowerCase().includes(needle)
-        ) {
-          continue;
-        }
-        localSeen.add(row.conversationId);
-        local.push(row);
+    for (const row of this.#list?.rows ?? []) {
+      if (localSeen.has(row.conversationId)) continue;
+      if (
+        !row.title.toLowerCase().includes(needle) &&
+        !(row.preview ?? "").toLowerCase().includes(needle)
+      ) {
+        continue;
       }
+      localSeen.add(row.conversationId);
+      local.push(row);
     }
     const [groups, people, messages] = await Promise.all([
       this.#cli.searchGroups(query).catch(() => ({
@@ -649,12 +561,7 @@ export class DingTalkService {
   async #conversationFor(conversationId: string): Promise<DingTalkConversation | null> {
     const cached =
       this.#conversations.get(conversationId) ??
-      this.#lists.unread?.rows.find(
-        (conversation) => conversation.conversationId === conversationId,
-      ) ??
-      this.#lists.recent?.rows.find(
-        (conversation) => conversation.conversationId === conversationId,
-      ) ??
+      this.#list?.rows.find((conversation) => conversation.conversationId === conversationId) ??
       null;
     // A group row is complete once it carries a member count; a direct chat
     // also needs the person's job title for the header subtitle.
@@ -699,45 +606,47 @@ export class DingTalkService {
     return person?.title || null;
   }
 
-  async #messagesResult(
-    conversationId: string,
-    cache: MessageCache,
-  ): Promise<DingTalkMessagesResult> {
-    return dingtalkMessagesResultSchema.parse({
-      available: true,
-      conversation: await this.#conversationFor(conversationId),
-      messages: cache.messages,
-      hasMore: cache.hasMore,
-      nextCursor: cache.nextCursor,
-      cachedAt: cache.fetchedAt,
-      errorCode: null,
+  #dedupe<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const active = this.#inflight.get(key) as Promise<T> | undefined;
+    if (active) return active;
+    const promise = run().finally(() => {
+      if (this.#inflight.get(key) === promise) this.#inflight.delete(key);
     });
-  }
-
-  #refresh(view: DingTalkConversationView): Promise<void> {
-    if (this.#disposed) return Promise.resolve();
-    const active = this.#refreshing.get(view);
-    if (active) {
-      this.#refreshQueued.add(view);
-      return active;
-    }
-    const promise = this.#runRefresh(view).finally(() => {
-      if (this.#refreshing.get(view) !== promise) return;
-      this.#refreshing.delete(view);
-      if (this.#refreshQueued.delete(view)) {
-        void this.#refresh(view).catch(() => undefined);
-      }
-    });
-    this.#refreshing.set(view, promise);
+    this.#inflight.set(key, promise);
     return promise;
   }
 
-  async #runRefresh(view: DingTalkConversationView): Promise<void> {
+  #refresh(queue = false): Promise<void> {
+    if (this.#disposed) return Promise.resolve();
+    const active = this.#refreshing;
+    if (active) {
+      if (queue) this.#refreshQueued = true;
+      return active;
+    }
+    const promise = this.#runRefresh().finally(() => {
+      if (this.#refreshing !== promise) return;
+      this.#refreshing = null;
+      if (this.#refreshQueued) {
+        this.#refreshQueued = false;
+        void this.#refresh().catch(() => undefined);
+      }
+    });
+    this.#refreshing = promise;
+    return promise;
+  }
+
+  async #runRefresh(): Promise<void> {
     try {
-      const auth = await this.#cli.authStatus().catch(() => null);
+      // Auth, the unread list and @me hits are independent; the slow group
+      // directory must never delay the first list.
+      const [auth, unread] = await Promise.all([
+        this.#cli.authStatus().catch(() => null),
+        this.#cli.unreadConversations(UNREAD_LIMIT),
+        this.#loadAtMe(),
+      ]);
       if (auth) this.#lastAuth = auth;
       if (!auth?.installed || !auth.authenticated) {
-        this.#lists[view] = {
+        this.#list = {
           source: "empty",
           rows: [],
           fetchedAt: this.#now(),
@@ -745,27 +654,10 @@ export class DingTalkService {
         };
         return;
       }
-      if (view === "recent") {
-        await this.#loadGroupMeta();
-        const rows = await this.#recentConversations(auth.userId);
-        this.#lists.recent = {
-          source: rows.length > 0 ? "recent" : "empty",
-          rows,
-          fetchedAt: this.#now(),
-          errorCode: null,
-        };
-        return;
-      }
-      await this.#loadGroupMeta();
-      const [unread, atMe] = await Promise.all([
-        this.#cli.unreadConversations(UNREAD_LIMIT),
-        this.#loadAtMe(),
-      ]);
-      void atMe;
       if (unread.errorCode !== null) {
-        this.#lists.unread = {
-          source: this.#lists.unread?.source === "unread" ? "unread" : "empty",
-          rows: this.#lists.unread?.rows ?? [],
+        this.#list = {
+          source: this.#list?.source === "unread" ? "unread" : "empty",
+          rows: this.#list?.rows ?? [],
           fetchedAt: this.#now(),
           errorCode: unread.errorCode,
         };
@@ -774,29 +666,42 @@ export class DingTalkService {
       for (const conversation of unread.conversations) {
         this.#conversations.set(conversation.conversationId, this.#withMeta(conversation));
       }
+      const cutoff = this.#now() - UNREAD_WINDOW_MS;
       const rows = unread.conversations
         .filter(
           (conversation) =>
+            conversation.unreadCount > 0 &&
+            (conversation.lastMessageAt ?? 0) >= cutoff &&
             (conversation.lastMessageAt ?? 0) >
-            (this.#viewedAt.get(conversation.conversationId) ?? 0),
+              (this.#viewedAt.get(conversation.conversationId) ?? 0),
         )
         .map((conversation) => this.#withMeta(conversation))
         .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
         .slice(0, UNREAD_LIMIT);
-      this.#lists.unread = {
+      this.#list = {
         source: rows.length > 0 ? "unread" : "empty",
         rows,
         fetchedAt: this.#now(),
         errorCode: null,
       };
+      this.#startGroupMeta();
     } catch {
-      this.#lists[view] = {
-        source: this.#lists[view]?.source ?? "empty",
-        rows: this.#lists[view]?.rows ?? [],
+      this.#list = {
+        source: this.#list?.source ?? "empty",
+        rows: this.#list?.rows ?? [],
         fetchedAt: this.#now(),
         errorCode: "dws_failed",
       };
     }
+  }
+
+  /** Group badges fill in later and ask the page for one light re-read. */
+  #startGroupMeta(): void {
+    void this.#loadGroupMeta().then((loaded) => {
+      if (!loaded || this.#disposed) return;
+      if (this.#list) this.#list.rows = this.#list.rows.map((row) => this.#withMeta(row));
+      this.#notify(null);
+    });
   }
 
   #withMeta(conversation: DingTalkConversation): DingTalkConversation {
@@ -815,70 +720,29 @@ export class DingTalkService {
     };
   }
 
-  async #loadGroupMeta(): Promise<void> {
-    if (this.#groupMeta && this.#now() - this.#groupMetaAt < GROUP_META_TTL_MS) return;
+  async #loadGroupMeta(): Promise<boolean> {
+    if (this.#groupMeta && this.#now() - this.#groupMetaAt < GROUP_META_TTL_MS) return false;
     const result = await this.#cli.groupDirectory().catch(() => null);
-    if (result?.directory) {
-      this.#groupMeta = result.directory;
-      this.#groupMetaAt = this.#now();
-    }
+    if (!result?.directory) return false;
+    this.#groupMeta = result.directory;
+    this.#groupMetaAt = this.#now();
+    return true;
   }
 
   async #loadAtMe(): Promise<void> {
-    if (this.#now() - this.#atMeAt < AT_ME_TTL_MS) return;
     const result = await this.#cli.atMeHits(7, 50).catch(() => null);
-    if (!result || result.errorCode !== null) {
-      this.#atMeAt = this.#now();
-      return;
-    }
+    if (!result || result.errorCode !== null) return;
     const next = new Map<string, number>();
     for (const hit of result?.hits ?? []) {
       if (hit.createdAt === null) continue;
       next.set(hit.conversationId, Math.max(next.get(hit.conversationId) ?? 0, hit.createdAt));
     }
     this.#atMe = next;
-    this.#atMeAt = this.#now();
-  }
-
-  async #recentConversations(userId: string | null): Promise<DingTalkConversation[]> {
-    if (!userId) return [];
-    const sent = await this.#cli.searchMessages({
-      senderIds: [userId],
-      days: RECENT_WINDOW_DAYS,
-      limit: 100,
-    });
-    const latest = new Map<string, DingTalkMessage>();
-    for (const message of sent.messages) {
-      const existing = latest.get(message.conversationId);
-      if (!existing || message.createdAt > existing.createdAt) {
-        latest.set(message.conversationId, message);
-      }
-    }
-    const rows = [...latest.values()]
-      .sort((left, right) => right.createdAt - left.createdAt)
-      .slice(0, RECENT_LIMIT);
-    const conversations = await mapLimit<DingTalkMessage, DingTalkConversation | null>(
-      rows,
-      4,
-      async (message) => {
-        const known =
-          this.#conversations.get(message.conversationId) ??
-          (await this.#conversationFor(message.conversationId));
-        if (!known) return null;
-        return {
-          ...this.#withMeta(known),
-          unreadCount: 0,
-          lastMessageAt: message.createdAt,
-          preview: `我：${dingtalkMessageSummary(message)}`,
-        };
-      },
-    );
-    return conversations.filter((row): row is DingTalkConversation => row !== null);
   }
 
   #onEvent(record: DwsEventRecord): void {
     if (this.#disposed) return;
-    const list = this.#lists.unread;
+    const list = this.#list;
     if (list?.source === "unread") {
       const previous = list.rows.find(
         (conversation) => conversation.conversationId === record.conversationId,
@@ -898,16 +762,20 @@ export class DingTalkService {
         lastMessageAt: Math.max(known.lastMessageAt ?? 0, record.createdAt),
         preview: previewOf(record.text),
       };
-      const rows = [
-        updated,
-        ...list.rows.filter((row) => row.conversationId !== record.conversationId),
-      ].sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0));
-      this.#lists.unread = { ...list, rows: rows.slice(0, UNREAD_LIMIT) };
+      const visible =
+        (updated.lastMessageAt ?? 0) >= this.#now() - UNREAD_WINDOW_MS &&
+        (updated.lastMessageAt ?? 0) > (this.#viewedAt.get(record.conversationId) ?? 0);
+      const rows = (
+        visible
+          ? [updated, ...list.rows.filter((row) => row.conversationId !== record.conversationId)]
+          : list.rows.filter((row) => row.conversationId !== record.conversationId)
+      )
+        .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
+        .slice(0, UNREAD_LIMIT);
+      this.#list = { ...list, source: rows.length > 0 ? "unread" : "empty", rows };
     } else {
-      void this.#refresh("unread").catch(() => undefined);
+      void this.#refresh(true).catch(() => undefined);
     }
-    this.#previews.delete(record.conversationId);
-    this.#messages.delete(record.conversationId);
     if (!this.#conversations.get(record.conversationId)?.title) {
       void this.#conversationFor(record.conversationId).catch(() => undefined);
     }

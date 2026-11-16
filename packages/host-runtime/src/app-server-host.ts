@@ -3569,7 +3569,7 @@ export class AppServerHost {
       if (!parsed.success) {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk conversation request");
       }
-      return await service.conversations(parsed.data);
+      return await service.conversations();
     }
     if (request.method === DINGTALK_PREVIEW_METHOD) {
       const parsed = dingtalkPreviewParamsSchema.safeParse(request.params);

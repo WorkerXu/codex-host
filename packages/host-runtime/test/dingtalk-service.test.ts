@@ -8,32 +8,21 @@ import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-co
 import type { DingTalkCli } from "../src/dingtalk-cli.js";
 import { DingTalkService } from "../src/dingtalk-service.js";
 
-function conversation(id: string, lastMessageAt: number, unreadCount = 1): DingTalkConversation {
+const RECENT_BASE = Date.now() - 60 * 60_000;
+
+function conversation(id: string, offset: number, unreadCount = 1): DingTalkConversation {
   return {
     conversationId: id,
     title: `会话 ${id}`,
     singleChat: false,
     unreadCount,
-    lastMessageAt,
+    lastMessageAt: RECENT_BASE + offset,
     muted: false,
-  };
-}
-
-function message(id: string, conversationId: string, createdAt: number): DingTalkMessage {
-  return {
-    messageId: id,
-    conversationId,
-    senderName: "我",
-    createdAt,
-    text: "收到",
-    unsupported: false,
-    mine: true,
   };
 }
 
 interface FakeState {
   unread: DingTalkConversation[];
-  sent: DingTalkMessage[];
   messages: DingTalkMessage[];
   groups: DingTalkConversation[];
   people: {
@@ -45,7 +34,6 @@ interface FakeState {
   messageCalls: number;
   previewCalls: number;
   info: Record<string, DingTalkConversation>;
-  recentDelay?: Promise<void>;
 }
 
 function fakeCli(state: FakeState): DingTalkCli {
@@ -88,13 +76,7 @@ function fakeCli(state: FakeState): DingTalkCli {
         errorCode: null,
       };
     },
-    searchMessages: async (input) => {
-      if (input.senderIds?.includes("me")) {
-        if (state.recentDelay) await state.recentDelay;
-        return { messages: state.sent, errorCode: null };
-      }
-      return { messages: state.messages, errorCode: null };
-    },
+    searchMessages: async () => ({ messages: state.messages, errorCode: null }),
     send: async () => ({ ok: true, errorCode: null }),
     openEvents: async () => null,
   };
@@ -111,7 +93,6 @@ async function environment(): Promise<NodeJS.ProcessEnv> {
 function state(overrides: Partial<FakeState> = {}): FakeState {
   return {
     unread: [],
-    sent: [],
     messages: [],
     groups: [],
     people: [],
@@ -166,7 +147,7 @@ describe("DingTalk conversation views", () => {
       errorCode: null,
     });
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
-    const result = await service.conversations({ view: "unread" });
+    const result = await service.conversations();
     expect(result.source).toBe("unread");
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a", "b"]);
     expect(result.conversations[0]).toMatchObject({
@@ -177,101 +158,133 @@ describe("DingTalk conversation views", () => {
     service.dispose();
   });
 
-  it("lists the 10 most recent conversations I sent messages in", async () => {
+  it("only lists unread conversations from the last 48 hours", async () => {
     const env = await environment();
-    const sent = Array.from({ length: 14 }, (_unused, index) =>
-      message(`m${index}`, `c${index % 12}`, 1_000 - index),
-    );
-    const fake = state({ sent });
+    const fake = state({
+      unread: [
+        conversation("fresh", 200),
+        conversation("stale", -49 * 60 * 60_000),
+        conversation("read", 100, 0),
+      ],
+    });
     const service = new DingTalkService({
       environment: env,
       isLocalHost: true,
       cli: fakeCli(fake),
     });
-    fake.info = Object.fromEntries(
-      Array.from({ length: 12 }, (_unused, index) => [
-        `c${index}`,
-        { ...conversation(`c${index}`, 1_000 - index), title: `会话 c${index}` },
-      ]),
-    );
-    const result = await service.conversations({ view: "recent" });
-    expect(result.source).toBe("recent");
-    expect(result.conversations).toHaveLength(10);
-    expect(new Set(result.conversations.map(({ conversationId }) => conversationId)).size).toBe(10);
-    expect(result.conversations[0]?.conversationId).toBe("c0");
-    expect(result.conversations[0]?.preview).toMatch(/^我：/u);
+    const result = await service.conversations();
+    expect(result.source).toBe("unread");
+    expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["fresh"]);
     service.dispose();
   });
 
-  it("keeps the unread and recent caches separate", async () => {
+  it("returns an empty state when nothing is unread in 48 hours", async () => {
     const env = await environment();
-    const fake = state({
-      unread: [conversation("a", 100)],
-      sent: [message("m1", "b", 90)],
-      info: { b: { ...conversation("b", 90), title: "会话 b" } },
-    });
+    const fake = state({ unread: [conversation("stale", -49 * 60 * 60_000)] });
     const service = new DingTalkService({
       environment: env,
       isLocalHost: true,
       cli: fakeCli(fake),
     });
-    const unread = await service.conversations({ view: "unread" });
-    const recent = await service.conversations({ view: "recent" });
-    expect(unread.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
-    expect(recent.conversations.map(({ conversationId }) => conversationId)).toEqual(["b"]);
+    const result = await service.conversations();
+    expect(result.source).toBe("empty");
+    expect(result.conversations).toHaveLength(0);
     service.dispose();
   });
 
-  it("serves the cached recent view while a slow refresh runs", async () => {
+  it("loads auth, unread and @me concurrently", async () => {
     const env = await environment();
-    const fake = state({
-      sent: [message("m1", "c1", 100)],
-      info: { c1: { ...conversation("c1", 100), title: "会话 c1" } },
-    });
-    let now = 1_000_000;
-    let release;
-    const service = new DingTalkService({
-      environment: env,
-      isLocalHost: true,
-      cli: fakeCli(fake),
-      now: () => now,
-    });
-    await service.conversations({ view: "recent" });
-    fake.recentDelay = new Promise((resolve) => {
+    const fake = state({ unread: [conversation("a", 100)] });
+    const cli = fakeCli(fake);
+    let authStarted = false;
+    let unreadStarted = false;
+    let atMeStarted = false;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    now += 5 * 60_000;
-    const started = Date.now();
-    const result = await service.conversations({ view: "recent" });
-    expect(Date.now() - started).toBeLessThan(100);
-    expect(result.conversations).toHaveLength(1);
-    release?.();
+    const arrive = (): void => {
+      if (authStarted && unreadStarted && atMeStarted) release?.();
+    };
+    cli.authStatus = async () => {
+      authStarted = true;
+      arrive();
+      await gate;
+      return {
+        installed: true,
+        authenticated: true,
+        userId: "me",
+        userName: "我",
+        corpName: "测试公司",
+        errorCode: null,
+      };
+    };
+    cli.unreadConversations = async () => {
+      unreadStarted = true;
+      arrive();
+      await gate;
+      return { conversations: fake.unread, errorCode: null };
+    };
+    cli.atMeHits = async () => {
+      atMeStarted = true;
+      arrive();
+      await gate;
+      return { hits: [], errorCode: null };
+    };
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    const result = await Promise.race([
+      service.conversations(),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("requests ran sequentially")), 2_000),
+      ),
+    ]);
+    expect(authStarted).toBe(true);
+    expect(unreadStarted).toBe(true);
+    expect(atMeStarted).toBe(true);
+    expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
+    service.dispose();
+  });
+
+  it("never blocks the first list on the group directory", async () => {
+    const env = await environment();
+    const fake = state({ unread: [conversation("a", 100)] });
+    const cli = fakeCli(fake);
+    cli.groupDirectory = async () => new Promise(() => undefined);
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    const result = await Promise.race([
+      service.conversations(),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("group directory blocked the list")), 2_000),
+      ),
+    ]);
+    expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
     service.dispose();
   });
 
   it("hides a viewed conversation until a newer message arrives", async () => {
     const env = await environment();
-    const fake = state({ unread: [conversation("a", 100)] });
+    const row = conversation("a", 100);
+    const fake = state({ unread: [row] });
     const service = new DingTalkService({
       environment: env,
       isLocalHost: true,
       cli: fakeCli(fake),
     });
-    await service.markViewed("a", 100);
-    const hidden = await service.conversations({ view: "unread" });
+    await service.markViewed("a", row.lastMessageAt ?? 0);
+    const hidden = await service.conversations();
     expect(hidden.source).toBe("empty");
     expect(hidden.conversations).toHaveLength(0);
 
     fake.unread = [conversation("a", 200)];
-    void service.conversations({ view: "unread", refresh: true });
+    void service.conversations();
     await new Promise((resolve) => setTimeout(resolve, 60));
-    const shown = await service.conversations({ view: "unread" });
+    const shown = await service.conversations();
     expect(shown.source).toBe("unread");
     expect(shown.conversations[0]?.conversationId).toBe("a");
     service.dispose();
   });
 
-  it("caches the newest message preview per conversation", async () => {
+  it("reads the newest message preview on every request", async () => {
     const env = await environment();
     const received: DingTalkMessage = {
       messageId: "m1",
@@ -292,7 +305,36 @@ describe("DingTalk conversation views", () => {
     const second = await service.preview("a");
     expect(first.preview).toBe("吴菁：预算表我改完第二版了。");
     expect(second.preview).toBe(first.preview);
+    expect(fake.messageCalls).toBe(2);
+    service.dispose();
+  });
+
+  it("de-duplicates identical concurrent message reads", async () => {
+    const env = await environment();
+    const received: DingTalkMessage = {
+      messageId: "m1",
+      conversationId: "a",
+      senderName: "吴菁",
+      createdAt: 100,
+      text: "收到",
+      unsupported: false,
+      mine: false,
+    };
+    const fake = state({ messages: [received] });
+    const cli = fakeCli(fake);
+    cli.messages = async () => {
+      fake.messageCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return { messages: fake.messages, hasMore: false, nextCursor: null, errorCode: null };
+    };
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    const [first, second] = await Promise.all([
+      service.messages({ conversationId: "a", limit: 30 }),
+      service.messages({ conversationId: "a", limit: 30 }),
+    ]);
     expect(fake.messageCalls).toBe(1);
+    expect(first.messages).toHaveLength(1);
+    expect(second.messages).toHaveLength(1);
     service.dispose();
   });
 });
@@ -367,9 +409,9 @@ describe("DingTalk keyword search", () => {
 });
 
 describe("DingTalk change notifications", () => {
-  it("does not push a notification for a pull refresh", async () => {
+  it("does not push a conversation notification for a pull refresh", async () => {
     const env = await environment();
-    const changes: unknown[] = [];
+    const changes: { conversationId: string | null }[] = [];
     const fake = state({ unread: [conversation("a", 100)] });
     const service = new DingTalkService({
       environment: env,
@@ -377,10 +419,10 @@ describe("DingTalk change notifications", () => {
       cli: fakeCli(fake),
       onChange: (event) => changes.push(event),
     });
-    await service.conversations({ view: "unread" });
-    await service.conversations({ view: "unread", refresh: true });
+    await service.conversations();
+    await service.conversations();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(changes).toHaveLength(0);
+    expect(changes.filter((event) => event.conversationId !== null)).toHaveLength(0);
     service.dispose();
   });
 });
