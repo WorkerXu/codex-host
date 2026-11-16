@@ -81,27 +81,25 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 4))).toMatchObject({
-        result: {
-          enabled: false,
-          matchThreshold: 0.85,
-          replyScope: "group",
-          participatingAgents: ["terra_worker"],
-        },
+        result: { threshold: 0.85, agents: {} },
       });
 
       writeRequest(fixture.desktopInput, {
         id: 5,
         method: "codexhost/dingtalk-dispatch/set",
         params: {
-          enabled: true,
-          eventTypes: ["mention_me", "approval_pending"],
-          matchThreshold: 0.9,
-          replyScope: "direct",
-          participatingAgents: ["terra_worker"],
+          threshold: 0.9,
+          agents: {
+            "terra_worker.toml": {
+              enabled: true,
+              eventTypes: ["mention_me", "approval_pending"],
+              replyScope: "direct",
+            },
+          },
         },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 5))).toMatchObject({
-        result: { enabled: true, replyScope: "direct", matchThreshold: 0.9 },
+        result: { threshold: 0.9, agents: { "terra_worker.toml": { enabled: true } } },
       });
 
       writeRequest(fixture.desktopInput, {
@@ -111,6 +109,16 @@ describe("Host Codex agent and DingTalk RPC", () => {
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 6))).toMatchObject({
         result: { fileName: "terra_worker.toml" },
+      });
+
+      // Deleting an agent also removes it from DingTalk participation.
+      writeRequest(fixture.desktopInput, {
+        id: 7,
+        method: "codexhost/dingtalk-dispatch/get",
+        params: {},
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 7))).toMatchObject({
+        result: { threshold: 0.9, agents: {} },
       });
     } finally {
       await stopFixture(fixture);

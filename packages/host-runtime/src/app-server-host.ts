@@ -143,7 +143,10 @@ import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
 import { DingTalkServiceError, type DingTalkService } from "./dingtalk-service.js";
 import { CodexAgentError, type CodexAgentStore } from "./codex-agents.js";
 import { codexAgentCatalogFromModelList } from "./codex-agent-models.js";
-import type { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
+import type {
+  DingTalkDispatchAgent,
+  DingTalkDispatchSettingsStore,
+} from "./dingtalk-dispatch-settings.js";
 import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
@@ -3788,7 +3791,7 @@ export class AppServerHost {
     try {
       let result: unknown;
       if (request.method === DINGTALK_DISPATCH_GET_METHOD) {
-        result = await store.read(await this.#defaultDingTalkAgents());
+        result = await store.read(await this.#dingTalkDispatchAgents());
       } else if (request.method === DINGTALK_DISPATCH_SET_METHOD) {
         const params = dingtalkDispatchSettingsSchema.safeParse(request.params);
         if (!params.success) {
@@ -3809,17 +3812,19 @@ export class AppServerHost {
     }
   }
 
-  /** Without a saved file, every agent that has a description is opted in. */
-  async #defaultDingTalkAgents(): Promise<string[]> {
+  /** Null keeps existing entries when the agent list cannot be read. */
+  async #dingTalkDispatchAgents(): Promise<DingTalkDispatchAgent[] | null> {
     const store = this.#options.codexAgents;
-    if (!store) return [];
+    if (!store) return null;
     try {
       const listed = await store.list();
-      return listed.agents
-        .filter((agent) => agent.description.trim().length > 0)
-        .map((agent) => agent.name);
+      return listed.agents.map((agent) => ({
+        fileName: agent.fileName,
+        name: agent.name,
+        description: agent.description,
+      }));
     } catch {
-      return [];
+      return null;
     }
   }
 

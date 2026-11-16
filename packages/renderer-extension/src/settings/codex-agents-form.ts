@@ -3,11 +3,15 @@ import {
   CODEX_AGENT_EFFORT_MAX_LENGTH,
   CODEX_AGENT_INSTRUCTIONS_MAX_LENGTH,
   CODEX_AGENT_MODEL_MAX_LENGTH,
+  defaultDingTalkAgentDispatch,
+  dingtalkAgentDispatchFor,
   isCodexAgentName,
   type CodexAgentCatalogResult,
   type CodexAgentModelEffort,
   type CodexAgentRecord,
   type CodexAgentSaveParams,
+  type DingTalkAgentDispatch,
+  type DingTalkDispatchSettings,
 } from "@codexhost/shared-contracts";
 
 export interface CodexAgentDraft {
@@ -144,6 +148,35 @@ export function validateAgentDraft(
 export function parseDingTalkMatchThreshold(raw: string): number | null {
   const value = raw.trim() ? Number(raw) : Number.NaN;
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+/** The editor starts from the saved choice, or from every type and group replies. */
+export function agentDingTalkDraft(
+  settings: DingTalkDispatchSettings,
+  fileName: string | null,
+): DingTalkAgentDispatch {
+  return fileName === null
+    ? defaultDingTalkAgentDispatch()
+    : dingtalkAgentDispatchFor(settings, fileName);
+}
+
+/**
+ * Applies one agent's DingTalk choice without touching other agents or the
+ * threshold. A brand-new agent that is left off keeps no entry at all.
+ */
+export function withAgentDingTalk(
+  settings: DingTalkDispatchSettings,
+  fileName: string,
+  draft: DingTalkAgentDispatch,
+): DingTalkDispatchSettings {
+  if (!draft.enabled && !(fileName in settings.agents)) return settings;
+  return {
+    ...settings,
+    agents: {
+      ...settings.agents,
+      [fileName]: { ...draft, eventTypes: [...draft.eventTypes] },
+    },
+  };
 }
 
 export function agentSaveParamsFromDraft(draft: CodexAgentDraft): CodexAgentSaveParams {

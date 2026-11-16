@@ -158,7 +158,8 @@
 
 .agent-card:hover .agent-card-tools,
 .agent-card:focus-within .agent-card-tools,
-.agent-card--editing .agent-card-tools {
+.agent-card--editing .agent-card-tools,
+.agent-card--menu-open .agent-card-tools {
   opacity: 1;
 }
 
@@ -749,14 +750,6 @@
   border-top: 1px solid var(--color-token-border-light);
 }
 
-.dingtalk-field-head {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .dingtalk-field-title {
   color: var(--color-token-text-primary);
   font-size: var(--font-text-sm-size);
@@ -769,12 +762,6 @@
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-field-actions {
-  display: flex;
-  flex: none;
-  gap: 12px;
 }
 
 .dingtalk-check-list {
@@ -836,32 +823,6 @@
   line-height: var(--font-text-xs-line-height);
 }
 
-.dingtalk-agent-list {
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.dingtalk-agent-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.dingtalk-agent-name {
-  overflow: hidden;
-  color: var(--color-token-text-primary);
-  font-size: var(--font-text-sm-size);
-  line-height: var(--font-text-sm-line-height);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dingtalk-agent-meta {
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-}
-
 .dingtalk-listener-note {
   margin: 8px;
   color: var(--color-token-text-tertiary);
@@ -887,11 +848,163 @@
   color: var(--color-background-danger-solid, #e02e2a);
 }
 
-.agent-menu-item:focus-visible,
+/* Card actions popover */
+.agent-menu {
+  position: fixed;
+  z-index: 85;
+  display: flex;
+  width: 168px;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--color-token-dropdown-background);
+  border: 1px solid var(--color-token-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dropdown-overlay, 0 10px 30px rgb(0 0 0 / 14%));
+}
+
+.agent-menu-item {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--color-token-text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+  text-align: left;
+}
+
+.agent-menu-item:hover,
+.agent-menu-item:focus-visible {
+  outline: none;
+  background: var(--color-token-interactive-bg-secondary-hover);
+}
+
+.agent-menu-item--danger {
+  color: var(--color-text-danger, var(--color-background-danger-solid, #e02e2a));
+}
+
+.agent-menu-item--danger:hover,
+.agent-menu-item--danger:focus-visible {
+  color: var(--color-text-danger, var(--color-background-danger-solid, #e02e2a));
+  background: var(--color-background-danger-surface, rgb(224 46 42 / 8%));
+}
+
+/* Delete confirmation, in the page style */
+.agent-confirm {
+  width: min(360px, calc(100vw - 40px));
+  max-width: none;
+  padding: 20px;
+  color: var(--color-token-text-primary);
+  background: var(--color-token-dropdown-background);
+  border: 1px solid var(--color-token-border-default);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xl, 0 20px 25px -5px rgb(0 0 0 / 10%));
+}
+
+.agent-confirm::backdrop {
+  background: var(--color-dialog-overlay, rgb(0 0 0 / 28%));
+}
+
+.agent-confirm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-confirm-title {
+  margin: 0;
+  color: var(--color-token-text-primary);
+  font-size: var(--font-text-md-size);
+  font-weight: 600;
+  line-height: var(--font-text-md-line-height);
+}
+
+.agent-confirm-message {
+  margin: 0;
+  color: var(--color-token-text-secondary);
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+}
+
+.agent-confirm-error {
+  margin: 0;
+  color: var(--color-background-danger-solid, #e02e2a);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.agent-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.agent-danger {
+  display: inline-flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  color: var(--color-text-danger-solid, #fff);
+  background: var(--color-background-danger-solid, #e02e2a);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-text-sm-size);
+  font-weight: 500;
+  line-height: var(--font-text-sm-line-height);
+}
+
+.agent-danger:hover:not(:disabled) {
+  background: var(--color-background-danger-solid-hover, #ba2623);
+}
+
+.agent-danger:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.agent-danger:focus-visible,
+.agent-confirm-actions .agent-secondary:focus-visible {
+  outline: 2px solid var(--color-token-text-link-foreground);
+  outline-offset: 2px;
+}
+
+/* Per-agent DingTalk group inside the editor */
+.agent-dingtalk-switch {
+  min-height: 48px;
+  padding: 0;
+}
+
+.agent-dingtalk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity 120ms ease;
+}
+
+.agent-dingtalk-body[data-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.dingtalk-listener-field--first {
+  padding-top: 12px;
+  border-top: 0;
+}
+
 .agent-card-menu:focus-visible,
 .agent-editor-close:focus-visible,
-.dingtalk-check-row:focus-within,
-.dingtalk-text-button:focus-visible {
+.dingtalk-check-row:focus-within {
   outline: 2px solid var(--color-token-text-link-foreground);
   outline-offset: 1px;
 }

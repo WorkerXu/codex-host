@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { CodexAgentCatalogResult, CodexAgentRecord } from "@codexhost/shared-contracts";
+import type {
+  CodexAgentCatalogResult,
+  CodexAgentRecord,
+  DingTalkDispatchSettings,
+} from "@codexhost/shared-contracts";
+import { defaultDingTalkDispatchSettings } from "@codexhost/shared-contracts";
 
 import {
+  agentDingTalkDraft,
   agentDraftFromRecord,
   agentSaveParamsFromDraft,
   duplicateAgentDraft,
@@ -11,6 +17,7 @@ import {
   nextDuplicateName,
   parseDingTalkMatchThreshold,
   validateAgentDraft,
+  withAgentDingTalk,
 } from "../../src/settings/codex-agents-form.js";
 import { codexAgentsMessagesChinese } from "../../src/settings/codex-agents-messages.js";
 
@@ -157,9 +164,80 @@ describe("Codex agent form logic", () => {
   });
 
   it("states the approval rule without granting approval changes", () => {
-    expect(codexAgentsMessagesChinese.dingtalk.approvalNote).toBe(
-      "审批：智能体按你的配置处理，但不会直接同意、拒绝或撤销审批，审批状态由你决定。",
+    expect(codexAgentsMessagesChinese.dingtalk.approvalNote).toContain(
+      "不会替你同意、拒绝或撤销审批",
     );
     expect(codexAgentsMessagesChinese.dingtalk.approvalNote).not.toMatch(/自动通过/);
+  });
+
+  it("edits one agent's DingTalk choice without touching the others", () => {
+    const saved: DingTalkDispatchSettings = {
+      threshold: 0.9,
+      agents: {
+        "reviewer.toml": {
+          enabled: true,
+          eventTypes: ["mention_me"],
+          replyScope: "group",
+        },
+      },
+    };
+    const draft = agentDingTalkDraft(saved, "reviewer.toml");
+    expect(draft).toEqual({
+      enabled: true,
+      eventTypes: ["mention_me"],
+      replyScope: "group",
+    });
+
+    const next = withAgentDingTalk(saved, "writer.toml", {
+      enabled: true,
+      eventTypes: ["approval_pending"],
+      replyScope: "direct",
+    });
+    expect(next.threshold).toBe(0.9);
+    expect(next.agents["reviewer.toml"]).toEqual(saved.agents["reviewer.toml"]);
+    expect(next.agents["writer.toml"]).toEqual({
+      enabled: true,
+      eventTypes: ["approval_pending"],
+      replyScope: "direct",
+    });
+  });
+
+  it("gives a new agent the default choice and keeps it out of the map while off", () => {
+    expect(agentDingTalkDraft(defaultDingTalkDispatchSettings(), null)).toEqual({
+      enabled: false,
+      eventTypes: ["mention_me", "mention_all", "approval_pending"],
+      replyScope: "group",
+    });
+    const saved = defaultDingTalkDispatchSettings();
+    expect(
+      withAgentDingTalk(saved, "new.toml", {
+        enabled: false,
+        eventTypes: ["mention_me"],
+        replyScope: "group",
+      }),
+    ).toBe(saved);
+  });
+
+  it("keeps an entry when an existing agent turns listening off", () => {
+    const saved: DingTalkDispatchSettings = {
+      threshold: 0.85,
+      agents: {
+        "reviewer.toml": {
+          enabled: true,
+          eventTypes: ["mention_me"],
+          replyScope: "direct",
+        },
+      },
+    };
+    const next = withAgentDingTalk(saved, "reviewer.toml", {
+      enabled: false,
+      eventTypes: ["mention_me"],
+      replyScope: "direct",
+    });
+    expect(next.agents["reviewer.toml"]).toEqual({
+      enabled: false,
+      eventTypes: ["mention_me"],
+      replyScope: "direct",
+    });
   });
 });
