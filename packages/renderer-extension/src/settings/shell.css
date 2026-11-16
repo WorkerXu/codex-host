@@ -2561,8 +2561,20 @@
   max-width: 980px;
 }
 
+.settings-jarvis-header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 18px;
+}
+
+.settings-jarvis-header .settings-section-label {
+  padding-bottom: 0;
+}
+
 .settings-jarvis-body {
-  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;

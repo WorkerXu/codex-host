@@ -73,16 +73,14 @@ export function createJarvisSettingsPage(
       geminiSection.body.append(keyActions, keyStatus);
 
       const machinesSection = section(document, text.machinesSection);
-      const machineToolbar = document.createElement("div");
-      machineToolbar.className = "settings-jarvis-actions";
       const refreshMachines = button(document, text.refresh, "secondary");
-      machineToolbar.append(refreshMachines);
+      machinesSection.header.append(refreshMachines);
       const machineList = document.createElement("div");
       machineList.className = "settings-jarvis-machines";
       const machineStatus = document.createElement("p");
       machineStatus.className = "settings-jarvis-status";
       machineStatus.setAttribute("role", "status");
-      machinesSection.body.append(machineToolbar, machineList, machineStatus);
+      machinesSection.body.append(machineList, machineStatus);
       context.content.append(geminiSection.root, machinesSection.root);
 
       const rows = new Map<string, MachineRowState>();
@@ -402,16 +400,22 @@ function errorText(error: unknown): string {
     : "jarvis_failed";
 }
 
-function section(document: Document, title: string): { root: HTMLElement; body: HTMLElement } {
+function section(
+  document: Document,
+  title: string,
+): { root: HTMLElement; header: HTMLElement; body: HTMLElement } {
   const root = document.createElement("section");
   root.className = "settings-jarvis-section";
+  const header = document.createElement("div");
+  header.className = "settings-jarvis-header";
   const label = document.createElement("div");
   label.className = "settings-section-label";
   label.textContent = title;
+  header.append(label);
   const body = document.createElement("div");
   body.className = "settings-jarvis-body";
-  root.append(label, body);
-  return { root, body };
+  root.append(header, body);
+  return { root, header, body };
 }
 
 function button(

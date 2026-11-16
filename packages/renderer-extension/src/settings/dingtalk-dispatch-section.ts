@@ -59,14 +59,12 @@ export function createDingTalkDispatchSection(
   note.className = "dingtalk-listener-note";
   note.textContent = text.approvalNote;
 
-  const footer = document.createElement("div");
-  footer.className = "dingtalk-listener-footer";
   const status = document.createElement("span");
   status.className = "dingtalk-listener-status";
   status.setAttribute("role", "status");
-  footer.append(status);
+  status.hidden = true;
 
-  card.append(thresholdField, note, footer);
+  card.append(thresholdField, note, status);
   root.append(head, card);
 
   const setStatus = (state: SectionStatus): void => {
@@ -79,6 +77,7 @@ export function createDingTalkDispatchSection(
             ? text.saveFailed
             : "";
     status.dataset.state = state;
+    status.hidden = state === "idle";
   };
 
   const setThreshold = (value: number): void => {
