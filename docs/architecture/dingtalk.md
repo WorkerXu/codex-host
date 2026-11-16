@@ -28,7 +28,8 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 ## 默认 Host 与跨机路由
 
 - 每台 Host 都可以运行 DingTalk 服务，但真正的 `dws` 只在登录了钉钉的那台机器上执行。
-- 设置页（仅本地 Host）保存 `~/.config/codexhost/dingtalk-settings.json` 的 `defaultHost`，可选本地或任一 `peers.json` 中的 peer；未设置时优先 `tencent` peer，没有该 peer 则用本机。
+- DingTalk Host 固定使用 `peers.json` 里的 `tencent` 登录；没有该 peer 时才退回本机。界面不提供登录机器选择，`~/.config/codexhost/dingtalk-settings.json` 的 `defaultHost` 仍会被读取，供以后手工修改或迁移使用。
+- 工作台不提供「钉钉登录 / 默认机器」下拉。⋯ 菜单只显示一行连接状态：已连接时显示 `已连接 · <userName>（<corpName>）`，未登录显示「钉钉未登录」，tencent 不可达显示「无法连接钉钉服务」；后两种状态附「重试」。
 - 读取请求通过 `peer-exec` 的 `/v1/dingtalk/dws` 路由转发同一组参数数组；对端 Host 执行本机 `dws` 并原样返回 stdout、stderr 与退出码。目标机器上设置自动解析为本机，因此同一份默认值在 Mac 和 tencent 上都指向 tencent 的登录。
 - 图片下载通过同级的 `/v1/dingtalk/media` 路由在登录机器上执行，只接受会话、消息和资源 id；返回 base64、MIME 和大小。缓存目录按运行时隔离，不读取 `~/.codexhost/runtime/`。
 - CLI 透传 `codexhost dingtalk dws [--host <peer|Host ID>] [--yes] -- <dws args>`：只读命令白名单直接执行；其余命令（包括未知的新命令）视为写操作，缺少 `--yes` 时在启动任何进程前拒绝。
