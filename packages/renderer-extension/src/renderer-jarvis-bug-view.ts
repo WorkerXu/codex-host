@@ -101,12 +101,18 @@ export function jarvisRelativeTime(
 }
 
 /** The single 「Jarvis」 row for previews and the entry section. */
-export function createJarvisEntryRow(document: Document, locale: string): HTMLElement {
+export function createJarvisEntryRow(
+  document: Document,
+  locale: string,
+  query?: string,
+): HTMLElement {
+  const description = query ? "" : locale === "zh-CN" ? "搜索 Bug" : "Search bugs";
   return createWorkbenchRow(document, {
     rowAttribute: JARVIS_ENTRY_ROW_ATTRIBUTE,
     icon: createJarvisMark(document, 16),
-    label: "Jarvis",
-    description: locale === "zh-CN" ? "搜索 Bug" : "Search bugs",
+    label: query ? `Jarvis：${query}` : "Jarvis",
+    description,
+    singleLine: Boolean(query),
   });
 }
 

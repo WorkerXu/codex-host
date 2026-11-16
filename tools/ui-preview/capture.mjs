@@ -41,9 +41,13 @@ const allScenarios = [
   "at-entry-native",
   "at-entry-native-visible",
   "jarvis-entry",
+  "jarvis-entry-query",
+  "jarvis-mode-prefilled",
   "jarvis-mode-loading",
   "jarvis-mode-results",
   "jarvis-mode-empty",
+  "jarvis-mode-error",
+  "jarvis-mode-slow",
   "jarvis-mode-conditions",
   "jarvis-mode-chip-removed",
 ];
@@ -575,7 +579,10 @@ for (const scenario of scenarios) {
       if (
         document.body.dataset.scenario === "jarvis-mode-loading" ||
         document.body.dataset.scenario === "jarvis-mode-results" ||
+        document.body.dataset.scenario === "jarvis-mode-prefilled" ||
         document.body.dataset.scenario === "jarvis-mode-empty" ||
+        document.body.dataset.scenario === "jarvis-mode-error" ||
+        document.body.dataset.scenario === "jarvis-mode-slow" ||
         document.body.dataset.scenario === "jarvis-mode-conditions" ||
         document.body.dataset.scenario === "jarvis-mode-chip-removed"
       ) {
@@ -594,6 +601,40 @@ for (const scenario of scenarios) {
           Boolean(input) && document.activeElement === input,
           document.activeElement?.tagName ?? "",
         );
+      }
+      if (document.body.dataset.scenario === "jarvis-entry-query") {
+        const row = query("[data-codexhost-jarvis-entry-row]");
+        check(
+          "query-row-label",
+          Boolean(row?.textContent?.includes("Jarvis：我还没处理完的bug")),
+          row?.textContent ?? "",
+        );
+        check("query-no-mode", !query("[data-codexhost-jarvis-mode]"));
+        check(
+          "query-no-search-before-selection",
+          (window.__jarvisPreviewSearchCalls ?? 0) === 0,
+          String(window.__jarvisPreviewSearchCalls ?? 0),
+        );
+        check(
+          "query-row-in-native-scroller",
+          Boolean(query("[data-mention-list-scroll-area]")?.contains(row)),
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-prefilled") {
+        const mode = query("[data-codexhost-jarvis-mode]");
+        const input = mode?.querySelector("input");
+        check("prefilled-query", input?.value === "示例买的最近的bug", input?.value ?? "");
+        check(
+          "prefill-token-removed",
+          document.body.dataset.jarvisEditorText?.includes("@示例买") !== true,
+          document.body.dataset.jarvisEditorText ?? "",
+        );
+        check(
+          "prefill-search-started",
+          document.body.dataset.jarvisSearchCalls === "1",
+          document.body.dataset.jarvisSearchCalls ?? "",
+        );
+        check("prefill-result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
       }
       if (document.body.dataset.scenario === "jarvis-mode-loading") {
         check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
@@ -623,6 +664,29 @@ for (const scenario of scenarios) {
         );
         check("empty-keeps-chips", queryAll("[data-jarvis-chip]").length >= 2);
         check("no-result-rows", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-error") {
+        check(
+          "error-message",
+          Boolean(
+            query("[data-codexhost-jarvis-mode]")?.textContent?.includes("Jarvis 未安装或未登录"),
+          ),
+        );
+        check(
+          "error-not-empty-state",
+          !query("[data-codexhost-jarvis-mode]")?.textContent?.includes("没有符合条件的 Bug"),
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-slow") {
+        check(
+          "slow-notice",
+          Boolean(
+            query("[data-codexhost-jarvis-mode]")?.textContent?.includes(
+              "Jarvis 响应较慢，仍在查询…",
+            ),
+          ),
+        );
+        check("slow-keeps-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
       }
       if (document.body.dataset.scenario === "jarvis-mode-conditions") {
         check("condition-chips", queryAll("[data-jarvis-chip]").length >= 6);

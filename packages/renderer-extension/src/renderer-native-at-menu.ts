@@ -61,6 +61,8 @@ export interface WorkbenchRowOptions {
   icon: Element;
   label: string;
   description: string;
+  /** One-line row without a description column, e.g. `Jarvis：<query>`. */
+  singleLine?: boolean;
 }
 
 function isVisible(element: HTMLElement): boolean {
@@ -260,12 +262,16 @@ export function createWorkbenchRow(
   const group = ownerDocument.createElement("span");
   group.className = LABEL_GROUP_CLASS;
   const label = ownerDocument.createElement("span");
-  label.className = LABEL_CLASS;
+  const singleLine = options.singleLine === true || options.description.length === 0;
+  label.className = singleLine ? "min-w-0 flex-1 truncate" : LABEL_CLASS;
   label.textContent = options.label;
-  const description = ownerDocument.createElement("span");
-  description.className = DESCRIPTION_CLASS;
-  description.textContent = options.description;
-  group.append(label, description);
+  group.append(label);
+  if (!singleLine) {
+    const description = ownerDocument.createElement("span");
+    description.className = DESCRIPTION_CLASS;
+    description.textContent = options.description;
+    group.append(description);
+  }
   wrapper.append(group);
   content.append(iconSlot, wrapper);
   row.append(content);

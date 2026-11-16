@@ -458,11 +458,22 @@ const jarvisPreviewEmpty: JarvisBugSearchResult = {
   capped: false,
 };
 
+const jarvisPreviewError: JarvisBugSearchResult = {
+  available: false,
+  errorCode: "not_logged_in",
+  conditions: [],
+  bugs: [],
+  total: 0,
+  capped: false,
+};
+
 async function mountJarvisSearch(
   preview: JarvisPreviewResult,
   query: string,
   clickEntry = true,
   ready?: (mode: HTMLElement) => boolean,
+  initialText = "@",
+  prefill?: string,
 ): Promise<void> {
   await loadDesktopCss();
   const stage = mountStage(`
@@ -474,6 +485,7 @@ async function mountJarvisSearch(
   const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
   const card = stage.querySelector<HTMLElement>("[data-composer-body]");
   if (!editor || !card) throw new Error("Composer preview is missing");
+  editor.textContent = initialText;
   const menu = nativeAtMenu();
   card.append(menu);
   const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
@@ -522,6 +534,19 @@ async function mountJarvisSearch(
   );
   const input = mode.querySelector<HTMLInputElement>("input");
   if (!input) throw new Error("Jarvis search field is missing");
+  if (prefill !== undefined) {
+    await waitFor(() => input.value === prefill);
+    document.body.dataset.jarvisPrefill = input.value;
+    document.body.dataset.jarvisEditorText = editor.textContent ?? "";
+    document.body.dataset.jarvisSearchCalls = String(previewWindow.__jarvisPreviewSearchCalls ?? 0);
+    await waitFor(
+      () =>
+        (ready?.(mode) ?? Boolean(mode.querySelector("[data-codexhost-jarvis-bug]"))) ? mode : null,
+      4_000,
+    );
+    await delay(120);
+    return;
+  }
   input.value = query;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   if (preview.pending) {
@@ -781,6 +806,27 @@ const scenarios: Record<string, () => Promise<void>> = {
     await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "", false);
   },
 
+  async "jarvis-entry-query"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewResults, pending: true },
+      "",
+      false,
+      undefined,
+      "@我还没处理完的bug",
+    );
+  },
+
+  async "jarvis-mode-prefilled"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewResults, delayMs: 120 },
+      "",
+      true,
+      undefined,
+      "@示例买的最近的bug",
+      "示例买的最近的bug",
+    );
+  },
+
   async "jarvis-mode-loading"() {
     await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "示例买的最近的bug");
   },
@@ -796,6 +842,20 @@ const scenarios: Record<string, () => Promise<void>> = {
       true,
       (mode) => mode.textContent?.includes("没有符合条件的 Bug") === true,
     );
+  },
+
+  async "jarvis-mode-error"() {
+    await mountJarvisSearch(
+      { result: jarvisPreviewError, delayMs: 80 },
+      "我还没处理完的bug",
+      true,
+      (mode) => mode.textContent?.includes("Jarvis 未安装或未登录") === true,
+    );
+  },
+
+  async "jarvis-mode-slow"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "我还没处理完的bug");
+    await delay(8_200);
   },
 
   async "jarvis-mode-conditions"() {

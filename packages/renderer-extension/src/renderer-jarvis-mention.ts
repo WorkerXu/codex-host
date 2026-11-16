@@ -38,7 +38,9 @@ import {
   waitForNativeSuggestionList,
 } from "./renderer-native-at-menu.js";
 import {
+  deleteNativeRange,
   insertNativeAgentMention,
+  insertNativeAgentMentionAtSelection,
   type NativeTextRange,
 } from "./renderer-native-composer-controller.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
@@ -60,6 +62,7 @@ const SECTION_ATTRIBUTE = JARVIS_SECTION_ATTRIBUTE;
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
+const SLOW_NOTICE_MS = 8_000;
 const MAX_QUERY_LENGTH = 64;
 
 export interface RendererJarvisTrigger {
@@ -83,6 +86,23 @@ export function matchesJarvisEntry(query: string): boolean {
   return "jarvis".startsWith(value) || "贾维斯".startsWith(value);
 }
 
+const WORKBENCH_PREFIXES = ["jarvis", "贾维斯", "钉钉", "dingtalk"] as const;
+
+/**
+ * `@<text>` that is not a Workbench name prefix is itself the Jarvis query.
+ * The row then reads `Jarvis：<text>` and selecting it prefills the search.
+ */
+export function jarvisQueryEntry(query: string): string | null {
+  if (!query) return null;
+  const value = query.toLocaleLowerCase();
+  if (WORKBENCH_PREFIXES.some((prefix) => prefix.startsWith(value))) return null;
+  return query;
+}
+
+export function showsJarvisEntry(query: string): boolean {
+  return matchesJarvisEntry(query) || jarvisQueryEntry(query) !== null;
+}
+
 export type JarvisEntryAction = "none" | "entry" | "search";
 
 /**
@@ -93,7 +113,7 @@ export function jarvisEntryAction(input: {
   query: string;
   selectedEntry: boolean;
 }): JarvisEntryAction {
-  if (!matchesJarvisEntry(input.query)) return "none";
+  if (!showsJarvisEntry(input.query)) return "none";
   return input.selectedEntry ? "search" : "entry";
 }
 
@@ -144,6 +164,9 @@ interface ModeState {
   hidden: Map<HTMLElement, string>;
   locale: RendererSettingsLocale;
   timer: number | null;
+  slowTimer: number | null;
+  /** The `@query` text was already removed; insert the mention at the caret. */
+  insertAtSelection: boolean;
 }
 
 export function installRendererJarvisMention(
@@ -183,6 +206,7 @@ export function installRendererJarvisMention(
   const removeMode = (): void => {
     if (!mode) return;
     if (mode.timer !== null) view.clearTimeout(mode.timer);
+    stopSlowTimer(mode);
     mode.section.remove();
     for (const [element, display] of mode.hidden) {
       if (!element.isConnected) continue;
@@ -227,14 +251,15 @@ export function installRendererJarvisMention(
     trigger.node.data.slice(trigger.start, trigger.end) === `@${trigger.query}`;
 
   const attachEntry = (trigger: Trigger): void => {
-    if (!matchesJarvisEntry(trigger.query)) return;
+    const queryText = jarvisQueryEntry(trigger.query);
+    if (!matchesJarvisEntry(trigger.query) && queryText === null) return;
     const list = nativeList(trigger.editor);
     if (!list) return;
     cancelEntryWait?.();
     cancelEntryWait = null;
     entryPending = null;
     const locale = options.readLocale();
-    const row = createJarvisEntryRow(ownerDocument, locale);
+    const row = createJarvisEntryRow(ownerDocument, locale, queryText ?? undefined);
     const section = ensureWorkbenchSection(ownerDocument, list, locale);
     if (row.parentElement !== section.items) section.items.append(row);
     const state: EntryState = {
@@ -253,14 +278,15 @@ export function installRendererJarvisMention(
       event.preventDefault();
       event.stopPropagation();
       if (entry !== state) return;
-      enterMode(state.trigger);
+      if (queryText !== null) enterMode(state.trigger, queryText, true);
+      else enterMode(state.trigger);
     });
     state.unregister = registerWorkbenchRow(ownerDocument, row, () => row.click());
   };
 
   /** Wait for the native popup instead of drawing our own panel. */
   const scheduleEntry = (trigger: Trigger): void => {
-    if (!matchesJarvisEntry(trigger.query)) return;
+    if (!showsJarvisEntry(trigger.query)) return;
     const list = nativeList(trigger.editor);
     if (list) {
       attachEntry(trigger);
@@ -295,7 +321,15 @@ export function installRendererJarvisMention(
       hidden: new Map(),
       locale,
       timer: null,
+      slowTimer: null,
+      insertAtSelection: false,
     };
+  };
+
+  const stopSlowTimer = (state: ModeState): void => {
+    if (state.slowTimer === null) return;
+    view.clearTimeout(state.slowTimer);
+    state.slowTimer = null;
   };
 
   const renderLoading = (state: ModeState): void => {
@@ -307,6 +341,16 @@ export function installRendererJarvisMention(
     state.chips.replaceChildren();
     state.chips.hidden = true;
     renderJarvisLoading(ownerDocument, state.results);
+    stopSlowTimer(state);
+    const generation = state.generation;
+    state.slowTimer = view.setTimeout(() => {
+      state.slowTimer = null;
+      if (mode !== state || !state.loading || state.generation !== generation) return;
+      state.summary.textContent =
+        state.locale === "zh-CN"
+          ? "Jarvis 响应较慢，仍在查询…"
+          : "Jarvis is slow, still searching…";
+    }, SLOW_NOTICE_MS);
   };
 
   const selectRow = (state: ModeState, index: number): void => {
@@ -368,6 +412,7 @@ export function installRendererJarvisMention(
 
   const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
     state.loading = false;
+    stopSlowTimer(state);
     state.section.removeAttribute("aria-busy");
     state.lastQuery = state.input.value.trim();
     renderChips(state, result.conditions);
@@ -394,6 +439,7 @@ export function installRendererJarvisMention(
     const hostId = options.readHostId(state.trigger.editor);
     if (!hostId) {
       state.loading = false;
+      stopSlowTimer(state);
       state.section.removeAttribute("aria-busy");
       state.summary.textContent = "";
       renderEmpty(state, {
@@ -429,16 +475,26 @@ export function installRendererJarvisMention(
     }, DEBOUNCE_MS);
   };
 
-  function enterMode(trigger: Trigger): void {
-    if (!triggerIntact(trigger)) {
-      removeEntry();
-      return;
-    }
-    removeEntry();
-    removeMode();
+  const deleteTriggerText = async (trigger: Trigger): Promise<boolean> => {
+    const range: NativeTextRange = {
+      node: trigger.node,
+      start: trigger.start,
+      end: trigger.end,
+      expected: `@${trigger.query}`,
+    };
+    if (deleteNativeRange(trigger.editor, range)) return true;
+    if (!(await selectTriggerText(trigger))) return false;
+    ownerDocument.execCommand("delete");
+    await new Promise<void>((resolve) => view.setTimeout(resolve, 0));
+    return true;
+  };
+
+  const startMode = (trigger: Trigger, prefill: string, insertAtSelection: boolean): void => {
     const list = nativeList(trigger.editor);
     if (!list) return;
     const state = buildMode(trigger);
+    state.insertAtSelection = insertAtSelection;
+    if (prefill) state.input.value = prefill;
     list.append(state.section);
     hideNativeChildren(state, list);
     list.scrollTop = 0;
@@ -456,7 +512,24 @@ export function installRendererJarvisMention(
     });
     state.input.addEventListener("keydown", (event) => event.stopPropagation());
     state.input.focus({ preventScroll: true });
-    void requestSearch(state, "");
+    void requestSearch(state, prefill);
+  };
+
+  function enterMode(trigger: Trigger, prefill = "", consumeTrigger = false): void {
+    if (!consumeTrigger && !triggerIntact(trigger)) {
+      removeEntry();
+      return;
+    }
+    removeEntry();
+    removeMode();
+    if (!consumeTrigger) {
+      startMode(trigger, prefill, false);
+      return;
+    }
+    void deleteTriggerText(trigger).then((removed) => {
+      if (mode || !trigger.editor.isConnected) return;
+      startMode(trigger, prefill, removed);
+    });
   }
 
   function exitMode(refocusComposer: boolean): void {
@@ -464,7 +537,7 @@ export function installRendererJarvisMention(
     const trigger = mode.trigger;
     suppressed = trigger.query;
     removeMode();
-    if (refocusComposer && trigger.node.isConnected) {
+    if (refocusComposer && trigger.editor.isConnected) {
       trigger.editor.focus({ preventScroll: true });
     }
   }
@@ -485,13 +558,33 @@ export function installRendererJarvisMention(
   async function choose(state: ModeState, bug: JarvisBug): Promise<void> {
     if (mode !== state || inserting) return;
     const trigger = state.trigger;
-    if (!triggerIntact(trigger)) {
+    if (!state.insertAtSelection && !triggerIntact(trigger)) {
       exitMode(false);
       return;
     }
     const expected = `@${trigger.query}`;
     const label = jarvisBugLabel(bug);
     const path = jarvisMentionPath({ kind: "bug", id: bug.id, projectId: bug.projectId });
+    const mention = { name: `jarvis-bug-${bug.id}`, displayName: label, path };
+    const carrier = `${formatJarvisMentionLink({
+      kind: "bug",
+      id: bug.id,
+      projectId: bug.projectId,
+      label,
+    })} `;
+    if (state.insertAtSelection) {
+      suppressed = trigger.query;
+      removeMode();
+      inserting = true;
+      try {
+        if (insertNativeAgentMentionAtSelection(trigger.editor, mention)) return;
+        const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
+        if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
+      } finally {
+        inserting = false;
+      }
+      return;
+    }
     const range: NativeTextRange = {
       node: trigger.node,
       start: trigger.start,
@@ -502,22 +595,8 @@ export function installRendererJarvisMention(
     removeMode();
     inserting = true;
     try {
-      if (
-        insertNativeAgentMention(trigger.editor, range, {
-          name: `jarvis-bug-${bug.id}`,
-          displayName: label,
-          path,
-        })
-      ) {
-        return;
-      }
+      if (insertNativeAgentMention(trigger.editor, range, mention)) return;
       if (!(await selectTriggerText(trigger))) return;
-      const carrier = `${formatJarvisMentionLink({
-        kind: "bug",
-        id: bug.id,
-        projectId: bug.projectId,
-        label,
-      })} `;
       const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
       if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
     } finally {
