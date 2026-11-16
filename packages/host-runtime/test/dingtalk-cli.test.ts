@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createDingTalkCli,
   parseAtMeHits,
   parseConversationInfo,
   parseDwsEventLine,
@@ -11,6 +12,7 @@ import {
   parseMessagesPage,
   parsePersonSearch,
   parseUnreadConversations,
+  parseMembers,
   runDwsJson,
   runDwsRaw,
   sanitizeDingTalkText,
@@ -103,6 +105,27 @@ describe("dws CLI output", () => {
         ],
       }),
     ).toEqual([{ name: "林晓", title: "产品经理", userId: "u1", openDingTalkId: "open-1" }]);
+  });
+
+  it("parses and de-duplicates group members", () => {
+    expect(
+      parseMembers({
+        users: [
+          {
+            memberEmpName: "王鹏远",
+            memberNick: "王鹏远",
+            memberRoleDesc: "普通成员",
+            openDingtalkId: "open-1",
+          },
+          { name: "李书月", role: "群主", openDingtalkId: "open-2" },
+          { name: "重复", openDingtalkId: "open-1" },
+        ],
+        bots: [],
+      }),
+    ).toEqual([
+      { openDingTalkId: "open-1", name: "王鹏远", title: "普通成员" },
+      { openDingTalkId: "open-2", name: "李书月", title: "群主" },
+    ]);
   });
 
   it("parses the group directory and at-me hits", () => {
@@ -344,5 +367,75 @@ describe("dws process invocation", () => {
     });
     expect(raw.timedOut).toBe(true);
     expect(raw.exitCode).toBeNull();
+  });
+
+  it("reads group members with the documented command", async () => {
+    const calls: string[][] = [];
+    const cli = createDingTalkCli({
+      runImpl: async (args) => {
+        calls.push([...args]);
+        return {
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          truncated: false,
+          value: {
+            users: [{ name: "王鹏远", openDingtalkId: "open-1", role: "普通成员" }],
+          },
+          errorCode: null,
+          errorMessage: null,
+        };
+      },
+    });
+    expect(await cli.members("cidA==")).toMatchObject({
+      members: [{ name: "王鹏远", openDingTalkId: "open-1" }],
+      errorCode: null,
+    });
+    expect(calls[0]).toEqual([
+      "chat",
+      "+chat-members-list",
+      "--conversation-id",
+      "cidA==",
+      "--member-types",
+      "user",
+      "--page-limit",
+      "20",
+    ]);
+  });
+
+  it("passes @ targets only when the caller selected them", async () => {
+    const calls: string[][] = [];
+    const cli = createDingTalkCli({
+      runImpl: async (args) => {
+        calls.push([...args]);
+        return {
+          exitCode: 0,
+          stdout: "{}",
+          stderr: "",
+          timedOut: false,
+          truncated: false,
+          value: {},
+          errorCode: null,
+          errorMessage: null,
+        };
+      },
+    });
+    await cli.send("cidA==", "<@open-1> <@all> 请看", {
+      atOpenDingTalkIds: ["open-1"],
+      atAll: true,
+    });
+    expect(calls[0]).toEqual([
+      "chat",
+      "message",
+      "send",
+      "--conversation-id",
+      "cidA==",
+      "--content",
+      "<@open-1> <@all> 请看",
+      "--at-open-dingtalk-ids",
+      "open-1",
+      "--at-all",
+    ]);
   });
 });

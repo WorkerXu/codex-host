@@ -32,6 +32,7 @@ import {
   createFakeCodexAgentsClient,
   createFakeDingTalkClient,
   createFakeJarvisClient,
+  type FakeDingTalkOptions,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
 import {
@@ -122,6 +123,7 @@ function prepareSettings(
   dingtalkStatus: FakeDingTalkStatus = "connected",
   agentsEmpty = false,
   dingtalkHeavy = false,
+  dingtalkOptions: FakeDingTalkOptions = {},
 ) {
   const dingtalkClient = createFakeDingTalkClient({
     empty: dingtalkEmpty,
@@ -129,6 +131,18 @@ function prepareSettings(
     status: dingtalkStatus,
     heavy: dingtalkHeavy,
     messageDelayMs: dingtalkHeavy ? 20 : scenarioName === "dingtalk-scrolled-top" ? 1_500 : 120,
+    ...dingtalkOptions,
+    onSend(params) {
+      (window as Window & { __dingtalkPreviewSent?: unknown }).__dingtalkPreviewSent = params;
+      dingtalkOptions.onSend?.(params);
+    },
+    onViewed(conversationId, active) {
+      (window as Window & { __dingtalkPreviewViewed?: unknown }).__dingtalkPreviewViewed = {
+        conversationId,
+        active,
+      };
+      dingtalkOptions.onViewed?.(conversationId, active);
+    },
   });
   const agentsClient = createFakeCodexAgentsClient({ withAgents: !agentsEmpty });
   const dingtalkPage = createDingTalkSettingsPage(messages, {
@@ -153,6 +167,7 @@ function prepareSettings(
     shell,
     query,
     queryAll,
+    dingtalkClient,
     open: () => shell.openSettings(undefined, pageId),
   };
 }
@@ -164,6 +179,7 @@ function mountSettings(
   dingtalkStatus: FakeDingTalkStatus = "connected",
   agentsEmpty = false,
   dingtalkHeavy = false,
+  dingtalkOptions: FakeDingTalkOptions = {},
 ) {
   const prepared = prepareSettings(
     pageId,
@@ -172,6 +188,7 @@ function mountSettings(
     dingtalkStatus,
     agentsEmpty,
     dingtalkHeavy,
+    dingtalkOptions,
   );
   prepared.open();
   return prepared;
@@ -201,6 +218,15 @@ function pinAtMenu(card: HTMLElement, menu: HTMLElement): void {
   menu.style.bottom = "100%";
   menu.style.width = "100%";
   menu.style.maxHeight = "340px";
+}
+
+function resetConversationMemory(): void {
+  try {
+    localStorage.removeItem("codexhost.dingtalk.lastConversation.unread");
+    localStorage.removeItem("codexhost.dingtalk.lastConversation");
+  } catch {
+    /* Preview storage is optional. */
+  }
 }
 
 function mountStage(html: string): HTMLElement {
@@ -884,6 +910,24 @@ async function mountJarvisSearch(
   await delay(120);
 }
 
+async function mountUnreadScenario(): Promise<void> {
+  resetConversationMemory();
+  const { query, queryAll } = mountSettings("dingtalk", false, false, "connected", false, false, {
+    liveUnread: true,
+  });
+  await waitFor(() => query(".dingtalk-conversation"));
+  await waitFor(() => query(".dingtalk-message"));
+  const rows = queryAll<HTMLElement>(".dingtalk-conversation");
+  const badges = queryAll(".dingtalk-unread-badge, .dingtalk-avatar-unread");
+  document.body.dataset.initialUnread = String(badges.length);
+  document.body.dataset.initialConversations = String(rows.length);
+  const withBadge = rows.find((row) =>
+    row.querySelector(".dingtalk-unread-badge, .dingtalk-avatar-unread"),
+  );
+  document.body.dataset.badgeTitle =
+    withBadge?.querySelector(".dingtalk-conversation-title")?.textContent ?? "";
+}
+
 const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-heavy"() {
     interface HeavyMetrics {
@@ -995,6 +1039,103 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-hover"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-lightbox"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+    await waitFor(() => query(".dingtalk-message-image--clickable"));
+    await waitFor(() => query(".dingtalk-message-image--loaded"));
+    await delay(120);
+  },
+
+  async "dingtalk-at-picker"() {
+    resetConversationMemory();
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    const group = queryAll<HTMLButtonElement>(".dingtalk-conversation").find((row) =>
+      row.textContent?.includes("产品发布群"),
+    );
+    group?.click();
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "产品发布群");
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-header-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
+  async "dingtalk-page-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
+  async "dingtalk-at-send"() {
+    resetConversationMemory();
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    const group = queryAll<HTMLButtonElement>(".dingtalk-conversation").find((row) =>
+      row.textContent?.includes("产品发布群"),
+    );
+    group?.click();
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "产品发布群");
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-at-chip"() {
+    resetConversationMemory();
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    const group = queryAll<HTMLButtonElement>(".dingtalk-conversation").find((row) =>
+      row.textContent?.includes("产品发布群"),
+    );
+    group?.click();
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "产品发布群");
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-unread"() {
+    await mountUnreadScenario();
+  },
+
+  async "dingtalk-unread-open"() {
+    await mountUnreadScenario();
+  },
+
+  async "dingtalk-unread-left"() {
+    await mountUnreadScenario();
+  },
+
+  async "dingtalk-live"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      pushChangeAfterMs: 1_200,
+    });
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+    const count =
+      query(".dingtalk-message-list")?.querySelectorAll(".dingtalk-message").length ?? 0;
+    document.body.dataset.initialMessages = String(count);
+    await waitFor(
+      () => query(".dingtalk-message-list")?.textContent?.includes("刚刚收到一条新消息") || null,
+      6_000,
+    );
+    await delay(200);
+  },
+
   async "dingtalk-status-connected"() {
     const { query } = mountSettings("dingtalk", false, false, "connected");
     await waitFor(() => query(".dingtalk-conversation"));
@@ -1040,14 +1181,11 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "dingtalk-scrolled-top"() {
+    resetConversationMemory();
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
-    const list = query<HTMLElement>(".dingtalk-message-list");
-    if (!list) throw new Error("Message list is missing");
-    await previewWheel(list, -100_000);
-    await waitFor(() => query(".dingtalk-loading-older:not([hidden])"));
-    await delay(120);
+    await waitFor(() => query(".dingtalk-message-list"));
   },
 
   async "dingtalk-search"() {

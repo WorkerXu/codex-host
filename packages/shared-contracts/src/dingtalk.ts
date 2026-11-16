@@ -14,8 +14,10 @@ import { z } from "zod";
  */
 export const DINGTALK_MENTION_PATH_PREFIX = "dingtalk://";
 
+// Desktop may wrap or split a long carrier between the label and the target;
+// whitespace there is layout, not a different mention.
 const MENTION_LINK_PATTERN =
-  /\[([^\]\n]{0,512})\]\(<?dingtalk:\/\/(conversation|message)\/([^\s()<>]+)>?\)/gu;
+  /\[([^\]\n]{0,512})\]\s*\(<?\s*dingtalk:\/\/(conversation|message)\/([^\s()<>]+)>?\)/gu;
 const ID_SEGMENT = /^[^()<>\r\n]{1,512}$/u;
 const MAX_MESSAGE_IDS = 200;
 
@@ -230,6 +232,7 @@ export const DINGTALK_STATUS_METHOD = "codexhost/dingtalk/status";
 export const DINGTALK_CONVERSATIONS_METHOD = "codexhost/dingtalk/conversations";
 export const DINGTALK_PREVIEW_METHOD = "codexhost/dingtalk/preview";
 export const DINGTALK_MESSAGES_METHOD = "codexhost/dingtalk/messages";
+export const DINGTALK_MEMBERS_METHOD = "codexhost/dingtalk/members";
 export const DINGTALK_RESOURCE_METHOD = "codexhost/dingtalk/resource";
 export const DINGTALK_SEND_METHOD = "codexhost/dingtalk/send";
 export const DINGTALK_SEARCH_METHOD = "codexhost/dingtalk/search";
@@ -242,6 +245,8 @@ export const DINGTALK_CHANGED_METHOD = "codexhost/dingtalk/changed";
 export const DINGTALK_DEFAULT_PEER = "tencent";
 export const DINGTALK_MAX_MESSAGES = 100;
 export const DINGTALK_MAX_CONVERSATIONS = 50;
+export const DINGTALK_MAX_MEMBERS = 500;
+export const DINGTALK_MAX_AT_MEMBERS = 100;
 
 export const dingtalkStatusSchema = z
   .object({
@@ -335,6 +340,30 @@ export const dingtalkMessagesResultSchema = z
   .strict();
 export type DingTalkMessagesResult = z.infer<typeof dingtalkMessagesResultSchema>;
 
+export const dingtalkMembersParamsSchema = z
+  .object({ conversationId: z.string().trim().min(1).max(512) })
+  .strict();
+export type DingTalkMembersParams = z.infer<typeof dingtalkMembersParamsSchema>;
+
+export const dingtalkMemberSchema = z
+  .object({
+    openDingTalkId: z.string().trim().min(1).max(512),
+    name: z.string().trim().min(1).max(256),
+    /** Job title or group role, when dws provides one. */
+    title: z.string().max(256).nullable().optional(),
+  })
+  .strict();
+export type DingTalkMember = z.infer<typeof dingtalkMemberSchema>;
+
+export const dingtalkMembersResultSchema = z
+  .object({
+    available: z.boolean(),
+    members: z.array(dingtalkMemberSchema).max(DINGTALK_MAX_MEMBERS),
+    errorCode: z.string().max(64).nullable(),
+  })
+  .strict();
+export type DingTalkMembersResult = z.infer<typeof dingtalkMembersResultSchema>;
+
 export const dingtalkResourceParamsSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
@@ -360,6 +389,13 @@ export const dingtalkSendParamsSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
     text: z.string().trim().min(1).max(4_000),
+    /** Group members to @; `text` must carry one `<@id>` per entry. */
+    atOpenDingTalkIds: z
+      .array(z.string().trim().min(1).max(512))
+      .max(DINGTALK_MAX_AT_MEMBERS)
+      .optional(),
+    /** `@所有人`; `text` must carry `<@all>`. */
+    atAll: z.boolean().optional(),
   })
   .strict();
 export type DingTalkSendParams = z.infer<typeof dingtalkSendParamsSchema>;
@@ -415,6 +451,8 @@ export const dingtalkViewedParamsSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
     lastMessageAt: z.number().int().nonnegative(),
+    /** The workbench keeps the row visible without a badge while it stays open. */
+    active: z.boolean().optional(),
   })
   .strict();
 export type DingTalkViewedParams = z.infer<typeof dingtalkViewedParamsSchema>;

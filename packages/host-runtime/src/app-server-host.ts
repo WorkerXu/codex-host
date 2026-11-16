@@ -47,6 +47,7 @@ import {
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_PREVIEW_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_MEMBERS_METHOD,
   DINGTALK_RESOURCE_METHOD,
   DINGTALK_SEND_METHOD,
   DINGTALK_SEARCH_METHOD,
@@ -56,6 +57,7 @@ import {
   dingtalkConversationsParamsSchema,
   dingtalkPreviewParamsSchema,
   dingtalkMessagesParamsSchema,
+  dingtalkMembersParamsSchema,
   dingtalkResourceParamsSchema,
   dingtalkSendParamsSchema,
   dingtalkSearchParamsSchema,
@@ -801,6 +803,7 @@ export class AppServerHost {
   #sessionImportRequests: SessionImportRequests | undefined;
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
+  #unsubscribeDingTalk: (() => void) | undefined;
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
@@ -850,11 +853,14 @@ export class AppServerHost {
       this.#noteDesktopReply(value);
       return this.#takeConsoleReply(value);
     });
-    this.#options.dingtalk?.setNotifier((event) => {
-      void this.#writer
-        .json({ method: DINGTALK_CHANGED_METHOD, params: event })
-        .catch(() => undefined);
-    });
+    // A shared service can serve several Desktop sessions; each Host keeps its
+    // own subscription instead of replacing the previous session's notifier.
+    this.#unsubscribeDingTalk =
+      this.#options.dingtalk?.addNotifier((event) => {
+        void this.#writer
+          .json({ method: DINGTALK_CHANGED_METHOD, params: event })
+          .catch(() => undefined);
+      }) ?? undefined;
     const environment = this.#options.environment ?? process.env;
     this.#launchSettings = new HarnessLaunchSettingsStore(
       this.#options.pluginContext?.environment ?? environment,
@@ -1026,6 +1032,8 @@ export class AppServerHost {
   close(): void {
     if (this.#closeRequested) return;
     this.#closeRequested = true;
+    this.#unsubscribeDingTalk?.();
+    this.#unsubscribeDingTalk = undefined;
     this.#options.sharedThreads?.close();
     this.#externalRuntime.idleRelease.disable();
     this.#pluginLoadAbort.abort();
@@ -1168,6 +1176,8 @@ export class AppServerHost {
       return this.#closeRequested ? 0 : 1;
     } finally {
       this.#options.sharedThreads?.close();
+      this.#unsubscribeDingTalk?.();
+      this.#unsubscribeDingTalk = undefined;
       this.#pluginLoadAbort.abort();
       // Stop replacement waiters before waiting for their tracked Host operations.
       this.#externalSteering.close();
@@ -2420,26 +2430,59 @@ export class AppServerHost {
         item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
     );
     let changed = false;
+    let dingtalkChanged = false;
     const expanded: JsonValue[] = [];
+    const textIndexes: number[] = [];
     for (const item of input) {
       if (isRecord(item) && typeof item.text === "string") {
         let text = item.text;
         if (hasJarvisCarrier(text)) text = await this.#expandJarvisText(text);
-        if (hasDingTalkCarrier(text)) text = await this.#expandDingTalkText(text);
+        if (hasDingTalkCarrier(text)) {
+          const before = text;
+          text = await this.#expandDingTalkText(text);
+          if (text !== before) dingtalkChanged = true;
+        }
         if (text !== item.text) changed = true;
+        textIndexes.push(expanded.length);
         expanded.push({ ...item, text } as JsonObject);
       } else {
         expanded.push(item);
       }
     }
+    // A long carrier can be split across adjacent text items (Desktop wraps it
+    // after the label). Expand the joined run and keep one text item.
+    if (
+      !dingtalkChanged &&
+      textIndexes.length > 1 &&
+      input.some(
+        (item) =>
+          isRecord(item) && typeof item.text === "string" && item.text.includes("dingtalk://"),
+      )
+    ) {
+      const joined = textIndexes
+        .map((index) => String((expanded[index] as JsonObject).text ?? ""))
+        .join("\n");
+      if (hasDingTalkCarrier(joined)) {
+        const next = await this.#expandDingTalkText(joined);
+        if (next !== joined) {
+          const first = expanded[textIndexes[0] as number] as JsonObject;
+          expanded[textIndexes[0] as number] = { ...first, text: next };
+          for (const index of textIndexes.slice(1)) expanded[index] = null;
+          changed = true;
+        }
+      }
+    }
+    const normalized = expanded.some((item) => item === null)
+      ? expanded.filter((item): item is JsonValue => item !== null)
+      : expanded;
     if (!changed && !hasDelegation) return frame;
     const rewritten = hasDelegation
-      ? rewriteDelegationMentionInput(expanded, await managedDelegationSkillReference())
+      ? rewriteDelegationMentionInput(normalized, await managedDelegationSkillReference())
       : null;
     if (!changed && !rewritten) return frame;
     return encodeJsonFrame({
       ...(request as unknown as JsonObject),
-      params: { ...(request.params as JsonObject), input: rewritten ?? expanded },
+      params: { ...(request.params as JsonObject), input: rewritten ?? normalized },
     });
   }
 
@@ -3588,6 +3631,13 @@ export class AppServerHost {
       }
       return await service.messages(parsed.data);
     }
+    if (request.method === DINGTALK_MEMBERS_METHOD) {
+      const parsed = dingtalkMembersParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk member request");
+      }
+      return await service.members(parsed.data.conversationId);
+    }
     if (request.method === DINGTALK_RESOURCE_METHOD) {
       const parsed = dingtalkResourceParamsSchema.safeParse(request.params);
       if (!parsed.success) {
@@ -3634,7 +3684,11 @@ export class AppServerHost {
       if (!parsed.success) {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk view state");
       }
-      return await service.markViewed(parsed.data.conversationId, parsed.data.lastMessageAt);
+      return await service.markViewed(
+        parsed.data.conversationId,
+        parsed.data.lastMessageAt,
+        parsed.data.active !== false,
+      );
     }
     if (request.method === DINGTALK_SETTINGS_SET_METHOD) {
       const parsed = dingtalkSettingsSetParamsSchema.safeParse(request.params);

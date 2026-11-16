@@ -7,6 +7,9 @@ Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，�
 - Composer 的原生 `@` 菜单在查询为空或匹配「钉」（`钉钉` / `dingtalk` 前缀）时，把「钉钉」行追加到与 Jarvis 共用的「工作台」分组：分组位于原生 `[data-mention-list-scroll-area]` 滚动容器内，使用原生 section 结构、header 类名和 `[data-list-navigation-item]` 按钮行，上下键与回车跟随原生 `aria-current` 高亮。原生菜单在 `input` 之后挂载，Renderer 等待约 300 ms 并继续观察 DOM；列表不出现时不绘制任何浮层。
 - 选择该行打开工作台（设置页外壳中的 `dingtalk` 页面），并记住打开它的 Composer。页面关闭后，嵌入操作仍回到这个 Composer。
 - 页面左侧只有一个未读列表：来自 `chat message list-unread-conversations`，只显示最近 48 小时内仍有未读、且最后一条消息晚于本机已读时间的会话。右侧显示所选会话的消息，并以当前用户身份发送消息。
+- 打开会话时，列表行立即去掉未读角标和 @ 提醒，但在页面离开该会话前仍保留在未读列表中；切走后该行按已读状态移除。Host 记录已读时间，页面用 `active` 区分「仍打开」和「已离开」。
+- 群聊输入框支持原生 `@` 选择器：`@` 触发，按姓名/职位过滤，方向键移动，回车/点击选择；已选成员显示为 chip，可逐个移除，`@所有人` 作为首项。发送时 chip 生成 `<@openDingTalkId>` / `<@all>` 占位符，并通过 `chat message send --at-open-dingtalk-ids` / `--at-all` 传给 dws。
+- 消息中的图片使用缩略图；点击后用真实尺寸在深色遮罩中打开，支持左右方向键切换同会话图片、Esc 或点击遮罩关闭，关闭时释放 object URL，不保留全尺寸缓存。
 - 钉钉页占用工作台内容区全宽；打开时隐藏设置导航，顶部关闭按钮仍可返回。
 - 消息按 dws 字段渲染：`quotedMessage` 引用块、`reactions` / `emotionReplyList` 表情计数、`resourceRefs` 图片和文件、`sendType: bot` 机器人标签、Markdown 卡片标题与正文。`<imageContent>`、`mediaId=`、`fileId:` 等原始标记一律不显示。
 - 图片由 DingTalk Host 用 `chat +messages-resource-download` 下载，以 data URL 经 RPC 返回；Renderer 只在图片进入可视区时下载并转成 object URL 缩略图（最大 240 px），行离开 DOM、切换会话或关闭页面时立即 revoke。
@@ -21,7 +24,7 @@ Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，�
 
 cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时也接受未编码的 cid，并以最后一个 `/` 作为消息分隔符。嵌入时优先插入 Desktop 原生 mention chip，控制器不可用时退化为 Markdown carrier。
 
-`turn/start`、`turn/steer` 和外部 steering 都会经过 Host 的 `dingtalk-mention-rewrite.ts`。会话引用取最近 30 条消息；所选消息取这些消息及其前后各 3 条同会话上下文。输出一段 `[codexhost DingTalk]` 上下文块，包含会话标题、类型、cid、发送人、时间和正文；失败只写一行说明，不阻断 Turn。
+`turn/start`、`turn/steer` 和外部 steering 都会经过 Host 的 `dingtalk-mention-rewrite.ts`。会话引用取最近 30 条消息；所选消息取这些消息及其前后各 3 条同会话上下文。输出一段 `[codexhost DingTalk]` 上下文块，包含会话标题、类型、cid、发送人、时间和正文；失败只写一行说明，不阻断 Turn。解析同时接受 Desktop 在标签与 URL 之间换行、或把二者拆成相邻 text item 的形态；`conversationInfo` 与消息列表并行，单聊不额外查询职位。
 
 上下文块同时告诉 Agent：更多记录用 `codexhost dingtalk dws -- <dws 参数>` 读取；发送、撤回、审批等写操作必须先征得用户同意，并在命令中加 `--yes`。
 
@@ -37,11 +40,13 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 
 ## 性能与缓存
 
-- 工作台不缓存消息、摘要或会话列表：每次打开、刷新和收到 `codexhost/dingtalk/changed` 都重新读取 dws。Host 只对完全相同的并发请求做 in-flight 去重，并保留 `chat group list-all` 的群类型/人数元数据用于标签。
+- 工作台不缓存消息、摘要或会话列表：每次打开、刷新、收到 `codexhost/dingtalk/changed` 和定时轮询都重新读取 dws。Host 只对完全相同的并发请求做 in-flight 去重，并保留 `chat group list-all` 的群类型/人数元数据用于标签。
+- 通知之外还有保底轮询：页面可见时每 10 秒刷新当前会话，每 30 秒刷新未读列表；页面隐藏时停止，恢复可见时立即补一次。轮询不写入缓存，也不与慢请求重叠。事件通知在 Host 侧合并 250 ms 内的事件，并广播给共享同一 DingTalk 服务的所有 Desktop 会话。
 - 打开未读视图时，`auth status`、`list-unread-conversations` 和 `chat +at-me` 并发执行；`group list-all` 不阻塞首屏，结果到达后补上「内部群」和人数标签并发一次变更通知。
+- 提交时展开会话引用只读取最近 100 条消息并跳过单聊职位补全，`conversationInfo` 与消息列表并行执行，避免一条引用串行等待多次 dws。
 - 会话列表只为可见行懒加载最近一条消息摘要，最多 3 个并发；拿不到摘要时第二行留空。
 - 最近消息每次按会话实时读取；滚动加载更早消息走同一 `chat message list` 游标，不阻塞首屏。Renderer 只保留当前会话最近 200 条消息和对应 DOM，首屏 30 条。
-- 只有 DingTalk Host 本机、且 `dws` 已登录时才启动一条长连接事件流（`event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期）。事件用于增加未读数、更新最近消息和向 Renderer 推送 `codexhost/dingtalk/changed`，不轮询。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求再启动。退出用 SIGTERM，让 CLI 自行退订。
+- 只有 DingTalk Host 本机、且 `dws` 已登录时才启动一条长连接事件流（`event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期）。事件用于增加未读数、更新最近消息和向 Renderer 推送 `codexhost/dingtalk/changed`，不轮询。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求或轮询再启动。退出用 SIGTERM，让 CLI 自行退订。
 - `dws` 以参数数组启动，无 shell；单次输出和总时长都有上限。
 
 ## 已读状态

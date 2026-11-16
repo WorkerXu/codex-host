@@ -28,6 +28,7 @@ import {
   agents,
   conversations,
   dispatchSettings,
+  groupMembers,
   heavyConversation,
   messagesFor,
   previewImageDataUrl,
@@ -43,6 +44,12 @@ export interface FakeDingTalkOptions {
   messageDelayMs?: number;
   status?: FakeDingTalkStatus;
   heavy?: boolean;
+  /** Preview-only: make view state change the visible list like the Host. */
+  liveUnread?: boolean;
+  onSend?(params: { text: string; atOpenDingTalkIds?: string[]; atAll?: boolean }): void;
+  onViewed?(conversationId: string, active: boolean): void;
+  /** Preview-only: notify subscribers after this delay, like a dws event. */
+  pushChangeAfterMs?: number;
 }
 
 const sleep = (milliseconds: number) =>
@@ -56,16 +63,25 @@ export function createFakeDingTalkClient(
   const messageDelay = options.messageDelayMs ?? 120;
   const statusState = options.status ?? "connected";
   const listeners = new Set<(conversationId: string | null) => void>();
+  const viewed = new Set<string>();
+  const active = new Set<string>();
 
   const conversationsResult = (): DingTalkConversationsResult => {
     const cutoff = Date.now() - 48 * 60 * 60_000;
     const visible = (row: DingTalkConversation): boolean =>
-      row.unreadCount > 0 && (row.lastMessageAt ?? 0) >= cutoff;
+      (row.unreadCount > 0 &&
+        (row.lastMessageAt ?? 0) >= cutoff &&
+        !viewed.has(row.conversationId)) ||
+      active.has(row.conversationId);
     const rows = (
       options.heavy
         ? [{ ...heavyConversation }, ...conversations.slice(0, 4).map((row) => ({ ...row }))]
         : conversations.map((row) => ({ ...row }))
-    ).filter(visible);
+    )
+      .filter(visible)
+      .map((row) =>
+        active.has(row.conversationId) ? { ...row, unreadCount: 0, atMe: false } : row,
+      );
     return {
       available: !options.error,
       source: options.empty || options.error ? "empty" : rows.length > 0 ? "unread" : "empty",
@@ -135,6 +151,9 @@ export function createFakeDingTalkClient(
       };
     },
     async messages(params): Promise<DingTalkMessagesResult> {
+      const previewWindow = window as Window & { __dingtalkPreviewMessageCalls?: number };
+      previewWindow.__dingtalkPreviewMessageCalls =
+        (previewWindow.__dingtalkPreviewMessageCalls ?? 0) + 1;
       await sleep(messageDelay);
       const all = messagesFor(params.conversationId);
       const limit = params.limit ?? 40;
@@ -158,6 +177,7 @@ export function createFakeDingTalkClient(
     },
     async send(params): Promise<DingTalkSendResult> {
       await sleep(320);
+      options.onSend?.(params);
       const all = messagesFor(params.conversationId);
       const sentAt = Math.max(Date.now(), (all.at(-1)?.createdAt ?? 0) + 1);
       all.push({
@@ -178,6 +198,14 @@ export function createFakeDingTalkClient(
         conversation.preview = `我：${params.text}`;
       }
       return { ok: true, messageId: `sent-${sentAt}`, sentAt, errorCode: null };
+    },
+    async members() {
+      await sleep(80);
+      return {
+        available: true,
+        members: groupMembers.map((member) => ({ ...member })),
+        errorCode: null,
+      };
     },
     async resource(params): Promise<DingTalkResourceResult> {
       await sleep(20);
@@ -257,11 +285,41 @@ export function createFakeDingTalkClient(
         errorCode: null,
       };
     },
-    async markViewed() {
-      // Preview fixtures keep unread counts stable for repeatable screenshots.
+    async markViewed(conversationId, _lastMessageAt, isActive) {
+      if (!options.liveUnread) return;
+      const open = isActive !== false;
+      options.onViewed?.(conversationId, open);
+      if (open) {
+        active.add(conversationId);
+      } else {
+        active.delete(conversationId);
+        viewed.add(conversationId);
+      }
+      for (const callback of listeners) callback(conversationId);
     },
     subscribe(listener) {
       listeners.add(listener);
+      if (options.pushChangeAfterMs !== undefined) {
+        setTimeout(() => {
+          const row = conversations.find((item) => item.unreadCount > 0);
+          if (!row) return;
+          const createdAt = Date.now();
+          row.unreadCount += 1;
+          row.lastMessageAt = createdAt;
+          row.preview = "林晓：刚刚收到一条新消息。";
+          messagesFor(row.conversationId).push({
+            messageId: `preview-live-${createdAt}`,
+            conversationId: row.conversationId,
+            senderName: "林晓",
+            senderId: "preview-lin",
+            createdAt,
+            text: "刚刚收到一条新消息。",
+            unsupported: false,
+            mine: false,
+          });
+          for (const callback of listeners) callback(row.conversationId);
+        }, options.pushChangeAfterMs);
+      }
       return () => listeners.delete(listener);
     },
   };

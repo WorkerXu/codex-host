@@ -162,6 +162,10 @@ export interface HighlightSegment {
 export interface ViewMessage extends DingTalkMessage {
   pending?: boolean;
   failed?: boolean;
+  /** Wire text with `<@id>` placeholders when the bubble shows readable chips. */
+  sendText?: string;
+  atOpenDingTalkIds?: string[];
+  atAll?: boolean;
 }
 
 export function formatDingTalkFileSize(bytes: number | null | undefined): string {

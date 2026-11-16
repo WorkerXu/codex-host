@@ -39,6 +39,17 @@ function conversation(
   };
 }
 
+export const groupMembers = [
+  { openDingTalkId: "open-preview-1", name: "林晓", title: "产品经理" },
+  { openDingTalkId: "open-preview-2", name: "赵明", title: "后端工程师" },
+  { openDingTalkId: "open-preview-3", name: "钱程", title: "设计师" },
+  { openDingTalkId: "open-preview-4", name: "周岚", title: "项目经理" },
+  { openDingTalkId: "open-preview-5", name: "王鹏远", title: "测试工程师" },
+  { openDingTalkId: "open-preview-6", name: "李书月", title: "运营" },
+  { openDingTalkId: "open-preview-7", name: "陈曦", title: "前端工程师" },
+  { openDingTalkId: "open-preview-8", name: "郑凯", title: "架构师" },
+];
+
 export const conversations: DingTalkConversation[] = [
   conversation(
     "cid-launch",

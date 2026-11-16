@@ -304,6 +304,7 @@ export interface MessageRowOptions {
     message: DingTalkMessage,
     resource: DingTalkMessageResource,
   ): void;
+  onImageClick?(message: DingTalkMessage, resource: DingTalkMessageResource): void;
 }
 
 function appendFileChip(
@@ -373,6 +374,18 @@ function appendImage(
     "span",
     "dingtalk-message-image dingtalk-message-image--loading",
   );
+  if (options.onImageClick) {
+    frame.classList.add("dingtalk-message-image--clickable");
+    frame.setAttribute("role", "button");
+    frame.tabIndex = 0;
+    const open = (): void => options.onImageClick?.(message, resource);
+    frame.addEventListener("click", open);
+    frame.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      open();
+    });
+  }
   frame.append(
     createElementNode(document, "span", "dingtalk-skeleton dingtalk-message-image-skeleton"),
   );

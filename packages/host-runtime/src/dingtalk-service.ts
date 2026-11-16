@@ -1,5 +1,7 @@
 import {
+  DINGTALK_MAX_MEMBERS,
   dingtalkConversationsResultSchema,
+  dingtalkMembersResultSchema,
   dingtalkMessagesResultSchema,
   dingtalkPreviewResultSchema,
   dingtalkResolveResultSchema,
@@ -14,6 +16,7 @@ import {
   type DingTalkMessagesParams,
   type DingTalkMessagesResult,
   type DingTalkMention,
+  type DingTalkMembersResult,
   type DingTalkPreviewResult,
   type DingTalkResourceParams,
   type DingTalkResourceResult,
@@ -144,6 +147,8 @@ export class DingTalkService {
   readonly #conversations = new Map<string, DingTalkConversation>();
   readonly #inflight = new Map<string, Promise<unknown>>();
   readonly #viewedAt = new Map<string, number>();
+  /** Open workbench conversations stay in the list without a badge until closed. */
+  readonly #active = new Map<string, DingTalkConversation>();
   #viewedLoaded = false;
   #viewedWriteTimer: ReturnType<typeof setTimeout> | null = null;
   #list: ConversationCache | null = null;
@@ -156,6 +161,7 @@ export class DingTalkService {
   #lastAuth: Awaited<ReturnType<DingTalkCli["authStatus"]>> | null = null;
   readonly #events: DingTalkEventListener;
   #notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  #pendingNotify = new Set<string | null>();
   #disposed = false;
 
   constructor(options: DingTalkServiceOptions) {
@@ -310,13 +316,7 @@ export class DingTalkService {
       `messages:${conversationId}:${params.before ?? "latest"}:${limit}`,
       async () => {
         const [page, conversation] = await Promise.all([
-          this.#cli.messages({
-            conversationId,
-            limit,
-            ...(params.before !== undefined
-              ? { before: params.before, direction: "older" as const }
-              : {}),
-          }),
+          this.#readMessages(conversationId, limit, params.before),
           this.#conversationFor(conversationId),
         ]);
         return dingtalkMessagesResultSchema.parse({
@@ -330,6 +330,32 @@ export class DingTalkService {
         });
       },
     );
+  }
+
+  #readMessages(
+    conversationId: string,
+    limit: number,
+    before?: number,
+  ): Promise<Awaited<ReturnType<DingTalkCli["messages"]>>> {
+    return this.#cli.messages({
+      conversationId,
+      limit,
+      ...(before !== undefined ? { before, direction: "older" as const } : {}),
+    });
+  }
+
+  /** Human members for the group composer's native `@` picker. */
+  async members(conversationId: string): Promise<DingTalkMembersResult> {
+    await this.#ensure();
+    this.#events.touch();
+    return await this.#dedupe(`members:${conversationId}`, async () => {
+      const result = await this.#cli.members(conversationId);
+      return dingtalkMembersResultSchema.parse({
+        available: result.errorCode === null,
+        members: result.members.slice(0, DINGTALK_MAX_MEMBERS),
+        errorCode: result.errorCode,
+      });
+    });
   }
 
   async resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult> {
@@ -355,7 +381,22 @@ export class DingTalkService {
 
   async send(params: DingTalkSendParams): Promise<DingTalkSendResult> {
     await this.#ensure();
-    const result = await this.#cli.send(params.conversationId, params.text);
+    const atIds = [...new Set(params.atOpenDingTalkIds ?? [])];
+    for (const id of atIds) {
+      if (!params.text.includes(`<@${id}>`)) {
+        throw new DingTalkServiceError(
+          "invalid_params",
+          "DingTalk @ member placeholder is missing",
+        );
+      }
+    }
+    if (params.atAll === true && !params.text.includes("<@all>")) {
+      throw new DingTalkServiceError("invalid_params", "DingTalk @all placeholder is missing");
+    }
+    const result = await this.#cli.send(params.conversationId, params.text, {
+      ...(atIds.length > 0 ? { atOpenDingTalkIds: atIds } : {}),
+      ...(params.atAll === true ? { atAll: true } : {}),
+    });
     if (result.ok) {
       const sentAt = this.#now();
       const conversation = this.#conversations.get(params.conversationId);
@@ -380,26 +421,66 @@ export class DingTalkService {
     });
   }
 
-  async markViewed(conversationId: string, lastMessageAt: number): Promise<Record<string, never>> {
+  async markViewed(
+    conversationId: string,
+    lastMessageAt: number,
+    active = true,
+  ): Promise<Record<string, never>> {
     await this.#ensure();
     const previous = this.#viewedAt.get(conversationId) ?? 0;
     if (lastMessageAt > previous) {
       this.#viewedAt.set(conversationId, lastMessageAt);
       this.#scheduleViewedWrite();
     }
+    let changed = false;
     const list = this.#list;
-    if (list?.source === "unread") {
-      const rows = list.rows.filter(
-        (conversation) =>
-          conversation.conversationId !== conversationId ||
-          (conversation.lastMessageAt ?? 0) > lastMessageAt,
-      );
-      if (rows.length !== list.rows.length) {
-        this.#list = { ...list, rows };
-        if (rows.length === 0) void this.#refresh().catch(() => undefined);
-        this.#notify(conversationId);
+    const listed =
+      list?.rows.find((conversation) => conversation.conversationId === conversationId) ?? null;
+    const row = listed ?? this.#active.get(conversationId) ?? null;
+    if (active && row) {
+      const cleared: DingTalkConversation = {
+        ...row,
+        unreadCount: 0,
+        atMe: false,
+        ...(lastMessageAt > (row.lastMessageAt ?? 0) ? { lastMessageAt } : {}),
+      };
+      const wasActive = this.#active.has(conversationId);
+      this.#active.set(conversationId, cleared);
+      this.#conversations.set(conversationId, cleared);
+      if (list && listed) {
+        this.#list = {
+          ...list,
+          rows: list.rows.map((conversation) =>
+            conversation.conversationId === conversationId ? cleared : conversation,
+          ),
+        };
+        // Badge removal is the visible change; a newer viewed timestamp alone
+        // must not start another page refresh.
+        if (row.unreadCount > 0 || row.atMe === true || !wasActive) changed = true;
+      } else if (!wasActive) {
+        changed = true;
       }
+    } else if (!active) {
+      const wasActive = this.#active.delete(conversationId);
+      if (list) {
+        const rows = list.rows.filter(
+          (conversation) =>
+            conversation.conversationId !== conversationId ||
+            (conversation.lastMessageAt ?? 0) > lastMessageAt,
+        );
+        if (rows.length !== list.rows.length) {
+          this.#list = {
+            ...list,
+            rows,
+            source: rows.length > 0 ? "unread" : "empty",
+          };
+          changed = true;
+          if (rows.length === 0) void this.#refresh().catch(() => undefined);
+        }
+      }
+      if (wasActive) changed = true;
     }
+    if (changed) this.#notify(conversationId);
     return {};
   }
 
@@ -471,11 +552,13 @@ export class DingTalkService {
   async resolve(mention: DingTalkMention): Promise<DingTalkResolveResult> {
     await this.#ensure();
     this.#events.touch();
-    const conversation = await this.#conversationFor(mention.conversationId);
-    const latest = await this.messages({ conversationId: mention.conversationId, limit: 100 });
-    let available = latest.available;
-    let errorCode = latest.errorCode;
-    let all = latest.messages;
+    const [conversation, latestPage] = await Promise.all([
+      this.#conversationForMention(mention.conversationId),
+      this.#readMessages(mention.conversationId, 30),
+    ]);
+    let available = latestPage.errorCode === null;
+    let errorCode = latestPage.errorCode;
+    let all = latestPage.messages;
     if (
       mention.kind === "messages" &&
       mention.messageIds.some((id) => !all.some((message) => message.messageId === id))
@@ -531,11 +614,22 @@ export class DingTalkService {
     return (await expandDingTalkMentions(text, resolver)).text;
   }
 
-  setNotifier(notifier: (event: { conversationId: string | null }) => void): void {
-    this.#notifier = notifier;
+  /**
+   * Every Host session that serves this page subscribes; one shared service can
+   * outlive individual Desktop sessions, so a single notifier would send the
+   * change to whichever session constructed last.
+   */
+  addNotifier(notifier: (event: { conversationId: string | null }) => void): () => void {
+    this.#notifiers.add(notifier);
+    return () => this.#notifiers.delete(notifier);
   }
 
-  #notifier: ((event: { conversationId: string | null }) => void) | null = null;
+  setNotifier(notifier: (event: { conversationId: string | null }) => void): void {
+    this.#notifiers.clear();
+    this.#notifiers.add(notifier);
+  }
+
+  readonly #notifiers = new Set<(event: { conversationId: string | null }) => void>();
 
   async #personConversation(person: DingTalkPerson): Promise<DingTalkConversation | null> {
     const known = [...this.#conversations.values()].find(
@@ -597,6 +691,21 @@ export class DingTalkService {
     }
     this.#conversations.set(conversationId, enriched);
     return enriched;
+  }
+
+  /**
+   * Mention context only needs a title; a direct chat's job title costs one
+   * extra directory round trip, so submission-time expansion skips it.
+   */
+  async #conversationForMention(conversationId: string): Promise<DingTalkConversation | null> {
+    const cached =
+      this.#conversations.get(conversationId) ??
+      this.#list?.rows.find((conversation) => conversation.conversationId === conversationId) ??
+      null;
+    if (cached) return cached;
+    const info = await this.#cli.conversationInfo(conversationId).catch(() => null);
+    if (info) this.#conversations.set(conversationId, info);
+    return info;
   }
 
   async #personSubtitle(name: string): Promise<string | null> {
@@ -667,15 +776,41 @@ export class DingTalkService {
         this.#conversations.set(conversation.conversationId, this.#withMeta(conversation));
       }
       const cutoff = this.#now() - UNREAD_WINDOW_MS;
-      const rows = unread.conversations
-        .filter(
-          (conversation) =>
-            conversation.unreadCount > 0 &&
-            (conversation.lastMessageAt ?? 0) >= cutoff &&
+      const byId = new Map(
+        unread.conversations.map((conversation) => [
+          conversation.conversationId,
+          this.#withMeta(conversation),
+        ]),
+      );
+      // An open conversation keeps its row even when dws stops reporting it as
+      // unread; its badge stays cleared until the page leaves it.
+      for (const [conversationId, snapshot] of this.#active) {
+        const latest = byId.get(conversationId);
+        const merged: DingTalkConversation = {
+          ...(latest ?? snapshot),
+          ...(latest && !latest.preview && snapshot.preview ? { preview: snapshot.preview } : {}),
+          unreadCount: 0,
+          atMe: false,
+          lastMessageAt: Math.max(latest?.lastMessageAt ?? 0, snapshot.lastMessageAt ?? 0) || null,
+        };
+        byId.set(conversationId, merged);
+        this.#active.set(conversationId, merged);
+        this.#conversations.set(conversationId, merged);
+      }
+      const rows = [...byId.values()]
+        .filter((conversation) => {
+          if ((conversation.lastMessageAt ?? 0) < cutoff) return false;
+          if (this.#active.has(conversation.conversationId)) return true;
+          const reported = unread.conversations.find(
+            (row) => row.conversationId === conversation.conversationId,
+          );
+          return (
+            reported !== undefined &&
+            reported.unreadCount > 0 &&
             (conversation.lastMessageAt ?? 0) >
-              (this.#viewedAt.get(conversation.conversationId) ?? 0),
-        )
-        .map((conversation) => this.#withMeta(conversation))
+              (this.#viewedAt.get(conversation.conversationId) ?? 0)
+          );
+        })
         .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
         .slice(0, UNREAD_LIMIT);
       this.#list = {
@@ -748,6 +883,7 @@ export class DingTalkService {
         (conversation) => conversation.conversationId === record.conversationId,
       );
       const known = previous ??
+        this.#active.get(record.conversationId) ??
         this.#conversations.get(record.conversationId) ?? {
           conversationId: record.conversationId,
           title: "",
@@ -756,15 +892,18 @@ export class DingTalkService {
           lastMessageAt: null,
           muted: false,
         };
+      const active = this.#active.has(record.conversationId);
       const updated: DingTalkConversation = {
         ...known,
-        unreadCount: known.unreadCount + 1,
+        unreadCount: active ? 0 : known.unreadCount + 1,
+        atMe: active ? false : known.atMe,
         lastMessageAt: Math.max(known.lastMessageAt ?? 0, record.createdAt),
         preview: previewOf(record.text),
       };
       const visible =
-        (updated.lastMessageAt ?? 0) >= this.#now() - UNREAD_WINDOW_MS &&
-        (updated.lastMessageAt ?? 0) > (this.#viewedAt.get(record.conversationId) ?? 0);
+        active ||
+        ((updated.lastMessageAt ?? 0) >= this.#now() - UNREAD_WINDOW_MS &&
+          (updated.lastMessageAt ?? 0) > (this.#viewedAt.get(record.conversationId) ?? 0));
       const rows = (
         visible
           ? [updated, ...list.rows.filter((row) => row.conversationId !== record.conversationId)]
@@ -773,6 +912,8 @@ export class DingTalkService {
         .sort((left, right) => (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0))
         .slice(0, UNREAD_LIMIT);
       this.#list = { ...list, source: rows.length > 0 ? "unread" : "empty", rows };
+      if (active) this.#active.set(record.conversationId, updated);
+      this.#conversations.set(record.conversationId, updated);
     } else {
       void this.#refresh(true).catch(() => undefined);
     }
@@ -792,19 +933,26 @@ export class DingTalkService {
   }
 
   #notify(conversationId: string | null): void {
+    this.#pendingNotify.add(conversationId);
     if (this.#notifyTimer) return;
     this.#notifyTimer = setTimeout(() => {
       this.#notifyTimer = null;
-      const event = { conversationId };
+      const pending = [...this.#pendingNotify];
+      this.#pendingNotify.clear();
+      // One refresh reloads the whole list; the newest conversation id tells
+      // the page which open transcript also needs an incremental read.
+      const event = { conversationId: [...pending].reverse().find((id) => id !== null) ?? null };
       try {
         this.#onChange?.(event);
       } catch {
         /* Renderer notification is best effort. */
       }
-      try {
-        this.#notifier?.(event);
-      } catch {
-        /* Renderer notification is best effort. */
+      for (const notifier of this.#notifiers) {
+        try {
+          notifier(event);
+        } catch {
+          /* Renderer notification is best effort. */
+        }
       }
     }, NOTIFY_DELAY_MS);
     this.#notifyTimer.unref?.();
@@ -812,6 +960,8 @@ export class DingTalkService {
 
   dispose(): void {
     this.#disposed = true;
+    this.#notifiers.clear();
+    this.#pendingNotify.clear();
     this.#events.dispose();
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);
     if (this.#viewedWriteTimer) clearTimeout(this.#viewedWriteTimer);

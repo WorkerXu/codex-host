@@ -23,6 +23,8 @@ import {
 import { createDingTalkConversationList } from "./dingtalk-conversation-list.js";
 import { createDingTalkMessageList } from "./dingtalk-message-list.js";
 import { createDingTalkComposer } from "./dingtalk-composer.js";
+import { createDingTalkLightbox, type DingTalkLightboxImage } from "./dingtalk-lightbox.js";
+import { startDingTalkPoll } from "./dingtalk-poll.js";
 import { createDingTalkMainHeader } from "./dingtalk-main-header.js";
 import { createDingTalkPageMenu } from "./dingtalk-page-menu.js";
 import { consumeDingTalkReveal, type DingTalkRevealTarget } from "./dingtalk-reveal.js";
@@ -206,18 +208,69 @@ export function createDingTalkSettingsPage(
         onImageLoaded: (wasNearBottom) => {
           if (wasNearBottom) scrollToBottom();
         },
+        onImageClick: (message, resource) => openImage(message, resource),
         onRetry: (message) => void deliver(message),
       });
 
       const composer = createDingTalkComposer({
         document,
         text,
-        onSend: () => sendMessage(),
+        onSend: (payload) => sendMessage(payload),
+        isGroup: () => state.currentConversation?.singleChat === false,
+        loadMembers: async () => {
+          if (!client || !state.selectedId) {
+            return { available: false, members: [], errorCode: "peer_unavailable" };
+          }
+          return await client.members(state.selectedId);
+        },
       });
 
       main.append(mainHead.element, notice, pane, composer.element);
       root.append(sidebar, pageMenu.element, main);
       context.content.append(root);
+
+      const lightbox = createDingTalkLightbox({
+        document,
+        host: root,
+        text,
+        loadResource: async (message, resource) => {
+          if (!client) {
+            return {
+              available: false,
+              dataUrl: null,
+              mimeType: null,
+              sizeBytes: null,
+              errorCode: "peer_unavailable",
+            };
+          }
+          return await client.resource({
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            resourceId: resource.resourceId,
+            resourceIdType: resource.resourceIdType,
+          });
+        },
+      });
+
+      const conversationImages = (): DingTalkLightboxImage[] =>
+        state.messages.flatMap((message) =>
+          (message.resources ?? [])
+            .filter((resource) => resource.kind === "image")
+            .map((resource) => ({ message, resource })),
+        );
+
+      function openImage(
+        message: ViewMessage,
+        resource: NonNullable<ViewMessage["resources"]>[number],
+      ): void {
+        const all = conversationImages();
+        const index = all.findIndex(
+          (entry) =>
+            entry.message.messageId === message.messageId &&
+            entry.resource.resourceId === resource.resourceId,
+        );
+        lightbox.open(all, index < 0 ? 0 : index);
+      }
 
       const setNotice = (value: string | null): void => {
         notice.hidden = value === null;
@@ -366,7 +419,8 @@ export function createDingTalkSettingsPage(
         composer.setPlaceholder(conversation?.title || "");
       };
 
-      const distanceFromBottom = (): number => messageList.scrollHeight - messageList.scrollTop;
+      const distanceFromBottom = (): number =>
+        messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
 
       const scrollToBottom = (): void => {
         const request = ++scrollRequest;
@@ -430,10 +484,49 @@ export function createDingTalkSettingsPage(
 
       const selectConversation = async (conversationId: string, force = false): Promise<void> => {
         if (!client) return;
-        if (!force && state.selectedId === conversationId && state.messages.length > 0) return;
+        if (!force && state.selectedId === conversationId && state.messages.length > 0) {
+          // Auto-selection and a later click can race; the row is already open,
+          // but a stale badge must still be cleared through the same route.
+          const existing = conversationFor(conversationId);
+          if (existing && (existing.unreadCount > 0 || existing.atMe === true)) {
+            const cleared = { ...existing, unreadCount: 0, atMe: false };
+            state.currentConversation = cleared;
+            state.conversations = state.conversations.map((row) =>
+              row.conversationId === conversationId ? cleared : row,
+            );
+            updateHeader();
+            renderList();
+            void client.markViewed(
+              conversationId,
+              existing.lastMessageAt ?? state.messages.at(-1)?.createdAt ?? 0,
+              true,
+            );
+          }
+          renderList();
+          return;
+        }
+        if (state.selectedId && state.selectedId !== conversationId) {
+          const previous = conversationFor(state.selectedId);
+          void client.markViewed(
+            state.selectedId,
+            previous?.lastMessageAt ?? state.messages.at(-1)?.createdAt ?? 0,
+            false,
+          );
+        }
         mainHead.closeMenu();
         state.selectedId = conversationId;
         state.currentConversation = conversationFor(conversationId);
+        // The row must lose its badge before the messages arrive; the Host
+        // keeps it in the unread column while this page stays open.
+        const opening = state.currentConversation;
+        if (opening && (opening.unreadCount > 0 || opening.atMe === true)) {
+          const cleared = { ...opening, unreadCount: 0, atMe: false };
+          state.currentConversation = cleared;
+          state.conversations = state.conversations.map((row) =>
+            row.conversationId === conversationId ? cleared : row,
+          );
+          void client.markViewed(conversationId, opening.lastMessageAt ?? 0, true);
+        }
         try {
           view.localStorage.setItem(LAST_CONVERSATION_KEY, conversationId);
         } catch {
@@ -446,6 +539,7 @@ export function createDingTalkSettingsPage(
         state.messagesError = false;
         state.loadMoreError = false;
         state.pendingNewCount = 0;
+        composer.reset();
         updateHeader();
         renderList();
         renderMessages();
@@ -462,9 +556,14 @@ export function createDingTalkSettingsPage(
           return;
         }
         if (result.conversation) {
-          state.currentConversation = result.conversation;
+          const viewed: DingTalkConversation = {
+            ...result.conversation,
+            unreadCount: 0,
+            atMe: false,
+          };
+          state.currentConversation = viewed;
           state.conversations = state.conversations.map((row) =>
-            row.conversationId === conversationId ? { ...row, ...result.conversation } : row,
+            row.conversationId === conversationId ? { ...row, ...viewed } : row,
           );
         }
         state.messages = [...result.messages].sort(
@@ -476,7 +575,7 @@ export function createDingTalkSettingsPage(
         updateHeader();
         renderMessages({ scroll: "bottom" });
         const newest = state.messages.at(-1);
-        if (newest) void client.markViewed(conversationId, newest.createdAt);
+        if (newest) void client.markViewed(conversationId, newest.createdAt, true);
       };
 
       const loadOlder = async (force = false): Promise<void> => {
@@ -579,7 +678,7 @@ export function createDingTalkSettingsPage(
           renderPill();
         }
         const newest = state.messages.at(-1);
-        if (newest) void client.markViewed(conversationId, newest.createdAt);
+        if (newest) void client.markViewed(conversationId, newest.createdAt, true);
       };
 
       const rememberedConversation = (): string | null => {
@@ -637,10 +736,19 @@ export function createDingTalkSettingsPage(
           }
         }
         if (choose) {
+          if (state.selectedId) {
+            const previous = conversationFor(state.selectedId);
+            void client.markViewed(
+              state.selectedId,
+              state.messages.at(-1)?.createdAt ?? previous?.lastMessageAt ?? 0,
+              false,
+            );
+          }
           const target = rememberedConversation();
           state.selectedId = null;
           state.currentConversation = null;
           state.messages = [];
+          composer.reset();
           updateHeader();
           renderMessages();
           renderList();
@@ -649,9 +757,17 @@ export function createDingTalkSettingsPage(
         }
         renderList();
         if (state.conversations.length === 0) {
+          if (state.selectedId) {
+            void client.markViewed(
+              state.selectedId,
+              state.messages.at(-1)?.createdAt ?? state.currentConversation?.lastMessageAt ?? 0,
+              false,
+            );
+          }
           state.selectedId = null;
           state.currentConversation = null;
           state.messages = [];
+          composer.reset();
           updateHeader();
           renderMessages();
         }
@@ -732,7 +848,16 @@ export function createDingTalkSettingsPage(
         message.pending = true;
         message.failed = false;
         messageListView.update(message, previousId);
-        const result = await client.send({ conversationId, text: message.text }).catch(() => null);
+        const result = await client
+          .send({
+            conversationId,
+            text: message.sendText ?? message.text,
+            ...(message.atOpenDingTalkIds && message.atOpenDingTalkIds.length > 0
+              ? { atOpenDingTalkIds: message.atOpenDingTalkIds }
+              : {}),
+            ...(message.atAll === true ? { atAll: true } : {}),
+          })
+          .catch(() => null);
         if (disposed || state.selectedId !== conversationId) return;
         message.pending = false;
         if (!result?.ok) {
@@ -757,21 +882,29 @@ export function createDingTalkSettingsPage(
         renderList();
       };
 
-      const sendMessage = (): void => {
-        const value = composer.value();
-        if (!value || state.selectedId === null) return;
+      const sendMessage = (payload: {
+        text: string;
+        displayText: string;
+        atOpenDingTalkIds: string[];
+        atAll: boolean;
+      }): void => {
+        if (state.selectedId === null) return;
         const pending: ViewMessage = {
           messageId: `local-${Date.now()}`,
           conversationId: state.selectedId,
           senderName: "我",
           senderId: "me",
           createdAt: Date.now(),
-          text: value,
+          text: payload.displayText,
           unsupported: false,
           mine: true,
           pending: true,
+          sendText: payload.text,
+          ...(payload.atOpenDingTalkIds.length > 0
+            ? { atOpenDingTalkIds: payload.atOpenDingTalkIds }
+            : {}),
+          ...(payload.atAll ? { atAll: true } : {}),
         };
-        composer.clear();
         const overflow = Math.max(0, state.messages.length + 1 - MAX_MESSAGE_WINDOW);
         if (overflow > 0) {
           state.messages.splice(0, overflow);
@@ -855,7 +988,13 @@ export function createDingTalkSettingsPage(
           scrollRequest += 1;
           void loadOlder();
         }
-        if (distanceFromBottom() <= 4 && state.pendingNewCount > 0) {
+        if (distanceFromBottom() <= 80 && state.pendingNewCount > 0) {
+          state.pendingNewCount = 0;
+          renderPill();
+        }
+      });
+      messageList.addEventListener("wheel", () => {
+        if (distanceFromBottom() <= 80 && state.pendingNewCount > 0) {
           state.pendingNewCount = 0;
           renderPill();
         }
@@ -871,12 +1010,14 @@ export function createDingTalkSettingsPage(
         if (detail) void revealTarget(detail);
       };
       const onPointerDown = (event: PointerEvent): void => {
-        const target = event.target;
-        if (mainHead.menuOpen) {
-          if (!(target instanceof Node) || !mainHead.contains(target)) mainHead.closeMenu();
-        }
+        // Event.target is retargeted to the shadow host for this document-level
+        // listener; composedPath keeps the real menu nodes visible.
+        const path = event.composedPath();
+        const inside = (menu: { contains(node: Node): boolean }): boolean =>
+          path.some((node) => node instanceof Node && menu.contains(node));
+        if (mainHead.menuOpen && !inside(mainHead)) mainHead.closeMenu();
         if (!pageMenu.open) return;
-        if (target instanceof Node && pageMenu.contains(target)) return;
+        if (inside(pageMenu)) return;
         pageMenu.close();
       };
       const onKey = (event: KeyboardEvent): void => {
@@ -902,14 +1043,29 @@ export function createDingTalkSettingsPage(
       document.addEventListener("keydown", onKey, true);
 
       const unsubscribe =
-        client?.subscribe((conversationId) => {
+        client?.subscribe(() => {
           if (disposed) return;
           void loadConversations().then(() => {
-            if (conversationId && conversationId === state.selectedId) {
-              void refreshLatest(conversationId);
-            }
+            // A coalesced notification carries one id, but the list refresh is
+            // global; refresh whatever transcript is open now.
+            if (state.selectedId) void refreshLatest(state.selectedId);
           });
         }) ?? (() => undefined);
+
+      const poll = startDingTalkPoll({
+        isVisible: () =>
+          !disposed && document.visibilityState !== "hidden" && state.searchQuery.length === 0,
+        pollConversation: () => {
+          const conversationId = state.selectedId;
+          if (!conversationId || state.loadingMessages) return;
+          return refreshLatest(conversationId);
+        },
+        pollList: () => loadConversations(),
+      });
+      const onVisibility = (): void => {
+        if (document.visibilityState === "visible") poll.pollNow();
+      };
+      document.addEventListener("visibilitychange", onVisibility);
 
       updateHeader();
       renderMessages();
@@ -921,6 +1077,18 @@ export function createDingTalkSettingsPage(
 
       return () => {
         disposed = true;
+        poll.stop();
+        document.removeEventListener("visibilitychange", onVisibility);
+        lightbox.dispose();
+        composer.dispose();
+        if (client && state.selectedId) {
+          const row = conversationFor(state.selectedId);
+          void client.markViewed(
+            state.selectedId,
+            state.messages.at(-1)?.createdAt ?? row?.lastMessageAt ?? 0,
+            false,
+          );
+        }
         listGeneration += 1;
         messageGeneration += 1;
         searchGeneration += 1;

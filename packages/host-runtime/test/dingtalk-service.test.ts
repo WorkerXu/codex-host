@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
 
@@ -33,7 +33,16 @@ interface FakeState {
   }[];
   messageCalls: number;
   previewCalls: number;
+  memberCalls: number;
+  members: { openDingTalkId: string; name: string; title?: string }[];
   info: Record<string, DingTalkConversation>;
+  onRecord?: (record: {
+    messageId: string;
+    conversationId: string;
+    senderName: string;
+    text: string;
+    createdAt: number;
+  }) => void;
 }
 
 function fakeCli(state: FakeState): DingTalkCli {
@@ -77,8 +86,15 @@ function fakeCli(state: FakeState): DingTalkCli {
       };
     },
     searchMessages: async () => ({ messages: state.messages, errorCode: null }),
+    members: async () => {
+      state.memberCalls += 1;
+      return { members: state.members, errorCode: null };
+    },
     send: async () => ({ ok: true, errorCode: null }),
-    openEvents: async () => null,
+    openEvents: async (input) => {
+      state.onRecord = input.onRecord;
+      return { stop: () => undefined };
+    },
   };
 }
 
@@ -98,6 +114,8 @@ function state(overrides: Partial<FakeState> = {}): FakeState {
     people: [],
     messageCalls: 0,
     previewCalls: 0,
+    memberCalls: 0,
+    members: [],
     info: {},
     ...overrides,
   };
@@ -270,7 +288,7 @@ describe("DingTalk conversation views", () => {
       isLocalHost: true,
       cli: fakeCli(fake),
     });
-    await service.markViewed("a", row.lastMessageAt ?? 0);
+    await service.markViewed("a", row.lastMessageAt ?? 0, false);
     const hidden = await service.conversations();
     expect(hidden.source).toBe("empty");
     expect(hidden.conversations).toHaveLength(0);
@@ -281,6 +299,82 @@ describe("DingTalk conversation views", () => {
     const shown = await service.conversations();
     expect(shown.source).toBe("unread");
     expect(shown.conversations[0]?.conversationId).toBe("a");
+    service.dispose();
+  });
+
+  it("keeps an open conversation with a cleared badge until the page leaves", async () => {
+    const env = await environment();
+    const row = conversation("a", 100, 4);
+    const fake = state({ unread: [row] });
+    const changes: { conversationId: string | null }[] = [];
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(fake),
+      onChange: (event) => changes.push(event),
+    });
+    await service.conversations();
+    await service.markViewed("a", row.lastMessageAt ?? 0, true);
+    const whileOpen = await service.conversations();
+    expect(whileOpen.conversations).toHaveLength(1);
+    expect(whileOpen.conversations[0]).toMatchObject({ conversationId: "a", unreadCount: 0 });
+    expect(whileOpen.conversations[0]?.atMe).not.toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(changes.some((event) => event.conversationId === "a")).toBe(true);
+
+    await service.markViewed("a", row.lastMessageAt ?? 0, false);
+    const afterLeave = await service.conversations();
+    expect(afterLeave.source).toBe("empty");
+    expect(afterLeave.conversations).toHaveLength(0);
+    service.dispose();
+  });
+
+  it("keeps a new message visible without a badge while the conversation is open", async () => {
+    const env = await environment();
+    const row = conversation("a", 100, 1);
+    const fake = state({ unread: [row] });
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(fake),
+      now: () => row.lastMessageAt ?? 0,
+    });
+    await service.conversations();
+    await service.markViewed("a", row.lastMessageAt ?? 0, true);
+    await vi.waitFor(() => expect(fake.onRecord).toBeDefined());
+    fake.onRecord?.({
+      messageId: "m2",
+      conversationId: "a",
+      senderName: "林晓",
+      text: "新消息",
+      createdAt: (row.lastMessageAt ?? 0) + 1_000,
+    });
+    const result = await service.conversations();
+    expect(result.conversations[0]).toMatchObject({
+      conversationId: "a",
+      unreadCount: 0,
+      preview: "新消息",
+    });
+    service.dispose();
+  });
+
+  it("reads members once for simultaneous picker requests", async () => {
+    const env = await environment();
+    const fake = state({
+      members: [{ openDingTalkId: "open-1", name: "王鹏远", title: "普通成员" }],
+    });
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(fake),
+    });
+    const [first, second] = await Promise.all([
+      service.members("cidA=="),
+      service.members("cidA=="),
+    ]);
+    expect(first).toMatchObject({ available: true, members: fake.members });
+    expect(second).toEqual(first);
+    expect(fake.memberCalls).toBe(1);
     service.dispose();
   });
 
@@ -409,6 +503,48 @@ describe("DingTalk keyword search", () => {
 });
 
 describe("DingTalk change notifications", () => {
+  it("notifies every Desktop session that shares the service", async () => {
+    const env = await environment();
+    const row = conversation("a", 100);
+    const fake = state({ unread: [row] });
+    const first: { conversationId: string | null }[] = [];
+    const second: { conversationId: string | null }[] = [];
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(fake),
+    });
+    service.addNotifier((event) => first.push(event));
+    const unsubscribe = service.addNotifier((event) => second.push(event));
+    await service.conversations();
+    await vi.waitFor(() => expect(fake.onRecord).toBeDefined());
+    fake.onRecord?.({
+      messageId: "m2",
+      conversationId: "a",
+      senderName: "林晓",
+      text: "新消息",
+      createdAt: (row.lastMessageAt ?? 0) + 1_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(first.some((event) => event.conversationId === "a")).toBe(true);
+    expect(second.some((event) => event.conversationId === "a")).toBe(true);
+    unsubscribe();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    first.length = 0;
+    second.length = 0;
+    fake.onRecord?.({
+      messageId: "m3",
+      conversationId: "a",
+      senderName: "林晓",
+      text: "新消息 2",
+      createdAt: (row.lastMessageAt ?? 0) + 2_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(first.length).toBeGreaterThan(0);
+    expect(second).toHaveLength(0);
+    service.dispose();
+  });
+
   it("does not push a conversation notification for a pull refresh", async () => {
     const env = await environment();
     const changes: { conversationId: string | null }[] = [];

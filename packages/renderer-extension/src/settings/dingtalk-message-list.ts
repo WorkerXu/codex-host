@@ -22,6 +22,10 @@ export interface DingTalkMessageListOptions {
     resource: NonNullable<DingTalkMessage["resources"]>[number],
   ): Promise<DingTalkResourceResult>;
   onImageLoaded?(wasNearBottom: boolean): void;
+  onImageClick?(
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void;
   onRetry?(message: ViewMessage): void;
   /** Injectable object-URL hooks keep this testable outside the Desktop. */
   createObjectUrl?(blob: Blob): string;
@@ -95,7 +99,7 @@ interface LoadedImage {
   resource: NonNullable<DingTalkMessage["resources"]>[number];
 }
 
-async function decodeDataUrl(dataUrl: string): Promise<Blob | null> {
+export async function decodeDingTalkDataUrl(dataUrl: string): Promise<Blob | null> {
   try {
     const match = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/u.exec(dataUrl);
     if (!match) return null;
@@ -175,6 +179,7 @@ export function createDingTalkMessageList(
       continuation,
       suppressTime,
       onRetry: () => options.onRetry?.(message),
+      ...(options.onImageClick ? { onImageClick: options.onImageClick } : {}),
       attachImage: (frame, imageMessage, resource) => {
         if (!imageObserver) {
           void loadImage(frame, { entry, message: imageMessage, resource });
@@ -228,7 +233,9 @@ export function createDingTalkMessageList(
       showImageUnavailable(document, frame);
       return;
     }
-    const blob = await (options.decodeImage ?? decodeDataUrl)(result.dataUrl).catch(() => null);
+    const blob = await (options.decodeImage ?? decodeDingTalkDataUrl)(result.dataUrl).catch(
+      () => null,
+    );
     if (!blob || pending.entry.removed || !frame.isConnected) {
       if (!blob) showImageUnavailable(document, frame);
       return;
