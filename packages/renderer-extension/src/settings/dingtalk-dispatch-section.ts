@@ -193,6 +193,8 @@ export function createDingTalkDispatchSection(
   const renderBody = (): void => {
     body.dataset.disabled = String(!enabled.checked);
     body.inert = !enabled.checked;
+    selectAll.disabled = !enabled.checked;
+    clearAll.disabled = !enabled.checked;
     if (!enabled.checked) setStatus("idle");
   };
 

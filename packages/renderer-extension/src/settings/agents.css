@@ -221,7 +221,7 @@
 }
 
 .agent-menu-item--danger {
-  color: var(--color-token-charts-red);
+  color: var(--color-background-danger-solid, #e02e2a);
 }
 
 .agents-status,
@@ -233,7 +233,7 @@
 }
 
 .agents-status[data-failed="true"] {
-  color: var(--color-token-charts-red);
+  color: var(--color-background-danger-solid, #e02e2a);
 }
 
 .agents-empty {
@@ -451,7 +451,7 @@
 }
 
 .agent-input[aria-invalid="true"] {
-  border-color: var(--color-token-charts-red);
+  border-color: var(--color-background-danger-solid, #e02e2a);
 }
 
 .agent-textarea {
@@ -532,7 +532,7 @@
 
 .agent-editor-error {
   margin: 0;
-  color: var(--color-token-charts-red);
+  color: var(--color-background-danger-solid, #e02e2a);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
 }
@@ -633,7 +633,7 @@
 }
 
 .dingtalk-switch:checked {
-  background: var(--color-token-charts-blue);
+  background: var(--color-token-charts-blue, #0285ff);
 }
 
 .dingtalk-switch:checked::before {
@@ -727,7 +727,7 @@
   height: 15px;
   flex: none;
   margin: 0;
-  accent-color: var(--color-token-charts-blue);
+  accent-color: var(--color-token-charts-blue, #0285ff);
   cursor: pointer;
 }
 
@@ -742,7 +742,7 @@
   width: 280px;
   max-width: 100%;
   margin: 0;
-  accent-color: var(--color-token-charts-blue);
+  accent-color: var(--color-token-charts-blue, #0285ff);
 }
 
 .dingtalk-threshold-value {
@@ -800,7 +800,7 @@
 }
 
 .dingtalk-listener-status[data-state="failed"] {
-  color: var(--color-token-charts-red);
+  color: var(--color-background-danger-solid, #e02e2a);
 }
 
 .agent-menu-item:focus-visible,

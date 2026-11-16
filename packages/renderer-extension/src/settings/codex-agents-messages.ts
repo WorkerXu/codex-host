@@ -89,7 +89,7 @@ export const codexAgentsMessagesEnglish = {
     selectAll: "Select all",
     clearAll: "Clear",
     approvalNote:
-      "You decide approvals: agents may prepare material and recommend a conclusion, but never approve or reject on your behalf.",
+      "Approvals: agents act on your configuration but never approve, reject or revoke one; the approval state stays yours to decide.",
     policyNote: "",
     runtimeNote: "",
     save: "Save",
@@ -193,7 +193,7 @@ export const codexAgentsMessagesChinese: CodexAgentsMessages = {
     agentsEmpty: "还没有填写描述的智能体。",
     selectAll: "全选",
     clearAll: "清空",
-    approvalNote: "审批由你决定：智能体可以整理材料并给出建议，但不会代为同意、拒绝或撤销。",
+    approvalNote: "审批：智能体按你的配置处理，但不会直接同意、拒绝或撤销审批，审批状态由你决定。",
     policyNote: "",
     runtimeNote: "",
     save: "保存",
