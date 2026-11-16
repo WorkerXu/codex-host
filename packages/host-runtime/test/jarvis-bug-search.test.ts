@@ -308,7 +308,9 @@ describe("Jarvis structured bug search", () => {
       query: "最近的示例买bug",
     });
     expect(decisions.interpret).toHaveBeenCalledTimes(1);
-    const fields = decisions.interpret.mock.calls[0]?.[1] as readonly string[];
+    const fields = (
+      decisions.interpret.mock.calls as unknown as [string, readonly string[]][]
+    )[0]?.[1];
     expect(fields).toContain("scope");
     expect(fields).toContain("status");
     expect(fields).not.toContain("mentionsProject");
