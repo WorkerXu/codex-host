@@ -131,6 +131,26 @@ afterEach(async () => {
   );
 });
 
+describe("DingTalk connection status", () => {
+  it("reports the identity used by the workbench status line", async () => {
+    const env = await environment();
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli: fakeCli(state()),
+    });
+    const status = await service.status();
+    expect(status).toMatchObject({
+      installed: true,
+      authenticated: true,
+      userName: "我",
+      corpName: "测试公司",
+      errorCode: null,
+    });
+    service.dispose();
+  });
+});
+
 describe("DingTalk conversation views", () => {
   it("shows unread conversations and merges group metadata", async () => {
     const env = await environment();
