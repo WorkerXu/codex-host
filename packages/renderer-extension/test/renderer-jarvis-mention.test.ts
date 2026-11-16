@@ -63,9 +63,9 @@ describe("Jarvis entry gating", () => {
 
 describe("Jarvis bug presentation", () => {
   const bug = {
-    id: 928,
-    projectId: 4029,
-    title: "填写已查码的序列号给新的查码任务，无法进行下一步",
+    id: 9101,
+    projectId: 9001,
+    title: "示例：列表页加载失败",
     status: 1,
     priority: 1,
     severity: 2,
@@ -78,7 +78,7 @@ describe("Jarvis bug presentation", () => {
   });
 
   it("builds the chip label", () => {
-    expect(jarvisBugLabel(bug)).toBe("Bug #928 填写已查码的序列号给新的查码任务，无法进行下一步");
+    expect(jarvisBugLabel(bug)).toBe("Bug #9101 示例：列表页加载失败");
   });
 
   it("maps status, priority and severity in both locales", () => {
@@ -107,10 +107,10 @@ describe("Renderer Jarvis client", () => {
     conditions: [{ key: "scope:assigned", kind: "scope", label: "指派给我" }],
     bugs: [
       {
-        id: 928,
-        projectId: 4029,
-        projectName: "示例商城 · 迭代 A",
-        title: "序列号",
+        id: 9101,
+        projectId: 9001,
+        projectName: "示例后台 · 迭代 B",
+        title: "示例：列表页加载失败",
         status: 1,
       },
     ],

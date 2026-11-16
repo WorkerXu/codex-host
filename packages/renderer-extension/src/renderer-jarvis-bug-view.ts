@@ -28,7 +28,7 @@ export function truncateJarvisText(value: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, Math.max(1, limit - 1))}…` : text;
 }
 
-/** Chip and row label, e.g. `Bug #928 填写已查码的序列号…`. */
+/** Chip and row label, e.g. `Bug #9101 示例：列表页加载失败…`. */
 export function jarvisBugLabel(bug: Pick<JarvisBug, "id" | "title">): string {
   return `Bug #${bug.id} ${truncateJarvisText(bug.title, 28)}`;
 }

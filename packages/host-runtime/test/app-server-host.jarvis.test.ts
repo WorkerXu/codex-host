@@ -27,7 +27,7 @@ function fakeService(overrides: Partial<Record<keyof JarvisService, unknown>> = 
       available: true,
       errorCode: null,
       conditions: [{ key: "scope:assigned", kind: "scope", label: "指派给我" }],
-      bugs: [{ id: 928, projectId: 4029, title: "序列号" }],
+      bugs: [{ id: 9101, projectId: 9001, title: "示例：列表页加载失败" }],
       total: 1,
       capped: false,
     })),
@@ -112,7 +112,7 @@ describe("Host Jarvis RPC", () => {
         params: { query: "我还没处理完成的bug" },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 2))).toMatchObject({
-        result: { available: true, total: 1, bugs: [{ id: 928 }] },
+        result: { available: true, total: 1, bugs: [{ id: 9101 }] },
       });
       writeRequest(fixture.desktopInput, {
         id: 4,

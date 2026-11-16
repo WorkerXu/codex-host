@@ -399,24 +399,22 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
     { key: "status:1", kind: "status", label: "未解决" },
   ],
   bugs: [
-    previewBug(
-      928,
-      4029,
-      "示例商城 · 迭代 A",
-      "填写已查码的序列号给新的查码任务，无法进行下一步",
-      { priority: 1, severity: 2, updatedAt: new Date(Date.now() - 3 * 60_000).toISOString() },
-    ),
-    previewBug(936, 4041, "示例后台 · 迭代 B", "加盟商鉴定任务的查码成本判断", {
+    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：列表页加载失败", {
+      priority: 1,
+      severity: 2,
+      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    }),
+    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：筛选条件未生效", {
       priority: 3,
       severity: 3,
       updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
     }),
-    previewBug(941, 4078, "示例买 · 消息通知", "示例买消息通知未送达", {
+    previewBug(9104, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
       priority: 2,
       severity: 1,
       updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
     }),
-    previewBug(952, 4081, "示例买 · 标记迭代", "搜索结果列表未显示示例买标记", {
+    previewBug(9105, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
       priority: 3,
       severity: 2,
       updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
@@ -427,13 +425,38 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
 };
 
 const jarvisPreviewProjectRecent: JarvisBugSearchResult = {
-  ...jarvisPreviewResults,
+  available: true,
+  errorCode: null,
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
     { key: "order:newest", kind: "order", label: "最新" },
   ],
-  bugs: jarvisPreviewResults.bugs.map((bug, index) => (index === 3 ? { ...bug, status: 2 } : bug)),
+  bugs: [
+    previewBug(9201, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
+      priority: 2,
+      severity: 1,
+      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    }),
+    previewBug(9202, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
+      status: 2,
+      priority: 3,
+      severity: 2,
+      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    }),
+    previewBug(9203, 9003, "示例买 · 消息通知", "示例：通知开关无效", {
+      priority: 3,
+      severity: 3,
+      updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+    }),
+    previewBug(9204, 9004, "示例买 · 标记迭代", "示例：标记颜色错误", {
+      priority: 3,
+      severity: 3,
+      updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    }),
+  ],
+  total: 4,
+  capped: false,
 };
 
 const jarvisPreviewConditions: JarvisBugSearchResult = {
@@ -446,10 +469,10 @@ const jarvisPreviewConditions: JarvisBugSearchResult = {
     { key: "title", kind: "title", label: "标题含「登录」" },
   ],
   bugs: [
-    previewBug(928, 4029, "示例商城 · 迭代 A", "登录后无法进入工作台", {
+    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：登录后无法进入工作台", {
       severity: 2,
     }),
-    previewBug(936, 4041, "示例后台 · 迭代 B", "登录验证码不显示", {
+    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：验证码不显示", {
       severity: 2,
       updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
     }),
