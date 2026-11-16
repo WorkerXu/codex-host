@@ -48,6 +48,7 @@ const READ_ONLY_PREFIXES: readonly (readonly string[])[] = [
   ["chat", "+my-groups"],
   ["chat", "+conversation-list-top"],
   ["chat", "+messages-mget"],
+  ["chat", "+messages-resource-download"],
   ["chat", "+flag-list"],
   ["chat", "+chat-search"],
   ["chat", "+chat-members-list"],

@@ -32,6 +32,8 @@ export interface DingTalkCliOptions {
   executable?: string;
   spawnImpl?: DwsSpawn;
   timeoutMs?: number;
+  /** Working directory for commands that must write inside it (media download). */
+  cwd?: string;
   /** Runs on the configured DingTalk Host instead of the local CLI. */
   runImpl?: (args: readonly string[], timeoutMs: number) => Promise<DwsResult>;
 }
@@ -120,6 +122,7 @@ export async function runDwsRaw(
     const child = spawnImpl(executable, [...args], {
       stdio: ["ignore", "pipe", "pipe"],
       env: options.environment ?? process.env,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
     });
     const timer = setTimeout(() => {
       timedOut = true;
@@ -259,6 +262,105 @@ export function parseUnreadConversations(value: unknown): DingTalkConversation[]
   return conversations;
 }
 
+/** `dws chat search --query` → group rows with type and member count. */
+export function parseGroupSearch(value: unknown): DingTalkConversation[] {
+  const root = record(value) ? value : null;
+  const result = root && record(root.result) ? root.result : null;
+  const rows = result && Array.isArray(result.groups) ? result.groups : [];
+  const conversations: DingTalkConversation[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!record(row)) continue;
+    const conversationId = string(row.openConversationId);
+    if (!conversationId || seen.has(conversationId)) continue;
+    seen.add(conversationId);
+    conversations.push({
+      conversationId,
+      title: string(row.title),
+      singleChat: false,
+      unreadCount: 0,
+      lastMessageAt: parseDwsTime(row.createAt),
+      muted: false,
+      groupType: string(row.groupType) || null,
+      memberCount: number(row.memberCount),
+    });
+  }
+  return conversations;
+}
+
+export interface DingTalkPerson {
+  name: string;
+  title: string;
+  userId: string;
+  openDingTalkId: string;
+}
+
+/** `dws contact user search --query` → people; each resolves to one direct chat. */
+export function parsePersonSearch(value: unknown): DingTalkPerson[] {
+  const root = record(value) ? value : null;
+  const rows = root && Array.isArray(root.result) ? root.result : [];
+  const people: DingTalkPerson[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!record(row)) continue;
+    const openDingTalkId = string(row.openDingTalkId);
+    const name = string(row.name) || string(row.nick);
+    if (!openDingTalkId || !name || seen.has(openDingTalkId)) continue;
+    seen.add(openDingTalkId);
+    people.push({
+      name,
+      title: string(row.title),
+      userId: string(row.userId),
+      openDingTalkId,
+    });
+  }
+  return people;
+}
+
+export interface DingTalkGroupMeta {
+  title: string;
+  groupType: string | null;
+  memberCount: number | null;
+}
+
+/** `dws chat group list-all` → group metadata keyed by conversation id. */
+export function parseGroupDirectory(value: unknown): Map<string, DingTalkGroupMeta> {
+  const root = record(value) ? value : null;
+  const result = root && record(root.result) ? root.result : null;
+  const rows = result && Array.isArray(result.groups) ? result.groups : [];
+  const directory = new Map<string, DingTalkGroupMeta>();
+  for (const row of rows) {
+    if (!record(row)) continue;
+    const conversationId = string(row.openConversationId);
+    if (!conversationId) continue;
+    directory.set(conversationId, {
+      title: string(row.title),
+      groupType: string(row.groupType) || null,
+      memberCount: number(row.memberCount),
+    });
+  }
+  return directory;
+}
+
+export interface DingTalkAtMeHit {
+  conversationId: string;
+  createdAt: number | null;
+}
+
+/** `dws chat +at-me` → conversation ids with their newest mention time. */
+export function parseAtMeHits(value: unknown): DingTalkAtMeHit[] {
+  const root = record(value) ? value : null;
+  const rows = root && Array.isArray(root.items) ? root.items : [];
+  const hits: DingTalkAtMeHit[] = [];
+  for (const row of rows) {
+    if (!record(row)) continue;
+    const conversationId = string(row.conversationId);
+    if (!conversationId) continue;
+    hits.push({ conversationId, createdAt: parseDwsTime(row.time) });
+  }
+  return hits;
+}
+
 /** `dws chat +conversation-info` → one conversation row. */
 export function parseConversationInfo(value: unknown): DingTalkConversation | null {
   if (!record(value)) return null;
@@ -273,24 +375,156 @@ export function parseConversationInfo(value: unknown): DingTalkConversation | nu
     unreadCount: 0,
     lastMessageAt: null,
     muted: false,
+    memberCount: number(info.memberCount),
+    groupType: string(info.groupType) || null,
   };
 }
 
-const UNSUPPORTED_MARKERS = [
-  "[图片消息]",
-  "[文件]",
-  "[语音消息]",
-  "[视频消息]",
-  "[卡片消息]",
-  "[合并转发]",
-  "[表情]",
-];
+const IMAGE_CONTENT_PATTERN = /<imageContent>[\s\S]*?<\/imageContent>/giu;
+const MEDIA_MARKER_PATTERN =
+  /\[(?:图片消息|语音消息|视频消息|表情|链接|卡片消息|合并转发|文件)\]\s*(?:\([^)\n]*\)|fileId:\s*\S+)?/giu;
+const MEDIA_ID_PATTERN = /(?:mediaId|fileId)\s*[=:]\s*[^\s,，;；)）\]】]+/giu;
+const HTML_TAG_PATTERN = /<\/?[a-zA-Z][^>]*>/gu;
+const LEADING_CARD_MARKER = /^\s*(?:\[卡片\]|\[卡片消息\])\s*/u;
 
-export function messageIsUnsupported(text: string, hasResources: boolean): boolean {
-  if (!text.trim()) return true;
-  if (UNSUPPORTED_MARKERS.some((marker) => text.includes(marker))) return true;
-  // A body that is only a resource reference has no readable message text.
-  return hasResources && /^\[[^\]]+\]\s*\S*$/u.test(text.trim());
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/giu, " ")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;/giu, "'")
+    .replace(/&amp;/giu, "&");
+}
+
+/** Remove media markers, `<imageContent>` blocks and raw resource ids. */
+export function sanitizeDingTalkText(text: string): string {
+  return decodeEntities(
+    text
+      .replace(IMAGE_CONTENT_PATTERN, "\n")
+      .replace(MEDIA_MARKER_PATTERN, "")
+      .replace(MEDIA_ID_PATTERN, "")
+      .replace(/图片内容[:：]/gu, "")
+      .replace(HTML_TAG_PATTERN, "")
+      .replace(/\r\n?/gu, "\n"),
+  )
+    .replace(LEADING_CARD_MARKER, "")
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+function looksLikeMarkdown(text: string): boolean {
+  return (
+    /(^|\n)\s{0,3}(#{1,6}\s|>\s?|[-*]\s|\d+\.\s|---|___)/u.test(text) ||
+    /\*\*[^*\n]+\*\*/u.test(text) ||
+    /\[[^\]\n]+\]\([^)\n]+\)/u.test(text)
+  );
+}
+
+function plainTitle(text: string): string {
+  return text
+    .replace(/^[#>\s]+/u, "")
+    .replace(/\*\*(.+?)\*\*/gu, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .trim()
+    .slice(0, 160);
+}
+
+export interface DingTalkMessageBody {
+  text: string;
+  cardTitle: string | null;
+  format: "text" | "markdown";
+}
+
+/** Turn one raw dws body into renderable text, separating a card title. */
+export function parseMessageBody(rawText: string): DingTalkMessageBody {
+  const text = sanitizeDingTalkText(rawText);
+  if (!text) return { text: "", cardTitle: null, format: "text" };
+  const cardish = /<imageContent>/iu.test(rawText) || /^\s*(?:\[卡片|【)/u.test(text);
+  if (!cardish && !looksLikeMarkdown(text)) {
+    return { text, cardTitle: null, format: "text" };
+  }
+  if (!looksLikeMarkdown(text)) {
+    return { text, cardTitle: null, format: "text" };
+  }
+  const lines = text.split("\n");
+  const first = lines[0]?.trim() ?? "";
+  const title = cardish && first && !/^[-*>#\d]|\[[^\]]+\]\(/u.test(first) ? plainTitle(first) : "";
+  const body = title ? lines.slice(1).join("\n").trimStart() : text;
+  return { text: body || text, cardTitle: title || null, format: "markdown" };
+}
+
+function parseQuoted(value: unknown): DingTalkMessage["quotedMessage"] | undefined {
+  if (!record(value)) return undefined;
+  const senderName = string(value.sender) || "未知成员";
+  const text = sanitizeDingTalkText(string(value.content) || string(value.text));
+  const messageId = string(value.openMessageId) || string(value.messageId);
+  const createdAt = parseDwsTime(value.createTime);
+  if (!text && !messageId) return undefined;
+  return {
+    senderName,
+    text,
+    ...(messageId ? { messageId } : {}),
+    ...(createdAt !== null ? { createdAt } : {}),
+  };
+}
+
+function parseReactions(row: Record<string, unknown>): DingTalkMessage["reactions"] {
+  const parsed: { emoji: string; count: number }[] = [];
+  const seen = new Set<string>();
+  const reactions = record(row.reactions) ? row.reactions : null;
+  const counts = reactions && Array.isArray(reactions.counts) ? reactions.counts : [];
+  for (const item of counts) {
+    if (!record(item)) continue;
+    const emoji = string(item.emoji);
+    const count = Math.floor(number(item.count) ?? 0);
+    if (!emoji || count <= 0 || seen.has(emoji)) continue;
+    seen.add(emoji);
+    parsed.push({ emoji, count });
+  }
+  if (parsed.length === 0 && Array.isArray(row.emotionReplyList)) {
+    const grouped = new Map<string, number>();
+    for (const item of row.emotionReplyList) {
+      if (!record(item)) continue;
+      const emoji = string(item.emoji);
+      if (!emoji) continue;
+      const users = Array.isArray(item.replyUsers) ? item.replyUsers.length : 0;
+      grouped.set(emoji, (grouped.get(emoji) ?? 0) + Math.max(1, users));
+    }
+    for (const [emoji, count] of grouped) parsed.push({ emoji, count });
+  }
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function parseResources(
+  row: Record<string, unknown>,
+  rawText: string,
+): DingTalkMessage["resources"] {
+  const refs = Array.isArray(row.resourceRefs) ? row.resourceRefs : [];
+  const hasImageMarker = /\[图片消息\]/u.test(rawText);
+  const resources: NonNullable<DingTalkMessage["resources"]> = [];
+  for (const ref of refs) {
+    if (!record(ref)) continue;
+    const resourceId = string(ref.resourceId);
+    const contentType = string(ref.contentType).toLowerCase();
+    const type = string(ref.type) || string(ref.resourceIdType);
+    const resourceIdType = string(ref.resourceIdType) || type;
+    if (!resourceId || !resourceIdType) continue;
+    const file = contentType === "file" || resourceIdType === "fileId" || type === "fileId";
+    const image = !file && (contentType === "image" || (type === "mediaId" && hasImageMarker));
+    if (!file && !image) continue;
+    const name = string(ref.name) || null;
+    const sizeBytes = number(ref.sizeBytes) ?? number(ref.size) ?? number(ref.fileSize);
+    resources.push({
+      kind: file ? "file" : "image",
+      ...(name ? { name } : {}),
+      ...(sizeBytes !== null ? { sizeBytes } : {}),
+      resourceId,
+      resourceIdType,
+    });
+  }
+  return resources.length > 0 ? resources : undefined;
 }
 
 function messageFromRow(
@@ -300,18 +534,33 @@ function messageFromRow(
   const messageId = string(row.messageId) || string(row.openMessageId);
   const conversationId = string(row.conversationId) || string(row.openConversationId);
   if (!messageId || !conversationId) return null;
-  const text = string(row.text) || string(row.content);
-  const hasResources = Array.isArray(row.resourceRefs) && row.resourceRefs.length > 0;
+  const rawText = string(row.text) || string(row.content);
+  const resources = parseResources(row, rawText);
+  let body = parseMessageBody(rawText);
+  if (resources && resources.some(({ kind }) => kind === "file")) {
+    const fileNames = new Set(resources.flatMap(({ name }) => (name ? [name] : [])));
+    if (fileNames.has(body.text.trim())) {
+      body = { text: "", cardTitle: null, format: "text" };
+    }
+  }
   const senderId = string(row.senderId) || string(row.senderOpenDingTalkId);
+  const quotedMessage = parseQuoted(row.quotedMessage);
+  const reactions = parseReactions(row);
   return {
     messageId,
     conversationId,
     senderName: string(row.sender) || "未知成员",
     ...(senderId ? { senderId } : {}),
     createdAt: parseDwsTime(row.createTime) ?? parseDwsTime(row.time) ?? 0,
-    text,
-    unsupported: messageIsUnsupported(text, hasResources),
+    text: body.text,
+    unsupported: body.text.length === 0 && !resources,
     mine: selfId !== null && senderId === selfId,
+    ...(quotedMessage ? { quotedMessage } : {}),
+    ...(reactions ? { reactions } : {}),
+    ...(resources ? { resources } : {}),
+    ...(row.sendType === "bot" ? { bot: true } : {}),
+    ...(body.cardTitle ? { cardTitle: body.cardTitle } : {}),
+    ...(body.format === "markdown" ? { format: "markdown" as const } : {}),
   };
 }
 
@@ -392,7 +641,20 @@ export interface DingTalkCli {
   unreadConversations(
     count: number,
   ): Promise<{ conversations: DingTalkConversation[]; errorCode: string | null }>;
+  searchGroups(
+    query: string,
+  ): Promise<{ conversations: DingTalkConversation[]; errorCode: string | null }>;
+  searchPeople(query: string): Promise<{ people: DingTalkPerson[]; errorCode: string | null }>;
+  groupDirectory(): Promise<{
+    directory: Map<string, DingTalkGroupMeta> | null;
+    errorCode: string | null;
+  }>;
+  atMeHits(
+    days: number,
+    limit: number,
+  ): Promise<{ hits: DingTalkAtMeHit[]; errorCode: string | null }>;
   conversationInfo(conversationId: string): Promise<DingTalkConversation | null>;
+  conversationInfoForUser(openDingTalkId: string): Promise<DingTalkConversation | null>;
   messages(input: {
     conversationId: string;
     before?: number;
@@ -554,8 +816,40 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         errorCode: result.errorCode,
       };
     },
+    async searchGroups(query) {
+      const result = await run(["chat", "search", "--query", query, "--limit", "20"], 20_000);
+      return {
+        conversations: parseGroupSearch(result.value),
+        errorCode: result.errorCode,
+      };
+    },
+    async searchPeople(query) {
+      const result = await run(["contact", "user", "search", "--query", query], 20_000);
+      return { people: parsePersonSearch(result.value), errorCode: result.errorCode };
+    },
+    async groupDirectory() {
+      const result = await run(["chat", "group", "list-all", "--limit", "200"], 25_000);
+      return {
+        directory: result.errorCode === null ? parseGroupDirectory(result.value) : null,
+        errorCode: result.errorCode,
+      };
+    },
+    async atMeHits(days, limit) {
+      const result = await run(
+        ["chat", "+at-me", "--days", String(days), "--limit", String(Math.max(1, limit))],
+        20_000,
+      );
+      return { hits: parseAtMeHits(result.value), errorCode: result.errorCode };
+    },
     async conversationInfo(conversationId) {
       const result = await run(["chat", "+conversation-info", "--group", conversationId], 15_000);
+      return result.errorCode === null ? parseConversationInfo(result.value) : null;
+    },
+    async conversationInfoForUser(openDingTalkId) {
+      const result = await run(
+        ["chat", "+conversation-info", "--open-dingtalk-id", openDingTalkId],
+        15_000,
+      );
       return result.errorCode === null ? parseConversationInfo(result.value) : null;
     },
     async messages(input) {

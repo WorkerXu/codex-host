@@ -7,6 +7,11 @@ import {
   type DwsSpawn,
 } from "./dingtalk-cli.js";
 import {
+  downloadDingTalkMedia,
+  type DingTalkMediaRequest,
+  type DingTalkMediaResult,
+} from "./dingtalk-media.js";
+import {
   DingTalkSettingsStore,
   resolveDingTalkHost,
   type DingTalkHostResolution,
@@ -14,6 +19,7 @@ import {
 import { requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
 export const DINGTALK_DWS_PEER_ROUTE = "/v1/dingtalk/dws";
+export const DINGTALK_MEDIA_PEER_ROUTE = "/v1/dingtalk/media";
 const PEER_TIMEOUT_MS = 45_000;
 
 export interface DingTalkTransport {
@@ -24,6 +30,8 @@ export interface DingTalkTransport {
   refresh(): Promise<DingTalkHostResolution>;
   run(args: readonly string[], timeoutMs?: number): Promise<DwsResult>;
   runRaw(args: readonly string[], timeoutMs?: number): Promise<DwsRawResult>;
+  /** Reads a message image from the DingTalk Host's cached download. */
+  readMedia(request: DingTalkMediaRequest): Promise<DingTalkMediaResult>;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -148,6 +156,50 @@ export function createDingTalkTransport(input: {
             ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
           })
         : await executeRemote(args, timeoutMs);
+    },
+    async readMedia(request) {
+      await ready;
+      if (resolution.local) {
+        return await downloadDingTalkMedia({
+          environment: input.environment,
+          request,
+          ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+        });
+      }
+      if (!resolution.peer) {
+        return {
+          ok: false,
+          base64: null,
+          mimeType: null,
+          sizeBytes: null,
+          errorCode: "peer_unavailable",
+        };
+      }
+      try {
+        const response = await requestPeerRoute({
+          environment: input.environment,
+          peer: resolution.peer,
+          route: DINGTALK_MEDIA_PEER_ROUTE,
+          body: { ...request },
+          timeoutMs: 60_000,
+          ...(input.peerSpawnImpl ? { spawnImpl: input.peerSpawnImpl } : {}),
+        });
+        return {
+          ok: response.ok === true,
+          base64: typeof response.base64 === "string" ? response.base64 : null,
+          mimeType: typeof response.mimeType === "string" ? response.mimeType : null,
+          sizeBytes: typeof response.sizeBytes === "number" ? response.sizeBytes : null,
+          errorCode: typeof response.errorCode === "string" ? response.errorCode : null,
+        };
+      } catch {
+        return {
+          ok: false,
+          base64: null,
+          mimeType: null,
+          sizeBytes: null,
+          errorCode: "peer_unavailable",
+        };
+      }
     },
   };
   // A failed initial settings read must not block the first request; refresh

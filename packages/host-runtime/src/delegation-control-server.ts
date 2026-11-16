@@ -109,6 +109,8 @@ async function startWithWatch(
 export interface DingTalkDwsPeerApi {
   /** Runs one dws command on the machine that owns the DingTalk login. */
   runDingTalkDws(args: readonly string[]): Promise<Record<string, unknown>>;
+  /** Downloads and returns one message image from the same machine. */
+  readDingTalkMedia(body: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 export async function startDelegationControlServer(input: {
@@ -192,6 +194,16 @@ export async function startDelegationControlServer(input: {
             ? body.args.filter((value): value is string => typeof value === "string")
             : [];
           writeJson(response, 200, await input.dingtalkDws.runDingTalkDws(args));
+          return;
+        }
+        case "/v1/dingtalk/media": {
+          if (!input.dingtalkDws) {
+            writeJson(response, 404, {
+              error: { code: "INVALID_ARGUMENT", message: "DingTalk is unavailable on this Host" },
+            });
+            return;
+          }
+          writeJson(response, 200, await input.dingtalkDws.readDingTalkMedia(body));
           return;
         }
         case "/v1/thread/list":

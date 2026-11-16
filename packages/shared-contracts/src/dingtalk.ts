@@ -157,9 +157,45 @@ export const dingtalkConversationSchema = z
     lastMessageAt: z.number().int().nonnegative().nullable(),
     muted: z.boolean(),
     preview: z.string().max(2_000).optional(),
+    /** `INTERNAL_GROUP` marks an internal group in list rows and the header. */
+    groupType: z.string().max(64).nullable().optional(),
+    memberCount: z.number().int().nonnegative().nullable().optional(),
+    /** Direct-chat job title or department shown under the header title. */
+    subtitle: z.string().max(512).nullable().optional(),
+    /** A recent message in this conversation mentions me. */
+    atMe: z.boolean().optional(),
   })
   .strict();
 export type DingTalkConversation = z.infer<typeof dingtalkConversationSchema>;
+
+export const dingtalkQuotedMessageSchema = z
+  .object({
+    senderName: z.string().max(256),
+    text: z.string().max(20_000),
+    messageId: z.string().max(512).optional(),
+    createdAt: z.number().int().nonnegative().nullable().optional(),
+  })
+  .strict();
+export type DingTalkQuotedMessage = z.infer<typeof dingtalkQuotedMessageSchema>;
+
+export const dingtalkReactionSchema = z
+  .object({
+    emoji: z.string().min(1).max(64),
+    count: z.number().int().positive(),
+  })
+  .strict();
+export type DingTalkReaction = z.infer<typeof dingtalkReactionSchema>;
+
+export const dingtalkMessageResourceSchema = z
+  .object({
+    kind: z.enum(["image", "file"]),
+    name: z.string().max(512).nullable().optional(),
+    sizeBytes: z.number().int().nonnegative().nullable().optional(),
+    resourceId: z.string().min(1).max(4_096),
+    resourceIdType: z.string().min(1).max(32),
+  })
+  .strict();
+export type DingTalkMessageResource = z.infer<typeof dingtalkMessageResourceSchema>;
 
 export const dingtalkMessageSchema = z
   .object({
@@ -168,22 +204,33 @@ export const dingtalkMessageSchema = z
     senderName: z.string().max(256),
     senderId: z.string().max(512).optional(),
     createdAt: z.number().int().nonnegative(),
-    text: z.string().max(20_000),
+    /** Readable text with media tags, `<imageContent>` and raw ids removed. */
+    text: z.string().max(40_000),
     unsupported: z.boolean(),
     mine: z.boolean(),
+    quotedMessage: dingtalkQuotedMessageSchema.nullable().optional(),
+    reactions: z.array(dingtalkReactionSchema).max(20).optional(),
+    resources: z.array(dingtalkMessageResourceSchema).max(20).optional(),
+    /** `sendType: bot` in dws. */
+    bot: z.boolean().optional(),
+    /** Markdown card title; the body stays in `text`. */
+    cardTitle: z.string().max(512).nullable().optional(),
+    /** How the Renderer should render `text`. */
+    format: z.enum(["text", "markdown"]).optional(),
   })
   .strict();
 export type DingTalkMessage = z.infer<typeof dingtalkMessageSchema>;
 
-/** Local-only methods: Gemini key and the default Host stay on this machine. */
+/** Local-only methods: the default Host stays on this machine. */
 export const DINGTALK_SETTINGS_GET_METHOD = "codexhost/dingtalk/settings/get";
 export const DINGTALK_SETTINGS_SET_METHOD = "codexhost/dingtalk/settings/set";
-export const DINGTALK_DECIDE_METHOD = "codexhost/dingtalk/decide";
 
 /** Methods every Host can serve; reads route to the configured DingTalk Host. */
 export const DINGTALK_STATUS_METHOD = "codexhost/dingtalk/status";
 export const DINGTALK_CONVERSATIONS_METHOD = "codexhost/dingtalk/conversations";
+export const DINGTALK_PREVIEW_METHOD = "codexhost/dingtalk/preview";
 export const DINGTALK_MESSAGES_METHOD = "codexhost/dingtalk/messages";
+export const DINGTALK_RESOURCE_METHOD = "codexhost/dingtalk/resource";
 export const DINGTALK_SEND_METHOD = "codexhost/dingtalk/send";
 export const DINGTALK_SEARCH_METHOD = "codexhost/dingtalk/search";
 export const DINGTALK_RESOLVE_METHOD = "codexhost/dingtalk/resolve";
@@ -237,14 +284,17 @@ export const dingtalkSettingsSetParamsSchema = z
 export type DingTalkSettingsSetParams = z.infer<typeof dingtalkSettingsSetParamsSchema>;
 
 export const dingtalkConversationsParamsSchema = z
-  .object({ refresh: z.boolean().optional() })
+  .object({
+    view: z.enum(["unread", "recent"]).optional(),
+    refresh: z.boolean().optional(),
+  })
   .strict();
 export type DingTalkConversationsParams = z.infer<typeof dingtalkConversationsParamsSchema>;
 
 export const dingtalkConversationsResultSchema = z
   .object({
     available: z.boolean(),
-    source: z.enum(["unread", "recent-replied", "empty"]),
+    source: z.enum(["unread", "recent", "empty"]),
     conversations: z.array(dingtalkConversationSchema).max(DINGTALK_MAX_CONVERSATIONS),
     cachedAt: z.number().int().nonnegative().nullable(),
     refreshing: z.boolean(),
@@ -252,6 +302,21 @@ export const dingtalkConversationsResultSchema = z
   })
   .strict();
 export type DingTalkConversationsResult = z.infer<typeof dingtalkConversationsResultSchema>;
+
+export const dingtalkPreviewParamsSchema = z
+  .object({ conversationId: z.string().trim().min(1).max(512) })
+  .strict();
+export type DingTalkPreviewParams = z.infer<typeof dingtalkPreviewParamsSchema>;
+
+export const dingtalkPreviewResultSchema = z
+  .object({
+    available: z.boolean(),
+    preview: z.string().max(2_000).nullable(),
+    cachedAt: z.number().int().nonnegative().nullable(),
+    errorCode: z.string().max(64).nullable(),
+  })
+  .strict();
+export type DingTalkPreviewResult = z.infer<typeof dingtalkPreviewResultSchema>;
 
 export const dingtalkMessagesParamsSchema = z
   .object({
@@ -275,6 +340,27 @@ export const dingtalkMessagesResultSchema = z
   .strict();
 export type DingTalkMessagesResult = z.infer<typeof dingtalkMessagesResultSchema>;
 
+export const dingtalkResourceParamsSchema = z
+  .object({
+    conversationId: z.string().trim().min(1).max(512),
+    messageId: z.string().trim().min(1).max(512),
+    resourceId: z.string().trim().min(1).max(4_096),
+    resourceIdType: z.string().trim().min(1).max(32),
+  })
+  .strict();
+export type DingTalkResourceParams = z.infer<typeof dingtalkResourceParamsSchema>;
+
+export const dingtalkResourceResultSchema = z
+  .object({
+    available: z.boolean(),
+    dataUrl: z.string().max(12_000_000).nullable(),
+    mimeType: z.string().max(128).nullable(),
+    sizeBytes: z.number().int().nonnegative().nullable(),
+    errorCode: z.string().max(64).nullable(),
+  })
+  .strict();
+export type DingTalkResourceResult = z.infer<typeof dingtalkResourceResultSchema>;
+
 export const dingtalkSendParamsSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
@@ -293,50 +379,9 @@ export const dingtalkSendResultSchema = z
   .strict();
 export type DingTalkSendResult = z.infer<typeof dingtalkSendResultSchema>;
 
-export const dingtalkDecideParamsSchema = z
-  .object({
-    query: z.string().trim().min(1).max(200),
-    conversations: z
-      .array(
-        z
-          .object({
-            conversationId: z.string().min(1).max(512),
-            title: z.string().max(1_024),
-            singleChat: z.boolean(),
-            lastMessageAt: z.number().int().nonnegative().nullable(),
-            preview: z.string().max(2_000).optional(),
-          })
-          .strict(),
-      )
-      .max(DINGTALK_MAX_CONVERSATIONS),
-  })
-  .strict();
-export type DingTalkDecideParams = z.infer<typeof dingtalkDecideParamsSchema>;
-
-export const dingtalkDecideResultSchema = z
-  .object({
-    available: z.boolean(),
-    route: z.enum(["messages", "conversations", "none"]),
-    /** Keyword for `+search-msg`; empty means the raw query is not reusable. */
-    messageQuery: z.string().max(200),
-    fromMe: z.boolean(),
-    atMe: z.boolean(),
-    days: z.number().int().min(1).max(90),
-    conversationIds: z.array(z.string().max(512)).max(8),
-    errorCode: z.string().max(64).nullable(),
-  })
-  .strict();
-export type DingTalkDecideResult = z.infer<typeof dingtalkDecideResultSchema>;
-
 export const dingtalkSearchParamsSchema = z
   .object({
     query: z.string().trim().min(1).max(200),
-    route: z.enum(["messages", "conversations"]),
-    messageQuery: z.string().max(200).optional(),
-    fromMe: z.boolean().optional(),
-    atMe: z.boolean().optional(),
-    days: z.number().int().min(1).max(90).optional(),
-    conversationIds: z.array(z.string().max(512)).max(8).optional(),
   })
   .strict();
 export type DingTalkSearchParams = z.infer<typeof dingtalkSearchParamsSchema>;
@@ -344,8 +389,7 @@ export type DingTalkSearchParams = z.infer<typeof dingtalkSearchParamsSchema>;
 export const dingtalkSearchResultSchema = z
   .object({
     available: z.boolean(),
-    route: z.enum(["messages", "conversations", "none"]),
-    conversations: z.array(dingtalkConversationSchema).max(8),
+    conversations: z.array(dingtalkConversationSchema).max(20),
     messages: z.array(dingtalkMessageSchema).max(50),
     errorCode: z.string().max(64).nullable(),
   })

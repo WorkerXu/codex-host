@@ -2,14 +2,18 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  messageIsUnsupported,
+  parseAtMeHits,
   parseConversationInfo,
   parseDwsEventLine,
   parseDwsTime,
+  parseGroupDirectory,
+  parseGroupSearch,
   parseMessagesPage,
+  parsePersonSearch,
   parseUnreadConversations,
   runDwsJson,
   runDwsRaw,
+  sanitizeDingTalkText,
 } from "../src/dingtalk-cli.js";
 
 function childWith(stdout: string, exitCode = 0) {
@@ -57,17 +61,96 @@ describe("dws CLI output", () => {
     ]);
   });
 
-  it("parses conversation info", () => {
+  it("parses group search rows", () => {
+    expect(
+      parseGroupSearch({
+        result: {
+          groups: [
+            {
+              openConversationId: "cidA==",
+              title: "【示例Sprint】 进度",
+              groupType: "INTERNAL_GROUP",
+              memberCount: 15,
+              createAt: "2026-05-06 08:34:54",
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        conversationId: "cidA==",
+        title: "【示例Sprint】 进度",
+        singleChat: false,
+        unreadCount: 0,
+        lastMessageAt: parseDwsTime("2026-05-06 08:34:54"),
+        muted: false,
+        groupType: "INTERNAL_GROUP",
+        memberCount: 15,
+      },
+    ]);
+  });
+
+  it("parses people returned by contact search", () => {
+    expect(
+      parsePersonSearch({
+        result: [
+          {
+            name: "吴菁",
+            title: "产品经理",
+            userId: "u1",
+            openDingTalkId: "open-1",
+          },
+        ],
+      }),
+    ).toEqual([{ name: "吴菁", title: "产品经理", userId: "u1", openDingTalkId: "open-1" }]);
+  });
+
+  it("parses the group directory and at-me hits", () => {
+    const directory = parseGroupDirectory({
+      result: {
+        groups: [
+          {
+            openConversationId: "cidA==",
+            title: "线上群",
+            groupType: "INTERNAL_GROUP",
+            memberCount: 18,
+          },
+        ],
+      },
+    });
+    expect(directory.get("cidA==")).toEqual({
+      title: "线上群",
+      groupType: "INTERNAL_GROUP",
+      memberCount: 18,
+    });
+    expect(
+      parseAtMeHits({
+        items: [{ conversationId: "cidA==", time: "2026-11-16 11:02:58" }],
+      }),
+    ).toEqual([{ conversationId: "cidA==", createdAt: parseDwsTime("2026-11-16 11:02:58") }]);
+  });
+
+  it("parses conversation info with the member count", () => {
     expect(
       parseConversationInfo({
         result: {
-          conversationInfo: { openConversationId: "cidB==", title: "财务", singleChat: true },
+          conversationInfo: {
+            openConversationId: "cidB==",
+            title: "财务",
+            singleChat: true,
+            memberCount: 2,
+          },
         },
       }),
-    ).toMatchObject({ conversationId: "cidB==", title: "财务", singleChat: true });
+    ).toMatchObject({
+      conversationId: "cidB==",
+      title: "财务",
+      singleChat: true,
+      memberCount: 2,
+    });
   });
 
-  it("parses message pages and marks non-text bodies", () => {
+  it("parses real message fields: quote, reactions, resources, bot and cards", () => {
     const page = parseMessagesPage(
       {
         hasMore: true,
@@ -76,33 +159,89 @@ describe("dws CLI output", () => {
           {
             messageId: "m1",
             conversationId: "cidA==",
-            sender: "张三",
-            senderId: "u1",
+            sender: "发布机器人",
+            senderId: "bot-1",
             createTime: "2026-11-13 15:29:00",
-            text: "hello",
+            sendType: "bot",
+            text: [
+              "[图片消息](mediaId=@media-1)",
+              "图片内容：",
+              "<imageContent>",
+              "11",
+              "</imageContent>",
+              "【云监控】发布检查",
+              "",
+              ">- 服务: saas",
+              "",
+              "[查看详情](https://example.com/detail)",
+            ].join("\n"),
+            resourceRefs: [
+              {
+                resourceId: "@media-1",
+                resourceIdType: "mediaId",
+                type: "mediaId",
+                contentType: "image",
+              },
+            ],
+            quotedMessage: {
+              sender: "李端",
+              content: "预算表第二版",
+              openMessageId: "m0",
+              createTime: "2026-11-13 15:20:00",
+            },
+            reactions: {
+              counts: [{ emoji: "OK", count: 3 }],
+              details: [],
+            },
+            emotionReplyList: [{ emoji: "收到", replyUsers: ["u1"] }],
           },
           {
             messageId: "m2",
             conversationId: "cidA==",
             sender: "李四",
             createTime: "2026-11-13 15:30:00",
-            text: "[图片消息](mediaId=@x)",
+            text: "[文件] 报表.xlsx fileId: file-1",
+            resourceRefs: [
+              {
+                resourceId: "file-1",
+                resourceIdType: "fileId",
+                type: "fileId",
+                contentType: "file",
+                name: "报表.xlsx",
+              },
+            ],
           },
         ],
       },
-      "u1",
+      null,
     );
     expect(page.hasMore).toBe(true);
     expect(page.nextCursor).toBe(1_700_000_000_000);
-    expect(page.messages.map((message) => message.messageId)).toEqual(["m2", "m1"]);
-    expect(page.messages[1]).toMatchObject({ mine: true, unsupported: false });
-    expect(page.messages[0]?.unsupported).toBe(true);
+    expect(page.messages[1]?.unsupported).toBe(false);
+    expect(page.messages[1]).toMatchObject({
+      bot: true,
+      cardTitle: "【云监控】发布检查",
+      format: "markdown",
+      quotedMessage: { senderName: "李端", text: "预算表第二版" },
+      reactions: [{ emoji: "OK", count: 3 }],
+      resources: [{ kind: "image", resourceId: "@media-1", resourceIdType: "mediaId" }],
+    });
+    expect(page.messages[1]?.text).toContain(">- 服务: saas");
+    expect(page.messages[1]?.text).not.toContain("mediaId");
+    expect(page.messages[1]?.text).not.toContain("imageContent");
+    expect(page.messages[0]).toMatchObject({
+      text: "",
+      unsupported: false,
+      resources: [{ kind: "file", name: "报表.xlsx", resourceId: "file-1" }],
+    });
   });
 
-  it("recognises unsupported message summaries", () => {
-    expect(messageIsUnsupported("", false)).toBe(true);
-    expect(messageIsUnsupported("[文件] 报表.xlsx fileId: x", true)).toBe(true);
-    expect(messageIsUnsupported("收到", false)).toBe(false);
+  it("removes media markers and raw ids everywhere", () => {
+    expect(
+      sanitizeDingTalkText(
+        "[图片消息](mediaId=@abc) 图片内容：\n<imageContent> 11 </imageContent>\n【云监控】告警 <font color='#fff'>卡片样式</font>",
+      ),
+    ).toBe("【云监控】告警 卡片样式");
   });
 
   it("parses flattened event lines only", () => {

@@ -1,8 +1,9 @@
 import {
   DINGTALK_CHANGED_METHOD,
   DINGTALK_CONVERSATIONS_METHOD,
-  DINGTALK_DECIDE_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_PREVIEW_METHOD,
+  DINGTALK_RESOURCE_METHOD,
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_SEARCH_METHOD,
   DINGTALK_SEND_METHOD,
@@ -11,19 +12,22 @@ import {
   DINGTALK_STATUS_METHOD,
   DINGTALK_VIEWED_METHOD,
   dingtalkConversationsResultSchema,
-  dingtalkDecideResultSchema,
   dingtalkMessagesResultSchema,
+  dingtalkPreviewResultSchema,
+  dingtalkResourceResultSchema,
   dingtalkResolveResultSchema,
   dingtalkSearchResultSchema,
   dingtalkSendResultSchema,
   dingtalkSettingsSchema,
   dingtalkStatusSchema,
+  type DingTalkConversationsParams,
   type DingTalkConversationsResult,
-  type DingTalkDecideParams,
-  type DingTalkDecideResult,
   type DingTalkMessage,
   type DingTalkMessagesParams,
   type DingTalkMessagesResult,
+  type DingTalkPreviewResult,
+  type DingTalkResourceParams,
+  type DingTalkResourceResult,
   type DingTalkResolveResult,
   type DingTalkSearchParams,
   type DingTalkSearchResult,
@@ -62,10 +66,11 @@ export interface RendererDingTalkClient {
   status(): Promise<DingTalkStatus>;
   settings(): Promise<DingTalkSettings>;
   updateSettings(params: DingTalkSettingsSetParams): Promise<DingTalkSettings>;
-  conversations(refresh?: boolean): Promise<DingTalkConversationsResult>;
+  conversations(params?: DingTalkConversationsParams): Promise<DingTalkConversationsResult>;
+  preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
+  resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult>;
   send(params: DingTalkSendParams): Promise<DingTalkSendResult>;
-  decide(params: DingTalkDecideParams): Promise<DingTalkDecideResult>;
   search(params: DingTalkSearchParams): Promise<DingTalkSearchResult>;
   resolve(conversationId: string, messageIds?: readonly string[]): Promise<DingTalkResolveResult>;
   markViewed(conversationId: string, lastMessageAt: number): Promise<void>;
@@ -82,8 +87,10 @@ const DINGTALK_MESSAGES: Record<RendererSettingsLocale, Record<string, string>> 
     cli_failed: "钉钉命令失败",
     local_only: "该操作只能在桌面本机执行",
     invalid_params: "请求参数无效",
-    decision_unavailable: "搜索分类不可用，已按关键词搜索",
     dws_failed: "钉钉数据读取失败",
+    cache_unavailable: "无法写入图片缓存",
+    download_failed: "图片下载失败",
+    resource_too_large: "图片过大，暂不显示",
   },
   en: {
     not_installed: "dws is not installed on the DingTalk Host",
@@ -94,8 +101,10 @@ const DINGTALK_MESSAGES: Record<RendererSettingsLocale, Record<string, string>> 
     cli_failed: "The DingTalk command failed",
     local_only: "This action is available on the desktop Host only",
     invalid_params: "Invalid request",
-    decision_unavailable: "Search classification is unavailable; using keyword search",
     dws_failed: "Could not read DingTalk data",
+    cache_unavailable: "Could not write the image cache",
+    download_failed: "Could not download the image",
+    resource_too_large: "The image is too large to show",
   },
 };
 
@@ -141,19 +150,26 @@ export function createRendererDingTalkClient(
     async updateSettings(params) {
       return dingtalkSettingsSchema.parse(await request(DINGTALK_SETTINGS_SET_METHOD, params));
     },
-    async conversations(refresh = false) {
+    async conversations(params = {}) {
       return dingtalkConversationsResultSchema.parse(
-        await request(DINGTALK_CONVERSATIONS_METHOD, { refresh }),
+        await request(DINGTALK_CONVERSATIONS_METHOD, params),
+      );
+    },
+    async preview(conversationId) {
+      return dingtalkPreviewResultSchema.parse(
+        await request(DINGTALK_PREVIEW_METHOD, { conversationId }, 30_000),
       );
     },
     async messages(params) {
       return dingtalkMessagesResultSchema.parse(await request(DINGTALK_MESSAGES_METHOD, params));
     },
+    async resource(params) {
+      return dingtalkResourceResultSchema.parse(
+        await request(DINGTALK_RESOURCE_METHOD, params, 60_000),
+      );
+    },
     async send(params) {
       return dingtalkSendResultSchema.parse(await request(DINGTALK_SEND_METHOD, params, 60_000));
-    },
-    async decide(params) {
-      return dingtalkDecideResultSchema.parse(await request(DINGTALK_DECIDE_METHOD, params));
     },
     async search(params) {
       return dingtalkSearchResultSchema.parse(
