@@ -7,8 +7,6 @@ import {
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_SEARCH_METHOD,
   DINGTALK_SEND_METHOD,
-  DINGTALK_SETTINGS_GET_METHOD,
-  DINGTALK_SETTINGS_SET_METHOD,
   DINGTALK_STATUS_METHOD,
   DINGTALK_VIEWED_METHOD,
   dingtalkConversationsResultSchema,
@@ -18,7 +16,6 @@ import {
   dingtalkResolveResultSchema,
   dingtalkSearchResultSchema,
   dingtalkSendResultSchema,
-  dingtalkSettingsSchema,
   dingtalkStatusSchema,
   type DingTalkConversationsParams,
   type DingTalkConversationsResult,
@@ -33,8 +30,6 @@ import {
   type DingTalkSearchResult,
   type DingTalkSendParams,
   type DingTalkSendResult,
-  type DingTalkSettings,
-  type DingTalkSettingsSetParams,
   type DingTalkStatus,
 } from "@codexhost/shared-contracts";
 
@@ -64,8 +59,6 @@ export interface RendererDingTalkClientOptions {
 export interface RendererDingTalkClient {
   available(): boolean;
   status(): Promise<DingTalkStatus>;
-  settings(): Promise<DingTalkSettings>;
-  updateSettings(params: DingTalkSettingsSetParams): Promise<DingTalkSettings>;
   conversations(params?: DingTalkConversationsParams): Promise<DingTalkConversationsResult>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
@@ -145,12 +138,6 @@ export function createRendererDingTalkClient(
     available: () => route() !== null,
     async status() {
       return dingtalkStatusSchema.parse(await request(DINGTALK_STATUS_METHOD, {}));
-    },
-    async settings() {
-      return dingtalkSettingsSchema.parse(await request(DINGTALK_SETTINGS_GET_METHOD, {}));
-    },
-    async updateSettings(params) {
-      return dingtalkSettingsSchema.parse(await request(DINGTALK_SETTINGS_SET_METHOD, params));
     },
     async conversations(params = {}) {
       return dingtalkConversationsResultSchema.parse(

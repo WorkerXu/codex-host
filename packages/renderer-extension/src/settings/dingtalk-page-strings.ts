@@ -5,12 +5,8 @@ export interface DingTalkPageText {
   brand: string;
   moreActions: string;
   menuConnected: string;
-  menuUnavailable: string;
-  menuLoginLabel: string;
-  hostAuto: string;
-  hostLocal: string;
-  hostEffective: string;
-  hostChangeFailed: string;
+  menuNotLoggedIn: string;
+  menuServiceUnavailable: string;
   refreshConversations: string;
   searchPlaceholder: string;
   clearSearch: string;
@@ -49,13 +45,9 @@ export interface DingTalkPageText {
 const ZH: DingTalkPageText = {
   brand: "钉钉",
   moreActions: "更多操作",
-  menuConnected: "已连接 · {host}",
-  menuUnavailable: "钉钉连接不可用",
-  menuLoginLabel: "钉钉登录",
-  hostAuto: "自动选择",
-  hostLocal: "本机",
-  hostEffective: "当前使用 {name} 的钉钉登录",
-  hostChangeFailed: "切换钉钉登录失败，请稍后重试",
+  menuConnected: "已连接",
+  menuNotLoggedIn: "钉钉未登录",
+  menuServiceUnavailable: "无法连接钉钉服务",
   refreshConversations: "刷新会话",
   searchPlaceholder: "搜索",
   clearSearch: "清除搜索",
@@ -94,13 +86,9 @@ const ZH: DingTalkPageText = {
 const EN: DingTalkPageText = {
   brand: "DingTalk",
   moreActions: "More actions",
-  menuConnected: "Connected · {host}",
-  menuUnavailable: "DingTalk is unavailable",
-  menuLoginLabel: "DingTalk login",
-  hostAuto: "Choose automatically",
-  hostLocal: "This machine",
-  hostEffective: "Using the DingTalk login on {name}",
-  hostChangeFailed: "Could not switch the DingTalk login. Try again.",
+  menuConnected: "Connected",
+  menuNotLoggedIn: "DingTalk is not signed in",
+  menuServiceUnavailable: "Cannot reach the DingTalk service",
   refreshConversations: "Refresh conversations",
   searchPlaceholder: "Search",
   clearSearch: "Clear search",

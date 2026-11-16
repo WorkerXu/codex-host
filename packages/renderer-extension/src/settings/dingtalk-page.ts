@@ -92,7 +92,6 @@ export function createDingTalkSettingsPage(
         pendingNewCount: 0,
       };
       let disposed = false;
-      let effectiveHost = "local";
       let listGeneration = 0;
       let messageGeneration = 0;
       let searchGeneration = 0;
@@ -131,7 +130,10 @@ export function createDingTalkSettingsPage(
         document,
         text,
         onRefresh: () => void loadConversations(true),
-        onHostChange: (host) => void changeHost(host),
+        onRetry: () => {
+          void loadStatus();
+          void loadConversations(true);
+        },
       });
       sidebarHead.append(searchBox, pageMenu.moreButton);
 
@@ -701,13 +703,13 @@ export function createDingTalkSettingsPage(
         if (!result) {
           state.listError = true;
           renderList();
-          pageMenu.setStatus(false, effectiveHost);
+          void loadStatus();
           return;
         }
         state.conversations = result.conversations;
         state.source = result.source;
         state.listError = !result.available;
-        pageMenu.setStatus(result.available, effectiveHost);
+        if (!result.available) void loadStatus();
         renderList();
         if (state.selectedId) {
           const selected = conversationFor(state.selectedId);
@@ -867,27 +869,13 @@ export function createDingTalkSettingsPage(
         if (!done) setNotice(text.embedFailed);
       };
 
-      const loadSettings = async (): Promise<void> => {
-        if (!client) return;
-        const settings = await client.settings().catch(() => null);
-        if (disposed || !settings) return;
-        pageMenu.setSettings(settings);
-        effectiveHost = settings.effectiveHost;
-        pageMenu.setStatus(true, effectiveHost);
-      };
-
-      const changeHost = async (host: string | null): Promise<void> => {
-        if (!client) return;
-        pageMenu.setHostDisabled(true);
-        try {
-          await client.updateSettings({ defaultHost: host });
-          await loadSettings();
-          await loadConversations(true);
-        } catch {
-          pageMenu.setError(text.hostChangeFailed);
-        } finally {
-          if (!disposed) pageMenu.setHostDisabled(false);
+      const loadStatus = async (): Promise<void> => {
+        if (!client) {
+          pageMenu.setStatus(null);
+          return;
         }
+        const status = await client.status().catch(() => null);
+        if (!disposed) pageMenu.setStatus(status);
       };
 
       unreadButton.addEventListener("click", () => {
@@ -1029,7 +1017,7 @@ export function createDingTalkSettingsPage(
       updateHeader();
       updateSelectionUi();
       renderMessages();
-      void loadSettings();
+      void loadStatus();
       void loadConversations(false).then(() => {
         const pending = consumeDingTalkReveal();
         if (pending?.conversationId) void revealTarget(pending);
