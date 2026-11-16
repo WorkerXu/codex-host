@@ -208,6 +208,10 @@ class FakeDocument {
     return new FakeElement(tagName);
   }
 
+  createElementNS(_namespace: string, tagName: string): FakeElement {
+    return new FakeElement(tagName);
+  }
+
   querySelectorAll(selector: string): FakeElement[] {
     return this.body.querySelectorAll(selector);
   }

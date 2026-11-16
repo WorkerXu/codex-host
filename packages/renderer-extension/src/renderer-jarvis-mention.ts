@@ -125,6 +125,8 @@ export interface RendererJarvisMentionOptions {
   search(hostId: string, params: JarvisBugSearchParams): Promise<JarvisBugSearchResult>;
   readLocale(): RendererSettingsLocale;
   anchorForEditor(editor: HTMLElement): Element | null;
+  /** Opens the Jarvis settings page from an error state. */
+  openSettings?(opener: HTMLElement): void;
 }
 
 export interface RendererJarvisMentionControl {
@@ -152,6 +154,7 @@ interface ModeState {
   section: HTMLElement;
   back: HTMLButtonElement;
   input: HTMLInputElement;
+  clear: HTMLButtonElement;
   chips: HTMLElement;
   summary: HTMLElement;
   results: HTMLElement;
@@ -167,6 +170,9 @@ interface ModeState {
   slowTimer: number | null;
   /** The `@query` text was already removed; insert the mention at the caret. */
   insertAtSelection: boolean;
+  /** Native popup bounds, reused if focus makes the popup close. */
+  lastRect: { left: number; top: number; width: number; height: number } | null;
+  detachedHost: HTMLElement | null;
 }
 
 export function installRendererJarvisMention(
@@ -184,7 +190,6 @@ export function installRendererJarvisMention(
   let composing = false;
   let inserting = false;
   let reattachScheduled = false;
-  let reattachAttempts = 0;
 
   const isInside = (node: Node | null, element: Element | null): boolean =>
     node !== null && element !== null && element.contains(node);
@@ -208,6 +213,8 @@ export function installRendererJarvisMention(
     if (mode.timer !== null) view.clearTimeout(mode.timer);
     stopSlowTimer(mode);
     mode.section.remove();
+    mode.detachedHost?.remove();
+    mode.detachedHost = null;
     for (const [element, display] of mode.hidden) {
       if (!element.isConnected) continue;
       element.style.display = display;
@@ -323,6 +330,8 @@ export function installRendererJarvisMention(
       timer: null,
       slowTimer: null,
       insertAtSelection: false,
+      lastRect: null,
+      detachedHost: null,
     };
   };
 
@@ -407,7 +416,19 @@ export function installRendererJarvisMention(
           ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
           : "No matching bugs. Try removing a condition or rephrasing.";
     }
-    renderJarvisEmpty(ownerDocument, state.results, message);
+    const action =
+      !result.available &&
+      (result.errorCode === "not_installed" || result.errorCode === "not_logged_in") &&
+      options.openSettings
+        ? {
+            label: state.locale === "zh-CN" ? "去设置" : "Open settings",
+            onSelect: (opener: HTMLElement) => {
+              options.openSettings?.(opener);
+              exitMode(false);
+            },
+          }
+        : undefined;
+    renderJarvisEmpty(ownerDocument, state.results, message, action);
   };
 
   const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
@@ -416,15 +437,17 @@ export function installRendererJarvisMention(
     state.section.removeAttribute("aria-busy");
     state.lastQuery = state.input.value.trim();
     renderChips(state, result.conditions);
-    const labels = result.conditions.map((condition) => condition.label);
-    const count = result.capped
-      ? state.locale === "zh-CN"
-        ? `${result.total} 条，仅显示前 ${result.bugs.length} 条`
-        : `${result.total}, showing the first ${result.bugs.length}`
-      : state.locale === "zh-CN"
-        ? `${result.total} 条`
-        : `${result.total} bugs`;
-    state.summary.textContent = [...labels, count].join(" · ");
+    if (!result.available || result.errorCode) {
+      state.summary.textContent = "";
+    } else if (result.capped) {
+      state.summary.textContent =
+        state.locale === "zh-CN"
+          ? `已显示前 ${result.bugs.length} 条`
+          : `Showing the first ${result.bugs.length}`;
+    } else {
+      state.summary.textContent =
+        state.locale === "zh-CN" ? `${result.total} 条` : `${result.total} bugs`;
+    }
     if (result.bugs.length === 0) {
       renderEmpty(state, result);
     } else {
@@ -489,15 +512,54 @@ export function installRendererJarvisMention(
     return true;
   };
 
-  const startMode = (trigger: Trigger, prefill: string, insertAtSelection: boolean): void => {
+  const panelRectOf = (
+    list: HTMLElement,
+  ): { left: number; top: number; width: number; height: number } => {
+    const panel =
+      list.closest<HTMLElement>('[class*="suggestionMenu"]') ?? list.parentElement ?? list;
+    const rect = panel.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  };
+
+  /** Keep the mode visible at the popup's old position if the popup closes. */
+  const detachMode = (state: ModeState): void => {
+    if (state.detachedHost) return;
+    const rect = state.lastRect ?? { left: 24, top: 120, width: 360, height: 320 };
+    const host = ownerDocument.createElement("div");
+    host.setAttribute("data-codexhost-jarvis-detached", "true");
+    host.className =
+      "fixed z-[2147483647] flex flex-col overflow-hidden rounded-[var(--radius-suggestion-menu,var(--radius-2xl))] border border-default bg-surface-elevated-secondary text-sm shadow-lg";
+    host.style.left = `${Math.max(8, rect.left)}px`;
+    host.style.top = `${Math.max(8, rect.top)}px`;
+    host.style.width = `${Math.max(240, rect.width)}px`;
+    host.style.maxHeight = `${Math.max(160, rect.height)}px`;
+    host.append(state.section);
+    ownerDocument.body.append(host);
+    state.detachedHost = host;
+    state.input.focus({ preventScroll: true });
+  };
+
+  const startMode = (
+    trigger: Trigger,
+    prefill: string,
+    insertAtSelection: boolean,
+    fallbackRect: { left: number; top: number; width: number; height: number } | null = null,
+  ): void => {
     const list = nativeList(trigger.editor);
-    if (!list) return;
+    if (!list && !fallbackRect) return;
     const state = buildMode(trigger);
     state.insertAtSelection = insertAtSelection;
     if (prefill) state.input.value = prefill;
-    list.append(state.section);
-    hideNativeChildren(state, list);
-    list.scrollTop = 0;
+    state.clear.style.display = state.input.value.length === 0 ? "none" : "inline-flex";
+    if (list) {
+      state.lastRect = panelRectOf(list);
+      list.append(state.section);
+      hideNativeChildren(state, list);
+      list.scrollTop = 0;
+    } else {
+      state.lastRect = fallbackRect;
+      detachMode(state);
+    }
     mode = state;
 
     state.back.addEventListener("click", (event) => {
@@ -507,8 +569,19 @@ export function installRendererJarvisMention(
     });
     state.input.addEventListener("pointerdown", (event) => event.stopPropagation());
     state.input.addEventListener("input", () => {
+      state.clear.style.display = state.input.value.length === 0 ? "none" : "inline-flex";
       if (state.input.value.trim() !== state.lastQuery) state.omit.clear();
       scheduleSearch(state);
+    });
+    state.clear.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.input.value.length === 0) return;
+      state.input.value = "";
+      state.clear.style.display = "none";
+      state.omit.clear();
+      state.input.focus({ preventScroll: true });
+      void requestSearch(state, "");
     });
     state.input.addEventListener("keydown", (event) => event.stopPropagation());
     state.input.focus({ preventScroll: true });
@@ -520,15 +593,17 @@ export function installRendererJarvisMention(
       removeEntry();
       return;
     }
+    const list = nativeList(trigger.editor);
+    const fallbackRect = list ? panelRectOf(list) : null;
     removeEntry();
     removeMode();
     if (!consumeTrigger) {
-      startMode(trigger, prefill, false);
+      startMode(trigger, prefill, false, fallbackRect);
       return;
     }
     void deleteTriggerText(trigger).then((removed) => {
       if (mode || !trigger.editor.isConnected) return;
-      startMode(trigger, prefill, removed);
+      startMode(trigger, prefill, removed, fallbackRect);
     });
   }
 
@@ -702,19 +777,17 @@ export function installRendererJarvisMention(
     view.setTimeout(() => {
       reattachScheduled = false;
       if (mode) {
+        if (mode.detachedHost) return;
         const list = nativeList(mode.trigger.editor);
         if (list) {
+          mode.lastRect = panelRectOf(list);
           if (mode.section.parentElement !== list) list.append(mode.section);
           hideNativeChildren(mode, list);
           return;
         }
-        if (reattachAttempts < 3) {
-          reattachAttempts += 1;
-          ensureAttached();
-          return;
-        }
-        reattachAttempts = 0;
-        exitMode(false);
+        // Focusing the icon-less search input can blur the Composer and close
+        // the native popup; keep the mode at the popup's last position.
+        detachMode(mode);
         return;
       }
       if (!entry) {

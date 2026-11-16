@@ -3661,6 +3661,16 @@ export function installRendererBindingProbe(
     readLocale: () => settingsLifecycle.locale,
     anchorForEditor: (editor) =>
       editor.closest("[data-composer-body]") ?? composerForElement(editor),
+    openSettings: (opener) => {
+      const shell = (
+        window as Window & {
+          __codexhostSettingsShellV1?: {
+            openSettings(opener?: HTMLElement, pageId?: string): boolean;
+          };
+        }
+      ).__codexhostSettingsShellV1;
+      shell?.openSettings(opener, "jarvis");
+    },
   });
   dingtalkMention = installRendererDingTalkEntry(document, {
     isComposerEditor: (editor) => {

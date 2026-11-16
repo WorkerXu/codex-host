@@ -152,6 +152,7 @@ export interface JarvisModeChrome {
   section: HTMLElement;
   back: HTMLButtonElement;
   input: HTMLInputElement;
+  clear: HTMLButtonElement;
   chips: HTMLElement;
   summary: HTMLElement;
   results: HTMLElement;
@@ -182,32 +183,51 @@ export function createJarvisModeChrome(
   header.append(back, title);
 
   const searchWrap = document.createElement("div");
-  searchWrap.className = "px-row-x pb-1";
+  searchWrap.className = "relative px-row-x pb-1";
   const input = document.createElement("input");
-  input.type = "search";
+  // A text input avoids the heavy UA clear button of `type=search`.
+  input.type = "text";
   input.className =
-    "w-full min-w-0 rounded-sm border border-default bg-transparent px-2 py-1 text-sm text-default outline-none";
+    "w-full min-w-0 rounded-sm border border-default bg-transparent px-2 py-1 pr-8 text-sm text-default outline-none";
   input.placeholder = JARVIS_SEARCH_PLACEHOLDER;
   input.maxLength = 200;
   input.spellcheck = false;
   input.autocomplete = "off";
   input.value = "";
-  searchWrap.append(input);
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.style.display = "none";
+  clear.setAttribute("data-jarvis-clear", "true");
+  clear.setAttribute("aria-label", locale === "zh-CN" ? "清除" : "Clear");
+  clear.className =
+    "absolute right-2 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-tertiary hover:text-default";
+  const clearIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  clearIcon.setAttribute("viewBox", "0 0 12 12");
+  clearIcon.setAttribute("width", "12");
+  clearIcon.setAttribute("height", "12");
+  clearIcon.setAttribute("fill", "none");
+  clearIcon.setAttribute("stroke", "currentColor");
+  clearIcon.setAttribute("stroke-width", "1.25");
+  clearIcon.setAttribute("stroke-linecap", "round");
+  clearIcon.setAttribute("aria-hidden", "true");
+  const clearPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  clearPath.setAttribute("d", "M3 3l6 6M9 3l-6 6");
+  clearIcon.append(clearPath);
+  clear.append(clearIcon);
+  keepEditorFocusOnPress(clear);
+  searchWrap.append(input, clear);
 
   const chips = document.createElement("div");
   chips.className = "flex flex-wrap gap-1 px-row-x pb-1";
   chips.hidden = true;
   const summary = document.createElement("div");
   summary.className = "px-row-x py-1 text-xs text-tertiary";
+  summary.setAttribute("data-jarvis-summary", "true");
   const results = document.createElement("div");
   results.className = "flex w-full flex-col";
-  const footer = document.createElement("div");
-  footer.className = "px-row-x py-1 text-xs text-tertiary";
-  footer.textContent =
-    locale === "zh-CN" ? "↑↓ 选择 · ↵ 插入 · Esc 返回" : "↑↓ move · ↵ insert · Esc back";
 
-  section.append(header, searchWrap, chips, summary, results, footer);
-  return { section, back, input, chips, summary, results };
+  section.append(header, searchWrap, chips, summary, results);
+  return { section, back, input, clear, chips, summary, results };
 }
 
 /** Three placeholder rows while the Host search is running. */
@@ -306,10 +326,36 @@ export function renderJarvisBugRows(
   return entries;
 }
 
-export function renderJarvisEmpty(document: Document, results: HTMLElement, message: string): void {
+export interface JarvisEmptyAction {
+  label: string;
+  onSelect(opener: HTMLElement): void;
+}
+
+export function renderJarvisEmpty(
+  document: Document,
+  results: HTMLElement,
+  message: string,
+  action?: JarvisEmptyAction,
+): void {
   results.replaceChildren();
   const empty = document.createElement("div");
   empty.className = "px-row-x py-2 text-xs text-tertiary";
-  empty.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  empty.append(text);
+  if (action) {
+    const link = document.createElement("button");
+    link.type = "button";
+    link.setAttribute("data-jarvis-settings", "true");
+    link.className = "ml-1 text-default underline underline-offset-2";
+    link.textContent = action.label;
+    keepEditorFocusOnPress(link);
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      action.onSelect(link);
+    });
+    empty.append(link);
+  }
   results.append(empty);
 }

@@ -397,8 +397,6 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "status:1", kind: "status", label: "未解决" },
-    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
-    { key: "order:newest", kind: "order", label: "最新" },
   ],
   bugs: [
     previewBug(
@@ -419,7 +417,6 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
       updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
     }),
     previewBug(952, 4081, "示例买 · 标记迭代", "搜索结果列表未显示示例买标记", {
-      status: 2,
       priority: 3,
       severity: 2,
       updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
@@ -429,20 +426,36 @@ const jarvisPreviewResults: JarvisBugSearchResult = {
   capped: false,
 };
 
-const jarvisPreviewConditions: JarvisBugSearchResult = {
+const jarvisPreviewProjectRecent: JarvisBugSearchResult = {
   ...jarvisPreviewResults,
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    { key: "status:1", kind: "status", label: "未解决" },
-    { key: "priority:1", kind: "priority", label: "高优先级" },
-    { key: "severity:1", kind: "severity", label: "严重" },
     { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
-    { key: "time", kind: "time", label: "最近 7 天" },
-    { key: "title", kind: "title", label: "标题含「登录」" },
     { key: "order:newest", kind: "order", label: "最新" },
   ],
-  bugs: jarvisPreviewResults.bugs.slice(0, 2),
+  bugs: jarvisPreviewResults.bugs.map((bug, index) => (index === 3 ? { ...bug, status: 2 } : bug)),
+};
+
+const jarvisPreviewConditions: JarvisBugSearchResult = {
+  available: true,
+  errorCode: null,
+  conditions: [
+    { key: "scope:assigned", kind: "scope", label: "指派给我" },
+    { key: "status:1", kind: "status", label: "未解决" },
+    { key: "severity:2", kind: "severity", label: "严重" },
+    { key: "title", kind: "title", label: "标题含「登录」" },
+  ],
+  bugs: [
+    previewBug(928, 4029, "示例商城 · 迭代 A", "登录后无法进入工作台", {
+      severity: 2,
+    }),
+    previewBug(936, 4041, "示例后台 · 迭代 B", "登录验证码不显示", {
+      severity: 2,
+      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    }),
+  ],
   total: 2,
+  capped: false,
 };
 
 const jarvisPreviewEmpty: JarvisBugSearchResult = {
@@ -451,7 +464,7 @@ const jarvisPreviewEmpty: JarvisBugSearchResult = {
   conditions: [
     { key: "scope:assigned", kind: "scope", label: "指派给我" },
     { key: "status:3", kind: "status", label: "已关闭" },
-    { key: "severity:1", kind: "severity", label: "严重" },
+    { key: "severity:2", kind: "severity", label: "严重" },
   ],
   bugs: [],
   total: 0,
@@ -495,6 +508,9 @@ async function mountJarvisSearch(
     readHostId: () => "local",
     readLocale: () => locale,
     anchorForEditor: () => card,
+    openSettings: () => {
+      document.body.dataset.jarvisSettingsOpened = "true";
+    },
     search: async (_hostId, params) => {
       previewWindow.__jarvisPreviewSearchCalls =
         (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
@@ -818,13 +834,21 @@ const scenarios: Record<string, () => Promise<void>> = {
 
   async "jarvis-mode-prefilled"() {
     await mountJarvisSearch(
-      { result: jarvisPreviewResults, delayMs: 120 },
+      { result: jarvisPreviewProjectRecent, delayMs: 120 },
       "",
       true,
       undefined,
       "@示例买的最近的bug",
       "示例买的最近的bug",
     );
+  },
+
+  async "jarvis-mode-detached"() {
+    await mountJarvisSearch({ result: jarvisPreviewResults, delayMs: 120 }, "我还没处理完成的bug");
+    document.querySelector<HTMLInputElement>("[data-codexhost-jarvis-mode] input")?.focus();
+    document.querySelector(".preview-at-menu")?.remove();
+    await waitFor(() => document.querySelector("[data-codexhost-jarvis-detached]"), 4_000);
+    await delay(120);
   },
 
   async "jarvis-mode-loading"() {
@@ -863,7 +887,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       { result: jarvisPreviewConditions, delayMs: 80 },
       "我还没处理完成的严重登录bug",
       true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
     );
   },
 
@@ -872,7 +896,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       { result: jarvisPreviewConditions, delayMs: 80 },
       "我还没处理完成的严重登录bug",
       true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 6,
+      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
     );
     const chip = document.querySelector<HTMLElement>('[data-jarvis-chip="status:1"]');
     if (!chip) throw new Error("Status chip is missing");

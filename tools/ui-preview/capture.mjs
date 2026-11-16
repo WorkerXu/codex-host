@@ -43,6 +43,7 @@ const allScenarios = [
   "jarvis-entry",
   "jarvis-entry-query",
   "jarvis-mode-prefilled",
+  "jarvis-mode-detached",
   "jarvis-mode-loading",
   "jarvis-mode-results",
   "jarvis-mode-empty",
@@ -594,8 +595,11 @@ for (const scenario of scenarios) {
           !query("[data-codexhost-dingtalk-panel]") && !query("[data-codexhost-jarvis-panel]"),
         );
         check("mode-header", Boolean(mode?.textContent?.includes("Jarvis · Bug")));
+        check("no-footer-hint", !mode?.textContent?.includes("↑↓ 选择"));
         const input = mode?.querySelector("input");
         check("search-field", Boolean(input));
+        check("search-input-no-native-clear", input?.type === "text", input?.type ?? "");
+        check("subtle-clear-button", Boolean(mode?.querySelector("[data-jarvis-clear]")));
         check(
           "search-field-focused",
           Boolean(input) && document.activeElement === input,
@@ -607,6 +611,11 @@ for (const scenario of scenarios) {
         check(
           "query-row-label",
           Boolean(row?.textContent?.includes("Jarvis：我还没处理完的bug")),
+          row?.textContent ?? "",
+        );
+        check(
+          "query-label-no-space-before-colon",
+          !row?.textContent?.includes("Jarvis ："),
           row?.textContent ?? "",
         );
         check("query-no-mode", !query("[data-codexhost-jarvis-mode]"));
@@ -636,6 +645,18 @@ for (const scenario of scenarios) {
         );
         check("prefill-result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
       }
+      if (document.body.dataset.scenario === "jarvis-mode-detached") {
+        const mode = query("[data-codexhost-jarvis-mode]");
+        const host = query("[data-codexhost-jarvis-detached]");
+        check("detached-mode-survives", Boolean(mode) && Boolean(host?.contains(mode)));
+        check("detached-native-menu-gone", !query(".preview-at-menu"));
+        check("detached-results-kept", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
+        check(
+          "detached-search-focused",
+          document.activeElement === mode?.querySelector("input"),
+          document.activeElement?.tagName ?? "",
+        );
+      }
       if (document.body.dataset.scenario === "jarvis-mode-loading") {
         check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
         check(
@@ -649,10 +670,11 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "jarvis-mode-results") {
         check("result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
-        check("result-chips", queryAll("[data-jarvis-chip]").length >= 3);
+        check("result-chips", queryAll("[data-jarvis-chip]").length >= 2);
         check(
           "result-count",
-          Boolean(query("[data-codexhost-jarvis-mode]")?.textContent?.includes("4 条")),
+          query("[data-jarvis-summary]")?.textContent === "4 条",
+          query("[data-jarvis-summary]")?.textContent ?? "",
         );
       }
       if (document.body.dataset.scenario === "jarvis-mode-empty") {
@@ -676,6 +698,12 @@ for (const scenario of scenarios) {
           "error-not-empty-state",
           !query("[data-codexhost-jarvis-mode]")?.textContent?.includes("没有符合条件的 Bug"),
         );
+        check(
+          "error-no-count",
+          (query("[data-jarvis-summary]")?.textContent ?? "missing") === "",
+          query("[data-jarvis-summary]")?.textContent ?? "",
+        );
+        check("error-settings-link", Boolean(query("[data-jarvis-settings]")));
       }
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(
@@ -689,12 +717,12 @@ for (const scenario of scenarios) {
         check("slow-keeps-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
       }
       if (document.body.dataset.scenario === "jarvis-mode-conditions") {
-        check("condition-chips", queryAll("[data-jarvis-chip]").length >= 6);
+        check("condition-chips", queryAll("[data-jarvis-chip]").length >= 4);
         check("condition-results", queryAll("[data-codexhost-jarvis-bug]").length >= 2);
       }
       if (document.body.dataset.scenario === "jarvis-mode-chip-removed") {
         check("status-chip-removed", !query('[data-jarvis-chip="status:1"]'));
-        check("other-chips-kept", queryAll("[data-jarvis-chip]").length >= 5);
+        check("other-chips-kept", queryAll("[data-jarvis-chip]").length >= 3);
       }
       if (
         document.body.dataset.scenario === "at-entry-native" ||
