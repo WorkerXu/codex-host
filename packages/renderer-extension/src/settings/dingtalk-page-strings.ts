@@ -22,7 +22,6 @@ export interface DingTalkPageText {
   searchKeyboardHint: string;
   noSearchResults: string;
   searchFailed: string;
-  searchFallback: string;
   recentReplied: string;
   unread: string;
   noConversations: string;
@@ -76,7 +75,6 @@ const ZH: DingTalkPageText = {
   searchKeyboardHint: "↑↓ 移动 · ↵ 打开 · Esc 退出",
   noSearchResults: "没有找到相关会话或消息",
   searchFailed: "搜索失败，请稍后重试",
-  searchFallback: "搜索分类不可用，已按关键词搜索",
   recentReplied: "最近回复",
   unread: "未读",
   noConversations: "暂无会话",
@@ -130,7 +128,6 @@ const EN: DingTalkPageText = {
   searchKeyboardHint: "↑↓ Move · ↵ Open · Esc Exit",
   noSearchResults: "No matching conversations or messages",
   searchFailed: "Search failed. Try again.",
-  searchFallback: "Classification is unavailable; searched by keyword",
   recentReplied: "Recently replied",
   unread: "Unread",
   noConversations: "No conversations",

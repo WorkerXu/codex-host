@@ -83,29 +83,46 @@ export function continuesDingTalkGroup(
   return message.createdAt - previous.createdAt <= 3 * MINUTE;
 }
 
-export function dingtalkInitial(title: string): string {
-  const trimmed = title.trim();
-  if (!trimmed) return "钉";
-  return [...trimmed][0] ?? "钉";
-}
+const AVATAR_TONES = ["#3296FA", "#1E7BE0", "#4AA8FF", "#2E86DE", "#5B8FF9", "#3D7EFF"];
 
-const AVATAR_TONES = [
-  "var(--color-token-charts-blue)",
-  "var(--color-token-charts-green)",
-  "var(--color-token-charts-orange)",
-  "var(--color-token-charts-purple)",
-  "var(--color-token-charts-yellow)",
-  "var(--color-token-charts-red)",
-] as const;
-
-/** FNV-1a keeps the same conversation on the same soft tone across sessions. */
+/** FNV-1a picks a stable DingTalk-blue avatar background for the id. */
 export function avatarTone(conversationId: string): string {
   let hash = 0x811c9dc5;
   for (const character of conversationId) {
     hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return AVATAR_TONES[hash % AVATAR_TONES.length] ?? AVATAR_TONES[0];
+  return AVATAR_TONES[hash % AVATAR_TONES.length] ?? AVATAR_TONES[0]!;
+}
+
+const AVATAR_STRIP_PATTERN =
+  /[\s[\]【】()（）<>《》「」『』"'“”‘’·•.,，。!！?？:：;；、\-_/\\|~`^*#]+/gu;
+
+function stripAvatarPunctuation(title: string): string {
+  return title.replace(AVATAR_STRIP_PATTERN, "").trim();
+}
+
+function takeCharacters(text: string, fromEnd: boolean): string {
+  const characters = [...text];
+  const picked = fromEnd ? characters.slice(-2) : characters.slice(0, 2);
+  return picked.join("");
+}
+
+/**
+ * DingTalk's default avatar: two characters for Chinese names and group
+ * titles, one capital letter for a pure-Latin name, never punctuation.
+ */
+export function dingtalkAvatarLabel(title: string, singleChat: boolean, fallback = "钉"): string {
+  const cleaned = stripAvatarPunctuation(title);
+  if (!cleaned) return fallback;
+  if (/^[A-Za-z][A-Za-z .'-]*$/u.test(cleaned)) {
+    return (cleaned.match(/[A-Za-z]/u)?.[0] ?? fallback).toUpperCase();
+  }
+  return takeCharacters(cleaned, singleChat);
+}
+
+export function dingtalkInitial(title: string): string {
+  return dingtalkAvatarLabel(title, false);
 }
 
 export function conversationMention(
@@ -146,8 +163,15 @@ export interface ViewMessage extends DingTalkMessage {
   failed?: boolean;
 }
 
+export function formatDingTalkFileSize(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export interface DingTalkPageState {
-  source: "unread" | "recent-replied" | "empty";
+  source: "unread" | "recent" | "empty";
   view: "unread" | "recent";
   conversations: DingTalkConversation[];
   selectedId: string | null;
@@ -161,6 +185,7 @@ export interface DingTalkPageState {
   searchPending: boolean;
   searchFailed: boolean;
   listError: boolean;
+  listLoading: boolean;
   loadingMessages: boolean;
   messagesError: boolean;
   loadMoreError: boolean;

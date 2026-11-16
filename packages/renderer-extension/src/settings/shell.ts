@@ -143,6 +143,9 @@ export function mountRendererSettingsShell(
   const setActivePage = (pageId: string): void => {
     page.dataset.activePage = pageId;
     pageContent.dataset.pageId = pageId;
+    // The DingTalk workbench is a chat surface: hide the settings navigation
+    // so the conversation uses the full content width.
+    layout.dataset.compact = String(pageId === "dingtalk");
   };
   frame.append(header, layout);
   surface.append(frame);

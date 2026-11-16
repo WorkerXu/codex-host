@@ -24,6 +24,7 @@ import {
   createIcon,
   createIconButton,
   createListEmpty,
+  createListSkeleton,
   createMessageRow,
   createMessageSkeleton,
   createOlderMessagesSkeleton,
@@ -45,6 +46,8 @@ const SEARCH_DEBOUNCE_MS = 450;
 const HIGHLIGHT_MS = 2_500;
 const INITIAL_MESSAGE_LIMIT = 30;
 const OLDER_MESSAGE_LIMIT = 30;
+const PREVIEW_CONCURRENCY = 3;
+const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation";
 
 export interface RendererDingTalkPageOptions {
   createClient(): RendererDingTalkClient | null;
@@ -69,7 +72,7 @@ export function createDingTalkSettingsPage(
       const text = dingtalkPageStrings(locale);
       const state: DingTalkPageState = {
         source: "empty",
-        view: "recent",
+        view: "unread",
         conversations: [],
         selectedId: null,
         currentConversation: null,
@@ -82,6 +85,7 @@ export function createDingTalkSettingsPage(
         searchPending: false,
         searchFailed: false,
         listError: false,
+        listLoading: true,
         loadingMessages: false,
         messagesError: false,
         loadMoreError: false,
@@ -97,8 +101,14 @@ export function createDingTalkSettingsPage(
       let scrollRequest = 0;
       let searchExpanded = { conversations: false, messages: false };
       let searchCursor = -1;
-      let viewInitialized = false;
       let loadingOlderRequest = false;
+      let openedInitialConversation = false;
+      const previews = new Map<string, string | null>();
+      const previewQueue: string[] = [];
+      const previewPending = new Set<string>();
+      let previewActive = 0;
+      const images = new Map<string, string | null>();
+      const imageRequests = new Map<string, Promise<string | null>>();
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
 
@@ -237,6 +247,58 @@ export function createDingTalkSettingsPage(
         if (searchCursor >= 0) rows[searchCursor]?.scrollIntoView({ block: "nearest" });
       };
 
+      const applyPreview = (conversationId: string, preview: string | null): void => {
+        previews.set(conversationId, preview);
+        const row = state.conversations.find(
+          (conversation) => conversation.conversationId === conversationId,
+        );
+        if (row) row.preview = preview ?? undefined;
+        const target = conversationList.querySelector<HTMLElement>(
+          `[data-conversation-id="${CSS.escape(conversationId)}"] .dingtalk-conversation-preview`,
+        );
+        if (target) target.textContent = preview ?? "";
+      };
+
+      const pumpPreviews = (): void => {
+        while (previewActive < PREVIEW_CONCURRENCY && previewQueue.length > 0) {
+          const conversationId = previewQueue.shift();
+          if (!conversationId || previewPending.has(conversationId)) continue;
+          previewPending.add(conversationId);
+          previewActive += 1;
+          void (async () => {
+            const result = await client?.preview(conversationId).catch(() => null);
+            if (disposed) return;
+            applyPreview(conversationId, result?.preview ?? null);
+          })().finally(() => {
+            previewPending.delete(conversationId);
+            previewActive -= 1;
+            if (!disposed) pumpPreviews();
+          });
+        }
+      };
+
+      const requestPreview = (conversationId: string): void => {
+        if (!client || previews.has(conversationId) || previewPending.has(conversationId)) return;
+        previewQueue.push(conversationId);
+        pumpPreviews();
+      };
+
+      const previewObserver =
+        typeof IntersectionObserver === "undefined"
+          ? null
+          : new IntersectionObserver(
+              (entries) => {
+                for (const entry of entries) {
+                  if (!entry.isIntersecting) continue;
+                  const conversationId = (entry.target as HTMLElement).dataset.conversationId;
+                  if (!conversationId) continue;
+                  previewObserver?.unobserve(entry.target);
+                  requestPreview(conversationId);
+                }
+              },
+              { root: conversationList, rootMargin: "48px" },
+            );
+
       const renderList = (): void => {
         conversationList.replaceChildren();
         unreadButton.setAttribute("aria-pressed", String(state.view === "unread"));
@@ -259,30 +321,35 @@ export function createDingTalkSettingsPage(
           syncColumnMode();
           return;
         }
-        const rows =
-          state.view === "unread"
-            ? state.conversations.filter(
-                (conversation) => conversation.unreadCount > 0 || conversation.muted,
-              )
-            : state.conversations;
+        if (state.listLoading && state.conversations.length === 0) {
+          conversationList.append(createListSkeleton(document));
+          syncColumnMode();
+          return;
+        }
+        const rows = state.conversations.map((conversation) => ({
+          ...conversation,
+          ...(previews.has(conversation.conversationId) && !conversation.preview
+            ? { preview: previews.get(conversation.conversationId) ?? undefined }
+            : {}),
+        }));
         for (const conversation of rows) {
-          conversationList.append(
-            createConversationRow(
-              document,
-              conversation,
-              text,
-              conversation.conversationId === state.selectedId,
-              () => void selectConversation(conversation.conversationId),
-            ),
+          const row = createConversationRow(
+            document,
+            conversation,
+            text,
+            conversation.conversationId === state.selectedId,
+            () => void selectConversation(conversation.conversationId),
           );
+          conversationList.append(row);
+          if (previews.has(conversation.conversationId)) continue;
+          if (!conversation.preview && previewObserver) previewObserver.observe(row);
+          else if (!conversation.preview) requestPreview(conversation.conversationId);
         }
         if (rows.length === 0) {
           conversationList.append(
             createListEmpty(
               document,
-              state.view === "unread" && state.conversations.length > 0
-                ? text.noUnreadConversations
-                : text.noConversations,
+              state.view === "unread" ? text.noUnreadConversations : text.noConversations,
             ),
           );
         }
@@ -319,6 +386,37 @@ export function createDingTalkSettingsPage(
         const conversation = state.currentConversation;
         mainHead.setConversation(conversation);
         composer.setPlaceholder(conversation?.title || "");
+      };
+
+      const loadImage = (
+        message: DingTalkMessage,
+        resource: NonNullable<DingTalkMessage["resources"]>[number],
+      ): Promise<string | null> => {
+        const key = `${message.conversationId}:${message.messageId}:${resource.resourceId}`;
+        if (images.has(key)) return Promise.resolve(images.get(key) ?? null);
+        const pending = imageRequests.get(key);
+        if (pending) return pending;
+        if (!client) return Promise.resolve(null);
+        const request = client
+          .resource({
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            resourceId: resource.resourceId,
+            resourceIdType: resource.resourceIdType,
+          })
+          .then((result) => (result.available ? result.dataUrl : null))
+          .catch(() => null)
+          .then((dataUrl) => {
+            images.set(key, dataUrl);
+            imageRequests.delete(key);
+            if (images.size > 80) {
+              const oldest = images.keys().next().value;
+              if (oldest !== undefined) images.delete(oldest);
+            }
+            return dataUrl;
+          });
+        imageRequests.set(key, request);
+        return request;
       };
 
       const distanceFromBottom = (): number => messageList.scrollHeight - messageList.scrollTop;
@@ -420,6 +518,10 @@ export function createDingTalkSettingsPage(
                   !state.selectedMessages.has(message.messageId),
                 ),
               onRetry: () => void deliver(message),
+              loadImage: (resource) => loadImage(message, resource),
+              onImageLoaded: (wasNearBottom) => {
+                if (wasNearBottom) scrollToBottom();
+              },
             }),
           );
           previous = message;
@@ -451,6 +553,11 @@ export function createDingTalkSettingsPage(
         mainHead.closeMenu();
         state.selectedId = conversationId;
         state.currentConversation = conversationFor(conversationId);
+        try {
+          view.localStorage.setItem(LAST_CONVERSATION_KEY, conversationId);
+        } catch {
+          /* Persisting the last conversation is best effort. */
+        }
         state.messages = [];
         state.hasMore = false;
         state.nextCursor = null;
@@ -474,7 +581,12 @@ export function createDingTalkSettingsPage(
           renderMessages();
           return;
         }
-        if (result.conversation) state.currentConversation = result.conversation;
+        if (result.conversation) {
+          state.currentConversation = result.conversation;
+          state.conversations = state.conversations.map((row) =>
+            row.conversationId === conversationId ? { ...row, ...result.conversation } : row,
+          );
+        }
         state.messages = [...result.messages].sort(
           (left, right) => left.createdAt - right.createdAt,
         );
@@ -554,6 +666,10 @@ export function createDingTalkSettingsPage(
         for (const message of [...state.messages, ...result.messages]) {
           merged.set(message.messageId, message);
         }
+        if (result.conversation) {
+          state.currentConversation = result.conversation;
+          updateHeader();
+        }
         const fresh = result.messages.filter((message) => !known.has(message.messageId)).length;
         state.messages = [...merged.values()].sort(
           (left, right) => left.createdAt - right.createdAt,
@@ -571,12 +687,17 @@ export function createDingTalkSettingsPage(
       const loadConversations = async (refresh: boolean): Promise<void> => {
         if (!client) {
           state.listError = true;
+          state.listLoading = false;
           renderList();
           return;
         }
         const generation = ++listGeneration;
-        const result = await client.conversations(refresh).catch(() => null);
+        const viewName = state.view;
+        state.listLoading = true;
+        if (state.conversations.length === 0) renderList();
+        const result = await client.conversations({ view: viewName, refresh }).catch(() => null);
         if (disposed || generation !== listGeneration) return;
+        state.listLoading = false;
         if (!result) {
           state.listError = true;
           renderList();
@@ -585,19 +706,40 @@ export function createDingTalkSettingsPage(
         }
         state.conversations = result.conversations;
         state.source = result.source;
-        if (!viewInitialized) {
-          state.view = result.source === "unread" ? "unread" : "recent";
-          viewInitialized = true;
-        }
         state.listError = !result.available;
         pageMenu.setStatus(result.available, effectiveHost);
         renderList();
-        if (state.selectedId && !conversationFor(state.selectedId)) {
-          state.selectedId = null;
-          state.currentConversation = null;
-          state.messages = [];
-          updateHeader();
-          renderMessages();
+        if (state.selectedId) {
+          const selected = conversationFor(state.selectedId);
+          if (selected) {
+            state.currentConversation = selected;
+            updateHeader();
+          } else {
+            state.selectedId = null;
+            state.currentConversation = null;
+            state.messages = [];
+            updateHeader();
+            renderMessages();
+          }
+        }
+        if (
+          !openedInitialConversation &&
+          state.selectedId === null &&
+          state.conversations.length > 0
+        ) {
+          openedInitialConversation = true;
+          let remembered: string | null = null;
+          try {
+            remembered = view.localStorage.getItem(LAST_CONVERSATION_KEY);
+          } catch {
+            remembered = null;
+          }
+          const target =
+            (remembered &&
+              state.conversations.find((row) => row.conversationId === remembered)
+                ?.conversationId) ||
+            state.conversations[0]?.conversationId;
+          if (target) void selectConversation(target);
         }
       };
 
@@ -615,32 +757,7 @@ export function createDingTalkSettingsPage(
         searchExpanded = { conversations: false, messages: false };
         searchCursor = -1;
         renderSearch();
-        const decision = await client
-          .decide({
-            query: normalized,
-            conversations: state.conversations.map((conversation) => ({
-              conversationId: conversation.conversationId,
-              title: conversation.title,
-              singleChat: conversation.singleChat,
-              lastMessageAt: conversation.lastMessageAt,
-              ...(conversation.preview ? { preview: conversation.preview } : {}),
-            })),
-          })
-          .catch(() => null);
-        if (disposed || generation !== searchGeneration) return;
-        const result = await client
-          .search({
-            query: normalized,
-            route: decision?.route === "conversations" ? "conversations" : "messages",
-            ...(decision?.messageQuery ? { messageQuery: decision.messageQuery } : {}),
-            fromMe: decision?.fromMe ?? false,
-            atMe: decision?.atMe ?? false,
-            days: decision?.days ?? 30,
-            ...(decision?.conversationIds.length
-              ? { conversationIds: decision.conversationIds }
-              : {}),
-          })
-          .catch(() => null);
+        const result = await client.search({ query: normalized }).catch(() => null);
         if (disposed || generation !== searchGeneration) return;
         state.searchPending = false;
         if (!result) {
@@ -715,6 +832,12 @@ export function createDingTalkSettingsPage(
           state.currentConversation.lastMessageAt = result.sentAt;
           state.currentConversation.preview = `我：${message.text}`;
         }
+        state.conversations = state.conversations.map((row) =>
+          row.conversationId === conversationId
+            ? { ...row, lastMessageAt: result.sentAt, preview: `我：${message.text}` }
+            : row,
+        );
+        previews.set(conversationId, `我：${message.text}`);
         renderMessages({ scroll: "bottom" });
         renderList();
       };
@@ -770,12 +893,18 @@ export function createDingTalkSettingsPage(
       unreadButton.addEventListener("click", () => {
         if (state.view === "unread") return;
         state.view = "unread";
+        state.conversations = [];
+        state.listLoading = true;
         renderList();
+        void loadConversations(false);
       });
       recentButton.addEventListener("click", () => {
         if (state.view === "recent") return;
         state.view = "recent";
+        state.conversations = [];
+        state.listLoading = true;
         renderList();
+        void loadConversations(false);
       });
       searchInput.addEventListener("input", () => {
         const query = searchInput.value.trim();
@@ -911,6 +1040,7 @@ export function createDingTalkSettingsPage(
         listGeneration += 1;
         messageGeneration += 1;
         searchGeneration += 1;
+        previewObserver?.disconnect();
         if (searchTimer !== null) view.clearTimeout(searchTimer);
         if (highlightTimer !== null) view.clearTimeout(highlightTimer);
         unsubscribe();
