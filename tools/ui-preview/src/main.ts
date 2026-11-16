@@ -1,5 +1,8 @@
 import previewCss from "./preview.css";
-import { createDingTalkEntrySection } from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
+import {
+  createDingTalkEntrySection,
+  installRendererDingTalkEntry,
+} from "../../../packages/renderer-extension/src/renderer-dingtalk-entry.js";
 import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
@@ -136,16 +139,92 @@ async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
   await delay(160);
 }
 
+async function mountNativeAtMenu(open: boolean): Promise<void> {
+  const stage = mountStage(`
+    <main class="preview-canvas preview-canvas--composer">
+      <div class="preview-composer-card">
+        <div class="preview-composer-input" id="native-editor" contenteditable="true">@钉</div>
+      </div>
+      <div class="preview-at-menu" id="native-at-menu" role="listbox" aria-label="提及">
+        <div class="preview-native-scroll vertical-scroll-fade-mask">
+          <div class="preview-native-header">文件</div>
+          <div class="preview-native-row" role="option" aria-selected="false">图片</div>
+          <div class="preview-native-header">智能体</div>
+          <div class="preview-native-row" role="option" aria-selected="true">Codex</div>
+        </div>
+      </div>
+    </main>`);
+  const editor = stage.querySelector<HTMLElement>("#native-editor");
+  const menu = stage.querySelector<HTMLElement>("#native-at-menu");
+  if (!editor || !menu) throw new Error("Native composer or menu is missing");
+  const text = editor.firstChild;
+  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
+  editor.focus();
+  const range = document.createRange();
+  range.setStart(text, (text.textContent ?? "").length);
+  range.collapse(true);
+  const selection = document.getSelection();
+  if (!selection) throw new Error("Selection is unavailable");
+  selection.removeAllRanges();
+  selection.addRange(range);
+  installRendererDingTalkEntry(document, {
+    isComposerEditor: (element) => element === editor,
+    anchorForEditor: () => menu,
+    open: () => {
+      document.body.dataset.entryOpened = "true";
+      return true;
+    },
+  });
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  const section = await waitFor(() => menu.querySelector("[data-codexhost-dingtalk-section]"));
+  const scroller = menu.querySelector(".vertical-scroll-fade-mask");
+  const entryRow = section.querySelector("[data-codexhost-dingtalk-entry]");
+  document.body.dataset.entryNativeScroller = String(
+    Boolean(scroller && section.parentElement === scroller),
+  );
+  document.body.dataset.entryLastGroup = String(scroller?.lastElementChild === section);
+  document.body.dataset.entryRow = String(Boolean(entryRow));
+  document.body.dataset.entryGroupTitle = String(section.textContent?.includes("工作台") ?? false);
+  document.body.dataset.entryHelper = String(
+    entryRow?.textContent?.includes("打开钉钉工作台") ?? false,
+  );
+  if (!open) {
+    await delay(80);
+    return;
+  }
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+  );
+  await waitFor(() => document.body.dataset.entryOpened === "true");
+}
+
 const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-list"() {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
+    await waitFor(() => query(".dingtalk-message"));
   },
 
   async "dingtalk-open"() {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
+  },
+
+  async "dingtalk-direct"() {
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    const row = await waitFor(() =>
+      queryAll<HTMLButtonElement>(".dingtalk-conversation").find(
+        (item) => item.textContent?.includes("吴菁") && !item.textContent?.includes("群"),
+      ),
+    );
+    row.click();
+    await waitFor(() => query(".dingtalk-main-title")?.textContent === "吴菁");
+    await waitFor(() => query(".dingtalk-message"));
   },
 
   async "dingtalk-scrolled-top"() {
@@ -160,13 +239,26 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(120);
   },
 
+  async "dingtalk-recent"() {
+    const { query, queryAll } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    const button = queryAll<HTMLButtonElement>(".dingtalk-list-switch-button")[1];
+    if (!button) throw new Error("Recent button is missing");
+    button.click();
+    await waitFor(
+      () =>
+        queryAll(".dingtalk-conversation").length > 0 &&
+        query(".dingtalk-conversation-preview")?.textContent?.startsWith("我："),
+    );
+  },
+
   async "dingtalk-search"() {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
     const input = query<HTMLInputElement>(".dingtalk-search-input");
     if (!input) throw new Error("Search input is missing");
-    input.value = "预算";
+    input.value = "示例Sprint";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => query(".dingtalk-search-result"));
     await delay(260);
@@ -277,17 +369,27 @@ const scenarios: Record<string, () => Promise<void>> = {
         <div class="preview-composer-card">
           <div class="preview-composer-input">帮我把今天的发布进展整理一下…</div>
           <div class="preview-at-menu" role="listbox" aria-label="提及">
-            <div class="preview-native-header">文件</div>
-            <div class="preview-native-row">图片</div>
-            <div class="preview-native-header">智能体</div>
-            <div class="preview-native-row">Codex</div>
+            <div class="preview-native-scroll vertical-scroll-fade-mask">
+              <div class="preview-native-header">文件</div>
+              <div class="preview-native-row">图片</div>
+              <div class="preview-native-header">智能体</div>
+              <div class="preview-native-row">Codex</div>
+            </div>
           </div>
         </div>
       </main>`);
-    const menu = stage.querySelector(".preview-at-menu");
+    const menu = stage.querySelector(".preview-native-scroll");
     if (!menu) throw new Error("At menu is missing");
     menu.append(createDingTalkEntrySection(document, locale).element);
     await delay(80);
+  },
+
+  async "at-entry-native"() {
+    await mountNativeAtMenu(true);
+  },
+
+  async "at-entry-native-visible"() {
+    await mountNativeAtMenu(false);
   },
 };
 

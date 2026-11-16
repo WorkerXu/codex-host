@@ -26,6 +26,7 @@ function conversation(
   age: number,
   preview: string,
   muted = false,
+  extra: Partial<DingTalkConversation> = {},
 ): DingTalkConversation {
   return {
     conversationId: id,
@@ -35,6 +36,7 @@ function conversation(
     lastMessageAt: now - age,
     muted,
     preview,
+    ...extra,
   };
 }
 
@@ -46,9 +48,26 @@ export const conversations: DingTalkConversation[] = [
     3,
     5 * minute,
     "吴菁：发布窗口定在周五 20:00，今晚先冻结分支。",
+    false,
+    { groupType: "INTERNAL_GROUP", memberCount: 18, atMe: true },
   ),
-  conversation("cid-finance", "财务打款群", false, 12, 22 * minute, "李端：预算表我改完第二版了。"),
-  conversation("cid-wujing", "吴菁", true, 1, 47 * minute, "明天上午的评审还需要你确认一下。"),
+  conversation("cid-finance", "财务打款群", false, 12, 22 * minute, "", false, {
+    groupType: "INTERNAL_GROUP",
+    memberCount: 9,
+  }),
+  conversation(
+    "cid-wujing",
+    "吴菁",
+    true,
+    1,
+    47 * minute,
+    "明天上午的评审还需要你确认一下。",
+    false,
+    {
+      subtitle: "产品经理",
+      memberCount: 2,
+    },
+  ),
   conversation(
     "cid-design",
     "设计评审",
@@ -57,6 +76,7 @@ export const conversations: DingTalkConversation[] = [
     2 * hour,
     "陈默：[图片] 新版工作台视觉稿",
     true,
+    { groupType: "INTERNAL_GROUP", memberCount: 7 },
   ),
   conversation("cid-chenmo", "陈默", true, 99, 3 * hour, "收到，我晚点把数据补上。"),
   conversation(
@@ -183,6 +203,66 @@ function buildLongConversation(): DingTalkMessage[] {
       unsupported,
       mine,
     });
+  }
+  const richQuote = messages[195];
+  if (richQuote) {
+    richQuote.quotedMessage = {
+      senderName: "李端",
+      text: "预算表第二版已经发到群里，差旅和外包分开列了。",
+      messageId: "msg-launch-quote",
+      createdAt: richQuote.createdAt - 4 * minute,
+    };
+    richQuote.reactions = [
+      { emoji: "OK", count: 3 },
+      { emoji: "收到", count: 1 },
+    ];
+  }
+  const card = messages[196];
+  if (card) {
+    card.bot = true;
+    card.cardTitle = "【云监控】发布检查";
+    card.format = "markdown";
+    card.text =
+      ">- 服务: saas\n>- 环境: production\n>- 结论: 检查通过，可以继续发布\n\n[查看详情](https://example.com/detail)";
+    card.resources = [
+      {
+        kind: "image",
+        resourceId: "media-preview-card",
+        resourceIdType: "mediaId",
+      },
+    ];
+  }
+  const image = messages[197];
+  if (image) {
+    image.text = "";
+    image.resources = [
+      {
+        kind: "image",
+        resourceId: "media-preview-image",
+        resourceIdType: "mediaId",
+      },
+    ];
+  }
+  const file = messages[198];
+  if (file) {
+    file.text = "";
+    file.resources = [
+      {
+        kind: "file",
+        name: "发布检查清单.xlsx",
+        sizeBytes: 24_576,
+        resourceId: "file-preview-checklist",
+        resourceIdType: "fileId",
+      },
+    ];
+  }
+  const bot = messages[199];
+  if (bot) {
+    bot.bot = true;
+    bot.senderName = "发布机器人";
+    bot.format = "markdown";
+    bot.text =
+      "**发布窗口提醒**\n\n今晚 20:00 冻结分支，请各端在 19:30 前完成自测。\n\n- 后端：确认灰度开关\n- 前端：确认静态资源版本";
   }
   return messages;
 }
@@ -445,3 +525,61 @@ export const addMachineTargets: ProjectGroupAddMachineTarget[] = [
     harnessLabel: "Claude Code",
   },
 ];
+
+/** A group outside the unread list, returned only by `chat search`. */
+export const remoteSearchGroups: DingTalkConversation[] = [
+  {
+    conversationId: "cid-guansprint",
+    title: "【示例Sprint】 进度",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 2 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 15,
+  },
+  {
+    conversationId: "cid-guansprint-2",
+    title: "【示例Sprint】示例买",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 3 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 18,
+  },
+  {
+    conversationId: "cid-guansprint-3",
+    title: "示例Sprint 联调群",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 4 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 12,
+  },
+  {
+    conversationId: "cid-guansprint-4",
+    title: "示例Sprint 数据核对",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - 5 * day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 8,
+  },
+];
+
+export const remoteSearchPeople = [
+  {
+    name: "吴菁",
+    title: "产品经理",
+    userId: "user-wujing",
+    openDingTalkId: "open-wujing",
+    conversationId: "cid-wujing",
+  },
+];
+
+/** 1x1 transparent PNG used as the fake image download result. */
+export const previewImageDataUrl =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

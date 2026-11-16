@@ -15,7 +15,9 @@ const baseUrl = "http://127.0.0.1:4417";
 const allScenarios = [
   "dingtalk-list",
   "dingtalk-open",
+  "dingtalk-direct",
   "dingtalk-scrolled-top",
+  "dingtalk-recent",
   "dingtalk-search",
   "dingtalk-select",
   "dingtalk-empty",
@@ -29,6 +31,8 @@ const allScenarios = [
   "group-add-machine-busy",
   "group-add-machine-error",
   "at-entry",
+  "at-entry-native",
+  "at-entry-native-visible",
 ];
 
 const args = process.argv.slice(2);
@@ -44,6 +48,12 @@ for (let index = 0; index < args.length; index += 1) {
   }
 }
 const scenarios = requested.length > 0 ? requested : allScenarios;
+
+if (!process.env.CODEX_SHADOW_CONTEXT) {
+  throw new Error(
+    "Set CODEX_SHADOW_CONTEXT to the exported shadow-context.json before capturing previews",
+  );
+}
 
 async function serverIsUp() {
   try {
@@ -69,7 +79,15 @@ if (!(await serverIsUp())) {
 
 const browser = await chromium.launch();
 await mkdir(outputDirectory, { recursive: true });
-const report = { generatedAt: new Date().toISOString(), baseUrl, captures: [] };
+const shadowContext = await fetch(`${baseUrl}/shadow-context.json`).then((response) =>
+  response.json(),
+);
+const report = {
+  generatedAt: new Date().toISOString(),
+  baseUrl,
+  shadowContext,
+  captures: [],
+};
 
 for (const scenario of scenarios) {
   for (const theme of ["light", "dark"]) {
@@ -99,13 +117,110 @@ for (const scenario of scenarios) {
       ];
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
+      const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+
+      // Every custom property used by the workbench must resolve inside the
+      // shadow root, or carry an explicit fallback.
+      if (shell) {
+        const unresolved = new Set();
+        const collectRules = (rules) => {
+          for (const rule of rules) {
+            if (rule.cssRules) collectRules(rule.cssRules);
+            if (!rule.selectorText || !rule.style) continue;
+            let sample = null;
+            if (rule.selectorText.includes(":host")) {
+              sample = shell.host;
+            } else {
+              try {
+                sample = shell.querySelector(rule.selectorText);
+              } catch {
+                continue;
+              }
+            }
+            if (!sample) continue;
+            for (const property of rule.style) {
+              const value = rule.style.getPropertyValue(property);
+              const pattern = /var\(\s*(--[\w-]+)\s*(,)?/gu;
+              let match;
+              while ((match = pattern.exec(value))) {
+                if (match[2]) continue;
+                const resolved = getComputedStyle(sample).getPropertyValue(match[1]).trim();
+                if (!resolved) unresolved.add(`${match[1]} @ ${rule.selectorText}`);
+              }
+            }
+          }
+        };
+        for (const style of shell.querySelectorAll("style")) {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(style.textContent ?? "");
+          collectRules(sheet.cssRules);
+        }
+        check(
+          "shadow-vars-resolved",
+          unresolved.size === 0,
+          [...unresolved].slice(0, 8).join(" | "),
+        );
+      }
 
       if (document.querySelector(".dingtalk-workbench")) {
         const list = query(".dingtalk-conversation-list");
+        check("conversation-list-visible", visible(list));
+        const sidebar = query(".settings-sidebar");
         check(
-          "conversation-list-visible",
-          Boolean(list) && list.getBoundingClientRect().height > 0,
+          "dingtalk-full-width",
+          Boolean(sidebar) && getComputedStyle(sidebar).display === "none",
         );
+        check("default-conversation-open", queryAll(".dingtalk-message").length > 0);
+        check("list-switch", queryAll(".dingtalk-list-switch-button").length === 2);
+      }
+      if (document.body.dataset.scenario === "dingtalk-list") {
+        check("internal-group-tag", queryAll(".dingtalk-conversation-tag").length > 0);
+        check(
+          "unread-count-prefix",
+          Boolean(query(".dingtalk-conversation-count")?.textContent?.includes("条")),
+        );
+        check("at-me-prefix", Boolean(query(".dingtalk-conversation-at-me")));
+        const badge = query(".dingtalk-unread-badge");
+        const badgeStyle = badge ? getComputedStyle(badge) : null;
+        check(
+          "unread-badge-visible",
+          Boolean(badge) &&
+            badgeStyle.backgroundColor !== "rgba(0, 0, 0, 0)" &&
+            badgeStyle.color !== "rgba(0, 0, 0, 0)",
+          badgeStyle ? `${badgeStyle.backgroundColor} / ${badgeStyle.color}` : "missing",
+        );
+        const dot = query(".dingtalk-avatar-unread");
+        check(
+          "muted-dot-visible",
+          Boolean(dot) && getComputedStyle(dot).backgroundColor !== "rgba(0, 0, 0, 0)",
+        );
+        const avatar = query(".dingtalk-conversation .dingtalk-avatar");
+        check(
+          "avatar-two-characters",
+          Boolean(avatar) && [...(avatar.textContent ?? "")].length <= 2,
+          avatar?.textContent ?? "",
+        );
+        check(
+          "preview-has-sender",
+          queryAll(".dingtalk-conversation-preview").some((row) => row.textContent.includes("：")),
+        );
+        const lazyRow = [...queryAll(".dingtalk-conversation")].find((row) =>
+          row.textContent?.includes("财务打款群"),
+        );
+        check(
+          "preview-lazy-filled",
+          Boolean(lazyRow?.textContent?.includes("懒加载")),
+          lazyRow?.textContent ?? "",
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-direct") {
+        check("direct-header-title", query(".dingtalk-main-title")?.textContent === "吴菁");
+        check(
+          "direct-header-subtitle",
+          query(".dingtalk-main-subtitle")?.textContent === "产品经理",
+          query(".dingtalk-main-subtitle")?.textContent ?? "",
+        );
+        check("direct-messages", queryAll(".dingtalk-message").length > 0);
       }
       if (document.body.dataset.scenario === "dingtalk-open") {
         const scroller = query(".dingtalk-message-list");
@@ -120,7 +235,28 @@ for (const scenario of scenarios) {
           `${queryAll(".dingtalk-date-separator").length} separators`,
         );
         check("time-separator", queryAll(".dingtalk-time-separator").length > 0);
-        check("list-switch", queryAll(".dingtalk-list-switch-button").length === 2);
+        check("message-quote", queryAll(".dingtalk-message-quote").length > 0);
+        check("message-reaction", queryAll(".dingtalk-reaction").length > 0);
+        check("message-bot-tag", queryAll(".dingtalk-bot-tag").length > 0);
+        check("message-card", queryAll(".dingtalk-message-bubble--card").length > 0);
+        check("message-card-title", queryAll(".dingtalk-message-card-title").length > 0);
+        check("message-image", queryAll(".dingtalk-message-image-content").length > 0);
+        check("message-file", queryAll(".dingtalk-message-file").length > 0);
+        const bodies = queryAll(".dingtalk-message")
+          .map((row) => row.textContent ?? "")
+          .join("");
+        check("no-raw-media-tags", !/mediaId|<imageContent>|fileId:/u.test(bodies));
+        check("header-member-count", Boolean(query(".dingtalk-main-subtitle")?.textContent));
+      }
+      if (document.body.dataset.scenario === "dingtalk-recent") {
+        const rows = queryAll(".dingtalk-conversation");
+        check("recent-rows", rows.length > 0 && rows.length <= 10, `${rows.length} rows`);
+        check(
+          "recent-mine-preview",
+          queryAll(".dingtalk-conversation-preview").every((row) =>
+            row.textContent.startsWith("我："),
+          ),
+        );
       }
       if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
         check("loading-older-visible", Boolean(query(".dingtalk-loading-older:not([hidden])")));
@@ -129,7 +265,7 @@ for (const scenario of scenarios) {
         const panel = query(".dingtalk-search-results");
         const sidebar = query(".dingtalk-sidebar");
         check("search-inside-left-column", Boolean(panel && sidebar && sidebar.contains(panel)));
-        check("search-results-visible", Boolean(panel) && panel.getBoundingClientRect().height > 0);
+        check("search-results-visible", visible(panel));
         check(
           "search-highlight",
           queryAll(".dingtalk-search-mark").length > 0,
@@ -143,9 +279,8 @@ for (const scenario of scenarios) {
         );
         check("search-keyboard-hint", Boolean(query(".dingtalk-search-hint:not([hidden])")));
         check(
-          "search-orange-mark",
-          queryAll(".dingtalk-search-mark").length > 0 &&
-            getComputedStyle(query(".dingtalk-search-mark")).backgroundColor === "rgba(0, 0, 0, 0)",
+          "search-remote-group",
+          queryAll(".dingtalk-search-title").some((row) => row.textContent.includes("示例Sprint")),
         );
       }
       if (document.body.dataset.scenario === "dingtalk-select") {
@@ -184,9 +319,21 @@ for (const scenario of scenarios) {
       ) {
         check("listener-section", Boolean(query(".dingtalk-listener")));
         check("listener-events", queryAll(".dingtalk-listener-events input").length === 3);
+        check(
+          "approval-copy",
+          Boolean(
+            query(".dingtalk-listener-note")?.textContent?.includes("审批：智能体按你的配置处理"),
+          ),
+        );
       }
       if (document.body.dataset.scenario === "agents-dingtalk-disabled") {
         check("listener-disabled", Boolean(query('.dingtalk-listener-body[data-disabled="true"]')));
+        check(
+          "bulk-links-disabled",
+          queryAll(".dingtalk-field-actions .dingtalk-text-button").every(
+            (button) => button.disabled,
+          ),
+        );
       }
       if (document.body.dataset.scenario === "group-plus-menu") {
         check("add-machine-row", Boolean(query("[data-codexhost-add-machine-row]")));
@@ -224,9 +371,25 @@ for (const scenario of scenarios) {
           row?.textContent ?? "",
         );
       }
+      if (
+        document.body.dataset.scenario === "at-entry-native" ||
+        document.body.dataset.scenario === "at-entry-native-visible"
+      ) {
+        check("entry-inside-native-scroller", document.body.dataset.entryNativeScroller === "true");
+        check("entry-is-last-native-group", document.body.dataset.entryLastGroup === "true");
+        check("single-dingtalk-row", document.body.dataset.entryRow === "true");
+        check("entry-workbench-group", document.body.dataset.entryGroupTitle === "true");
+        check("entry-helper-text", document.body.dataset.entryHelper === "true");
+        if (document.body.dataset.scenario === "at-entry-native") {
+          check("entry-opened-by-keyboard", document.body.dataset.entryOpened === "true");
+        } else {
+          const nativeList = document.querySelector("#native-at-menu .vertical-scroll-fade-mask");
+          const section = nativeList?.querySelector("[data-codexhost-dingtalk-section]");
+          check("entry-still-mounted", Boolean(section && section.parentElement === nativeList));
+        }
+      }
       return result;
     });
-
     const filename = `${scenario}-${theme}.png`;
     await page.screenshot({
       path: path.join(outputDirectory, filename),
@@ -236,6 +399,7 @@ for (const scenario of scenarios) {
     report.captures.push({
       scenario,
       theme,
+      approximate: theme === "dark" && shadowContext.darkApproximate === true,
       screenshot: path.join(outputDirectory, filename),
       pageErrors: errors,
       checks,

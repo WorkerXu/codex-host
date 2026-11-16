@@ -180,3 +180,43 @@ body {
   font-size: var(--font-text-sm-size, 14px);
   line-height: 20px;
 }
+
+.preview-at-menu {
+  max-height: 340px;
+}
+
+.preview-native-scroll {
+  display: flex;
+  max-height: 300px;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.preview-native-row[aria-selected="true"],
+.preview-native-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+/* Desktop's document utilities are not loaded here; approximate the native row. */
+.preview-at-menu [data-codexhost-dingtalk-section] {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.preview-at-menu [data-codexhost-dingtalk-entry] {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.preview-at-menu [data-codexhost-dingtalk-entry] > div {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
