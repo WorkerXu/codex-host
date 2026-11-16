@@ -151,6 +151,9 @@ export function createFakeDingTalkClient(
       };
     },
     async messages(params): Promise<DingTalkMessagesResult> {
+      const previewWindow = window as Window & { __dingtalkPreviewMessageCalls?: number };
+      previewWindow.__dingtalkPreviewMessageCalls =
+        (previewWindow.__dingtalkPreviewMessageCalls ?? 0) + 1;
       await sleep(messageDelay);
       const all = messagesFor(params.conversationId);
       const limit = params.limit ?? 40;

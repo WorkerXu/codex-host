@@ -21,6 +21,8 @@ const allScenarios = [
   "dingtalk-at-picker",
   "dingtalk-at-chip",
   "dingtalk-at-send",
+  "dingtalk-header-menu",
+  "dingtalk-page-menu",
   "dingtalk-unread-open",
   "dingtalk-unread-left",
   "dingtalk-live",
@@ -202,6 +204,52 @@ for (const scenario of scenarios) {
         await page.waitForTimeout(450);
       }
     }
+    if (scenario === "dingtalk-header-menu") {
+      const before = await page.evaluate(() => window.__dingtalkPreviewMessageCalls ?? 0);
+      await page.evaluate((calls) => {
+        window.__dingtalkBaselineMessages = calls;
+      }, before);
+      await realClick(page, ".dingtalk-main-actions .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-header-menu:not([hidden])", { timeout: 10_000 });
+      const action = await pointAt(page, ".dingtalk-header-menu .dingtalk-menu-action");
+      await page.mouse.move(action.x, action.y);
+      await page.mouse.down();
+      await page.evaluate(() => {
+        const shadow = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+        window.__dingtalkMenuOpenAfterDown = Boolean(
+          shadow?.querySelector(".dingtalk-header-menu:not([hidden])"),
+        );
+      });
+      await page.mouse.up();
+      await page.waitForFunction(
+        () => {
+          const shadow = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+          return Boolean(shadow?.querySelector(".dingtalk-header-menu[hidden]"));
+        },
+        undefined,
+        { timeout: 10_000 },
+      );
+      await page.waitForFunction(
+        (calls) => (window.__dingtalkPreviewMessageCalls ?? 0) > calls,
+        before,
+        { timeout: 10_000 },
+      );
+    }
+    if (scenario === "dingtalk-page-menu") {
+      await realClick(page, ".dingtalk-sidebar .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])", { timeout: 10_000 });
+      const status = await pointAt(page, ".dingtalk-page-menu .dingtalk-menu-status");
+      await page.mouse.move(status.x, status.y);
+      await page.mouse.down();
+      await page.evaluate(() => {
+        const shadow = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+        window.__dingtalkPageMenuOpenAfterDown = Boolean(
+          shadow?.querySelector(".dingtalk-page-menu:not([hidden])"),
+        );
+      });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    }
     if (scenario === "dingtalk-live") {
       const list = await pointAt(page, ".dingtalk-message-list");
       await page.mouse.move(list.x, list.y);
@@ -355,7 +403,11 @@ for (const scenario of scenarios) {
           "unread-count-prefix",
           Boolean(query(".dingtalk-conversation-count")?.textContent?.includes("条")),
         );
-        check("at-me-prefix", Boolean(query(".dingtalk-conversation-at-me")));
+        check(
+          "selected-at-me-cleared",
+          Boolean(query(".dingtalk-conversation[aria-selected='true']")) &&
+            !query(".dingtalk-conversation[aria-selected='true'] .dingtalk-conversation-at-me"),
+        );
         const badge = query(".dingtalk-unread-badge");
         const badgeStyle = badge ? getComputedStyle(badge) : null;
         check(
@@ -387,6 +439,19 @@ for (const scenario of scenarios) {
           "preview-lazy-filled",
           Boolean(lazyRow?.textContent?.includes("懒加载")),
           lazyRow?.textContent ?? "",
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-list") {
+        const selected = query(".dingtalk-conversation[aria-selected='true']");
+        check("auto-selected-row", Boolean(selected));
+        check(
+          "auto-selected-badge-cleared",
+          Boolean(selected) &&
+            !selected.querySelector(".dingtalk-unread-badge, .dingtalk-avatar-unread"),
+        );
+        check(
+          "auto-selected-count-cleared",
+          !selected?.querySelector(".dingtalk-conversation-count"),
         );
       }
       if (document.body.dataset.scenario === "dingtalk-hover") {
@@ -426,8 +491,25 @@ for (const scenario of scenarios) {
         check("lightbox-no-status", Boolean(query(".dingtalk-lightbox-status")?.hidden));
       }
       if (document.body.dataset.scenario === "dingtalk-at-picker") {
+        const selected = query(".dingtalk-conversation[aria-selected='true']");
+        check(
+          "at-picker-badge-cleared",
+          Boolean(selected) &&
+            !selected.querySelector(".dingtalk-unread-badge, .dingtalk-avatar-unread"),
+        );
         const picker = query(".dingtalk-mention-picker");
         check("at-picker-open", Boolean(picker) && !picker.hidden);
+        const pickerRect = picker?.getBoundingClientRect();
+        check(
+          "at-picker-width",
+          Boolean(pickerRect) && (pickerRect?.width ?? 0) >= 260 && (pickerRect?.width ?? 0) <= 300,
+          String(Math.round(pickerRect?.width ?? 0)),
+        );
+        check(
+          "at-picker-height",
+          Boolean(pickerRect) && (pickerRect?.height ?? 0) <= 280,
+          String(Math.round(pickerRect?.height ?? 0)),
+        );
         check(
           "at-picker-options",
           queryAll(".dingtalk-mention-option").length >= 2,
@@ -445,6 +527,19 @@ for (const scenario of scenarios) {
           row.classList.contains("dingtalk-mention-option--active"),
         );
         check("at-picker-keyboard", active === 1, `active=${active}`);
+      }
+      if (document.body.dataset.scenario === "dingtalk-header-menu") {
+        check("header-menu-open-after-down", window.__dingtalkMenuOpenAfterDown === true);
+        check("header-menu-closed-after-action", Boolean(query(".dingtalk-header-menu")?.hidden));
+        check(
+          "header-menu-action-ran",
+          (window.__dingtalkPreviewMessageCalls ?? 0) > (window.__dingtalkBaselineMessages ?? 0),
+          String(window.__dingtalkPreviewMessageCalls ?? 0),
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-page-menu") {
+        check("page-menu-open-after-down", window.__dingtalkPageMenuOpenAfterDown === true);
+        check("page-menu-still-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
       }
       if (document.body.dataset.scenario === "dingtalk-at-chip") {
         const chips = query(".dingtalk-composer-chips");

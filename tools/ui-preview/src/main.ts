@@ -985,6 +985,20 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-header-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
+  async "dingtalk-page-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
   async "dingtalk-at-send"() {
     resetConversationMemory();
     const { query, queryAll } = mountSettings("dingtalk");
