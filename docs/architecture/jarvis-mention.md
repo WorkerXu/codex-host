@@ -4,7 +4,8 @@ Codex Composer 的原生 `@` 菜单提供「工作台」分组，里面有一行
 
 ## 入口与模式
 
-- 「Jarvis」行与「钉钉」行同组、同一样式和键盘导航，追加在原生 `@` 菜单的同一个滚动容器里，不使用独立浮层。
+- 「Jarvis」行与「钉钉」行同处一个「工作台」分组，分组是原生 `@` 菜单 `[data-mention-list-scroll-area]` 滚动容器里的普通 section：`data-codexhost-workbench-section` / `data-mention-section-id="codexhost-workbench"`，标题与行使用原生 header / button 类名，行是 `[data-list-navigation-item]` 按钮。两个入口共用同一个 section，谁先出现谁创建，另一个复用，永远只有一条「工作台」标题。
+- 原生菜单在 `input` 事件之后才挂载；Renderer 会在约 300 ms 内分多次重试，并继续用 `MutationObserver` 观察，等原生列表出现后再插入。原生列表始终不出现时什么都不画，不再自建浮层。
 - 行只在查询为空或是 `jarvis` / `贾维斯` 前缀时出现。
 - 选中后同一个原生弹层切换到 Bug 搜索模式：
   - 顶部是「‹ Jarvis · Bug」返回头；
@@ -13,7 +14,8 @@ Codex Composer 的原生 `@` 菜单提供「工作台」分组，里面有一行
   - 已解析条件显示为可删除 chip；删除后按剩余条件重新查询；
   - 方向键选择、Enter 插入、Esc 或返回箭头回到原生菜单；
   - 加载时显示骨架行；空结果显示「没有符合条件的 Bug」并保留条件 chip。
-- 搜索期间原生菜单的原有行会被隐藏，退出模式时恢复。弹层由 Desktop 关闭时模式一并关闭。
+- 模式内容仍放在同一个滚动容器里（与原生 section 同级），只把其他 section 临时隐藏，不使用独立弹层；退出模式时恢复。弹层由 Desktop 关闭时模式一并关闭。
+- 键盘与原生行共用一套状态：原生高亮行带 `aria-current="true"` 和 `bg-secondary-ghost-hover opacity-100`。方向键越过最后一个原生行后依次选中「工作台」两行并清掉原生高亮，向上逐行返回，最后回到最后一个原生行；未选中「工作台」行时不拦截原生导航。React 重渲染丢弃该分组时会重新追加，并保持它是最后一个 section。
 
 ## 搜索流水线
 
