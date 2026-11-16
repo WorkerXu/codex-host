@@ -114,7 +114,7 @@ describe("CodexAgentStore", () => {
     });
   });
 
-  it("creates a new agent atomically with mode 0600", async () => {
+  it("creates a new agent atomically with a generated file name", async () => {
     const { store, home } = await createStore();
     const record = await store.save({
       fileName: null,
@@ -125,23 +125,46 @@ describe("CodexAgentStore", () => {
       reasoningEffort: "medium",
       developerInstructions: "Do the work.",
     });
-    expect(record.fileName).toBe("new_worker.toml");
-    const file = path.join(home, "agents", "new_worker.toml");
+    expect(record.fileName).toMatch(/^agent-[0-9a-f]{12}\.toml$/u);
+    const file = path.join(home, "agents", record.fileName);
     if (process.platform !== "win32") {
       expect((await stat(file)).mode & 0o777).toBe(0o600);
     }
-    expect((await readdir(path.join(home, "agents"))).sort()).toEqual(["new_worker.toml"]);
-    await expect(
-      store.save({
-        fileName: null,
-        expectedRevision: null,
-        name: "new_worker",
-        description: "Another worker.",
-        model: null,
-        reasoningEffort: null,
-        developerInstructions: "Do other work.",
-      }),
-    ).rejects.toMatchObject({ code: "name_taken" });
+    expect((await readdir(path.join(home, "agents"))).sort()).toEqual([record.fileName]);
+
+    const duplicate = await store.save({
+      fileName: null,
+      expectedRevision: null,
+      name: "new_worker",
+      description: "Another worker.",
+      model: null,
+      reasoningEffort: null,
+      developerInstructions: "Do other work.",
+    });
+    expect(duplicate.fileName).not.toBe(record.fileName);
+    expect(duplicate.fileName).toMatch(/^agent-[0-9a-f]{12}\.toml$/u);
+    expect((await readdir(path.join(home, "agents"))).sort()).toEqual(
+      [record.fileName, duplicate.fileName].sort(),
+    );
+  });
+
+  it("saves Chinese, spaced and long names without using them as file names", async () => {
+    const { store, home } = await createStore();
+    const longName = `发布与线上问题处理助手 ${"（夜间值守）".repeat(80)}`;
+    const record = await store.save({
+      fileName: null,
+      expectedRevision: null,
+      name: `  ${longName}  `,
+      description: "中文描述。",
+      model: null,
+      reasoningEffort: null,
+      developerInstructions: "处理发布检查。",
+    });
+    expect(record.name).toBe(longName);
+    expect(record.fileName).toMatch(/^agent-[0-9a-f]{12}\.toml$/u);
+    const raw = await readFile(path.join(home, "agents", record.fileName), "utf8");
+    expect((parse(raw) as Record<string, unknown>).name).toBe(longName);
+    expect((await store.read(record.fileName)).name).toBe(longName);
   });
 
   it("preserves an existing file mode on update", async () => {
@@ -213,7 +236,7 @@ describe("CodexAgentStore", () => {
         developerInstructions: "Instructions.",
       }),
     ).rejects.toMatchObject({ code: "invalid_file_name" });
-    for (const name of ["", "has space", "../evil", "-leading", "x".repeat(65)]) {
+    for (const name of ["", "   ", "two\nlines", "\nleading"]) {
       await expect(
         store.save({
           fileName: null,

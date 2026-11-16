@@ -13,23 +13,12 @@
   margin-bottom: 20px;
 }
 
-.agents-page-copy {
-  min-width: 0;
-}
-
 .agents-page-title {
   margin: 0;
   color: var(--color-token-text-primary);
   font-size: var(--font-text-md-size);
   font-weight: 600;
   line-height: var(--font-text-md-line-height);
-}
-
-.agents-page-description {
-  margin: 4px 0 0;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
 }
 
 .agent-secondary,
@@ -508,6 +497,13 @@
   line-height: var(--font-text-xs-line-height);
 }
 
+.agent-field-error {
+  margin: 0;
+  color: var(--color-background-danger-solid, #e02e2a);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
 .agent-model-controls {
   display: flex;
   flex-direction: column;
@@ -824,24 +820,22 @@
 }
 
 .dingtalk-listener-note {
-  margin: 8px;
+  margin: 8px 0 0;
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-listener-footer {
-  display: flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 12px;
-  padding: 0 8px;
 }
 
 .dingtalk-listener-status {
+  display: block;
+  margin: 8px 0 0;
   color: var(--color-token-text-tertiary);
   font-size: var(--font-text-xs-size);
   line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-listener-status[hidden] {
+  display: none;
 }
 
 .dingtalk-listener-status[data-state="failed"] {

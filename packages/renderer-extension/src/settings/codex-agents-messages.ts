@@ -1,6 +1,5 @@
 export const codexAgentsMessagesEnglish = {
   title: "Agents",
-  description: "Agents are Codex roles that can be delegated work.",
   empty: "No agents yet. Create one to handle tasks for you.",
   loadFailed: "Could not load agents.",
   createCard: "New agent",
@@ -55,8 +54,7 @@ export const codexAgentsMessagesEnglish = {
   saved: "Saved",
   catalogUnavailable: "The model list is unavailable; type a model name instead.",
   unavailable: "Agents are available on this computer only.",
-  invalidName: "Use 1–64 letters, digits, “_” or “-”, starting with a letter or digit.",
-  nameTaken: "Another agent already uses this name.",
+  invalidName: "Enter a name on one line.",
   descriptionRequired: "Enter a description.",
   instructionsRequired: "Enter developer instructions.",
   modelInvalid: "Use a model name without line breaks.",
@@ -95,7 +93,6 @@ export type CodexAgentsMessages = typeof codexAgentsMessagesEnglish;
 
 export const codexAgentsMessagesChinese: CodexAgentsMessages = {
   title: "智能体",
-  description: "智能体是可被委派任务的 Codex 角色。",
   empty: "还没有智能体，新建一个让它帮你处理任务",
   loadFailed: "智能体列表读取失败。",
   createCard: "新建智能体",
@@ -149,8 +146,7 @@ export const codexAgentsMessagesChinese: CodexAgentsMessages = {
   saved: "已保存",
   catalogUnavailable: "暂时读不到模型列表，可以直接填写模型名称。",
   unavailable: "只能在这台电脑上使用智能体。",
-  invalidName: "请使用 1–64 个字母、数字、下划线或连字符，并以字母或数字开头。",
-  nameTaken: "已有智能体使用这个名称。",
+  invalidName: "请填写名称，且名称只能是一行。",
   descriptionRequired: "请填写描述。",
   instructionsRequired: "请填写开发者指令。",
   modelInvalid: "模型名称不能包含换行。",

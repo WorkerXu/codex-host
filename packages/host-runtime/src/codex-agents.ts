@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -84,7 +85,7 @@ function agentFields(doc: Record<string, unknown>): ParsedAgent | null {
   const name = textField(doc, "name");
   const description = textField(doc, "description");
   const developerInstructions = textField(doc, "developer_instructions");
-  if (!name || !description || !developerInstructions) return null;
+  if (!name || !isCodexAgentName(name) || !description || !developerInstructions) return null;
   return {
     name: name.trim(),
     description,
@@ -175,10 +176,10 @@ export class CodexAgentStore {
   }
 
   async save(input: CodexAgentSaveParams): Promise<CodexAgentRecord> {
-    const name = input.name.trim();
-    if (!isCodexAgentName(name)) {
-      throw new CodexAgentError("invalid_name", "Agent names must match Codex's identifier form");
+    if (!isCodexAgentName(input.name)) {
+      throw new CodexAgentError("invalid_name", "Agent names must be a non-empty single line");
     }
+    const name = input.name.trim();
     if (!input.description.trim()) {
       throw new CodexAgentError("invalid_field", "Description must not be blank");
     }
@@ -195,16 +196,13 @@ export class CodexAgentStore {
     const reasoningEffort = normalizeOptional(input.reasoningEffort, CODEX_AGENT_EFFORT_MAX_LENGTH);
 
     const root = await this.#root();
-    const fileName = input.fileName ?? `${name}.toml`;
+    const fileName = input.fileName ?? (await this.#newFileName(root));
     if (!isCodexAgentFileName(fileName)) {
       throw new CodexAgentError(
         "invalid_file_name",
         "Agent file names must stay in the agents directory",
       );
     }
-    const target = path.join(root, fileName);
-    await this.#assertNameAvailable(root, name, input.fileName ? fileName : null);
-
     let doc: TomlTable;
     let mode = 0o600;
     if (input.fileName) {
@@ -218,10 +216,6 @@ export class CodexAgentStore {
       doc = current.doc;
       mode = current.info.mode & 0o777 || 0o600;
     } else {
-      const existing = await lstat(target).catch(() => null);
-      if (existing) {
-        throw new CodexAgentError("name_taken", "An agent file with this name already exists");
-      }
       doc = {};
     }
 
@@ -306,31 +300,17 @@ export class CodexAgentStore {
     return { doc, info };
   }
 
-  async #assertNameAvailable(
-    root: string,
-    name: string,
-    exceptFileName: string | null,
-  ): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(root, { withFileTypes: true });
-    } catch {
-      return;
+  /**
+   * New agents get an opaque file name so any name (Chinese, spaces, long)
+   * is supported. Retry on the unlikely collision with an existing file.
+   */
+  async #newFileName(root: string): Promise<string> {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const fileName = `agent-${randomUUID().replaceAll("-", "").slice(0, 12)}.toml`;
+      const existing = await lstat(path.join(root, fileName)).catch(() => null);
+      if (!existing) return fileName;
     }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".toml")) continue;
-      if (entry.name === exceptFileName || !isCodexAgentFileName(entry.name)) continue;
-      try {
-        const { doc } = await this.#readDocument(entry.name);
-        const existing = textField(doc, "name");
-        if (existing && existing.trim() === name) {
-          throw new CodexAgentError("name_taken", "Another agent already uses this name");
-        }
-      } catch (error) {
-        if (error instanceof CodexAgentError && error.code === "name_taken") throw error;
-        // Unreadable files cannot claim the name; the list reports them separately.
-      }
-    }
+    throw new CodexAgentError("io_failed", "Could not allocate an agent file name");
   }
 
   async #writeAtomic(root: string, fileName: string, content: string, mode: number): Promise<void> {

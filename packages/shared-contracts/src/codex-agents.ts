@@ -13,11 +13,11 @@ export const CODEX_AGENT_DELETE_METHOD = "codexhost/codex-agents/delete";
 export const CODEX_AGENT_CATALOG_METHOD = "codexhost/codex-agents/catalog";
 
 /**
- * Codex refers to an agent by its `name` field. The loader only requires a
- * non-empty name, but a transport-safe identifier avoids prompts, file names
- * and shell-adjacent surfaces that cannot address the agent reliably.
+ * Codex refers to an agent by its `name` field. The page only requires a
+ * trimmed, single-line value: Chinese, spaces and any other character are
+ * allowed. File names are generated separately, so the name never has to be
+ * shell- or path-safe.
  */
-export const CODEX_AGENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 export const CODEX_AGENT_FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.toml$/u;
 export const CODEX_AGENT_DESCRIPTION_MAX_LENGTH = 4_096;
 export const CODEX_AGENT_INSTRUCTIONS_MAX_LENGTH = 200_000;
@@ -26,7 +26,7 @@ export const CODEX_AGENT_EFFORT_MAX_LENGTH = 64;
 export const CODEX_AGENT_MAX_FILES = 512;
 
 export function isCodexAgentName(value: string): boolean {
-  return CODEX_AGENT_NAME_PATTERN.test(value);
+  return value.trim().length > 0 && !/[\r\n]/u.test(value);
 }
 
 export function isCodexAgentFileName(value: string): boolean {
@@ -46,7 +46,9 @@ const optionalText = (max: number) =>
     .refine((value) => value.trim().length > 0, { message: "Value must not be blank" })
     .nullable();
 
-export const codexAgentNameSchema = z.string().regex(CODEX_AGENT_NAME_PATTERN, "Invalid name");
+export const codexAgentNameSchema = z
+  .string()
+  .refine(isCodexAgentName, { message: "Name must be a non-empty single line" });
 export const codexAgentFileNameSchema = z
   .string()
   .max(128)
@@ -59,8 +61,8 @@ export const codexAgentRevisionSchema = z.string().regex(/^[0-9]+-[0-9]+$/u, "In
 export const codexAgentSummarySchema = z
   .object({
     fileName: codexAgentFileNameSchema,
-    /** Hand-written files may not match our stricter identifier rule. */
-    name: nonBlankText(CODEX_AGENT_MODEL_MAX_LENGTH),
+    /** Hand-written files may not match the page's stricter single-line rule. */
+    name: codexAgentNameSchema,
     description: z.string().max(CODEX_AGENT_DESCRIPTION_MAX_LENGTH),
     model: z.string().max(CODEX_AGENT_MODEL_MAX_LENGTH).nullable(),
     reasoningEffort: z.string().max(CODEX_AGENT_EFFORT_MAX_LENGTH).nullable(),
@@ -109,7 +111,7 @@ export type CodexAgentReadParams = z.infer<typeof codexAgentReadParamsSchema>;
 
 export const codexAgentSaveParamsSchema = z
   .object({
-    /** Null creates a new file named after the agent. */
+    /** Null creates a new file with a generated, unused name. */
     fileName: codexAgentFileNameSchema.nullable(),
     /** Required for an update; ignored for a create. */
     expectedRevision: codexAgentRevisionSchema.nullable(),
@@ -174,7 +176,6 @@ export const CODEX_AGENT_ERROR_CODES = [
   "invalid_name",
   "invalid_file_name",
   "invalid_field",
-  "name_taken",
   "not_found",
   "revision_conflict",
   "invalid_toml",

@@ -31,7 +31,6 @@ export type CodexAgentDraftField =
 
 export type CodexAgentDraftError =
   | "invalid_name"
-  | "name_taken"
   | "description_required"
   | "instructions_required"
   | "too_long"
@@ -41,11 +40,6 @@ export type CodexAgentDraftError =
 export interface CodexAgentDraftProblem {
   field: CodexAgentDraftField;
   error: CodexAgentDraftError;
-}
-
-export interface ExistingAgentIdentity {
-  name: string;
-  fileName: string;
 }
 
 export function emptyAgentDraft(): CodexAgentDraft {
@@ -72,33 +66,13 @@ export function agentDraftFromRecord(record: CodexAgentRecord): CodexAgentDraft 
   };
 }
 
-/** A duplicate always creates a new file so the original stays untouched. */
-export function duplicateAgentDraft(
-  record: CodexAgentRecord,
-  existing: readonly ExistingAgentIdentity[],
-): CodexAgentDraft {
+/** A duplicate keeps the name and creates a new file, so the original stays untouched. */
+export function duplicateAgentDraft(record: CodexAgentRecord): CodexAgentDraft {
   return {
     ...agentDraftFromRecord(record),
     fileName: null,
     expectedRevision: null,
-    name: nextDuplicateName(record.name, existing),
   };
-}
-
-export function nextDuplicateName(
-  name: string,
-  existing: readonly ExistingAgentIdentity[],
-): string {
-  const taken = new Set(existing.map((agent) => agent.name));
-  const base = `${name}-copy`.slice(0, 64).replace(/-+$/u, "");
-  let candidate = base;
-  let suffix = 2;
-  while (taken.has(candidate)) {
-    const tail = `-${suffix}`;
-    candidate = `${base.slice(0, 64 - tail.length)}${tail}`;
-    suffix += 1;
-  }
-  return candidate;
 }
 
 export function effortOptionsForModel(
@@ -110,19 +84,8 @@ export function effortOptionsForModel(
   return catalog.models.find((entry) => entry.model === trimmed)?.efforts ?? [];
 }
 
-export function validateAgentDraft(
-  draft: CodexAgentDraft,
-  existing: readonly ExistingAgentIdentity[],
-): CodexAgentDraftProblem | null {
-  const name = draft.name.trim();
-  if (!isCodexAgentName(name)) return { field: "name", error: "invalid_name" };
-  const others = existing.filter((agent) => agent.fileName !== draft.fileName);
-  if (others.some((agent) => agent.name === name)) {
-    return { field: "name", error: "name_taken" };
-  }
-  if (draft.fileName === null && others.some((agent) => agent.fileName === `${name}.toml`)) {
-    return { field: "name", error: "name_taken" };
-  }
+export function validateAgentDraft(draft: CodexAgentDraft): CodexAgentDraftProblem | null {
+  if (!isCodexAgentName(draft.name)) return { field: "name", error: "invalid_name" };
   if (!draft.description.trim()) {
     return { field: "description", error: "description_required" };
   }

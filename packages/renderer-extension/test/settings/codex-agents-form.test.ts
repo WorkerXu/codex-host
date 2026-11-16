@@ -14,7 +14,6 @@ import {
   duplicateAgentDraft,
   effortOptionsForModel,
   emptyAgentDraft,
-  nextDuplicateName,
   parseDingTalkMatchThreshold,
   validateAgentDraft,
   withAgentDingTalk,
@@ -38,11 +37,6 @@ const validDraft = {
   developerInstructions: "Review carefully.",
 };
 
-const existing = [
-  { name: "terra_worker", fileName: "terra-worker.toml" },
-  { name: "reviewer", fileName: "reviewer.toml" },
-];
-
 describe("Codex agent form logic", () => {
   it("accepts a valid draft and trims optional values on save", () => {
     const draft = {
@@ -51,7 +45,7 @@ describe("Codex agent form logic", () => {
       model: " gpt-5.6-terra ",
       reasoningEffort: "",
     };
-    expect(validateAgentDraft(draft, [])).toBeNull();
+    expect(validateAgentDraft(draft)).toBeNull();
     expect(agentSaveParamsFromDraft(draft)).toEqual({
       fileName: null,
       expectedRevision: null,
@@ -64,53 +58,56 @@ describe("Codex agent form logic", () => {
   });
 
   it("reports the first invalid field with a stable code", () => {
-    expect(validateAgentDraft(emptyAgentDraft(), [])).toEqual({
+    expect(validateAgentDraft(emptyAgentDraft())).toEqual({
       field: "name",
       error: "invalid_name",
     });
-    expect(validateAgentDraft({ ...validDraft, name: "bad name" }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, name: "two\nlines" })).toEqual({
       field: "name",
       error: "invalid_name",
     });
-    expect(validateAgentDraft(validDraft, existing)).toEqual({
+    expect(validateAgentDraft({ ...validDraft, name: "   " })).toEqual({
       field: "name",
-      error: "name_taken",
+      error: "invalid_name",
     });
-    expect(validateAgentDraft({ ...validDraft, description: "  " }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, name: "\nleading" })).toEqual({
+      field: "name",
+      error: "invalid_name",
+    });
+    expect(validateAgentDraft({ ...validDraft, description: "  " })).toEqual({
       field: "description",
       error: "description_required",
     });
-    expect(validateAgentDraft({ ...validDraft, developerInstructions: "\n" }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, developerInstructions: "\n" })).toEqual({
       field: "developerInstructions",
       error: "instructions_required",
     });
-    expect(validateAgentDraft({ ...validDraft, description: "x".repeat(4_097) }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, description: "x".repeat(4_097) })).toEqual({
       field: "description",
       error: "too_long",
     });
-    expect(validateAgentDraft({ ...validDraft, model: "a\nb" }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, model: "a\nb" })).toEqual({
       field: "model",
       error: "model_invalid",
     });
-    expect(validateAgentDraft({ ...validDraft, reasoningEffort: "a\nb" }, [])).toEqual({
+    expect(validateAgentDraft({ ...validDraft, reasoningEffort: "a\nb" })).toEqual({
       field: "reasoningEffort",
       error: "effort_invalid",
     });
   });
 
-  it("allows an agent to keep its own name and reports a new-file name collision", () => {
+  it("accepts Chinese, spaces, punctuation and long duplicate names", () => {
+    const longName = `发布与线上问题处理助手 ${"（夜间值守）".repeat(80)}`;
+    expect(validateAgentDraft({ ...validDraft, name: "  发布 与 值守 助手  " })).toBeNull();
+    expect(validateAgentDraft({ ...validDraft, name: "名字（华东区，夜间）" })).toBeNull();
+    expect(validateAgentDraft({ ...validDraft, name: longName })).toBeNull();
     expect(
-      validateAgentDraft({ ...agentDraftFromRecord(record), description: "Updated." }, existing),
+      validateAgentDraft({
+        ...agentDraftFromRecord(record),
+        name: "terra_worker",
+        description: "Updated.",
+      }),
     ).toBeNull();
-    expect(validateAgentDraft({ ...validDraft, name: "terra_worker" }, existing)).toEqual({
-      field: "name",
-      error: "name_taken",
-    });
-    expect(
-      validateAgentDraft({ ...validDraft, name: "other" }, [
-        { name: "different", fileName: "other.toml" },
-      ]),
-    ).toEqual({ field: "name", error: "name_taken" });
   });
 
   it("offers only the efforts the selected model supports", () => {
@@ -138,17 +135,11 @@ describe("Codex agent form logic", () => {
     expect(effortOptionsForModel(null, "gpt-5.6-terra")).toEqual([]);
   });
 
-  it("duplicates into a new file with a free name", () => {
-    expect(nextDuplicateName("terra_worker", [])).toBe("terra_worker-copy");
-    expect(
-      nextDuplicateName("terra_worker", [
-        { name: "terra_worker-copy", fileName: "terra_worker-copy.toml" },
-      ]),
-    ).toBe("terra_worker-copy-2");
-    const duplicate = duplicateAgentDraft(record, existing);
+  it("duplicates into a new file without renaming the agent", () => {
+    const duplicate = duplicateAgentDraft(record);
     expect(duplicate.fileName).toBeNull();
     expect(duplicate.expectedRevision).toBeNull();
-    expect(duplicate.name).toBe("terra_worker-copy");
+    expect(duplicate.name).toBe("terra_worker");
     expect(duplicate.developerInstructions).toBe("Do the work.");
   });
 

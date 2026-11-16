@@ -64,16 +64,10 @@ export function createCodexAgentsSettingsPage(
 
       const head = document.createElement("header");
       head.className = "agents-page-head";
-      const headCopy = document.createElement("div");
-      headCopy.className = "agents-page-copy";
       const heading = document.createElement("h2");
       heading.className = "agents-page-title";
       heading.textContent = text.title;
-      const description = document.createElement("p");
-      description.className = "agents-page-description";
-      description.textContent = text.description;
-      headCopy.append(heading, description);
-      head.append(headCopy);
+      head.append(heading);
       page.append(head);
 
       if (!client) {
@@ -98,7 +92,7 @@ export function createCodexAgentsSettingsPage(
       page.append(status, list, emptyCopy, issues);
 
       let dispatchSettings: DingTalkDispatchSettings = defaultDingTalkDispatchSettings();
-      let editingName: string | null = null;
+      let editingFile: string | null = null;
       let createCard: HTMLButtonElement | null = null;
       let dispatchQueue: Promise<void> = Promise.resolve();
       const persistDispatch = (
@@ -156,7 +150,6 @@ export function createCodexAgentsSettingsPage(
         const code = codexAgentCodeFromError(error);
         if (code === "revision_conflict") return text.revisionConflict;
         if (code === "not_found") return text.notFound;
-        if (code === "name_taken") return text.nameTaken;
         if (code === "invalid_name") return text.invalidName;
         if (code === "invalid_file_name") return text.fileInvalid;
         if (code === "unavailable") return text.unavailable;
@@ -169,8 +162,8 @@ export function createCodexAgentsSettingsPage(
         dispatchSettings.agents[agent.fileName]?.enabled === true;
 
       const stateLabel = (agent: CodexAgentSummary): string => {
-        if (!isParticipating(agent) && !runtimeStates.has(agent.name)) return text.stateResting;
-        const state = runtimeStates.get(agent.name) ?? "idle";
+        if (!isParticipating(agent) && !runtimeStates.has(agent.fileName)) return text.stateResting;
+        const state = runtimeStates.get(agent.fileName) ?? "idle";
         return state === "working"
           ? text.stateWorking
           : state === "waiting"
@@ -180,9 +173,9 @@ export function createCodexAgentsSettingsPage(
               : text.stateIdle;
       };
 
-      const setEditingCard = (name: string | null): void => {
-        for (const card of list.querySelectorAll<HTMLElement>(".agent-card[data-agent-name]")) {
-          const active = card.dataset.agentName === name;
+      const setEditingCard = (fileName: string | null): void => {
+        for (const card of list.querySelectorAll<HTMLElement>(".agent-card[data-agent-file]")) {
+          const active = card.dataset.agentFile === fileName;
           card.classList.toggle("agent-card--editing", active);
           if (active) card.setAttribute("aria-current", "true");
           else card.removeAttribute("aria-current");
@@ -214,9 +207,10 @@ export function createCodexAgentsSettingsPage(
         const card = document.createElement("div");
         card.className = "agent-card";
         card.dataset.agentName = agent.name;
+        card.dataset.agentFile = agent.fileName;
         card.setAttribute("role", "listitem");
         card.tabIndex = 0;
-        if (editingName === agent.name) {
+        if (editingFile === agent.fileName) {
           card.classList.add("agent-card--editing");
           card.setAttribute("aria-current", "true");
         }
@@ -229,8 +223,8 @@ export function createCodexAgentsSettingsPage(
           createAgentAvatar(
             document,
             agent.name,
-            runtimeStates.get(agent.name) ?? "idle",
-            !isParticipating(agent) && !runtimeStates.has(agent.name),
+            runtimeStates.get(agent.fileName) ?? "idle",
+            !isParticipating(agent) && !runtimeStates.has(agent.fileName),
           ),
         );
         const tools = document.createElement("div");
@@ -405,8 +399,8 @@ export function createCodexAgentsSettingsPage(
           if (disposed || generation !== listGeneration) return;
           loaded = true;
           agents = result.agents;
-          if (editingName && !agents.some((agent) => agent.name === editingName)) {
-            editingName = null;
+          if (editingFile && !agents.some((agent) => agent.fileName === editingFile)) {
+            editingFile = null;
           }
           renderRoutes();
           renderIssues(result);
@@ -569,16 +563,22 @@ export function createCodexAgentsSettingsPage(
 
         const basicGroup = fieldGroup(text.basicGroup);
         const name = input("text");
-        name.maxLength = 64;
         name.autocomplete = "off";
         name.spellcheck = false;
-        const nameField = labeledField(text.name, text.nameHint, name);
+        const nameError = fieldError();
+        nameError.dataset.field = "name";
+        const nameField = labeledField(text.name, text.nameHint, name, nameError);
         const descriptionField = textarea(2);
         descriptionField.maxLength = 4_096;
-        basicGroup.append(
-          nameField,
-          labeledField(text.descriptionLabel, text.descriptionHint, descriptionField),
+        const descriptionError = fieldError();
+        descriptionError.dataset.field = "description";
+        const descriptionFieldWrapper = labeledField(
+          text.descriptionLabel,
+          text.descriptionHint,
+          descriptionField,
+          descriptionError,
         );
+        basicGroup.append(nameField, descriptionFieldWrapper);
 
         const modelGroup = fieldGroup(text.modelGroup);
         const model = document.createElement("select");
@@ -602,10 +602,14 @@ export function createCodexAgentsSettingsPage(
         catalogHint.textContent = text.catalogUnavailable;
         catalogHint.hidden = true;
         catalogHint.dataset.role = "catalog-hint";
-        modelField.append(catalogHint);
+        const modelError = fieldError();
+        modelError.dataset.field = "model";
+        modelField.append(catalogHint, modelError);
         const effortSlot = document.createElement("div");
         effortSlot.className = "agent-effort-slot";
-        const effortField = labeledField(text.effort, text.effortHint, effortSlot);
+        const effortError = fieldError();
+        effortError.dataset.field = "reasoningEffort";
+        const effortField = labeledField(text.effort, text.effortHint, effortSlot, effortError);
         modelGroup.append(modelField, effortField);
 
         const instructionsGroup = fieldGroup(text.instructionsGroup);
@@ -624,7 +628,9 @@ export function createCodexAgentsSettingsPage(
         const instructionCount = document.createElement("span");
         instructionCount.className = "agent-character-count";
         instructionsMeta.append(instructionsHint, instructionCount);
-        instructionsField.append(instructions, instructionsMeta);
+        const instructionsError = fieldError();
+        instructionsError.dataset.field = "developerInstructions";
+        instructionsField.append(instructions, instructionsMeta, instructionsError);
         instructionsGroup.append(instructionsField);
 
         const dingtalkGroup = fieldGroup(text.dingtalk.agentSection);
@@ -741,6 +747,13 @@ export function createCodexAgentsSettingsPage(
           effortSlot,
           instructions,
           instructionCount,
+          fieldErrors: {
+            name: nameError,
+            description: descriptionError,
+            model: modelError,
+            reasoningEffort: effortError,
+            developerInstructions: instructionsError,
+          } satisfies Record<CodexAgentDraftField, HTMLElement>,
           dingtalkEnabled,
           dingtalkBody,
           dingtalkEvents,
@@ -751,7 +764,20 @@ export function createCodexAgentsSettingsPage(
         };
       }
 
-      function labeledField(title: string | null, hint: string, control: HTMLElement): HTMLElement {
+      function fieldError(): HTMLElement {
+        const node = document.createElement("p");
+        node.className = "agent-field-error";
+        node.setAttribute("role", "alert");
+        node.hidden = true;
+        return node;
+      }
+
+      function labeledField(
+        title: string | null,
+        hint: string,
+        control: HTMLElement,
+        error?: HTMLElement,
+      ): HTMLElement {
         const wrapper = document.createElement("div");
         wrapper.className = "agent-field";
         if (title !== null) {
@@ -770,6 +796,7 @@ export function createCodexAgentsSettingsPage(
         hintNode.className = "agent-field-hint";
         hintNode.textContent = hint;
         wrapper.append(control, hintNode);
+        if (error) wrapper.append(error);
         return wrapper;
       }
 
@@ -816,7 +843,6 @@ export function createCodexAgentsSettingsPage(
 
       const draftErrorText: Record<CodexAgentDraftError, string> = {
         invalid_name: text.invalidName,
-        name_taken: text.nameTaken,
         description_required: text.descriptionRequired,
         instructions_required: text.instructionsRequired,
         too_long: text.tooLong,
@@ -838,8 +864,15 @@ export function createCodexAgentsSettingsPage(
                 : editor.instructions;
 
       const showError = (message: string, fieldName?: CodexAgentDraftField): void => {
-        editor.error.textContent = message;
-        editor.error.hidden = false;
+        clearError();
+        const field = fieldName ? editor.fieldErrors[fieldName] : null;
+        if (field) {
+          field.textContent = message;
+          field.hidden = false;
+        } else {
+          editor.error.textContent = message;
+          editor.error.hidden = false;
+        }
         const control = fieldName ? controlFor(fieldName) : null;
         control?.setAttribute("aria-invalid", "true");
         control?.focus();
@@ -848,6 +881,10 @@ export function createCodexAgentsSettingsPage(
       const clearError = (): void => {
         editor.error.hidden = true;
         editor.error.textContent = "";
+        for (const field of Object.values(editor.fieldErrors)) {
+          field.hidden = true;
+          field.textContent = "";
+        }
         for (const control of [
           editor.name,
           editor.description,
@@ -897,14 +934,14 @@ export function createCodexAgentsSettingsPage(
       ): void => {
         closeRowMenu();
         clearError();
-        editingName = mode === "edit" ? (record?.name ?? null) : null;
-        setEditingCard(editingName);
+        editingFile = mode === "edit" ? (record?.fileName ?? null) : null;
+        setEditingCard(editingFile);
         currentDraft =
           mode === "create" || !record
             ? emptyAgentDraft()
             : mode === "edit"
               ? agentDraftFromRecord(record)
-              : duplicateAgentDraft(record, agents);
+              : duplicateAgentDraft(record);
         returnFocus = focusTarget ?? null;
         editor.root.hidden = false;
         editor.title.textContent =
@@ -916,6 +953,7 @@ export function createCodexAgentsSettingsPage(
               );
         editor.name.value = currentDraft.name;
         editor.description.value = currentDraft.description;
+        editor.title.title = editor.title.textContent ?? "";
         rebuildModel();
         editor.model.value = currentDraft.model;
         editor.modelInput.value = currentDraft.model;
@@ -936,7 +974,7 @@ export function createCodexAgentsSettingsPage(
       const closeEditor = (): void => {
         editor.root.hidden = true;
         currentDraft = emptyAgentDraft();
-        editingName = null;
+        editingFile = null;
         setEditingCard(null);
         clearError();
         returnFocus?.focus();
@@ -949,15 +987,15 @@ export function createCodexAgentsSettingsPage(
         focusTarget?: HTMLElement,
       ): Promise<void> => {
         if (mode === "edit") {
-          editingName = agent.name;
-          setEditingCard(agent.name);
+          editingFile = agent.fileName;
+          setEditingCard(agent.fileName);
         }
         try {
           const record = await client.read(agent.fileName);
           if (!disposed) openEditor(mode, record, focusTarget);
         } catch (error) {
           if (!disposed) {
-            editingName = null;
+            editingFile = null;
             setEditingCard(null);
             setStatus(errorText(error), true);
           }
@@ -1060,7 +1098,7 @@ export function createCodexAgentsSettingsPage(
           reasoningEffort: effortValue,
           developerInstructions: editor.instructions.value,
         };
-        const problem = validateAgentDraft(draft, agents);
+        const problem = validateAgentDraft(draft);
         if (problem) {
           showError(draftErrorText[problem.error], problem.field);
           return;
@@ -1090,7 +1128,7 @@ export function createCodexAgentsSettingsPage(
           .catch((error: unknown) => {
             if (disposed) return;
             const code = codexAgentCodeFromError(error);
-            showError(errorText(error), code === "name_taken" ? "name" : undefined);
+            showError(errorText(error), code === "invalid_name" ? "name" : undefined);
           })
           .finally(() => {
             if (disposed) return;
