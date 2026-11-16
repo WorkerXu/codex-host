@@ -2582,14 +2582,9 @@
   padding: 0 10px;
   border: 1px solid var(--color-border-default, rgba(127, 127, 127, 0.25));
   border-radius: 8px;
-  background: var(--color-surface-elevated-secondary, transparent);
+  background: var(--color-token-main-surface-primary, transparent);
   color: inherit;
   font: inherit;
-}
-
-.settings-jarvis-input--short {
-  flex: 0 0 120px;
-  min-width: 120px;
 }
 
 .settings-jarvis-input:focus-visible {
