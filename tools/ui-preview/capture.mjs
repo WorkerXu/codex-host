@@ -29,6 +29,12 @@ const allScenarios = [
   "group-add-machine-busy",
   "group-add-machine-error",
   "at-entry",
+  "jarvis-entry",
+  "jarvis-mode-loading",
+  "jarvis-mode-results",
+  "jarvis-mode-empty",
+  "jarvis-mode-conditions",
+  "jarvis-mode-chip-removed",
 ];
 
 const args = process.argv.slice(2);
@@ -223,6 +229,84 @@ for (const scenario of scenarios) {
           Boolean(row?.textContent.includes("打开钉钉工作台")),
           row?.textContent ?? "",
         );
+        const jarvis = query("[data-codexhost-jarvis-entry-row]");
+        check("single-jarvis-row", Boolean(jarvis));
+        check(
+          "shared-workbench-group",
+          Boolean(jarvis) && query("[data-codexhost-dingtalk-section]")?.contains(jarvis) === true,
+          jarvis?.textContent ?? "",
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-entry") {
+        const row = query("[data-codexhost-jarvis-entry-row]");
+        check("jarvis-row", Boolean(row));
+        check("no-mode-before-selection", !query("[data-codexhost-jarvis-mode]"));
+        check(
+          "no-search-before-selection",
+          (window.__jarvisPreviewSearchCalls ?? 0) === 0,
+          String(window.__jarvisPreviewSearchCalls ?? 0),
+        );
+        check(
+          "jarvis-row-helper",
+          Boolean(row?.textContent.includes("搜索 Bug")),
+          row?.textContent ?? "",
+        );
+      }
+      if (
+        document.body.dataset.scenario === "jarvis-mode-loading" ||
+        document.body.dataset.scenario === "jarvis-mode-results" ||
+        document.body.dataset.scenario === "jarvis-mode-empty" ||
+        document.body.dataset.scenario === "jarvis-mode-conditions" ||
+        document.body.dataset.scenario === "jarvis-mode-chip-removed"
+      ) {
+        const mode = query("[data-codexhost-jarvis-mode]");
+        check(
+          "mode-inside-native-list",
+          Boolean(mode) && Boolean(query(".preview-at-menu")?.contains(mode)),
+        );
+        check("mode-header", Boolean(mode?.textContent?.includes("Jarvis · Bug")));
+        const input = mode?.querySelector("input");
+        check("search-field", Boolean(input));
+        check(
+          "search-field-focused",
+          Boolean(input) && document.activeElement === input,
+          document.activeElement?.tagName ?? "",
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-loading") {
+        check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
+        check(
+          "native-rows-hidden",
+          [...document.querySelectorAll(".preview-native-row")].every(
+            (row) => getComputedStyle(row).display === "none",
+          ),
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-results") {
+        check("result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
+        check("result-chips", queryAll("[data-jarvis-chip]").length >= 3);
+        check(
+          "result-count",
+          Boolean(query("[data-codexhost-jarvis-mode]")?.textContent?.includes("4 条")),
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-empty") {
+        check(
+          "empty-state",
+          Boolean(
+            query("[data-codexhost-jarvis-mode]")?.textContent?.includes("没有符合条件的 Bug"),
+          ),
+        );
+        check("empty-keeps-chips", queryAll("[data-jarvis-chip]").length >= 2);
+        check("no-result-rows", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-conditions") {
+        check("condition-chips", queryAll("[data-jarvis-chip]").length >= 6);
+        check("condition-results", queryAll("[data-codexhost-jarvis-bug]").length >= 2);
+      }
+      if (document.body.dataset.scenario === "jarvis-mode-chip-removed") {
+        check("status-chip-removed", !query('[data-jarvis-chip="status:1"]'));
+        check("other-chips-kept", queryAll("[data-jarvis-chip]").length >= 5);
       }
       return result;
     });
