@@ -183,7 +183,7 @@ function message(
   return {
     messageId: id,
     conversationId: "cid",
-    senderName: "吴菁",
+    senderName: "林晓",
     senderId: "user-a",
     createdAt,
     text: `消息 ${id}`,
@@ -228,6 +228,13 @@ function renderedIds(container: FakeElement): string[] {
   return container.children
     .filter((child): child is FakeElement => child instanceof FakeElement)
     .flatMap((child) => (child.dataset.messageId ? [child.dataset.messageId] : []));
+}
+
+function hasClass(node: FakeElement, className: string): boolean {
+  if (node.className.split(/\s+/u).includes(className)) return true;
+  return node.children
+    .filter((child): child is FakeElement => child instanceof FakeElement)
+    .some((child) => hasClass(child, className));
 }
 
 describe("DingTalk message window rendering", () => {
@@ -331,6 +338,20 @@ describe("DingTalk message render guard", () => {
     expect(row.textContent).toContain("----- 报警 -----");
     expect(row.textContent).toContain("展开");
     expect(row.textContent).not.toContain("长".repeat(8_000));
+  });
+
+  it("renders image-only messages without a bubble surface", () => {
+    const document = new FakeDocument();
+    const row = createMessageRow(
+      document as unknown as Document,
+      message("m1", 1_000, {
+        text: "",
+        resources: [{ kind: "image", resourceId: "media-1", resourceIdType: "mediaId" }],
+      }),
+      dingtalkPageStrings("zh-CN"),
+      { continuation: false },
+    );
+    expect(hasClass(row, "dingtalk-message-bubble--image")).toBe(true);
   });
 
   it("no longer renders a per-message checkbox", () => {

@@ -135,15 +135,6 @@
   color: var(--color-token-text-secondary);
 }
 
-.dingtalk-search-hint {
-  flex: none;
-  padding: 8px 16px 12px;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-  white-space: nowrap;
-}
-
 .dingtalk-conversation-list,
 .dingtalk-search-results {
   min-height: 0;
@@ -563,6 +554,19 @@
     var(--color-token-charts-blue, #0285ff) 12%,
     var(--color-token-main-surface-primary)
   );
+}
+
+.dingtalk-message-bubble--image,
+.dingtalk-message--mine .dingtalk-message-bubble--image {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.dingtalk-message-bubble--image .dingtalk-message-image {
+  margin-bottom: 0;
+  background: transparent;
+  border-radius: 12px;
 }
 
 .dingtalk-message-bubble--card {

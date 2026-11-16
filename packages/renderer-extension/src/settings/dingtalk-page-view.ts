@@ -570,6 +570,14 @@ function buildMessageRow(
 
   const line = createElementNode(document, "div", "dingtalk-message-line");
   const bubble = createElementNode(document, "div", "dingtalk-message-bubble");
+  const imageOnly =
+    (message.resources?.length ?? 0) > 0 &&
+    (message.resources ?? []).every((resource) => resource.kind === "image") &&
+    !message.text.trim() &&
+    !message.cardTitle &&
+    !message.quotedMessage &&
+    !(message.reactions?.length ?? 0);
+  if (imageOnly) bubble.classList.add("dingtalk-message-bubble--image");
   bubbleContent(document, bubble, message, options);
   if (message.failed) {
     const retry = document.createElement("button");

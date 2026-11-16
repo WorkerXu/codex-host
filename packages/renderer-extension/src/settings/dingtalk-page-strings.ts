@@ -13,7 +13,6 @@ export interface DingTalkPageText {
   searchConversations: string;
   searchMessages: string;
   searchMore: string;
-  searchKeyboardHint: string;
   noSearchResults: string;
   searchFailed: string;
   noUnreadConversations: string;
@@ -47,7 +46,6 @@ const ZH: DingTalkPageText = {
   searchConversations: "会话",
   searchMessages: "聊天记录",
   searchMore: "查看更多（{count}）",
-  searchKeyboardHint: "↑↓ 移动 · ↵ 打开 · Esc 退出",
   noSearchResults: "没有找到相关会话或消息",
   searchFailed: "搜索失败，请稍后重试",
   noUnreadConversations: "最近 48 小时没有未读消息",
@@ -81,7 +79,6 @@ const EN: DingTalkPageText = {
   searchConversations: "Conversations",
   searchMessages: "Messages",
   searchMore: "Show more ({count})",
-  searchKeyboardHint: "↑↓ Move · ↵ Open · Esc Exit",
   noSearchResults: "No matching conversations or messages",
   searchFailed: "Search failed. Try again.",
   noUnreadConversations: "No unread messages in the last 48 hours",

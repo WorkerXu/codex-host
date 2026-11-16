@@ -150,14 +150,7 @@ export function createDingTalkSettingsPage(
           renderSearch();
         },
       });
-      const searchHint = createElementNode(
-        document,
-        "div",
-        "dingtalk-search-hint",
-        text.searchKeyboardHint,
-      );
-      searchHint.hidden = true;
-      sidebar.append(sidebarHead, conversationList, searchPanel.element, searchHint);
+      sidebar.append(sidebarHead, conversationList, searchPanel.element);
 
       const main = createElementNode(document, "section", "dingtalk-main");
       const mainHead = createDingTalkMainHeader({
@@ -236,11 +229,20 @@ export function createDingTalkSettingsPage(
         state.search?.conversations.find((row) => row.conversationId === conversationId) ??
         null;
 
+      const syncMainVisibility = (): void => {
+        main.hidden =
+          state.searchQuery.length === 0 &&
+          state.conversations.length === 0 &&
+          !state.listLoading &&
+          !state.listError &&
+          state.selectedId === null;
+      };
+
       const syncColumnMode = (): void => {
         const searching = state.searchQuery.length > 0;
         conversationList.hidden = searching;
         searchPanel.element.hidden = !searching;
-        searchHint.hidden = !searching;
+        syncMainVisibility();
       };
 
       const applySearchCursor = (): void => {
