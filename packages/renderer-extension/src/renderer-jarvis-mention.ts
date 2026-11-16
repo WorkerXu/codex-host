@@ -16,11 +16,7 @@ import {
   type JarvisBugSearchResult,
 } from "@codexhost/shared-contracts";
 
-import {
-  HEADER_CLASS,
-  ROW_HIGHLIGHT_CLASSES,
-  ROW_IDLE_CLASS,
-} from "./renderer-delegation-mention.js";
+import { ROW_HIGHLIGHT_CLASSES, ROW_IDLE_CLASS } from "./renderer-delegation-mention.js";
 import {
   JARVIS_MODE_ATTRIBUTE,
   JARVIS_SECTION_ATTRIBUTE,
@@ -32,6 +28,14 @@ import {
   renderJarvisLoading,
 } from "./renderer-jarvis-bug-view.js";
 import { jarvisErrorText } from "./renderer-jarvis-client.js";
+import {
+  ensureWorkbenchSection,
+  findNativeSuggestionList,
+  highlightWorkbenchRow,
+  registerWorkbenchRow,
+  removeWorkbenchSectionIfEmpty,
+  waitForNativeSuggestionList,
+} from "./renderer-native-at-menu.js";
 import {
   insertNativeAgentMention,
   type NativeTextRange,
@@ -49,13 +53,13 @@ export {
   truncateJarvisText,
 } from "./renderer-jarvis-bug-view.js";
 
+export { findNativeSuggestionList } from "./renderer-native-at-menu.js";
+
 const SECTION_ATTRIBUTE = JARVIS_SECTION_ATTRIBUTE;
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
-const PANEL_ATTRIBUTE = "data-codexhost-jarvis-panel";
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
 const MAX_QUERY_LENGTH = 64;
-const NATIVE_LIST_CLASS = "vertical-scroll-fade-mask";
 
 export interface RendererJarvisTrigger {
   query: string;
@@ -92,51 +96,6 @@ export function jarvisEntryAction(input: {
   return input.selectedEntry ? "search" : "entry";
 }
 
-function isVisible(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 && element.getClientRects().length > 0;
-}
-
-/**
- * Desktop's menu is a listbox with a scrollable `vertical-scroll-fade-mask`
- * child. Appending there keeps Jarvis rows in the native scroll area.
- */
-export function findNativeSuggestionList(
-  document: Document,
-  anchor: Element | null,
-): HTMLElement | null {
-  const anchorRect = anchor?.getBoundingClientRect();
-  const lists = [...document.querySelectorAll<HTMLElement>('[role="listbox"]')]
-    .filter(
-      (element) =>
-        !element.closest(
-          `[${SECTION_ATTRIBUTE}],[${MODE_ATTRIBUTE}],[${PANEL_ATTRIBUTE}],[data-codexhost-delegation-mention-menu]`,
-        ),
-    )
-    .filter(isVisible)
-    .map((element, order) => {
-      const scroll =
-        element.querySelector<HTMLElement>(`.${NATIVE_LIST_CLASS}`) ??
-        (element.classList.contains(NATIVE_LIST_CLASS) ? element : element);
-      const rect = element.getBoundingClientRect();
-      const distance = anchorRect
-        ? rect.top >= anchorRect.top
-          ? rect.top - anchorRect.bottom
-          : anchorRect.top - rect.bottom
-        : 0;
-      const preferred = scroll.classList.contains(NATIVE_LIST_CLASS) ? 1 : 0;
-      return { scroll, distance, preferred, order };
-    })
-    .filter(({ distance }) => !anchorRect || Math.abs(distance) < 600);
-  lists.sort(
-    (left, right) =>
-      right.preferred - left.preferred ||
-      left.distance - right.distance ||
-      right.order - left.order,
-  );
-  return lists[0]?.scroll ?? null;
-}
-
 export interface RendererJarvisMentionOptions {
   isComposerEditor(editor: HTMLElement): boolean;
   /** Desktop Host that runs the Composer's Thread; null while unknown. */
@@ -164,7 +123,7 @@ interface EntryState {
   trigger: Trigger;
   row: HTMLElement;
   section: HTMLElement;
-  selected: boolean;
+  unregister: () => void;
 }
 
 interface ModeState {
@@ -194,6 +153,8 @@ export function installRendererJarvisMention(
   if (!view) return { refresh: () => undefined, dispose: () => undefined };
 
   let entry: EntryState | null = null;
+  let entryPending: Trigger | null = null;
+  let cancelEntryWait: (() => void) | null = null;
   let mode: ModeState | null = null;
   let suppressed: string | null = null;
   let composing = false;
@@ -208,9 +169,13 @@ export function installRendererJarvisMention(
     findNativeSuggestionList(ownerDocument, options.anchorForEditor(editor));
 
   const removeEntry = (): void => {
+    cancelEntryWait?.();
+    cancelEntryWait = null;
+    entryPending = null;
+    entry?.unregister();
     entry?.row.remove();
-    // Only remove the section we created; the DingTalk group is shared.
-    if (entry?.section.hasAttribute(SECTION_ATTRIBUTE)) entry.section.remove();
+    // The section is shared with the DingTalk row; drop it only when empty.
+    removeWorkbenchSectionIfEmpty(entry?.section ?? null);
     entry = null;
   };
 
@@ -260,36 +225,23 @@ export function installRendererJarvisMention(
     trigger.node.isConnected &&
     trigger.node.data.slice(trigger.start, trigger.end) === `@${trigger.query}`;
 
-  const highlightEntry = (state: EntryState, selected: boolean): void => {
-    state.selected = selected;
-    state.row.setAttribute("aria-selected", String(selected));
-    for (const name of ROW_HIGHLIGHT_CLASSES) state.row.classList.toggle(name, selected);
-    state.row.classList.toggle(ROW_IDLE_CLASS, !selected);
-    if (selected) state.row.scrollIntoView({ block: "nearest" });
-  };
-
   const attachEntry = (trigger: Trigger): void => {
     if (!matchesJarvisEntry(trigger.query)) return;
     const list = nativeList(trigger.editor);
     if (!list) return;
+    cancelEntryWait?.();
+    cancelEntryWait = null;
+    entryPending = null;
     const locale = options.readLocale();
     const row = createJarvisEntryRow(ownerDocument, locale);
-    let section: HTMLElement;
-    const dingtalk = list.querySelector<HTMLElement>("[data-codexhost-dingtalk-section]");
-    if (dingtalk) {
-      section = dingtalk;
-      dingtalk.append(row);
-    } else {
-      section = ownerDocument.createElement("div");
-      section.setAttribute(SECTION_ATTRIBUTE, "true");
-      section.className = "flex w-full flex-col";
-      const header = ownerDocument.createElement("div");
-      header.className = HEADER_CLASS;
-      header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
-      section.append(header, row);
-      list.append(section);
-    }
-    const state: EntryState = { trigger, row, section, selected: false };
+    const section = ensureWorkbenchSection(ownerDocument, list, locale);
+    if (row.parentElement !== section.items) section.items.append(row);
+    const state: EntryState = {
+      trigger,
+      row,
+      section: section.element,
+      unregister: () => undefined,
+    };
     entry = state;
 
     row.addEventListener("pointerdown", (event) => {
@@ -298,15 +250,36 @@ export function installRendererJarvisMention(
     });
     row.addEventListener("pointermove", (event) => {
       event.stopPropagation();
-      highlightEntry(state, true);
+      highlightWorkbenchRow(ownerDocument, state.row);
     });
-    row.addEventListener("pointerleave", () => highlightEntry(state, false));
     row.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (entry !== state) return;
       enterMode(state.trigger);
     });
+    state.unregister = registerWorkbenchRow(ownerDocument, row, () => row.click());
+  };
+
+  /** Wait for the native popup instead of drawing our own panel. */
+  const scheduleEntry = (trigger: Trigger): void => {
+    if (!matchesJarvisEntry(trigger.query)) return;
+    const list = nativeList(trigger.editor);
+    if (list) {
+      attachEntry(trigger);
+      return;
+    }
+    entryPending = trigger;
+    cancelEntryWait?.();
+    cancelEntryWait = waitForNativeSuggestionList(
+      ownerDocument,
+      () => options.anchorForEditor(trigger.editor),
+      () => {
+        cancelEntryWait = null;
+        if (entry || entryPending !== trigger) return;
+        attachEntry(trigger);
+      },
+    );
   };
 
   const buildMode = (trigger: Trigger): ModeState => {
@@ -486,6 +459,7 @@ export function installRendererJarvisMention(
     const state = buildMode(trigger);
     list.append(state.section);
     hideNativeChildren(state, list);
+    list.scrollTop = 0;
     mode = state;
 
     state.back.addEventListener("pointerdown", (event) => {
@@ -573,17 +547,6 @@ export function installRendererJarvisMention(
     }
   }
 
-  const nativeRows = (editor: HTMLElement): HTMLElement[] => {
-    const list = nativeList(editor);
-    if (!list) return [];
-    return [...list.querySelectorAll<HTMLElement>('[role="option"]')].filter(
-      (element) =>
-        !element.closest(`[${SECTION_ATTRIBUTE}]`) &&
-        !element.closest(`[${MODE_ATTRIBUTE}]`) &&
-        !element.closest("[data-codexhost-dingtalk-section]"),
-    );
-  };
-
   const schedule = (event?: Event): void => {
     if (inserting || composing) return;
     if (mode) {
@@ -609,7 +572,7 @@ export function installRendererJarvisMention(
       return;
     }
     removeEntry();
-    attachEntry(trigger);
+    scheduleEntry(trigger);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -645,35 +608,11 @@ export function installRendererJarvisMention(
       return;
     }
     if (!entry) return;
-    let handled = true;
-    if (event.key === "ArrowDown") {
-      const rows = nativeRows(entry.trigger.editor);
-      const current = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
-      if (rows.length === 0 || current === rows.length - 1) {
-        highlightEntry(entry, true);
-      } else {
-        handled = false;
-      }
-    } else if (event.key === "ArrowUp") {
-      if (!entry.selected) handled = false;
-      else {
-        highlightEntry(entry, false);
-        // Let the native menu move from its own last selected row.
-        handled = false;
-      }
-    } else if (event.key === "Enter" || event.key === "Tab") {
-      if (!entry.selected) handled = false;
-      else enterMode(entry.trigger);
-    } else if (event.key === "Escape") {
-      if (!entry.selected) {
-        suppressed = entry.trigger.query;
-        handled = false;
-      } else {
-        suppressed = entry.trigger.query;
-        removeEntry();
-      }
-    } else handled = false;
-    if (!handled) return;
+    if (event.key !== "Escape") return;
+    const selected = entry.row.getAttribute("aria-current") === "true";
+    suppressed = entry.trigger.query;
+    removeEntry();
+    if (!selected) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   };
@@ -708,7 +647,7 @@ export function installRendererJarvisMention(
       if (mode) {
         const list = nativeList(mode.trigger.editor);
         if (list) {
-          if (!mode.section.isConnected) list.append(mode.section);
+          if (mode.section.parentElement !== list) list.append(mode.section);
           hideNativeChildren(mode, list);
           return;
         }
@@ -721,32 +660,21 @@ export function installRendererJarvisMention(
         exitMode(false);
         return;
       }
-      if (!entry) return;
+      if (!entry) {
+        if (!entryPending) return;
+        const pending = entryPending;
+        const list = nativeList(pending.editor);
+        if (list) attachEntry(pending);
+        return;
+      }
       const list = nativeList(entry.trigger.editor);
       if (!list) {
         removeEntry();
         return;
       }
-      const dingtalk = list.querySelector<HTMLElement>("[data-codexhost-dingtalk-section]");
-      if (dingtalk && entry.row.parentElement !== dingtalk) {
-        dingtalk.append(entry.row);
-        if (entry.section !== dingtalk) entry.section.remove();
-        entry.section = dingtalk;
-        return;
-      }
-      if (!dingtalk && entry.section === entry.row.parentElement && entry.section.isConnected) {
-        return;
-      }
-      if (entry.row.isConnected) return;
-      const own = ownerDocument.createElement("div");
-      own.setAttribute(SECTION_ATTRIBUTE, "true");
-      own.className = "flex w-full flex-col";
-      const header = ownerDocument.createElement("div");
-      header.className = HEADER_CLASS;
-      header.textContent = options.readLocale() === "zh-CN" ? "工作台" : "Workbench";
-      own.append(header, entry.row);
-      list.append(own);
-      entry.section = own;
+      const section = ensureWorkbenchSection(ownerDocument, list, options.readLocale());
+      if (entry.row.parentElement !== section.items) section.items.append(entry.row);
+      entry.section = section.element;
     }, 60);
   };
 

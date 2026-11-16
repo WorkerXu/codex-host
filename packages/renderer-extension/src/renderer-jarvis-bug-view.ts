@@ -7,12 +7,8 @@
  */
 import type { JarvisBug } from "@codexhost/shared-contracts";
 
-import {
-  HEADER_CLASS,
-  ROW_CLASS,
-  ROW_CONTENT_CLASS,
-  ROW_IDLE_CLASS,
-} from "./renderer-delegation-mention.js";
+import { ROW_CLASS } from "./renderer-delegation-mention.js";
+import { createWorkbenchRow, createWorkbenchSection } from "./renderer-native-at-menu.js";
 import { createJarvisMark } from "./settings/jarvis-icon.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
@@ -102,40 +98,23 @@ export function jarvisRelativeTime(
 
 /** The single 「Jarvis」 row for previews and the entry section. */
 export function createJarvisEntryRow(document: Document, locale: string): HTMLElement {
-  const row = document.createElement("div");
-  row.setAttribute("role", "option");
-  row.setAttribute("aria-selected", "false");
-  row.setAttribute(JARVIS_ENTRY_ROW_ATTRIBUTE, "true");
-  row.className = ROW_CLASS;
-  const content = document.createElement("div");
-  content.className = ROW_CONTENT_CLASS;
-  const mark = createJarvisMark(document, 16);
-  const label = document.createElement("span");
-  label.className = "min-w-0 shrink truncate";
-  label.textContent = "Jarvis";
-  const meta = document.createElement("span");
-  meta.className = "flex-1 truncate text-codex-description";
-  meta.textContent = locale === "zh-CN" ? "搜索 Bug" : "Search bugs";
-  content.append(mark, label, meta);
-  row.append(content);
-  row.classList.add(ROW_IDLE_CLASS);
-  return row;
+  return createWorkbenchRow(document, {
+    rowAttribute: JARVIS_ENTRY_ROW_ATTRIBUTE,
+    icon: createJarvisMark(document, 16),
+    label: "Jarvis",
+    description: locale === "zh-CN" ? "搜索 Bug" : "Search bugs",
+  });
 }
 
-/** The standalone section used by previews that own their menu chrome. */
+/** The shared workbench section with only the Jarvis row; previews use it. */
 export function createJarvisEntrySection(
   document: Document,
   locale: string,
 ): { element: HTMLElement; row: HTMLElement } {
-  const section = document.createElement("div");
-  section.setAttribute(JARVIS_SECTION_ATTRIBUTE, "true");
-  section.className = "flex w-full flex-col";
-  const header = document.createElement("div");
-  header.className = HEADER_CLASS;
-  header.textContent = locale === "zh-CN" ? "工作台" : "Workbench";
+  const section = createWorkbenchSection(document, locale === "zh-CN" ? "zh-CN" : "en");
   const row = createJarvisEntryRow(document, locale);
-  section.append(header, row);
-  return { element: section, row };
+  section.items.append(row);
+  return { element: section.element, row };
 }
 
 export interface JarvisModeChrome {
