@@ -17,6 +17,11 @@ export interface DingTalkDispatchSection {
   dispose(): void;
 }
 
+export interface DingTalkDispatchSectionOptions {
+  /** Drives the card avatars and the 「参与钉钉」 tag. */
+  onParticipationChange?(participating: ReadonlySet<string>, enabled: boolean): void;
+}
+
 type SectionStatus = "idle" | "loading" | "saving" | "saved" | "failed";
 
 const EVENT_LABEL_KEYS: Record<DingTalkEventType, keyof CodexAgentsMessages["dingtalk"]> = {
@@ -30,6 +35,7 @@ export function createDingTalkDispatchSection(
   client: RendererCodexAgentsClient,
   text: CodexAgentsMessages["dingtalk"],
   effortLabel: (id: string) => string = (id) => id,
+  options: DingTalkDispatchSectionOptions = {},
 ): DingTalkDispatchSection {
   const root = document.createElement("section");
   root.className = "dingtalk-listener";
@@ -175,6 +181,10 @@ export function createDingTalkDispatchSection(
   let saving = false;
   let savingAgain = false;
 
+  const notifyParticipation = (): void => {
+    options.onParticipationChange?.(new Set(selected), enabled.checked);
+  };
+
   const setStatus = (value: SectionStatus): void => {
     status.textContent =
       value === "saving"
@@ -227,6 +237,7 @@ export function createDingTalkDispatchSection(
       input.addEventListener("change", () => {
         if (input.checked) selected.add(agent.name);
         else selected.delete(agent.name);
+        notifyParticipation();
         markDirty();
       });
       const copy = document.createElement("span");
@@ -260,6 +271,7 @@ export function createDingTalkDispatchSection(
     dirty = false;
     renderBody();
     renderAgents();
+    notifyParticipation();
   };
 
   const readSettings = (): DingTalkDispatchSettings => {
@@ -317,6 +329,7 @@ export function createDingTalkDispatchSection(
 
   enabled.addEventListener("change", () => {
     renderBody();
+    notifyParticipation();
     markDirty();
   });
   for (const input of eventInputs.values()) input.addEventListener("change", markDirty);
@@ -329,11 +342,13 @@ export function createDingTalkDispatchSection(
       if (isCodexAgentName(agent.name)) selected.add(agent.name);
     }
     renderAgents();
+    notifyParticipation();
     markDirty();
   });
   clearAll.addEventListener("click", () => {
     selected.clear();
     renderAgents();
+    notifyParticipation();
     markDirty();
   });
   retry.addEventListener("click", () => void save());
@@ -360,6 +375,7 @@ export function createDingTalkDispatchSection(
         if (!known.has(name)) selected.delete(name);
       }
       renderAgents();
+      notifyParticipation();
       // With no saved selection the Host fills defaults from the current agents.
       if (!dirty) void load();
     },

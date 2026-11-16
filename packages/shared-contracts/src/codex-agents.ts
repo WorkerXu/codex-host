@@ -65,6 +65,8 @@ export const codexAgentSummarySchema = z
     model: z.string().max(CODEX_AGENT_MODEL_MAX_LENGTH).nullable(),
     reasoningEffort: z.string().max(CODEX_AGENT_EFFORT_MAX_LENGTH).nullable(),
     revision: codexAgentRevisionSchema,
+    /** Optional runtime data; cards show the dispatch tag only when present. */
+    lastDispatchedAt: z.number().int().nonnegative().nullable().optional(),
   })
   .strict();
 
