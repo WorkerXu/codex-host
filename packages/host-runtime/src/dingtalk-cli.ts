@@ -501,19 +501,27 @@ function parseResources(
   row: Record<string, unknown>,
   rawText: string,
 ): DingTalkMessage["resources"] {
-  const refs = Array.isArray(row.resourceRefs) ? row.resourceRefs : [];
+  const refs = (Array.isArray(row.resourceRefs) ? row.resourceRefs : []).filter(
+    (ref): ref is Record<string, unknown> => record(ref),
+  );
   const hasImageMarker = /\[图片消息\]/u.test(rawText);
+  const hasTypedImage = refs.some((ref) => string(ref.contentType).toLowerCase() === "image");
   const resources: NonNullable<DingTalkMessage["resources"]> = [];
+  const seen = new Set<string>();
   for (const ref of refs) {
-    if (!record(ref)) continue;
     const resourceId = string(ref.resourceId);
     const contentType = string(ref.contentType).toLowerCase();
     const type = string(ref.type) || string(ref.resourceIdType);
     const resourceIdType = string(ref.resourceIdType) || type;
-    if (!resourceId || !resourceIdType) continue;
+    if (!resourceId || !resourceIdType || seen.has(resourceId)) continue;
     const file = contentType === "file" || resourceIdType === "fileId" || type === "fileId";
-    const image = !file && (contentType === "image" || (type === "mediaId" && hasImageMarker));
+    // Some images also list an untyped thumbnail first. Prefer the typed image
+    // resources; fall back to media ids only when the body carries an image.
+    const image =
+      !file &&
+      (contentType === "image" || (type === "mediaId" && hasImageMarker && !hasTypedImage));
     if (!file && !image) continue;
+    seen.add(resourceId);
     const name = string(ref.name) || null;
     const sizeBytes = number(ref.sizeBytes) ?? number(ref.size) ?? number(ref.fileSize);
     resources.push({
