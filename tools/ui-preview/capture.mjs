@@ -16,6 +16,14 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "dingtalk-heavy",
   "dingtalk-list",
+  "dingtalk-hover",
+  "dingtalk-lightbox",
+  "dingtalk-at-picker",
+  "dingtalk-at-chip",
+  "dingtalk-at-send",
+  "dingtalk-unread-open",
+  "dingtalk-unread-left",
+  "dingtalk-live",
   "dingtalk-status-connected",
   "dingtalk-status-not-logged-in",
   "dingtalk-status-unreachable",
@@ -88,6 +96,26 @@ async function serverIsUp() {
   }
 }
 
+async function pointAt(page, selector, index = 0) {
+  const locator = page.locator(selector).nth(index);
+  await locator.waitFor({ state: "visible", timeout: 10_000 });
+  const box = await locator.boundingBox();
+  if (!box) throw new Error(`No box for ${selector}`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2, box };
+}
+
+async function realClick(page, selector, index = 0) {
+  const point = await pointAt(page, selector, index);
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
+async function realHover(page, selector, index = 0) {
+  const point = await pointAt(page, selector, index);
+  await page.mouse.move(point.x, point.y, { steps: 6 });
+}
+
 let server = null;
 if (!(await serverIsUp())) {
   server = spawn(process.execPath, [path.join(previewRoot, "serve.mjs")], {
@@ -132,6 +160,69 @@ for (const scenario of scenarios) {
     await page.waitForSelector('body[data-ready="true"]', { timeout: 20_000 });
     if (scenario === "agents-cards") {
       await page.hover(".agent-card[data-agent-name]");
+    }
+    if (scenario === "dingtalk-hover") {
+      await realHover(page, ".dingtalk-message", 1);
+      await page.waitForTimeout(150);
+    }
+    if (scenario === "dingtalk-lightbox") {
+      await realClick(page, ".dingtalk-message-image--loaded", 0);
+      await page.waitForSelector(".dingtalk-lightbox:not([hidden])", { timeout: 10_000 });
+      await page.waitForTimeout(350);
+      await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(250);
+    }
+    if (scenario === "dingtalk-at-picker") {
+      await realClick(page, ".dingtalk-composer-input");
+      await page.keyboard.type("@");
+      await page.waitForSelector(".dingtalk-mention-picker:not([hidden])", { timeout: 10_000 });
+      await page.waitForTimeout(300);
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(120);
+    }
+    if (scenario === "dingtalk-at-chip" || scenario === "dingtalk-at-send") {
+      await realClick(page, ".dingtalk-composer-input");
+      await page.keyboard.type("@林");
+      await page.waitForSelector(".dingtalk-mention-picker:not([hidden])", { timeout: 10_000 });
+      await page.waitForTimeout(350);
+      const picker = await page.locator(".dingtalk-mention-picker").boundingBox();
+      if (!picker) throw new Error("Mention picker is missing");
+      // First option row below the picker heading; real pointer, not element.click().
+      await page.mouse.click(picker.x + 120, picker.y + 44);
+      await page.waitForTimeout(150);
+      await page.keyboard.type("请看一下今天的发布进度。");
+      await page.waitForTimeout(120);
+      if (scenario === "dingtalk-at-chip") {
+        await page.waitForTimeout(150);
+      } else {
+        await realClick(page, ".dingtalk-send-button");
+        await page.waitForFunction(() => Boolean(window.__dingtalkPreviewSent), undefined, {
+          timeout: 10_000,
+        });
+        await page.waitForTimeout(450);
+      }
+    }
+    if (scenario === "dingtalk-live") {
+      const list = await pointAt(page, ".dingtalk-message-list");
+      await page.mouse.move(list.x, list.y);
+      await page.mouse.wheel(0, 1_200);
+      await page.waitForTimeout(450);
+    }
+    if (scenario === "dingtalk-scrolled-top") {
+      const list = await pointAt(page, ".dingtalk-message-list");
+      await page.mouse.move(list.x, list.y);
+      await page.mouse.wheel(0, -100_000);
+      await page.waitForTimeout(500);
+      await page.waitForSelector(".dingtalk-loading-older:not([hidden])", { timeout: 10_000 });
+      await page.waitForTimeout(250);
+    }
+    if (scenario === "dingtalk-unread-open" || scenario === "dingtalk-unread-left") {
+      await realClick(page, ".dingtalk-conversation:has(.dingtalk-unread-badge)", 0);
+      await page.waitForTimeout(350);
+      if (scenario === "dingtalk-unread-left") {
+        await realClick(page, ".dingtalk-conversation", 2);
+        await page.waitForTimeout(350);
+      }
     }
     const failure = await page.evaluate(() => document.body.dataset.error ?? null);
     if (failure) throw new Error(`${scenario}/${theme}: ${failure}`);
@@ -297,6 +388,141 @@ for (const scenario of scenarios) {
           Boolean(lazyRow?.textContent?.includes("懒加载")),
           lazyRow?.textContent ?? "",
         );
+      }
+      if (document.body.dataset.scenario === "dingtalk-hover") {
+        const row = query(".dingtalk-message");
+        const bubble = query(".dingtalk-message-bubble");
+        const rowStyle = row ? getComputedStyle(row) : null;
+        check(
+          "message-hover-transparent",
+          Boolean(rowStyle) && rowStyle.backgroundColor === "rgba(0, 0, 0, 0)",
+          rowStyle?.backgroundColor ?? "missing",
+        );
+        check(
+          "message-bubble-visible",
+          Boolean(bubble) && getComputedStyle(bubble).backgroundColor !== "rgba(0, 0, 0, 0)",
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-lightbox") {
+        const overlay = query(".dingtalk-lightbox");
+        const image = query(".dingtalk-lightbox-image");
+        const rect = image?.getBoundingClientRect();
+        check("lightbox-open", Boolean(overlay) && !overlay.hidden);
+        check(
+          "lightbox-overlay-dark",
+          Boolean(overlay) && getComputedStyle(overlay).backgroundColor.startsWith("rgba(0, 0, 0"),
+          overlay ? getComputedStyle(overlay).backgroundColor : "missing",
+        );
+        check(
+          "lightbox-image-fit",
+          Boolean(rect) &&
+            rect.width <= window.innerWidth &&
+            rect.height <= window.innerHeight &&
+            rect.width > 200 &&
+            rect.height > 150,
+          rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : "missing",
+        );
+        check("lightbox-counter", Boolean(query(".dingtalk-lightbox-counter")?.textContent));
+        check("lightbox-no-status", Boolean(query(".dingtalk-lightbox-status")?.hidden));
+      }
+      if (document.body.dataset.scenario === "dingtalk-at-picker") {
+        const picker = query(".dingtalk-mention-picker");
+        check("at-picker-open", Boolean(picker) && !picker.hidden);
+        check(
+          "at-picker-options",
+          queryAll(".dingtalk-mention-option").length >= 2,
+          `${queryAll(".dingtalk-mention-option").length} options`,
+        );
+        check(
+          "at-picker-avatars",
+          queryAll(".dingtalk-mention-option .dingtalk-avatar").length > 0,
+        );
+        check(
+          "at-picker-all-row",
+          queryAll(".dingtalk-mention-option").some((row) => row.textContent?.includes("所有人")),
+        );
+        const active = queryAll(".dingtalk-mention-option").findIndex((row) =>
+          row.classList.contains("dingtalk-mention-option--active"),
+        );
+        check("at-picker-keyboard", active === 1, `active=${active}`);
+      }
+      if (document.body.dataset.scenario === "dingtalk-at-chip") {
+        const chips = query(".dingtalk-composer-chips");
+        check("at-chip-visible", Boolean(chips) && !chips.hidden);
+        check(
+          "at-chip-name",
+          Boolean(chips?.textContent?.includes("林晓")),
+          chips?.textContent ?? "missing",
+        );
+        check("at-chip-picker-closed", Boolean(query(".dingtalk-mention-picker")?.hidden));
+        check(
+          "at-chip-input",
+          Boolean(query(".dingtalk-composer-input")?.value?.includes("请看一下今天的发布进度")),
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-at-send") {
+        const sent = window.__dingtalkPreviewSent;
+        check("at-send-called", Boolean(sent));
+        check(
+          "at-send-placeholder",
+          Boolean(sent?.text?.includes("<@open-preview-1>")),
+          sent?.text ?? "missing",
+        );
+        check("at-send-id", sent?.atOpenDingTalkIds?.[0] === "open-preview-1");
+        check("at-send-no-all", sent?.atAll !== true);
+        check("at-picker-closed", Boolean(query(".dingtalk-mention-picker")?.hidden));
+        check(
+          "at-send-bubble",
+          queryAll(".dingtalk-message").some((row) => row.textContent?.includes("@林晓")),
+        );
+      }
+      if (
+        document.body.dataset.scenario === "dingtalk-unread-open" ||
+        document.body.dataset.scenario === "dingtalk-unread-left"
+      ) {
+        const badges = queryAll(".dingtalk-unread-badge, .dingtalk-avatar-unread").length;
+        const initialBadges = Number(document.body.dataset.initialUnread ?? "0");
+        const badgeTitle = document.body.dataset.badgeTitle ?? "";
+        const selected = query(".dingtalk-conversation[aria-selected='true']");
+        check("unread-badge-cleared", badges < initialBadges, `${initialBadges} → ${badges}`);
+        check(
+          "unread-active-row-present",
+          Boolean(selected) &&
+            !selected.querySelector(".dingtalk-unread-badge, .dingtalk-avatar-unread"),
+        );
+        if (document.body.dataset.scenario === "dingtalk-unread-left") {
+          check(
+            "unread-row-removed-after-leave",
+            !queryAll(".dingtalk-conversation-title").some(
+              (title) => title.textContent === badgeTitle,
+            ),
+            badgeTitle,
+          );
+        }
+      }
+      if (document.body.dataset.scenario === "dingtalk-live") {
+        const initial = Number(document.body.dataset.initialMessages ?? "0");
+        const messages = queryAll(".dingtalk-message");
+        check("live-message-arrived", messages.length > initial, `${initial} → ${messages.length}`);
+        check(
+          "live-message-text",
+          messages.some((row) => row.textContent?.includes("刚刚收到一条新消息")),
+        );
+        check(
+          "live-preview-updated",
+          queryAll(".dingtalk-conversation-preview").some((row) =>
+            row.textContent?.includes("刚刚收到一条新消息"),
+          ),
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-scrolled-top") {
+        const list = query(".dingtalk-message-list");
+        check(
+          "scroll-at-top",
+          Boolean(list) && (list?.scrollTop ?? 1) < 80,
+          String(list?.scrollTop),
+        );
+        check("scroll-loading-older", Boolean(query(".dingtalk-loading-older:not([hidden])")));
       }
       if (document.body.dataset.scenario === "dingtalk-direct") {
         check("direct-header-title", query(".dingtalk-main-title")?.textContent === "林晓");
