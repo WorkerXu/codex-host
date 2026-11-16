@@ -3,7 +3,11 @@ import { access, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
+import type {
+  DingTalkConversation,
+  DingTalkMember,
+  DingTalkMessage,
+} from "@codexhost/shared-contracts";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 25_000;
@@ -323,7 +327,28 @@ export interface DingTalkGroupMeta {
   memberCount: number | null;
 }
 
-/** `dws chat group list-all` → group metadata keyed by conversation id. */
+/** `dws chat +chat-members-list` → human members, de-duplicated by open id. */
+export function parseMembers(value: unknown): DingTalkMember[] {
+  const root = record(value) ? value : null;
+  const rows = root && Array.isArray(root.users) ? root.users : [];
+  const members: DingTalkMember[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!record(row)) continue;
+    const openDingTalkId = string(row.openDingtalkId) || string(row.openDingTalkId);
+    const name =
+      string(row.memberEmpName) || string(row.name) || string(row.memberNick) || string(row.nick);
+    if (!openDingTalkId || !name || seen.has(openDingTalkId)) continue;
+    seen.add(openDingTalkId);
+    const title = string(row.memberRoleDesc) || string(row.role) || string(row.title);
+    members.push({
+      openDingTalkId,
+      name,
+      ...(title ? { title } : {}),
+    });
+  }
+  return members;
+} /** `dws chat group list-all` → group metadata keyed by conversation id. */
 export function parseGroupDirectory(value: unknown): Map<string, DingTalkGroupMeta> {
   const root = record(value) ? value : null;
   const result = root && record(root.result) ? root.result : null;
@@ -679,7 +704,12 @@ export interface DingTalkCli {
     days?: number;
     limit: number;
   }): Promise<{ messages: DingTalkMessage[]; errorCode: string | null }>;
-  send(conversationId: string, text: string): Promise<{ ok: boolean; errorCode: string | null }>;
+  members(conversationId: string): Promise<{ members: DingTalkMember[]; errorCode: string | null }>;
+  send(
+    conversationId: string,
+    text: string,
+    options?: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean },
+  ): Promise<{ ok: boolean; errorCode: string | null }>;
 }
 
 function formatDwsTime(ms: number): string {
@@ -876,8 +906,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       if (input.pageAll) {
         args.push("--page-all", "--page-limit", "10", "--max-items", String(input.maxItems ?? 300));
       }
-      const result = await run(args, 45_000);
-      const user = await self();
+      const [result, user] = await Promise.all([run(args, 45_000), self()]);
       return { ...parseMessagesPage(result.value, user?.id ?? null), errorCode: result.errorCode };
     },
     async searchMessages(input) {
@@ -887,18 +916,42 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       if (input.atMe) args.push("--at-me");
       if (input.days !== undefined) args.push("--days", String(input.days));
       args.push("--limit", String(Math.max(1, Math.min(input.limit, 100))), "--order", "desc");
-      const result = await run(args, 35_000);
-      const user = await self();
+      const [result, user] = await Promise.all([run(args, 35_000), self()]);
       return {
         messages: parseMessages(result.value, user?.id ?? null),
         errorCode: result.errorCode,
       };
     },
-    async send(conversationId, text) {
+    async members(conversationId) {
       const result = await run(
-        ["chat", "message", "send", "--conversation-id", conversationId, "--content", text],
-        30_000,
+        [
+          "chat",
+          "+chat-members-list",
+          "--conversation-id",
+          conversationId,
+          "--member-types",
+          "user",
+          "--page-limit",
+          "20",
+        ],
+        35_000,
       );
+      return { members: parseMembers(result.value), errorCode: result.errorCode };
+    },
+    async send(conversationId, text, options = {}) {
+      const args = [
+        "chat",
+        "message",
+        "send",
+        "--conversation-id",
+        conversationId,
+        "--content",
+        text,
+      ];
+      const atIds = [...new Set((options.atOpenDingTalkIds ?? []).filter(Boolean))];
+      if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
+      if (options.atAll === true) args.push("--at-all");
+      const result = await run(args, 30_000);
       return { ok: result.errorCode === null, errorCode: result.errorCode };
     },
   };

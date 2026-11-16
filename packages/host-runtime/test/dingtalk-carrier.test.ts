@@ -64,6 +64,16 @@ describe("DingTalk carriers", () => {
     expect(stripDingTalkMentions("[x](https://example.com)").text).toBe("[x](https://example.com)");
   });
 
+  it("accepts a carrier that Desktop wrapped between the label and target", () => {
+    const conversationId = "cid-wrap+value==";
+    const text = `[@罗浩]\n(${dingtalkConversationPath(conversationId)}) 最新的一条消息是什么`;
+    expect(hasDingTalkCarrier(text)).toBe(true);
+    expect(stripDingTalkMentions(text)).toEqual({
+      text: "@罗浩 最新的一条消息是什么",
+      mentions: [{ kind: "conversation", conversationId, label: "罗浩" }],
+    });
+  });
+
   it("builds a message path with encoded ids", () => {
     expect(dingtalkMessagePath("cid/a", ["m 1", "m/2"])).toBe(
       `dingtalk://message/${encodeURIComponent("cid/a")}/${encodeURIComponent("m 1")},${encodeURIComponent("m/2")}`,
