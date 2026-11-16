@@ -400,15 +400,16 @@ export class DingTalkService {
       resourceId: params.resourceId,
       resourceIdType: params.resourceIdType,
     });
+    const renderable = media.ok && media.mimeType?.startsWith("image/") === true;
     return dingtalkResourceResultSchema.parse({
-      available: media.ok,
+      available: renderable,
       dataUrl:
-        media.ok && media.base64 && media.mimeType
+        renderable && media.base64 && media.mimeType
           ? `data:${media.mimeType};base64,${media.base64}`
           : null,
       mimeType: media.mimeType,
       sizeBytes: media.sizeBytes,
-      errorCode: media.errorCode,
+      errorCode: renderable ? media.errorCode : (media.errorCode ?? "unsupported_media"),
     });
   }
 

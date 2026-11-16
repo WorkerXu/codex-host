@@ -91,6 +91,7 @@ const DINGTALK_MESSAGES: Record<RendererSettingsLocale, Record<string, string>> 
     cache_unavailable: "无法写入图片缓存",
     download_failed: "图片下载失败",
     resource_too_large: "图片过大，暂不显示",
+    unsupported_media: "图片格式暂不支持",
   },
   en: {
     not_installed: "dws is not installed on the DingTalk Host",
@@ -105,6 +106,7 @@ const DINGTALK_MESSAGES: Record<RendererSettingsLocale, Record<string, string>> 
     cache_unavailable: "Could not write the image cache",
     download_failed: "Could not download the image",
     resource_too_large: "The image is too large to show",
+    unsupported_media: "This image format is not supported",
   },
 };
 
