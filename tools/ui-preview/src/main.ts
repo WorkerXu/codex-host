@@ -19,6 +19,7 @@ import {
   type ProjectGroupLayoutMember,
 } from "../../../packages/renderer-extension/src/renderer-project-groups-layout.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
+import { createJarvisSettingsPage } from "../../../packages/renderer-extension/src/settings/jarvis-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
 import { rendererSettingsMessages } from "../../../packages/renderer-extension/src/settings/localization.js";
 import { installRendererSettingsShell } from "../../../packages/renderer-extension/src/settings/shell.js";
@@ -26,6 +27,7 @@ import { installRendererSettingsShell } from "../../../packages/renderer-extensi
 import {
   createFakeCodexAgentsClient,
   createFakeDingTalkClient,
+  createFakeJarvisClient,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
 import {
@@ -71,7 +73,7 @@ async function waitFor<T>(read: () => T | null | undefined, timeout = 4_000): Pr
 }
 
 function prepareSettings(
-  pageId: "dingtalk" | "codex-agents",
+  pageId: "dingtalk" | "codex-agents" | "jarvis",
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
@@ -94,7 +96,10 @@ function prepareSettings(
   const agentsPage = createCodexAgentsSettingsPage(messages, {
     createClient: () => agentsClient,
   });
-  const shell = installRendererSettingsShell([dingtalkPage, agentsPage], messages);
+  const jarvisPage = createJarvisSettingsPage(messages, {
+    createClient: () => createFakeJarvisClient(),
+  });
+  const shell = installRendererSettingsShell([dingtalkPage, agentsPage, jarvisPage], messages);
   const shadow = shell.root.shadowRoot;
   if (!shadow) throw new Error("Settings shell shadow root is missing");
   const query = <T extends Element>(selector: string) => shadow.querySelector<T>(selector);
@@ -110,7 +115,7 @@ function prepareSettings(
 }
 
 function mountSettings(
-  pageId: "dingtalk" | "codex-agents",
+  pageId: "dingtalk" | "codex-agents" | "jarvis",
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
@@ -1029,33 +1034,97 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".agent-editor:not([hidden])"));
   },
 
-  async "agents-dingtalk-disabled"() {
+  async "agents-menu"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+    const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
+    const button = await waitFor(() => card.querySelector<HTMLButtonElement>(".agent-card-menu"));
+    button.click();
+    await waitFor(() => query(".agent-menu"));
+    await delay(120);
+  },
+
+  async "agents-delete-confirm"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+    const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
+    const button = await waitFor(() => card.querySelector<HTMLButtonElement>(".agent-card-menu"));
+    button.click();
+    const menu = await waitFor(() => query(".agent-menu"));
+    const remove = await waitFor(() =>
+      [...menu.querySelectorAll<HTMLButtonElement>(".agent-menu-item")].find(
+        (item) => item.textContent === "删除",
+      ),
+    );
+    remove.click();
+    await waitFor(() => query<HTMLDialogElement>(".agent-confirm[open]"));
+    await delay(120);
+  },
+
+  async "agents-edit-dingtalk-on"() {
+    const { query } = mountSettings("codex-agents");
+    const card = await waitFor(() => query<HTMLElement>('.agent-card[data-agent-name="writer"]'));
+    card.click();
+    await waitFor(() => query(".agent-editor:not([hidden])"));
+    await waitFor(() => query<HTMLInputElement>(".agent-dingtalk-switch input")?.checked === true);
+    await waitFor(() => query('.agent-dingtalk-body[data-disabled="false"]'));
+    await delay(200);
+    const body = query<HTMLElement>(".agent-editor-body");
+    if (!body) throw new Error("Editor body is missing");
+    body.scrollTop = body.scrollHeight;
+    await delay(180);
+  },
+
+  async "agents-edit-dingtalk-off"() {
+    const { query } = mountSettings("codex-agents");
+    const card = await waitFor(() =>
+      query<HTMLElement>('.agent-card[data-agent-name="researcher"]'),
+    );
+    card.click();
+    await waitFor(() => query(".agent-editor:not([hidden])"));
+    await waitFor(() => query<HTMLInputElement>(".agent-dingtalk-switch input")?.checked === false);
+    await waitFor(() => query('.agent-dingtalk-body[data-disabled="true"]'));
+    await delay(200);
+    const body = query<HTMLElement>(".agent-editor-body");
+    if (!body) throw new Error("Editor body is missing");
+    body.scrollTop = body.scrollHeight;
+    await delay(180);
+  },
+
+  async "agents-name-error"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+    const card = await waitFor(() => query<HTMLElement>(".agent-card--new"));
+    card.click();
+    await waitFor(() => query(".agent-editor:not([hidden])"));
+    const description = query<HTMLTextAreaElement>(".agent-editor textarea");
+    const instructions = query<HTMLTextAreaElement>(".agent-instructions");
+    if (!description || !instructions) throw new Error("Agent fields are missing");
+    description.value = "测试描述";
+    description.dispatchEvent(new Event("input", { bubbles: true }));
+    instructions.value = "测试指令";
+    instructions.dispatchEvent(new Event("input", { bubbles: true }));
+    const form = query<HTMLFormElement>(".agent-editor form");
+    if (!form) throw new Error("Agent form is missing");
+    form.requestSubmit();
+    await waitFor(() => query('.agent-field-error[data-field="name"]:not([hidden])'));
+    await delay(150);
+  },
+
+  async "agents-dingtalk-threshold"() {
     const { query, shell } = mountSettings("codex-agents");
-    const toggle = await waitFor(() => {
-      const input = query<HTMLInputElement>(".dingtalk-switch");
-      return input?.checked ? input : null;
-    });
-    toggle.checked = false;
-    toggle.dispatchEvent(new Event("change", { bubbles: true }));
-    await waitFor(() => query('.dingtalk-listener-body[data-disabled="true"]'));
-    await waitFor(() => query(".dingtalk-listener-status")?.textContent === "已保存", 3_000);
+    await waitFor(() => query(".dingtalk-listener"));
+    await waitFor(() => query(".agent-card-tag--dispatch"));
     const page = shell.root.shadowRoot?.querySelector<HTMLElement>(".settings-page");
     if (!page) throw new Error("Settings page scroller is missing");
+    await delay(100);
     page.scrollTop = page.scrollHeight;
     await delay(180);
   },
 
-  async "agents-dingtalk-settings"() {
-    const { query, shell } = mountSettings("codex-agents");
-    await waitFor(() => query(".dingtalk-listener"));
-    await waitFor(() => query(".dingtalk-agent-list .dingtalk-agent-name"));
-    await waitFor(() => query<HTMLInputElement>(".dingtalk-switch")?.checked === true);
-    const page = shell.root.shadowRoot?.querySelector<HTMLElement>(".settings-page");
-    if (!page) throw new Error("Settings page scroller is missing");
-    await delay(100);
-    page.scrollTop = page.scrollHeight;
-    await delay(100);
-    page.scrollTop = page.scrollHeight;
+  async "jarvis-settings"() {
+    const { query } = mountSettings("jarvis");
+    await waitFor(() => query(".settings-jarvis-machines .settings-jarvis-row"));
     await delay(120);
   },
 

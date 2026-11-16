@@ -1,11 +1,14 @@
 import { z } from "zod";
 
-import { CODEX_AGENT_NAME_PATTERN, isCodexAgentName } from "./codex-agents.js";
+import { codexAgentFileNameSchema } from "./codex-agents.js";
 
 /**
  * Settings for a DingTalk listener and dispatcher that runs on the local Host.
  * This contract only persists the user's choices; the listener and dispatcher
  * runtime live outside this branch and read the same file.
+ *
+ * Listening is configured per agent, keyed by the agent's file name so a
+ * rename keeps the choice. An agent without a map entry is off.
  *
  * Approval events are never changed by an agent: a dispatched agent performs
  * the work described in its own `developer_instructions` (checking, preparing
@@ -23,6 +26,7 @@ export const DINGTALK_REPLY_SCOPES = ["group", "direct"] as const;
 export type DingTalkReplyScope = (typeof DINGTALK_REPLY_SCOPES)[number];
 
 export const DEFAULT_DINGTALK_MATCH_THRESHOLD = 0.85;
+export const DINGTALK_DISPATCH_MAX_AGENTS = 512;
 
 const eventTypesSchema = z
   .array(z.enum(DINGTALK_EVENT_TYPES))
@@ -31,46 +35,74 @@ const eventTypesSchema = z
     message: "Event types must not repeat",
   });
 
-const participatingAgentsSchema = z
-  .array(z.string().regex(CODEX_AGENT_NAME_PATTERN, "Invalid agent name"))
-  .max(512)
-  .refine((values) => new Set(values).size === values.length, {
-    message: "Agents must not repeat",
-  });
-
-export const dingtalkDispatchSettingsSchema = z
+export const dingtalkAgentDispatchSchema = z
   .object({
     enabled: z.boolean(),
     eventTypes: eventTypesSchema,
-    /** Every agent scoring at or above this threshold receives the task. */
-    matchThreshold: z.number().min(0).max(1),
     /** Reply in the originating group (default) or in a direct message. */
     replyScope: z.enum(DINGTALK_REPLY_SCOPES),
-    /** Agents opted in; a missing file means every agent with a description. */
-    participatingAgents: participatingAgentsSchema,
+  })
+  .strict();
+
+export type DingTalkAgentDispatch = z.infer<typeof dingtalkAgentDispatchSchema>;
+
+export const dingtalkDispatchSettingsSchema = z
+  .object({
+    /** Every agent scoring at or above this threshold receives the task. */
+    threshold: z.number().min(0).max(1),
+    /** Keyed by `fileName`; a missing key means the agent does not listen. */
+    agents: z
+      .record(codexAgentFileNameSchema, dingtalkAgentDispatchSchema)
+      .refine((agents) => Object.keys(agents).length <= DINGTALK_DISPATCH_MAX_AGENTS, {
+        message: "Too many agents",
+      }),
   })
   .strict();
 
 export type DingTalkDispatchSettings = z.infer<typeof dingtalkDispatchSettingsSchema>;
 
-export const DEFAULT_DINGTALK_DISPATCH_SETTINGS: Omit<
-  DingTalkDispatchSettings,
-  "participatingAgents"
-> = {
-  enabled: false,
-  eventTypes: [...DINGTALK_EVENT_TYPES],
-  matchThreshold: DEFAULT_DINGTALK_MATCH_THRESHOLD,
-  replyScope: "group",
+export const DEFAULT_DINGTALK_DISPATCH_SETTINGS: DingTalkDispatchSettings = {
+  threshold: DEFAULT_DINGTALK_MATCH_THRESHOLD,
+  agents: {},
 };
 
-export const dingtalkDispatchEmptyParamsSchema = z.object({}).strict();
-
-export function defaultDingTalkDispatchSettings(
-  participatingAgents: readonly string[],
-): DingTalkDispatchSettings {
+/** A newly configured agent listens to every event type and replies in the group. */
+export function defaultDingTalkAgentDispatch(): DingTalkAgentDispatch {
   return {
-    ...DEFAULT_DINGTALK_DISPATCH_SETTINGS,
+    enabled: false,
     eventTypes: [...DINGTALK_EVENT_TYPES],
-    participatingAgents: [...new Set(participatingAgents.filter(isCodexAgentName))].slice(0, 512),
+    replyScope: "group",
   };
 }
+
+export function defaultDingTalkDispatchSettings(): DingTalkDispatchSettings {
+  return { threshold: DEFAULT_DINGTALK_MATCH_THRESHOLD, agents: {} };
+}
+
+export function dingtalkAgentDispatchFor(
+  settings: DingTalkDispatchSettings,
+  fileName: string,
+): DingTalkAgentDispatch {
+  return settings.agents[fileName] ?? defaultDingTalkAgentDispatch();
+}
+
+export interface DingTalkDispatchTarget {
+  fileName: string;
+  replyScope: DingTalkReplyScope;
+}
+
+/**
+ * Agents that listen to one event type. A dispatcher must use this instead of
+ * a global switch: event types and reply scope are per agent.
+ */
+export function dingtalkDispatchTargets(
+  settings: DingTalkDispatchSettings,
+  eventType: DingTalkEventType,
+): DingTalkDispatchTarget[] {
+  return Object.entries(settings.agents)
+    .filter(([, agent]) => agent.enabled && agent.eventTypes.includes(eventType))
+    .map(([fileName, agent]) => ({ fileName, replyScope: agent.replyScope }))
+    .sort((left, right) => left.fileName.localeCompare(right.fileName));
+}
+
+export const dingtalkDispatchEmptyParamsSchema = z.object({}).strict();

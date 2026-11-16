@@ -46,11 +46,12 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 ## 机器管理
 
-设置页「Jarvis」列出本地 Host 和 Desktop 已配置的 SSH 连接：
+设置页「Jarvis」只列标题，不加页面或区块副标题：一栏是可选的 Gemini API Key，一栏是已安装的机器。机器列表包含本地 Host 和 Desktop 已配置的 SSH 连接，由顶部唯一的「刷新」按钮整批更新，每行不再单独提供刷新：
 
 - **安装**：目标 Host 先通过公开 release API 自动下载。3 秒探测低于约 128 KB/s 时返回 `relay-required`；本地 Host 下载并校验后，由 Renderer 以 512 KB 分片经 Host RPC 推送到目标，目标完成 SHA256/大小校验后原子替换 `~/.local/bin/jarvis` 并运行 `version --json`。
 - **登录**：目标 Host 运行 `jarvis login --no-browser` 并返回授权 URL。本地目标直接打开浏览器；远程目标由本地 Host 用 `peers.json` 的 SSH 别名建立 `127.0.0.1:<port>` 本地转发（优先复用原端口，否则改写回调端口），Renderer 轮询目标 Host 的 `auth status` 直到成功，然后关闭转发。
 - 未安装或未登录的 Host 不返回搜索结果；`@` 入口仍可打开，模式内显示「Jarvis 未安装或未登录」一类提示。
+- 机器行的平台字段转成用户能读的名字（例如 `darwin-arm64` 显示为「macOS（Apple 芯片）」）。Gemini 判定阈值仍保存在设置里，默认 0.5，但设置页不再提供输入控件。
 
 ## 边界
 

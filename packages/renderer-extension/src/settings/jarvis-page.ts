@@ -28,6 +28,15 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Turns release platform ids into words a person can read. */
+function platformLabel(platform: string): string {
+  if (platform === "darwin-arm64") return "macOS（Apple 芯片）";
+  if (platform.startsWith("darwin")) return "macOS";
+  if (platform.startsWith("linux")) return "Linux";
+  if (platform.startsWith("win32") || platform.startsWith("windows")) return "Windows";
+  return platform;
+}
+
 export function createJarvisSettingsPage(
   messages: RendererSettingsMessages,
   options: RendererJarvisSettingsOptions,
@@ -43,15 +52,13 @@ export function createJarvisSettingsPage(
       const heading = document.createElement("div");
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.jarvis;
-      const description = document.createElement("p");
-      description.className = "settings-page-description";
-      description.textContent = text.description;
-      context.content.append(heading, description);
+      context.content.append(heading);
 
-      const geminiSection = section(document, text.geminiSection, text.geminiDescription);
+      const geminiSection = section(document, text.geminiSection);
       const keyStatus = document.createElement("p");
       keyStatus.className = "settings-jarvis-status";
       keyStatus.setAttribute("role", "status");
+      keyStatus.hidden = true;
       const keyInput = document.createElement("input");
       keyInput.type = "password";
       keyInput.className = "settings-jarvis-input";
@@ -65,34 +72,16 @@ export function createJarvisSettingsPage(
       keyActions.append(keyInput, saveKey, clearKey, testKey);
       geminiSection.body.append(keyActions, keyStatus);
 
-      const thresholdSection = section(document, text.thresholdSection, text.thresholdDescription);
-      const thresholdInput = document.createElement("input");
-      thresholdInput.type = "number";
-      thresholdInput.min = "0";
-      thresholdInput.max = "1";
-      thresholdInput.step = "0.05";
-      thresholdInput.className = "settings-jarvis-input settings-jarvis-input--short";
-      const saveThreshold = button(document, text.thresholdSave);
-      const thresholdActions = document.createElement("div");
-      thresholdActions.className = "settings-jarvis-actions";
-      thresholdActions.append(thresholdInput, saveThreshold);
-      const thresholdStatus = document.createElement("p");
-      thresholdStatus.className = "settings-jarvis-status";
-      thresholdStatus.setAttribute("role", "status");
-      thresholdSection.body.append(thresholdActions, thresholdStatus);
-
-      const machinesSection = section(document, text.machinesSection, text.machinesDescription);
-      const machineToolbar = document.createElement("div");
-      machineToolbar.className = "settings-jarvis-actions";
+      const machinesSection = section(document, text.machinesSection);
       const refreshMachines = button(document, text.refresh, "secondary");
-      machineToolbar.append(refreshMachines);
+      machinesSection.header.append(refreshMachines);
       const machineList = document.createElement("div");
       machineList.className = "settings-jarvis-machines";
       const machineStatus = document.createElement("p");
       machineStatus.className = "settings-jarvis-status";
       machineStatus.setAttribute("role", "status");
-      machinesSection.body.append(machineToolbar, machineList, machineStatus);
-      context.content.append(geminiSection.root, thresholdSection.root, machinesSection.root);
+      machinesSection.body.append(machineList, machineStatus);
+      context.content.append(geminiSection.root, machinesSection.root);
 
       const rows = new Map<string, MachineRowState>();
       let hasKey = false;
@@ -100,6 +89,7 @@ export function createJarvisSettingsPage(
 
       const setStatus = (element: HTMLElement, value: string, failed = false): void => {
         element.textContent = value;
+        element.hidden = value.length === 0;
         element.classList.toggle("settings-jarvis-status--error", failed);
       };
 
@@ -107,13 +97,11 @@ export function createJarvisSettingsPage(
         keyInput.placeholder = hasKey ? text.geminiKeyConfigured : text.geminiKeyPlaceholder;
         clearKey.hidden = !hasKey;
         testKey.disabled = !hasKey && keyInput.value.trim().length === 0;
-        keyStatus.textContent = hasKey ? text.geminiKeyConfigured : text.geminiKeyMissing;
       };
 
       const loadSettings = async (): Promise<void> => {
         const settings = await client.settings();
         hasKey = settings.hasKey;
-        thresholdInput.value = String(settings.threshold);
         renderKeyState();
       };
 
@@ -141,7 +129,7 @@ export function createJarvisSettingsPage(
           } else if (status?.installed) {
             parts.push(text.installed);
             if (status.version) parts.push(text.cliVersion.replace("{version}", status.version));
-            if (status.platform) parts.push(status.platform);
+            if (status.platform) parts.push(platformLabel(status.platform));
           } else {
             parts.push(text.notInstalled);
           }
@@ -176,10 +164,6 @@ export function createJarvisSettingsPage(
             login.addEventListener("click", () => void loginMachine(row));
             actions.append(login);
           }
-          const refresh = button(document, text.refresh, "secondary");
-          refresh.disabled = row.busy !== null;
-          refresh.addEventListener("click", () => void refreshMachine(row));
-          actions.append(refresh);
           item.append(main, notice, actions);
           machineList.append(item);
         }
@@ -322,7 +306,7 @@ export function createJarvisSettingsPage(
             hasKey = result.hasKey;
             keyInput.value = "";
             renderKeyState();
-            setStatus(keyStatus, text.geminiKeyMissing);
+            setStatus(keyStatus, text.geminiCleared);
           })
           .catch((error: unknown) => {
             setStatus(
@@ -374,33 +358,6 @@ export function createJarvisSettingsPage(
             testKey.disabled = false;
           });
       });
-      saveThreshold.addEventListener("click", () => {
-        const value = Number(thresholdInput.value);
-        if (!Number.isFinite(value) || value < 0 || value > 1) {
-          setStatus(thresholdStatus, text.thresholdInvalid, true);
-          return;
-        }
-        saveThreshold.disabled = true;
-        void client
-          .updateSettings({ threshold: value })
-          .then((result) => {
-            thresholdInput.value = String(result.threshold);
-            setStatus(thresholdStatus, text.geminiSaved);
-          })
-          .catch((error: unknown) => {
-            setStatus(
-              thresholdStatus,
-              text.actionFailed.replace(
-                "{reason}",
-                jarvisErrorText(errorText(error), messages.locale),
-              ),
-              true,
-            );
-          })
-          .finally(() => {
-            saveThreshold.disabled = false;
-          });
-      });
       refreshMachines.addEventListener("click", () => {
         refreshMachines.disabled = true;
         void loadMachines().finally(() => {
@@ -446,20 +403,19 @@ function errorText(error: unknown): string {
 function section(
   document: Document,
   title: string,
-  description: string,
-): { root: HTMLElement; body: HTMLElement } {
+): { root: HTMLElement; header: HTMLElement; body: HTMLElement } {
   const root = document.createElement("section");
   root.className = "settings-jarvis-section";
+  const header = document.createElement("div");
+  header.className = "settings-jarvis-header";
   const label = document.createElement("div");
   label.className = "settings-section-label";
   label.textContent = title;
-  const copy = document.createElement("p");
-  copy.className = "settings-page-description";
-  copy.textContent = description;
+  header.append(label);
   const body = document.createElement("div");
   body.className = "settings-jarvis-body";
-  root.append(label, copy, body);
-  return { root, body };
+  root.append(header, body);
+  return { root, header, body };
 }
 
 function button(

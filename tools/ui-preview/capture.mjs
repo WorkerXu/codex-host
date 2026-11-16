@@ -29,9 +29,14 @@ const allScenarios = [
   "agents-cards",
   "agents-cards-narrow",
   "agents-empty",
+  "agents-menu",
+  "agents-delete-confirm",
   "agents-edit",
-  "agents-dingtalk-settings",
-  "agents-dingtalk-disabled",
+  "agents-edit-dingtalk-on",
+  "agents-edit-dingtalk-off",
+  "agents-name-error",
+  "agents-dingtalk-threshold",
+  "jarvis-settings",
   "group-plus-menu",
   "group-add-machine",
   "project-group-empty-machine",
@@ -472,6 +477,23 @@ for (const scenario of scenarios) {
           queryAll(".agent-card-tag").some((tag) => tag.textContent?.includes("默认模型")),
         );
         check("card-no-status-dot", !query(".agent-card-status-dot"));
+        const longCard = queryAll(".agent-card[data-agent-name]").find((card) =>
+          card.dataset.agentName?.startsWith("发布与线上"),
+        );
+        const longName = longCard?.querySelector(".agent-card-name");
+        check("long-name-card", Boolean(longCard));
+        check(
+          "long-name-ellipsis",
+          Boolean(longName) &&
+            getComputedStyle(longName).textOverflow === "ellipsis" &&
+            longName.scrollWidth > longName.clientWidth,
+          longName ? `${longName.scrollWidth}/${longName.clientWidth}` : "missing",
+        );
+        check(
+          "long-name-tooltip",
+          Boolean(longName) && longName.title === longCard?.dataset.agentName,
+          longName?.title ?? "",
+        );
         if (document.body.dataset.scenario === "agents-cards") {
           const tools = query(".agent-card-tools");
           check(
@@ -495,6 +517,52 @@ for (const scenario of scenarios) {
           ),
         );
       }
+      if (document.body.dataset.scenario === "agents-menu") {
+        const menu = query(".agent-menu");
+        const rect = menu?.getBoundingClientRect();
+        const anchor = query(
+          '.agent-card[data-agent-name="writer"] .agent-card-menu',
+        )?.getBoundingClientRect();
+        check(
+          "menu-anchored-under-button",
+          Boolean(rect && anchor) && rect.top >= anchor.bottom - 1 && rect.left < anchor.right,
+          rect && anchor ? `${Math.round(rect.top)}/${Math.round(anchor.bottom)}` : "missing",
+        );
+        check("menu-three-items", queryAll(".agent-menu-item").length === 3);
+        const items = queryAll(".agent-menu-item");
+        check(
+          "menu-row-height",
+          items.every((item) => {
+            const height = item.getBoundingClientRect().height;
+            return height >= 28 && height <= 32;
+          }),
+          items.map((item) => Math.round(item.getBoundingClientRect().height)).join(","),
+        );
+        const danger = query(".agent-menu-item--danger");
+        check(
+          "menu-danger-color",
+          Boolean(danger) && getComputedStyle(danger).color !== getComputedStyle(items[0]).color,
+          danger ? getComputedStyle(danger).color : "missing",
+        );
+        check(
+          "menu-surface",
+          Boolean(menu) && getComputedStyle(menu).boxShadow !== "none",
+          menu ? getComputedStyle(menu).boxShadow : "missing",
+        );
+      }
+      if (document.body.dataset.scenario === "agents-delete-confirm") {
+        const dialog = query(".agent-confirm[open]");
+        check("delete-dialog-open", Boolean(dialog));
+        check(
+          "delete-dialog-copy",
+          Boolean(dialog?.textContent?.includes("确定删除智能体「writer」吗")),
+          dialog?.textContent ?? "",
+        );
+        check(
+          "delete-dialog-buttons",
+          Boolean(dialog?.textContent?.includes("取消") && dialog?.textContent?.includes("删除")),
+        );
+      }
       if (document.body.dataset.scenario === "agents-edit") {
         const editor = query(".agent-editor");
         check("editor-open", Boolean(editor) && !editor.hidden);
@@ -505,26 +573,67 @@ for (const scenario of scenarios) {
           Boolean(query(".agent-character-count")?.textContent?.includes("字")),
         );
       }
+      if (document.body.dataset.scenario === "agents-name-error") {
+        const error = query('.agent-field-error[data-field="name"]');
+        const input = query(".agent-editor .agent-field input");
+        const inputRect = input?.getBoundingClientRect();
+        const errorRect = error?.getBoundingClientRect();
+        check(
+          "name-error-under-input",
+          Boolean(error && !error.hidden && errorRect && inputRect) &&
+            errorRect.top >= inputRect.bottom - 1,
+          error ? error.textContent : "missing",
+        );
+        check("name-error-copy", Boolean(error?.textContent?.includes("请填写名称")));
+        check("name-error-not-at-form-bottom", Boolean(query(".agent-editor-error")?.hidden));
+      }
       if (
-        document.body.dataset.scenario === "agents-dingtalk-settings" ||
-        document.body.dataset.scenario === "agents-dingtalk-disabled"
+        document.body.dataset.scenario === "agents-edit-dingtalk-on" ||
+        document.body.dataset.scenario === "agents-edit-dingtalk-off"
       ) {
+        const on = document.body.dataset.scenario === "agents-edit-dingtalk-on";
+        const toggle = query(".agent-dingtalk-switch input");
+        check("agent-dingtalk-switch", Boolean(toggle) && toggle.checked === on);
+        check(
+          "agent-dingtalk-body-state",
+          query(".agent-dingtalk-body")?.getAttribute("data-disabled") === String(!on),
+        );
+        check(
+          "agent-dingtalk-events",
+          queryAll(".agent-dingtalk-body input[type=checkbox]").length === 3,
+        );
+        check("agent-dingtalk-no-tag-list", !query(".agent-dingtalk-body .dingtalk-agent-list"));
+      }
+      if (document.body.dataset.scenario === "agents-dingtalk-threshold") {
         check("listener-section", Boolean(query(".dingtalk-listener")));
-        check("listener-events", queryAll(".dingtalk-listener-events input").length === 3);
+        check("listener-only-threshold", Boolean(query(".dingtalk-listener .dingtalk-threshold")));
+        check(
+          "listener-no-global-switch",
+          !query(".dingtalk-listener > .dingtalk-listener-card .dingtalk-switch"),
+        );
+        check("listener-no-agent-list", !query(".dingtalk-listener .dingtalk-agent-list"));
+        check("listener-no-reply-control", !query(".dingtalk-listener .dingtalk-segmented"));
         check(
           "approval-copy",
-          Boolean(
-            query(".dingtalk-listener-note")?.textContent?.includes("审批：智能体按你的配置处理"),
-          ),
+          Boolean(query(".dingtalk-listener-note")?.textContent?.includes("审批由你决定")),
         );
-      }
-      if (document.body.dataset.scenario === "agents-dingtalk-disabled") {
-        check("listener-disabled", Boolean(query('.dingtalk-listener-body[data-disabled="true"]')));
+        const note = query(".dingtalk-listener-note");
+        const field = query(".dingtalk-listener-field");
+        const card = query(".dingtalk-listener-card");
+        const noteRect = note?.getBoundingClientRect();
+        const fieldRect = field?.getBoundingClientRect();
+        const cardRect = card?.getBoundingClientRect();
         check(
-          "bulk-links-disabled",
-          queryAll(".dingtalk-field-actions .dingtalk-text-button").every(
-            (button) => button.disabled,
-          ),
+          "note-left-aligned",
+          Boolean(noteRect && fieldRect && Math.abs(noteRect.left - fieldRect.left) <= 1),
+          noteRect && fieldRect ? `${noteRect.left}/${fieldRect.left}` : "missing",
+        );
+        check(
+          "note-bottom-padding",
+          Boolean(noteRect && cardRect) &&
+            cardRect.bottom - noteRect.bottom >= 8 &&
+            cardRect.bottom - noteRect.bottom <= 24,
+          noteRect && cardRect ? `${Math.round(cardRect.bottom - noteRect.bottom)}px` : "missing",
         );
       }
       if (document.body.dataset.scenario === "group-plus-menu") {
@@ -626,6 +735,46 @@ for (const scenario of scenarios) {
               item.getAttribute("data-list-navigation-item") === "true" &&
               Boolean(item.querySelector("[data-menu-row-content]")),
           ),
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-settings") {
+        const machineRows = queryAll(".settings-jarvis-row");
+        check("jarvis-machine-rows", machineRows.length === 5, `${machineRows.length} rows`);
+        check("jarvis-no-page-subtitle", !query(".settings-page-description"));
+        check(
+          "jarvis-no-section-subtitle",
+          queryAll(".settings-jarvis-section .settings-page-description").length === 0,
+        );
+        const machinesSection = queryAll(".settings-jarvis-section").find((section) =>
+          section.textContent?.includes("已安装的机器"),
+        );
+        check("jarvis-machines-title", Boolean(machinesSection));
+        const machinesTitle = machinesSection?.querySelector(".settings-section-label");
+        const refreshButton = machinesSection?.querySelector(".settings-jarvis-header button");
+        const titleRect = machinesTitle?.getBoundingClientRect();
+        const refreshRect = refreshButton?.getBoundingClientRect();
+        check(
+          "jarvis-refresh-in-title-row",
+          Boolean(titleRect && refreshRect) &&
+            Math.abs(
+              (titleRect.top + titleRect.bottom) / 2 - (refreshRect.top + refreshRect.bottom) / 2,
+            ) <= 8 &&
+            refreshRect.left > titleRect.right,
+        );
+        check(
+          "jarvis-no-threshold-control",
+          !query(".settings-jarvis-section")?.textContent?.includes("条件识别阈值"),
+        );
+        check(
+          "jarvis-single-refresh",
+          queryAll(".settings-jarvis-row .settings-command-button").every(
+            (button) => button.textContent !== "刷新",
+          ),
+        );
+        check(
+          "jarvis-key-status-quiet",
+          !query(".settings-jarvis-status")?.textContent?.includes("已保存 API Key"),
+          query(".settings-jarvis-status")?.textContent ?? "",
         );
       }
       if (document.body.dataset.scenario === "jarvis-entry") {

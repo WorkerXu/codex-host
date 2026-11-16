@@ -418,7 +418,7 @@ export const agents: CodexAgentRecord[] = [
   },
   {
     fileName: "ops-runner.toml",
-    name: "ops-runner",
+    name: "发布与线上问题处理助手（华东区，夜间值守）",
     description:
       "接手发布检查、日志核对和线上问题复现；会先收集证据、标明影响范围，再给出可回滚的处理建议，避免在没有确认的情况下执行破坏性操作。",
     model: null,
@@ -467,11 +467,19 @@ export const agentCatalog: CodexAgentCatalogResult = {
 };
 
 export const dispatchSettings: DingTalkDispatchSettings = {
-  enabled: true,
-  eventTypes: ["mention_me", "mention_all"],
-  matchThreshold: 0.85,
-  replyScope: "group",
-  participatingAgents: ["reviewer", "writer"],
+  threshold: 0.85,
+  agents: {
+    "reviewer.toml": {
+      enabled: true,
+      eventTypes: ["mention_me", "mention_all"],
+      replyScope: "group",
+    },
+    "writer.toml": {
+      enabled: true,
+      eventTypes: ["mention_me", "approval_pending"],
+      replyScope: "direct",
+    },
+  },
 };
 
 export const projectGroupView: ProjectGroupView = {

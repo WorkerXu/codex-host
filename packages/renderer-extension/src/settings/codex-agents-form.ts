@@ -3,11 +3,15 @@ import {
   CODEX_AGENT_EFFORT_MAX_LENGTH,
   CODEX_AGENT_INSTRUCTIONS_MAX_LENGTH,
   CODEX_AGENT_MODEL_MAX_LENGTH,
+  defaultDingTalkAgentDispatch,
+  dingtalkAgentDispatchFor,
   isCodexAgentName,
   type CodexAgentCatalogResult,
   type CodexAgentModelEffort,
   type CodexAgentRecord,
   type CodexAgentSaveParams,
+  type DingTalkAgentDispatch,
+  type DingTalkDispatchSettings,
 } from "@codexhost/shared-contracts";
 
 export interface CodexAgentDraft {
@@ -27,7 +31,6 @@ export type CodexAgentDraftField =
 
 export type CodexAgentDraftError =
   | "invalid_name"
-  | "name_taken"
   | "description_required"
   | "instructions_required"
   | "too_long"
@@ -37,11 +40,6 @@ export type CodexAgentDraftError =
 export interface CodexAgentDraftProblem {
   field: CodexAgentDraftField;
   error: CodexAgentDraftError;
-}
-
-export interface ExistingAgentIdentity {
-  name: string;
-  fileName: string;
 }
 
 export function emptyAgentDraft(): CodexAgentDraft {
@@ -68,33 +66,13 @@ export function agentDraftFromRecord(record: CodexAgentRecord): CodexAgentDraft 
   };
 }
 
-/** A duplicate always creates a new file so the original stays untouched. */
-export function duplicateAgentDraft(
-  record: CodexAgentRecord,
-  existing: readonly ExistingAgentIdentity[],
-): CodexAgentDraft {
+/** A duplicate keeps the name and creates a new file, so the original stays untouched. */
+export function duplicateAgentDraft(record: CodexAgentRecord): CodexAgentDraft {
   return {
     ...agentDraftFromRecord(record),
     fileName: null,
     expectedRevision: null,
-    name: nextDuplicateName(record.name, existing),
   };
-}
-
-export function nextDuplicateName(
-  name: string,
-  existing: readonly ExistingAgentIdentity[],
-): string {
-  const taken = new Set(existing.map((agent) => agent.name));
-  const base = `${name}-copy`.slice(0, 64).replace(/-+$/u, "");
-  let candidate = base;
-  let suffix = 2;
-  while (taken.has(candidate)) {
-    const tail = `-${suffix}`;
-    candidate = `${base.slice(0, 64 - tail.length)}${tail}`;
-    suffix += 1;
-  }
-  return candidate;
 }
 
 export function effortOptionsForModel(
@@ -106,19 +84,8 @@ export function effortOptionsForModel(
   return catalog.models.find((entry) => entry.model === trimmed)?.efforts ?? [];
 }
 
-export function validateAgentDraft(
-  draft: CodexAgentDraft,
-  existing: readonly ExistingAgentIdentity[],
-): CodexAgentDraftProblem | null {
-  const name = draft.name.trim();
-  if (!isCodexAgentName(name)) return { field: "name", error: "invalid_name" };
-  const others = existing.filter((agent) => agent.fileName !== draft.fileName);
-  if (others.some((agent) => agent.name === name)) {
-    return { field: "name", error: "name_taken" };
-  }
-  if (draft.fileName === null && others.some((agent) => agent.fileName === `${name}.toml`)) {
-    return { field: "name", error: "name_taken" };
-  }
+export function validateAgentDraft(draft: CodexAgentDraft): CodexAgentDraftProblem | null {
+  if (!isCodexAgentName(draft.name)) return { field: "name", error: "invalid_name" };
   if (!draft.description.trim()) {
     return { field: "description", error: "description_required" };
   }
@@ -144,6 +111,35 @@ export function validateAgentDraft(
 export function parseDingTalkMatchThreshold(raw: string): number | null {
   const value = raw.trim() ? Number(raw) : Number.NaN;
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+/** The editor starts from the saved choice, or from every type and group replies. */
+export function agentDingTalkDraft(
+  settings: DingTalkDispatchSettings,
+  fileName: string | null,
+): DingTalkAgentDispatch {
+  return fileName === null
+    ? defaultDingTalkAgentDispatch()
+    : dingtalkAgentDispatchFor(settings, fileName);
+}
+
+/**
+ * Applies one agent's DingTalk choice without touching other agents or the
+ * threshold. A brand-new agent that is left off keeps no entry at all.
+ */
+export function withAgentDingTalk(
+  settings: DingTalkDispatchSettings,
+  fileName: string,
+  draft: DingTalkAgentDispatch,
+): DingTalkDispatchSettings {
+  if (!draft.enabled && !(fileName in settings.agents)) return settings;
+  return {
+    ...settings,
+    agents: {
+      ...settings.agents,
+      [fileName]: { ...draft, eventTypes: [...draft.eventTypes] },
+    },
+  };
 }
 
 export function agentSaveParamsFromDraft(draft: CodexAgentDraft): CodexAgentSaveParams {
