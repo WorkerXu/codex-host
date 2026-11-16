@@ -73,6 +73,26 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
   let loading = false;
   let pickerGeneration = 0;
   let lastRange: { start: number; end: number; query: string } | null = null;
+  const measureCanvas = document.createElement("canvas");
+
+  const positionPicker = (caret: number): void => {
+    const context = measureCanvas.getContext("2d");
+    if (!context) return;
+    const style = document.defaultView?.getComputedStyle(input);
+    if (!style) return;
+    context.font =
+      style.font || `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const lineStart = input.value.lastIndexOf("\n", Math.max(0, caret - 1)) + 1;
+    const textWidth = context.measureText(input.value.slice(lineStart, caret)).width;
+    const areaWidth = area.clientWidth;
+    const caretLeft =
+      input.offsetLeft +
+      (Number.parseFloat(style.paddingLeft) || 0) +
+      (Number.parseFloat(style.borderLeftWidth) || 0) +
+      textWidth;
+    const maxLeft = Math.max(8, areaWidth - 288);
+    picker.element.style.left = `${Math.round(Math.max(8, Math.min(caretLeft, maxLeft)))}px`;
+  };
 
   const updateSend = (): void => {
     send.disabled = input.value.trim().length === 0 && selected.length === 0 && !atAll;
@@ -171,6 +191,7 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
       picker.close();
       return;
     }
+    positionPicker(range.end);
     if (members !== null) {
       picker.render(range.query, "ready", members);
       return;
