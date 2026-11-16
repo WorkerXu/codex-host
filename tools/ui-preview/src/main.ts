@@ -430,7 +430,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-status-connected"() {
     const { query } = mountSettings("dingtalk", false, false, "connected");
     await waitFor(() => query(".dingtalk-conversation"));
-    await waitFor(() => query(".dingtalk-menu-status-text")?.textContent?.includes("示例用户"));
+    await waitFor(() => query(".dingtalk-menu-status-text")?.textContent?.includes("林舟"));
     await openPageMenu(query);
   },
 
@@ -624,6 +624,26 @@ const scenarios: Record<string, () => Promise<void>> = {
     if (!body) throw new Error("Editor body is missing");
     body.scrollTop = body.scrollHeight;
     await delay(180);
+  },
+
+  async "agents-name-error"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-card-tag--dispatch"));
+    const card = await waitFor(() => query<HTMLElement>(".agent-card--new"));
+    card.click();
+    await waitFor(() => query(".agent-editor:not([hidden])"));
+    const description = query<HTMLTextAreaElement>(".agent-editor textarea");
+    const instructions = query<HTMLTextAreaElement>(".agent-instructions");
+    if (!description || !instructions) throw new Error("Agent fields are missing");
+    description.value = "测试描述";
+    description.dispatchEvent(new Event("input", { bubbles: true }));
+    instructions.value = "测试指令";
+    instructions.dispatchEvent(new Event("input", { bubbles: true }));
+    const form = query<HTMLFormElement>(".agent-editor form");
+    if (!form) throw new Error("Agent form is missing");
+    form.requestSubmit();
+    await waitFor(() => query('.agent-field-error[data-field="name"]:not([hidden])'));
+    await delay(150);
   },
 
   async "agents-dingtalk-threshold"() {

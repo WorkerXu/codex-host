@@ -103,9 +103,9 @@ export function createFakeDingTalkClient(
       return {
         installed: true,
         authenticated: true,
-        userName: "示例用户",
+        userName: "林舟",
         userId: "user-preview",
-        corpName: "示例科技有限公司",
+        corpName: "示例科技（上海）有限公司",
         defaultHost: "tencent",
         defaultHostId: "host-tencent",
         errorCode: null,
@@ -286,7 +286,7 @@ export function createFakeCodexAgentsClient(
     },
     async save(input: CodexAgentSaveParams) {
       await sleep(120);
-      const fileName = input.fileName ?? `${input.name}.toml`;
+      const fileName = input.fileName ?? generateAgentFileName(records);
       const record: CodexAgentRecord = {
         fileName,
         name: input.name,
@@ -322,6 +322,14 @@ export function createFakeCodexAgentsClient(
   };
 }
 
+function generateAgentFileName(records: readonly CodexAgentRecord[]): string {
+  for (;;) {
+    const token = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+    const fileName = `agent-${token}.toml`;
+    if (!records.some((record) => record.fileName === fileName)) return fileName;
+  }
+}
+
 function cloneDispatch(settings: DingTalkDispatchSettings): DingTalkDispatchSettings {
   return {
     threshold: settings.threshold,
@@ -348,7 +356,7 @@ export function createFakeJarvisClient(): RendererJarvisClient {
     version: "0.20.1",
     platform: "darwin-arm64",
     authenticated: true,
-    userName: "示例用户",
+    userName: "林舟",
     userId: 1,
     errorCode: null,
   };

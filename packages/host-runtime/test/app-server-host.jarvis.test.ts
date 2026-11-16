@@ -19,7 +19,7 @@ function fakeService(overrides: Partial<Record<keyof JarvisService, unknown>> = 
       version: "0.20.1",
       platform: "linux-arm64",
       authenticated: true,
-      userName: "示例用户",
+      userName: "林舟",
       userId: 10058,
       errorCode: null,
     })),

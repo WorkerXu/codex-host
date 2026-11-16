@@ -35,6 +35,7 @@ const allScenarios = [
   "agents-edit",
   "agents-edit-dingtalk-on",
   "agents-edit-dingtalk-off",
+  "agents-name-error",
   "agents-dingtalk-threshold",
   "jarvis-settings",
   "group-plus-menu",
@@ -203,7 +204,7 @@ for (const scenario of scenarios) {
         if (document.body.dataset.scenario === "dingtalk-status-connected") {
           check(
             "status-connected",
-            text.includes("已连接") && text.includes("示例用户") && text.includes("示例科技"),
+            text.includes("已连接") && text.includes("林舟") && text.includes("示例科技"),
             text,
           );
           check("status-retry-hidden", Boolean(retry?.hidden));
@@ -420,6 +421,23 @@ for (const scenario of scenarios) {
           queryAll(".agent-card-tag").some((tag) => tag.textContent?.includes("默认模型")),
         );
         check("card-no-status-dot", !query(".agent-card-status-dot"));
+        const longCard = queryAll(".agent-card[data-agent-name]").find((card) =>
+          card.dataset.agentName?.startsWith("发布与线上"),
+        );
+        const longName = longCard?.querySelector(".agent-card-name");
+        check("long-name-card", Boolean(longCard));
+        check(
+          "long-name-ellipsis",
+          Boolean(longName) &&
+            getComputedStyle(longName).textOverflow === "ellipsis" &&
+            longName.scrollWidth > longName.clientWidth,
+          longName ? `${longName.scrollWidth}/${longName.clientWidth}` : "missing",
+        );
+        check(
+          "long-name-tooltip",
+          Boolean(longName) && longName.title === longCard?.dataset.agentName,
+          longName?.title ?? "",
+        );
         if (document.body.dataset.scenario === "agents-cards") {
           const tools = query(".agent-card-tools");
           check(
@@ -499,6 +517,20 @@ for (const scenario of scenarios) {
           Boolean(query(".agent-character-count")?.textContent?.includes("字")),
         );
       }
+      if (document.body.dataset.scenario === "agents-name-error") {
+        const error = query('.agent-field-error[data-field="name"]');
+        const input = query(".agent-editor .agent-field input");
+        const inputRect = input?.getBoundingClientRect();
+        const errorRect = error?.getBoundingClientRect();
+        check(
+          "name-error-under-input",
+          Boolean(error && !error.hidden && errorRect && inputRect) &&
+            errorRect.top >= inputRect.bottom - 1,
+          error ? error.textContent : "missing",
+        );
+        check("name-error-copy", Boolean(error?.textContent?.includes("请填写名称")));
+        check("name-error-not-at-form-bottom", Boolean(query(".agent-editor-error")?.hidden));
+      }
       if (
         document.body.dataset.scenario === "agents-edit-dingtalk-on" ||
         document.body.dataset.scenario === "agents-edit-dingtalk-off"
@@ -528,6 +560,24 @@ for (const scenario of scenarios) {
         check(
           "approval-copy",
           Boolean(query(".dingtalk-listener-note")?.textContent?.includes("审批由你决定")),
+        );
+        const note = query(".dingtalk-listener-note");
+        const field = query(".dingtalk-listener-field");
+        const card = query(".dingtalk-listener-card");
+        const noteRect = note?.getBoundingClientRect();
+        const fieldRect = field?.getBoundingClientRect();
+        const cardRect = card?.getBoundingClientRect();
+        check(
+          "note-left-aligned",
+          Boolean(noteRect && fieldRect && Math.abs(noteRect.left - fieldRect.left) <= 1),
+          noteRect && fieldRect ? `${noteRect.left}/${fieldRect.left}` : "missing",
+        );
+        check(
+          "note-bottom-padding",
+          Boolean(noteRect && cardRect) &&
+            cardRect.bottom - noteRect.bottom >= 8 &&
+            cardRect.bottom - noteRect.bottom <= 24,
+          noteRect && cardRect ? `${Math.round(cardRect.bottom - noteRect.bottom)}px` : "missing",
         );
       }
       if (document.body.dataset.scenario === "group-plus-menu") {
@@ -581,11 +631,21 @@ for (const scenario of scenarios) {
           "jarvis-no-section-subtitle",
           queryAll(".settings-jarvis-section .settings-page-description").length === 0,
         );
+        const machinesSection = queryAll(".settings-jarvis-section").find((section) =>
+          section.textContent?.includes("已安装的机器"),
+        );
+        check("jarvis-machines-title", Boolean(machinesSection));
+        const machinesTitle = machinesSection?.querySelector(".settings-section-label");
+        const refreshButton = machinesSection?.querySelector(".settings-jarvis-header button");
+        const titleRect = machinesTitle?.getBoundingClientRect();
+        const refreshRect = refreshButton?.getBoundingClientRect();
         check(
-          "jarvis-machines-title",
-          queryAll(".settings-jarvis-section").some((section) =>
-            section.textContent?.includes("已安装的机器"),
-          ),
+          "jarvis-refresh-in-title-row",
+          Boolean(titleRect && refreshRect) &&
+            Math.abs(
+              (titleRect.top + titleRect.bottom) / 2 - (refreshRect.top + refreshRect.bottom) / 2,
+            ) <= 8 &&
+            refreshRect.left > titleRect.right,
         );
         check(
           "jarvis-no-threshold-control",
