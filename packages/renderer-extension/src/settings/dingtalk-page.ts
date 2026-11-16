@@ -484,7 +484,27 @@ export function createDingTalkSettingsPage(
 
       const selectConversation = async (conversationId: string, force = false): Promise<void> => {
         if (!client) return;
-        if (!force && state.selectedId === conversationId && state.messages.length > 0) return;
+        if (!force && state.selectedId === conversationId && state.messages.length > 0) {
+          // Auto-selection and a later click can race; the row is already open,
+          // but a stale badge must still be cleared through the same route.
+          const existing = conversationFor(conversationId);
+          if (existing && (existing.unreadCount > 0 || existing.atMe === true)) {
+            const cleared = { ...existing, unreadCount: 0, atMe: false };
+            state.currentConversation = cleared;
+            state.conversations = state.conversations.map((row) =>
+              row.conversationId === conversationId ? cleared : row,
+            );
+            updateHeader();
+            renderList();
+            void client.markViewed(
+              conversationId,
+              existing.lastMessageAt ?? state.messages.at(-1)?.createdAt ?? 0,
+              true,
+            );
+          }
+          renderList();
+          return;
+        }
         if (state.selectedId && state.selectedId !== conversationId) {
           const previous = conversationFor(state.selectedId);
           void client.markViewed(
@@ -499,7 +519,7 @@ export function createDingTalkSettingsPage(
         // The row must lose its badge before the messages arrive; the Host
         // keeps it in the unread column while this page stays open.
         const opening = state.currentConversation;
-        if (opening && opening.unreadCount > 0) {
+        if (opening && (opening.unreadCount > 0 || opening.atMe === true)) {
           const cleared = { ...opening, unreadCount: 0, atMe: false };
           state.currentConversation = cleared;
           state.conversations = state.conversations.map((row) =>
@@ -990,12 +1010,14 @@ export function createDingTalkSettingsPage(
         if (detail) void revealTarget(detail);
       };
       const onPointerDown = (event: PointerEvent): void => {
-        const target = event.target;
-        if (mainHead.menuOpen) {
-          if (!(target instanceof Node) || !mainHead.contains(target)) mainHead.closeMenu();
-        }
+        // Event.target is retargeted to the shadow host for this document-level
+        // listener; composedPath keeps the real menu nodes visible.
+        const path = event.composedPath();
+        const inside = (menu: { contains(node: Node): boolean }): boolean =>
+          path.some((node) => node instanceof Node && menu.contains(node));
+        if (mainHead.menuOpen && !inside(mainHead)) mainHead.closeMenu();
         if (!pageMenu.open) return;
-        if (target instanceof Node && pageMenu.contains(target)) return;
+        if (inside(pageMenu)) return;
         pageMenu.close();
       };
       const onKey = (event: KeyboardEvent): void => {
