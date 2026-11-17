@@ -21,15 +21,14 @@ Codex Composer 的原生 `@` 菜单提供「工作台」分组，里面有一行
 
 ## 搜索流水线
 
-Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis；只有本地未安装、未登录或不可达时才回退到 Composer Thread 所在的 Host。本地 Host 的 Gemini key 与登录状态因此对所有 Thread 生效。
+Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis。Gemini key 使用本地 `~/.config/codexhost/gemini-api-key`，不传给 Renderer 或远程 Host。远程 Host 不读取 key、不执行查询理解，搜索返回 `local_only` 错误。
 
-1. **规则优先**：在 Host 本地解析作用域（我的/指派给我、我创建/我提的、两者）、状态（未解决/已解决/已关闭）、优先级、严重程度、时间词（今天、昨天、本周、上周、最近 N 天）和排序词（最新/最早）。规则能确定的字段不再询问模型。
-2. **Gemini Decisions 只处理规则未覆盖的条件字段**：一次请求里只包含未确定的 `choice` / `noul` 问题。没有 key、超时或低于阈值时保留规则默认值。key 只保存在本地 Host；远程 Host 只用规则，不读取 key。
-3. **按需解析项目**：先抽取「标题/题目/名称 + 有/含/包含/带/是/叫/关于 + 关键词」「关键词在标题里」「标题里有关键词」等标题条件，去掉关键词末尾的「的」「bug」「问题」，再去掉其余条件词。只有剩余文本参与项目解析，字段词和连接词不作为项目候选。剩余短语从长到短处理；先匹配 `project list` 返回的「本人 Bug 关联项目」，并结合 `project list --scope visible --name <短语>` 判断。模糊命中超过 3 个项目且短语不包含完整项目名时，不添加项目条件，原短语保留为标题关键词候选；明确项目名仍支持多个迭代项目。未命中的剩余文本与显式标题关键词共同作为 `bug list --title` 关键词，因此项目与标题条件可同时生效。项目名搜索与 `auth status`、`project list` 并行启动；项目是否命中只由项目列表和项目搜索决定，Gemini 不能把已命中的项目改写成标题关键词。项目搜索结果短暂缓存，搜索过程中不预加载全部项目。
-4. **精确取数**：有项目条件时只查这些项目；没有时并行查询 `project list` 返回的每个项目（并发 8）。作用域为「两者」时分别查询指派给我和我创建的，按 `projectId + bugId` 去重。每页 100 条，最多 200 条；超过上限时在 UI 标注「仅显示前 N 条」。
-5. **本地过滤与排序**：状态、优先级、严重程度、时间窗口在本地再校验；按请求的时间字段排序，默认按 `updateTime` 最新优先。
-6. **可选语义排序**：只有仍留有自由描述文本且结果较多、用户没有指定顺序时，才用既有 score question 重排；重排不删除任何结果。
-7. 解析后的条件与结果一起返回。每个 chip 有稳定的 key，删除 chip 会把该 key 作为 `omit` 传给 Host，Host 按同一查询重新解析并去掉对应条件。
+1. **整句理解**：本地 Host 把完整查询交给 `gemini-3.5-flash-lite`，调用 Gemini API `generateContent`，通过 `responseMimeType=application/json` 和 `responseSchema` 返回固定字段：`scope`、`statuses`、`priorities`、`severities`、`order`、`timeWindow`、`titleKeywords`、`projectNames`、`unrecognized`。空数组表示不限对应条件，时间范围为空时为 `null`。时间区间使用 Unix 毫秒，包含 `since`、不包含 `until`，`field` 区分创建和更新时间。
+2. **上海时区与校验**：请求带上当前时刻、`Asia/Shanghai` 时区、当天日期和今天、昨天、本周、上周、本月的边界，模型据此换算相对时间。“最近的”只表示排序，不自动添加时间范围。返回 JSON 必须通过完整 schema 校验，不接受部分字段或不合法的时间区间。
+3. **失败直接显示错误**：从读取 key 到响应读取、校验共用 3 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，页面显示错误；不执行规则解析、不继续查询 Bug、不回退远程 Host。结果用 `source=gemini` 标记来源。设置页的“测试连接”也验证同一个模型及结构化输出能力。
+4. **按模型点名解析项目**：只有 `projectNames` 参与 `project list --scope visible --name <项目名>` 搜索，并与 `project list` 返回的本人 Bug 关联项目合并去重。项目名不会被缩短成其他搜索词，也不会改作标题关键词；同名迭代项目可以一起命中。用户点名的项目未命中时保留项目条件并返回空结果；没有项目条件时查询本人 Bug 关联项目。项目搜索结果短暂缓存，不预加载全部可见项目。
+5. **精确取数与标题查询**：`titleKeywords` 逐个通过 `bug list --title` 查询，多个关键词按 OR 合并；项目与标题条件可以同时生效。作用域为“两者”时分别查询指派给我和我创建的，最终按 `projectId + bugId` 去重。并发 8，每次 CLI 查询每页 100 条、最多 200 条，最多查询 40 个项目，最多显示 200 条；达到限制时在 UI 标记截断。多个关键词或作用域可能重叠，截断时不把各查询的服务端总数直接相加。
+6. **本地过滤与排序**：状态、优先级、严重程度、标题关键词和时间窗口在本地再校验；Jarvis 无时区的时间戳按上海时间解读。按模型返回的顺序和时间字段排序；无时间字段时最新按更新时间、最早按创建时间。解析后的条件仍使用现有 chip 和稳定 key，删除 chip 会把该 key 作为 `omit` 传给 Host，并去掉对应条件。
 
 ## 引用载体
 
@@ -48,12 +47,12 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 ## 机器管理
 
-设置页「Jarvis」只列标题，不加页面或区块副标题：一栏是可选的 Gemini API Key，一栏是已安装的机器。机器列表包含本地 Host 和 Desktop 已配置的 SSH 连接，由顶部唯一的「刷新」按钮整批更新，每行不再单独提供刷新：
+设置页「Jarvis」只列标题，不加页面或区块副标题：一栏是 Gemini API Key，一栏是已安装的机器。机器列表包含本地 Host 和 Desktop 已配置的 SSH 连接，由顶部唯一的「刷新」按钮整批更新，每行不再单独提供刷新：
 
 - **安装**：目标 Host 先通过公开 release API 自动下载。3 秒探测低于约 128 KB/s 时返回 `relay-required`；本地 Host 下载并校验后，由 Renderer 以 512 KB 分片经 Host RPC 推送到目标，目标完成 SHA256/大小校验后原子替换 `~/.local/bin/jarvis` 并运行 `version --json`。
 - **登录**：目标 Host 运行 `jarvis login --no-browser` 并返回授权 URL。本地目标直接打开浏览器；远程目标由本地 Host 用 `peers.json` 的 SSH 别名建立 `127.0.0.1:<port>` 本地转发（优先复用原端口，否则改写回调端口），Renderer 轮询目标 Host 的 `auth status` 直到成功，然后关闭转发。
 - 未安装或未登录的 Host 不返回搜索结果；`@` 入口仍可打开，模式内显示「Jarvis 未安装或未登录」一类提示。
-- 机器行的平台字段转成用户能读的名字（例如 `darwin-arm64` 显示为「macOS（Apple 芯片）」）。Gemini 判定阈值仍保存在设置里，默认 0.5，但设置页不再提供输入控件。
+- 机器行的平台字段转成用户能读的名字（例如 `darwin-arm64` 显示为「macOS（Apple 芯片）」）。阈值配置保留读写兼容性，默认 0.5；整句结构化理解不使用阈值，设置页不提供阈值输入控件。
 
 ## 边界
 

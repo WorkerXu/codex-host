@@ -25,7 +25,7 @@ import {
 
 import { JarvisBugSearcher } from "./jarvis-bug-search.js";
 import { createJarvisCli, type JarvisCli } from "./jarvis-cli.js";
-import { createJarvisDecisions, type JarvisDecisions } from "./jarvis-decisions.js";
+import { createJarvisGeminiQuery, type JarvisQueryInterpreter } from "./jarvis-gemini-query.js";
 import {
   createJarvisArtifactPath,
   detectJarvisPlatform,
@@ -59,7 +59,7 @@ export interface JarvisServiceOptions {
   isLocalHost: boolean;
   cli?: JarvisCli;
   settings?: JarvisSettingsStore;
-  decisions?: JarvisDecisions;
+  interpreter?: JarvisQueryInterpreter;
   searcher?: Pick<JarvisBugSearcher, "search">;
   login?: JarvisLoginManager;
   forwarder?: JarvisLoginForwarder;
@@ -88,7 +88,7 @@ export class JarvisService {
   readonly #isLocalHost: boolean;
   readonly #cli: JarvisCli;
   readonly #settings: JarvisSettingsStore;
-  readonly #decisions: JarvisDecisions;
+  readonly #interpreter: JarvisQueryInterpreter;
   readonly #searcher: Pick<JarvisBugSearcher, "search">;
   readonly #login: JarvisLoginManager;
   readonly #forwarder: JarvisLoginForwarder;
@@ -104,13 +104,18 @@ export class JarvisService {
     this.#cli = options.cli ?? createJarvisCli({ environment: this.#environment });
     this.#settings =
       options.settings ?? new JarvisSettingsStore({ environment: this.#environment });
-    this.#decisions =
-      options.decisions ?? createJarvisDecisions({ readApiKey: () => this.#settings.readKey() });
+    this.#interpreter =
+      options.interpreter ??
+      createJarvisGeminiQuery({
+        readApiKey: () => (this.#isLocalHost ? this.#settings.readKey() : Promise.resolve(null)),
+        fetchImpl: options.fetchImpl ?? fetch,
+        now: this.#now,
+      });
     this.#searcher =
       options.searcher ??
       new JarvisBugSearcher({
         cli: this.#cli,
-        decisions: this.#decisions,
+        interpreter: this.#interpreter,
         isLocalHost: this.#isLocalHost,
         now: this.#now,
       });
@@ -134,8 +139,7 @@ export class JarvisService {
   }
 
   async searchBugs(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
-    const threshold = await this.#settings.readThreshold();
-    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params, threshold));
+    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params));
   }
 
   async settings(): Promise<JarvisSettingsResult> {
@@ -151,7 +155,6 @@ export class JarvisService {
         throw new JarvisServiceError("invalid_key", "Gemini API key is invalid");
       }
       await this.#settings.writeKey(key);
-      this.#decisions.clear();
     }
     if (params.threshold !== undefined) await this.#settings.writeThreshold(params.threshold);
     return jarvisSettingsResultSchema.parse(await this.#settings.read());
@@ -159,7 +162,7 @@ export class JarvisService {
 
   async testSettings(): Promise<JarvisSettingsTestResult> {
     this.#requireLocal();
-    return jarvisSettingsTestResultSchema.parse(await this.#decisions.test());
+    return jarvisSettingsTestResultSchema.parse(await this.#interpreter.test());
   }
 
   async install(): Promise<JarvisInstallResult> {

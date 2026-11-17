@@ -188,12 +188,18 @@ describe("Renderer Jarvis client", () => {
     expect(jarvisSearchShouldFallback(result("unreachable"))).toBe(true);
     expect(jarvisSearchShouldFallback(result(null))).toBe(false);
     expect(jarvisSearchShouldFallback(result("cli_failed"))).toBe(false);
+    for (const code of ["missing_key", "timeout", "network", "invalid_response", "gemini_failed"]) {
+      expect(jarvisSearchShouldFallback(result(code))).toBe(false);
+    }
   });
 
   it("localizes Host error codes", () => {
     expect(jarvisErrorText("not_installed", "zh-CN")).toBe("未安装 jarvis CLI");
     expect(jarvisErrorText("forward_failed", "zh-CN")).toBe("无法建立登录回调转发");
     expect(jarvisErrorText("unknown_code", "zh-CN")).toBe("Jarvis 操作失败");
+    expect(jarvisErrorText("missing_key", "zh-CN")).toBe("尚未配置 Gemini API Key");
+    expect(jarvisErrorText("invalid_response", "zh-CN")).toContain("Gemini 查询理解结果无效");
+    expect(jarvisErrorText("gemini_failed", "zh-CN")).toContain("Gemini 查询理解失败");
     expect(jarvisCodeFromError({ message: "not_installed" })).toBe("not_installed");
     expect(jarvisCodeFromError(new Error("boom"))).toBe("jarvis_failed");
     expect(jarvisCodeFromError(new Error("timeout"))).toBe("timeout");

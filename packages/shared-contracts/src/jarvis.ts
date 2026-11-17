@@ -179,6 +179,33 @@ export const jarvisBugSearchParamsSchema = z
   .strict();
 export type JarvisBugSearchParams = z.infer<typeof jarvisBugSearchParamsSchema>;
 
+/** Gemini query conditions; timestamps are Unix milliseconds in Asia/Shanghai. */
+export const jarvisBugQuerySchema = z
+  .object({
+    scope: z.enum(["assigned", "created", "both"]),
+    statuses: z.array(z.number().int().min(1).max(3)).max(3),
+    priorities: z.array(z.number().int().min(1).max(3)).max(3),
+    severities: z.array(z.number().int().min(1).max(4)).max(4),
+    order: z.enum(["newest", "oldest"]),
+    timeWindow: z
+      .object({
+        since: z.number().int().min(0).max(8.64e15).nullable(),
+        until: z.number().int().min(0).max(8.64e15).nullable(),
+        field: z.enum(["create", "update"]),
+      })
+      .strict()
+      .refine(
+        ({ since, until }) =>
+          (since !== null || until !== null) && (since === null || until === null || since < until),
+      )
+      .nullable(),
+    titleKeywords: z.array(z.string().trim().min(1).max(200)).max(8),
+    projectNames: z.array(z.string().trim().min(1).max(56)).max(8),
+    unrecognized: z.string().trim().min(1).max(200).nullable(),
+  })
+  .strict();
+export type JarvisBugQuery = z.infer<typeof jarvisBugQuerySchema>;
+
 export const jarvisBugSearchResultSchema = z
   .object({
     available: z.boolean(),
@@ -187,6 +214,8 @@ export const jarvisBugSearchResultSchema = z
     bugs: z.array(jarvisBugSchema).max(JARVIS_MAX_SEARCH_BUGS),
     total: z.number().int().nonnegative(),
     capped: z.boolean(),
+    /** Optional for compatibility with older Hosts. */
+    source: z.literal("gemini").optional(),
   })
   .strict();
 export type JarvisBugSearchResult = z.infer<typeof jarvisBugSearchResultSchema>;

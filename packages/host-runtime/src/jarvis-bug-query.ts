@@ -1,9 +1,5 @@
 /**
- * Rule-first parsing for the Jarvis bug search behind the `@` entry.
- *
- * The rules consume the words they understand and leave the rest for project
- * resolution and `--title`. A model is only asked about fields the rules did
- * not settle; defaults apply when no model is available.
+ * Deterministic Jarvis Bug query parsing and condition labels.
  */
 
 export type JarvisBugScope = "assigned" | "created" | "both";
@@ -449,14 +445,4 @@ export function jarvisPriorityLabel(values: readonly number[]): string {
 
 export function jarvisSeverityLabel(values: readonly number[]): string {
   return labelsOf(values, { 1: "致命", 2: "严重", 3: "一般", 4: "低" });
-}
-
-/** Time window chosen by the Decisions API, expressed on this Host's clock. */
-export function jarvisDecisionTimeWindow(
-  kind: "today" | "week" | "month",
-  now = Date.now(),
-): { since: number; until: number | null; label: string } {
-  if (kind === "today") return { since: startOfDay(now), until: null, label: "今天" };
-  if (kind === "week") return { since: startOfWeek(now), until: null, label: "本周" };
-  return { since: now - 30 * DAY_MS, until: null, label: "最近 30 天" };
 }
