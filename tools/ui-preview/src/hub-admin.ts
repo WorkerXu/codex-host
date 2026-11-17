@@ -18,7 +18,7 @@ const memory = (index: number): HubMemory => ({
   time: 1794886200 - index * 3600,
   conversation: `session-${index}`,
 });
-export function createHubPreviewClient(error = false): RendererHubAdminClient {
+export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
   let servers: HubServer[] = [
     {
       name: "文档搜索",
@@ -93,6 +93,14 @@ export function createHubPreviewClient(error = false): RendererHubAdminClient {
       kind: "system",
     },
   ];
+  let configured = ![
+    "hub-connection-empty",
+    "hub-connection-connect",
+    "hub-connection-test-error",
+    "hub-connection-saved",
+  ].includes(scenario);
+  let invalid = scenario === "hub-error" || scenario === "hub-auth-error";
+  let last4 = "1234";
   let enabled = true;
   let headerName = "Authorization";
   return {
@@ -104,10 +112,25 @@ export function createHubPreviewClient(error = false): RendererHubAdminClient {
       _host: string,
       input: Extract<HubAdminParams, { op: O }>,
     ): Promise<HubResult<O>> {
-      if (error) throw new Error("forbidden");
+      if (invalid && !["mcpConnection", "mcpConnect", "mcpDisconnect"].includes(input.op))
+        throw new Error("mcp-auth");
       const params: HubAdminParams = input;
       let result: unknown = { ok: true };
       switch (params.op) {
+        case "mcpConnection":
+          result = { configured, last4: configured ? last4 : null };
+          break;
+        case "mcpConnect":
+          if (scenario === "hub-connection-test-error") throw new Error("mcp-auth");
+          configured = true;
+          invalid = false;
+          last4 = params.key.slice(-4);
+          result = { configured, last4 };
+          break;
+        case "mcpDisconnect":
+          configured = false;
+          result = { configured, last4: null };
+          break;
         case "servers":
           result = { servers: structuredClone(servers) };
           break;

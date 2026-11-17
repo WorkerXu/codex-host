@@ -10,6 +10,15 @@ interface PreviewHarness {
   waitFor<T>(read: () => T | null | undefined): Promise<T>;
 }
 export const hubScenarioNames = [
+  "hub-connection-empty",
+  "hub-connection-connect",
+  "hub-connection-test-error",
+  "hub-connection-saved",
+  "hub-connection-menu",
+  "hub-connection-replace",
+  "hub-connection-disconnect",
+  "hub-connection-disconnected",
+  "hub-auth-error",
   "hub-servers",
   "hub-search",
   "hub-filter",
@@ -77,11 +86,64 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
           await waitFor(() => query(".agent-menu"));
           if (text) await click(button(text, ".agent-menu"));
         };
-        if (name === "hub-error") {
-          await waitFor(() => query(".hub-status")?.textContent === "无权限");
+        if (name === "hub-error" || name === "hub-auth-error") {
+          await waitFor(
+            () => query(".hub-connection-state h3")?.textContent === "密钥无效或权限不足",
+          );
+          return;
+        }
+        if (
+          [
+            "hub-connection-empty",
+            "hub-connection-connect",
+            "hub-connection-test-error",
+            "hub-connection-saved",
+          ].includes(name)
+        ) {
+          await waitFor(() => query(".hub-connection-state"));
+          if (name !== "hub-connection-empty") {
+            await click(button("连接 MCPHub"));
+            await type(
+              required('.hub-dialog input[type="password"]'),
+              "mcphub_preview_fake_key_5678",
+            );
+            if (name === "hub-connection-test-error" || name === "hub-connection-saved") {
+              await click(button("测试并保存", ".hub-dialog"));
+              await waitFor(() =>
+                name === "hub-connection-test-error"
+                  ? query(".hub-dialog .hub-status")?.textContent === "密钥无效或权限不足"
+                  : query(".hub-server"),
+              );
+            }
+          }
           return;
         }
         await waitFor(() => query(memory ? ".hub-memory-row" : ".hub-server"));
+        if (
+          [
+            "hub-connection-menu",
+            "hub-connection-replace",
+            "hub-connection-disconnect",
+            "hub-connection-disconnected",
+          ].includes(name)
+        ) {
+          await click(required('[aria-label="MCPHub 连接设置"]'));
+          await waitFor(() => query(".agent-menu"));
+          if (name !== "hub-connection-menu") {
+            await click(
+              button(name === "hub-connection-replace" ? "更换密钥" : "断开", ".agent-menu"),
+            );
+            if (name === "hub-connection-replace")
+              await type(
+                required('.hub-dialog input[type="password"]'),
+                "mcphub_preview_fake_replacement_6789",
+              );
+            if (name === "hub-connection-disconnected") {
+              await click(button("确认", ".hub-dialog"));
+              await waitFor(() => query(".hub-connection-state"));
+            }
+          }
+        }
         if (name === "hub-search") await type(required('.hub-page input[type="search"]'), "文档");
         if (name === "hub-filter") await click(button("离线"));
         if (

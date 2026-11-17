@@ -160,7 +160,7 @@ function prepareSettings(
   const jarvisPage = createJarvisSettingsPage(messages, {
     createClient: () => createFakeJarvisClient(),
   });
-  const hubOptions = { createClient: () => createHubPreviewClient(scenarioName === "hub-error") };
+  const hubOptions = { createClient: () => createHubPreviewClient(scenarioName) };
   const shell = installRendererSettingsShell(
     [
       dingtalkPage,

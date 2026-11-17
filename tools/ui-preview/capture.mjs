@@ -415,6 +415,68 @@ for (const scenario of scenarios) {
           !query(".hub-page")?.textContent.includes("session-") &&
             !query(".hub-page")?.textContent.includes("调用 —"),
         );
+        const scenario = document.body.dataset.scenario;
+        if (scenario === "hub-servers") {
+          const disabled = query('.hub-server[data-disabled="true"]');
+          check(
+            "hub-disabled-content-dimmed",
+            disabled &&
+              Number(getComputedStyle(disabled.querySelector(".hub-server-title")).opacity) < 1 &&
+              !disabled.querySelector('[role="switch"]').disabled,
+          );
+          check(
+            "hub-metadata-separators",
+            getComputedStyle(query(".hub-server-meta span + span"), "::before").content.includes(
+              "·",
+            ),
+          );
+        }
+        if (["hub-memory", "hub-memory-search", "hub-memory-empty"].includes(scenario)) {
+          const values = queryAll(".hub-stat-value").map((element) => {
+            const style = getComputedStyle(element);
+            return `${style.fontSize}/${style.fontWeight}`;
+          });
+          check("hub-uniform-statistics", values.length === 3 && new Set(values).size === 1);
+          if (scenario !== "hub-memory")
+            check(
+              "hub-search-count-heading",
+              /搜索结果 · \d+ 条/u.test(query(".hub-section-head")?.textContent ?? ""),
+            );
+        }
+        if (scenario === "hub-header-rows") {
+          const add = query(".hub-header-editor > button");
+          check(
+            "hub-header-add-aligned",
+            Math.abs(
+              add.getBoundingClientRect().left -
+                query(".hub-header-row input").getBoundingClientRect().left,
+            ) < 2 && add.querySelector("svg"),
+          );
+        }
+        if (
+          [
+            "hub-connection-connect",
+            "hub-connection-replace",
+            "hub-connection-test-error",
+          ].includes(scenario)
+        ) {
+          const input = query('.hub-dialog input[type="password"]');
+          check("hub-key-masked", input && input.autocomplete === "off");
+          if (scenario === "hub-connection-test-error")
+            check("hub-failed-key-cleared", input?.value === "");
+        }
+        if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
+          check(
+            "hub-unconfigured-state",
+            query(".hub-connection-state h3")?.textContent === "连接 MCPHub" &&
+              !visible(query('[aria-label="MCPHub 连接设置"]')),
+          );
+        if (["hub-auth-error", "hub-error"].includes(scenario))
+          check(
+            "hub-auth-recovery",
+            query(".hub-connection-state")?.textContent.includes("密钥无效或权限不足") &&
+              query(".hub-connection-state button")?.textContent === "更换密钥",
+          );
         const primary = query(".hub-primary");
         if (primary) {
           const color = getComputedStyle(primary).backgroundColor;
