@@ -606,9 +606,10 @@ export class DingTalkService {
       conversations.push(row);
       this.#conversations.set(row.conversationId, { ...row });
     };
-    for (const row of local) push(row);
-    for (const row of groups.conversations) push(row);
+    for (const row of local.filter((row) => row.singleChat)) push(row);
     for (const row of personConversations) push(row);
+    for (const row of local.filter((row) => !row.singleChat)) push(row);
+    for (const row of groups.conversations) push(row);
     for (const row of messageConversations) push(row);
     const available =
       local.length > 0 ||
@@ -706,13 +707,6 @@ export class DingTalkService {
   readonly #notifiers = new Set<(event: { conversationId: string | null }) => void>();
 
   async #personConversation(person: DingTalkPerson): Promise<DingTalkConversation | null> {
-    const known = [...this.#conversations.values()].find(
-      (row) => row.singleChat && row.title === person.name,
-    );
-    if (known) {
-      known.subtitle = person.title || known.subtitle;
-      return known;
-    }
     const info = await this.#cli.conversationInfoForUser(person.openDingTalkId);
     if (!info) return null;
     const row: DingTalkConversation = {

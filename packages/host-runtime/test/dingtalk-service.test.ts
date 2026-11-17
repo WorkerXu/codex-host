@@ -439,6 +439,33 @@ describe("DingTalk conversation views", () => {
 });
 
 describe("DingTalk keyword search", () => {
+  it("keeps a contact before twenty matching groups and resolves the contact by open ID", async () => {
+    const env = await environment();
+    const fake = state({
+      groups: Array.from({ length: 20 }, (_, i) => ({
+        ...conversation(`group-${i}`, i),
+        title: "罗浩项目群",
+      })),
+      people: [
+        { name: "罗浩", title: "高级前端开发工程师", userId: "luo", openDingTalkId: "open-luo" },
+      ],
+    });
+    const cli = fakeCli(fake);
+    const resolve = vi.spyOn(cli, "conversationInfoForUser");
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    const result = await service.search({ query: "罗浩" });
+    expect(result.conversations).toHaveLength(20);
+    expect(result.conversations[0]).toMatchObject({
+      conversationId: "dm-luo",
+      singleChat: true,
+      title: "罗浩",
+    });
+    expect(resolve).toHaveBeenCalledWith("open-luo");
+    expect((await service.messages({ conversationId: "dm-luo" })).conversation?.singleChat).toBe(
+      true,
+    );
+    service.dispose();
+  });
   it("merges local list matches with groups, people and messages", async () => {
     const env = await environment();
     const searches: unknown[] = [];
@@ -492,16 +519,16 @@ describe("DingTalk keyword search", () => {
     expect(searches).toEqual([{ query: "示例", days: 30, limit: 30 }]);
     expect(result.available).toBe(true);
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual([
+      "dm-u1",
       "local",
       "remote-group",
-      "dm-u1",
       "message-conv",
     ]);
-    expect(result.conversations[1]).toMatchObject({
+    expect(result.conversations[2]).toMatchObject({
       groupType: "INTERNAL_GROUP",
       memberCount: 15,
     });
-    expect(result.conversations[2]?.subtitle).toBe("产品经理");
+    expect(result.conversations[0]?.subtitle).toBe("产品经理");
     expect(result.messages).toHaveLength(1);
     service.dispose();
   });

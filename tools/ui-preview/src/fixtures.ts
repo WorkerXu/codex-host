@@ -380,6 +380,33 @@ const messageCache = new Map<string, DingTalkMessage[]>();
 export function messagesFor(conversationId: string): DingTalkMessage[] {
   const cached = messageCache.get(conversationId);
   if (cached) return cached;
+  const person = remoteSearchPeople.find((row) => row.conversationId === conversationId);
+  if (person && !conversations.some((row) => row.conversationId === conversationId)) {
+    const messages: DingTalkMessage[] = [
+      {
+        messageId: `${conversationId}-1`,
+        conversationId,
+        senderName: person.name,
+        senderId: person.openDingTalkId,
+        createdAt: now - 30 * minute,
+        text: "周四评审的材料已经发你了，方便时看一下。",
+        unsupported: false,
+        mine: false,
+      },
+      {
+        messageId: `${conversationId}-2`,
+        conversationId,
+        senderName: "我",
+        senderId: "me",
+        createdAt: now - 29 * minute,
+        text: "收到，我会提前确认。",
+        unsupported: false,
+        mine: true,
+      },
+    ];
+    messageCache.set(conversationId, messages);
+    return messages;
+  }
   const found = conversations.find((row) => row.conversationId === conversationId);
   const messages =
     conversationId === "cid-heavy"
@@ -491,6 +518,16 @@ export const dispatchSettings: DingTalkDispatchSettings = {
 /** A group outside the unread list, returned only by `chat search`. */
 export const remoteSearchGroups: DingTalkConversation[] = [
   {
+    conversationId: "cid-luo-project",
+    title: "罗浩 · 项目沟通群",
+    singleChat: false,
+    unreadCount: 0,
+    lastMessageAt: now - day,
+    muted: false,
+    groupType: "INTERNAL_GROUP",
+    memberCount: 12,
+  },
+  {
     conversationId: "cid-guansprint",
     title: "【示例Sprint】 进度",
     singleChat: false,
@@ -533,6 +570,13 @@ export const remoteSearchGroups: DingTalkConversation[] = [
 ];
 
 export const remoteSearchPeople = [
+  {
+    name: "罗浩",
+    title: "高级前端开发工程师",
+    userId: "user-luohao",
+    openDingTalkId: "open-luohao",
+    conversationId: "cid-luohao",
+  },
   {
     name: "林晓",
     title: "产品经理",

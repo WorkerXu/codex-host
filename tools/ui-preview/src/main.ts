@@ -1095,6 +1095,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     await openFirstConversation(query);
   },
 
+  async "dingtalk-search-contacts"() {
+    await scenarios["dingtalk-search"]();
+  },
+
+  async "dingtalk-contact-open"() {
+    await scenarios["dingtalk-search"]();
+  },
+
   async "dingtalk-loading"() {
     const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
       conversationsPending: true,

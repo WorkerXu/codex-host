@@ -64,9 +64,9 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 
 1. 先命中本地未读列表里的标题和摘要。
 2. 并发执行 `chat search --query`（群）、`contact user search --query`（人，解析成单聊）和 `chat +search-msg --query`（最近 30 天消息）。
-3. 按会话 id 去重：本地结果在前，其次是群、单聊、消息命中的会话。
+3. 联系人按开放用户 ID 通过 `chat +conversation-info --open-dingtalk-id` 取得单聊会话 ID；按会话 ID 去重，联系人优先占用 20 条会话结果额度，群结果不会把联系人挤掉。
 
-搜索结果仍分「会话」「聊天记录」两组；群结果带 `groupType` 和 `memberCount`，人员结果显示职位。
+搜索结果按「联系人」「群聊」「聊天记录」分组，联系人在前。群结果带 `groupType` 和 `memberCount`，人员结果显示职位；点击联系人打开其单聊，不发送消息。
 
 ## 边界
 

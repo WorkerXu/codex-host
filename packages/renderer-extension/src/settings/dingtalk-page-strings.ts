@@ -10,7 +10,8 @@ export interface DingTalkPageText {
   refreshConversations: string;
   searchPlaceholder: string;
   clearSearch: string;
-  searchConversations: string;
+  searchContacts: string;
+  searchGroups: string;
   searchMessages: string;
   searchMore: string;
   noSearchResults: string;
@@ -55,7 +56,8 @@ const ZH: DingTalkPageText = {
   refreshConversations: "刷新会话",
   searchPlaceholder: "搜索",
   clearSearch: "清除搜索",
-  searchConversations: "会话",
+  searchContacts: "联系人",
+  searchGroups: "群聊",
   searchMessages: "聊天记录",
   searchMore: "查看更多（{count}）",
   noSearchResults: "没有找到相关会话或消息",
@@ -100,7 +102,8 @@ const EN: DingTalkPageText = {
   refreshConversations: "Refresh conversations",
   searchPlaceholder: "Search",
   clearSearch: "Clear search",
-  searchConversations: "Conversations",
+  searchContacts: "Contacts",
+  searchGroups: "Groups",
   searchMessages: "Messages",
   searchMore: "Show more ({count})",
   noSearchResults: "No matching conversations or messages",

@@ -64,14 +64,25 @@ export function createDingTalkSearchPanel(
       element.append(createListEmpty(document, text.noSearchResults));
       return;
     }
-    if (result.conversations.length > 0) {
+    for (const category of [
+      {
+        kind: "contacts",
+        label: text.searchContacts,
+        rows: result.conversations.filter((row) => row.singleChat),
+      },
+      {
+        kind: "groups",
+        label: text.searchGroups,
+        rows: result.conversations.filter((row) => !row.singleChat),
+      },
+    ]) {
+      if (category.rows.length === 0) continue;
       const group = createElementNode(document, "div", "dingtalk-search-group");
+      group.dataset.kind = category.kind;
       group.append(
-        createElementNode(document, "div", "dingtalk-search-group-label", text.searchConversations),
+        createElementNode(document, "div", "dingtalk-search-group-label", category.label),
       );
-      const visible = state.expanded.conversations
-        ? result.conversations
-        : result.conversations.slice(0, 3);
+      const visible = state.expanded.conversations ? category.rows : category.rows.slice(0, 3);
       for (const conversation of visible) {
         group.append(
           createSearchConversationRow(document, conversation, text, state.query, () =>
@@ -79,11 +90,11 @@ export function createDingTalkSearchPanel(
           ),
         );
       }
-      if (!state.expanded.conversations && result.conversations.length > 3) {
+      if (!state.expanded.conversations && category.rows.length > 3) {
         group.append(
           moreButton(
             document,
-            text.searchMore.replace("{count}", String(result.conversations.length)),
+            text.searchMore.replace("{count}", String(category.rows.length)),
             () => options.expand("conversations"),
           ),
         );

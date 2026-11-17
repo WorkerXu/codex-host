@@ -43,6 +43,8 @@ const allScenarios = [
   "dingtalk-scrolled-top",
   "dingtalk-search",
   "dingtalk-search-empty",
+  "dingtalk-search-contacts",
+  "dingtalk-contact-open",
   "dingtalk-loading",
   "dingtalk-search-more",
   "dingtalk-empty",
@@ -343,14 +345,34 @@ for (const scenario of scenarios) {
     if (scenario === "dingtalk-conversation-hover") {
       await realHover(page, ".dingtalk-conversation", 1);
     }
-    if (scenario === "dingtalk-search" || scenario === "dingtalk-search-empty") {
+    if (
+      [
+        "dingtalk-search",
+        "dingtalk-search-empty",
+        "dingtalk-search-contacts",
+        "dingtalk-contact-open",
+      ].includes(scenario)
+    ) {
       await realClick(page, ".dingtalk-search-input");
-      await page.keyboard.type(scenario.endsWith("-empty") ? "不存在的会话XYZ" : "示例Sprint");
+      await page.keyboard.type(
+        scenario.endsWith("-empty")
+          ? "不存在的会话XYZ"
+          : ["dingtalk-search-contacts", "dingtalk-contact-open"].includes(scenario)
+            ? "罗浩"
+            : "示例Sprint",
+      );
       await page.waitForSelector(
         scenario.endsWith("-empty")
           ? ".dingtalk-search-results .dingtalk-empty-list"
           : ".dingtalk-search-result",
       );
+      if (scenario === "dingtalk-contact-open") {
+        await realClick(
+          page,
+          '.dingtalk-search-group[data-kind="contacts"] .dingtalk-search-result',
+        );
+        await page.waitForSelector(".dingtalk-message[data-message-id]");
+      }
     }
     if (scenario === "dingtalk-image-unavailable") {
       const list = await pointAt(page, ".dingtalk-message-list");
@@ -510,6 +532,30 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      if (
+        ["dingtalk-search-contacts", "dingtalk-contact-open"].includes(
+          document.body.dataset.scenario,
+        )
+      ) {
+        const groups = queryAll(".dingtalk-search-group[data-kind]");
+        check(
+          "contacts-before-groups",
+          groups[0]?.dataset.kind === "contacts" && groups[1]?.dataset.kind === "groups",
+        );
+        check(
+          "contact-present",
+          groups[0]?.textContent.includes("罗浩") &&
+            groups[0]?.textContent.includes("高级前端开发工程师"),
+        );
+        if (document.body.dataset.scenario === "dingtalk-contact-open") {
+          check(
+            "contact-opens-direct-chat",
+            query(".dingtalk-main-title")?.textContent === "罗浩" &&
+              query(".dingtalk-main-tag")?.hidden,
+          );
+          check("contact-open-messages", queryAll(".dingtalk-message").length > 0);
+        }
+      }
       if (["dingtalk-send-echo", "dingtalk-send-ack"].includes(document.body.dataset.scenario)) {
         const echoes = queryAll(".dingtalk-message").filter((row) =>
           row.textContent.includes("已收到，我会核对这份材料。"),

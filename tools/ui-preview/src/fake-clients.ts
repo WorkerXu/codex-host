@@ -273,7 +273,7 @@ export function createFakeDingTalkClient(
             subtitle: row.title,
           };
         });
-      const merged = [...local, ...groups, ...people].filter(
+      const merged = [...people, ...local, ...groups].filter(
         (row, index, all) =>
           all.findIndex((item) => item.conversationId === row.conversationId) === index,
       );
