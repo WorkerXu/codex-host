@@ -616,3 +616,53 @@ it("accepts the real OA success envelope with numeric errorCode 0", async () => 
   });
   expect(calls).toEqual([["oa", "approval", "list-pending", "--limit", "20", "--page", "1"]]);
 });
+
+it("remembers auth once, retries explicitly and rechecks after a command auth error", async () => {
+  const calls: string[] = [];
+  let expired = false;
+  const cli = createDingTalkCli({
+    runImpl: async (args) => {
+      calls.push(args.slice(0, 3).join(" "));
+      const value =
+        args[0] === "auth" ? { authenticated: true, user_id: "self", user_name: "我" } : {};
+      return {
+        value,
+        exitCode: expired && args[0] === "chat" ? 1 : 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        truncated: false,
+        errorCode: expired && args[0] === "chat" ? "not_logged_in" : null,
+        errorMessage: null,
+      };
+    },
+  });
+  await Promise.all([cli.authStatus(), cli.authStatus()]);
+  await cli.authStatus();
+  expect(calls.filter((call) => call === "auth status --readonly")).toHaveLength(1);
+  await cli.authStatus(true);
+  expect(calls.filter((call) => call === "auth status --readonly")).toHaveLength(2);
+  expired = true;
+  await cli.unreadConversations(50);
+  await cli.authStatus();
+  expect(calls.filter((call) => call === "auth status --readonly")).toHaveLength(3);
+});
+
+it("returns messages while identity enrichment remains pending", async () => {
+  const cli = createDingTalkCli({
+    runImpl: async (args) => {
+      if (args[0] === "auth" || args[0] === "contact") return new Promise(() => {});
+      return {
+        value: { messages: [] },
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        truncated: false,
+        errorCode: null,
+        errorMessage: null,
+      };
+    },
+  });
+  expect((await cli.messages({ conversationId: "cid", limit: 30 })).errorCode).toBeNull();
+});

@@ -64,6 +64,7 @@ import {
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_VIEWED_METHOD,
   DINGTALK_CHANGED_METHOD,
+  dingtalkStatusParamsSchema,
   dingtalkConversationsParamsSchema,
   dingtalkPreviewParamsSchema,
   dingtalkMessagesParamsSchema,
@@ -3792,7 +3793,10 @@ export class AppServerHost {
   }
 
   async #runDingTalkMethod(service: DingTalkService, request: JsonRpcRequest): Promise<unknown> {
-    if (request.method === DINGTALK_STATUS_METHOD) return await service.status();
+    if (request.method === DINGTALK_STATUS_METHOD) {
+      const params = dingtalkStatusParamsSchema.parse(request.params ?? {});
+      return await service.status(params.refresh);
+    }
     if (request.method === DINGTALK_SETTINGS_GET_METHOD) return await service.settings();
     if (request.method === DINGTALK_CONVERSATIONS_METHOD) {
       const parsed = dingtalkConversationsParamsSchema.safeParse(request.params ?? {});

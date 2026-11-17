@@ -164,7 +164,6 @@ export class DingTalkService {
   #atMe = new Map<string, number>();
   #ready: Promise<void> | null = null;
   #lastAuth: Awaited<ReturnType<DingTalkCli["authStatus"]>> | null = null;
-  #lastAuthAt = 0;
   #enrichmentTimer: ReturnType<typeof setTimeout> | null = null;
   #enriching = false;
   #messageReads = 0;
@@ -203,7 +202,7 @@ export class DingTalkService {
       cli: this.#cli,
       local: () => this.#transport.canListen,
       authenticate: async () => {
-        const auth = this.#lastAuth ?? (await this.#cli.authStatus().catch(() => null));
+        const auth = await this.#cli.authStatus().catch(() => null);
         this.#lastAuth = auth;
         return auth?.installed === true && auth.authenticated;
       },
@@ -256,11 +255,10 @@ export class DingTalkService {
     }
   }
 
-  async status(): Promise<DingTalkStatus> {
+  async status(refresh = false): Promise<DingTalkStatus> {
     await this.#ensure();
-    const auth = await this.#cli.authStatus();
+    const auth = await this.#cli.authStatus(refresh);
     this.#lastAuth = auth;
-    this.#lastAuthAt = this.#now();
     const resolved = await resolveDingTalkHost(this.#environment, await this.#settings.read());
     return dingtalkStatusSchema.parse({
       installed: auth.installed,
@@ -796,26 +794,7 @@ export class DingTalkService {
 
   async #runRefresh(): Promise<void> {
     try {
-      // Only authentication and unread rows gate the first list.
-      const reuseAuth =
-        this.#lastAuth !== null && this.#now() - this.#lastAuthAt < ENRICHMENT_IDLE_MS;
-      const [auth, unread] = await Promise.all([
-        reuseAuth ? Promise.resolve(this.#lastAuth) : this.#cli.authStatus().catch(() => null),
-        this.#cli.unreadConversations(UNREAD_LIMIT),
-      ]);
-      if (auth) {
-        this.#lastAuth = auth;
-        if (!reuseAuth) this.#lastAuthAt = this.#now();
-      }
-      if (!auth?.installed || !auth.authenticated) {
-        this.#list = {
-          source: "empty",
-          rows: [],
-          fetchedAt: this.#now(),
-          errorCode: auth?.errorCode ?? "not_installed",
-        };
-        return;
-      }
+      const unread = await this.#cli.unreadConversations(UNREAD_LIMIT);
       if (unread.errorCode !== null) {
         this.#list = {
           source: this.#list?.source === "unread" ? "unread" : "empty",

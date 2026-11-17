@@ -463,6 +463,7 @@ export {
   dingtalkReactionSchema,
   dingtalkMessageResourceSchema,
   dingtalkStatusSchema,
+  dingtalkStatusParamsSchema,
   dingtalkHostOptionSchema,
   dingtalkSettingsSchema,
   dingtalkSettingsSetParamsSchema,

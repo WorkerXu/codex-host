@@ -737,7 +737,7 @@ export interface DingTalkCli {
     onRecord(record: DwsEventRecord): void;
     onExit?(): void;
   }): Promise<DingTalkEventStream | null>;
-  authStatus(): Promise<{
+  authStatus(refresh?: boolean): Promise<{
     installed: boolean;
     authenticated: boolean;
     userId: string | null;
@@ -864,25 +864,39 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
   let cachedUser: SelfUser | null = null;
   let identityPromise: Promise<SelfUser | null> | null = null;
   let authRead: Promise<DwsResult> | null = null;
+  let identityVersion = 0;
 
-  const run = (args: readonly string[], requestTimeoutMs = timeoutMs): Promise<DwsResult> =>
-    external
+  const invalidateIdentity = (): void => {
+    identityVersion += 1;
+    authRead = null;
+    cachedUser = null;
+    identityPromise = null;
+  };
+  const run = async (args: readonly string[], requestTimeoutMs = timeoutMs): Promise<DwsResult> => {
+    const result = await (external
       ? external(args, requestTimeoutMs)
-      : runDwsJson(args, {
-          ...options,
-          environment,
-          timeoutMs: requestTimeoutMs,
-        });
+      : runDwsJson(args, { ...options, environment, timeoutMs: requestTimeoutMs }));
+    if (
+      args[0] !== "auth" &&
+      result.errorCode !== null &&
+      /unauthenticated|not[_ -]?logged[_ -]?in|auth(?:entication)?[_ -]?(?:expired|invalid|failed|required)|token[_ -]?(?:expired|invalid)|login[_ -]?required|^401$/iu.test(
+        `${result.errorCode} ${result.errorMessage ?? ""}`,
+      )
+    ) {
+      invalidateIdentity();
+      void readAuth().catch(() => undefined);
+    }
+    return result;
+  };
 
   const readAuth = (): Promise<DwsResult> => {
-    authRead ??= run(["auth", "status", "--readonly"], 12_000).finally(() => {
-      authRead = null;
-    });
+    authRead ??= run(["auth", "status", "--readonly"], 12_000);
     return authRead;
   };
 
   const self = (): Promise<SelfUser | null> => {
     if (cachedUser?.openId) return Promise.resolve(cachedUser);
+    const version = identityVersion;
     identityPromise ??= (async () => {
       let user = cachedUser;
       if (!user) {
@@ -897,12 +911,10 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         .map((row) => row.orgEmployeeModel)
         .find((row) => record(row) && row.userId === user.id);
       const openId = record(org) ? string(org.openDingTalkId) : "";
-      if (cachedUser && cachedUser.id !== user.id) return null;
+      if (identityVersion !== version || (cachedUser && cachedUser.id !== user.id)) return null;
       cachedUser = { ...user, ...(openId ? { openId } : {}) };
       return cachedUser;
-    })().finally(() => {
-      identityPromise = null;
-    });
+    })();
     return identityPromise;
   };
 
@@ -962,7 +974,8 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         },
       };
     },
-    async authStatus() {
+    async authStatus(refresh = false) {
+      if (refresh) invalidateIdentity();
       const executable = external
         ? "external"
         : await resolveDwsExecutable({ ...options, environment });
@@ -993,6 +1006,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         data.authenticated === true && id
           ? { ...(cachedUser?.id === id ? cachedUser : {}), id, name: string(data.user_name) }
           : null;
+      if (cachedUser) void self().catch(() => undefined);
       return {
         installed: true,
         authenticated: data.authenticated === true,
@@ -1067,7 +1081,9 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       if (input.pageAll) {
         args.push("--page-all", "--page-limit", "10", "--max-items", String(input.maxItems ?? 300));
       }
-      const [result, user] = await Promise.all([run(args, 45_000), self()]);
+      void self().catch(() => undefined);
+      const result = await run(args, 45_000);
+      const user = cachedUser;
       return {
         ...parseMessagesPage(
           result.value,
@@ -1083,7 +1099,9 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       if (input.atMe) args.push("--at-me");
       if (input.days !== undefined) args.push("--days", String(input.days));
       args.push("--limit", String(Math.max(1, Math.min(input.limit, 100))), "--order", "desc");
-      const [result, user] = await Promise.all([run(args, 35_000), self()]);
+      void self().catch(() => undefined);
+      const result = await run(args, 35_000);
+      const user = cachedUser;
       return {
         messages: parseMessages(
           result.value,

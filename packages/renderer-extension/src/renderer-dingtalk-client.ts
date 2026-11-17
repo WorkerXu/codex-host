@@ -66,7 +66,7 @@ export interface RendererDingTalkClient {
   beginSession(): void;
   /** Releases the page session route and drops any routed subscription. */
   endSession(): void;
-  status(): Promise<DingTalkStatus>;
+  status(refresh?: boolean): Promise<DingTalkStatus>;
   conversations(): Promise<DingTalkConversationsResult>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
@@ -233,13 +233,17 @@ export function createRendererDingTalkClient(
     else if (next === null) detachRoute();
   };
 
-  const readStatus = (): Promise<DingTalkStatus> => {
+  const readStatus = (refresh = false): Promise<DingTalkStatus> => {
     statusPromise ??= (async () => {
       const generation = session;
       const current = localRoute();
       if (!current) throw new Error("peer_unavailable: Host Runtime is unavailable");
       const status = dingtalkStatusSchema.parse(
-        await current.manager.sendRequest(DINGTALK_STATUS_METHOD, {}, { timeoutMs: 45_000 }),
+        await current.manager.sendRequest(
+          DINGTALK_STATUS_METHOD,
+          refresh ? { refresh: true } : {},
+          { timeoutMs: 45_000 },
+        ),
       );
       const remoteUsable = await probeRemote(remoteRouteFor(status));
       if (generation === session) applyStatus(status, remoteUsable);
@@ -256,7 +260,7 @@ export function createRendererDingTalkClient(
     if (resolvedRoute) return Promise.resolve(resolvedRoute);
     const generation = session;
     resolving ??= (async () => {
-      await readStatus().catch(() => null);
+      void readStatus().catch(() => null);
       if (generation !== session) return null;
       return resolvedRoute ?? localRoute();
     })().finally(() => {
@@ -289,8 +293,8 @@ export function createRendererDingTalkClient(
       resolvedRoute = null;
       detachRoute();
     },
-    async status() {
-      return await readStatus();
+    async status(refresh = false) {
+      return await readStatus(refresh);
     },
     async conversations() {
       return dingtalkConversationsResultSchema.parse(

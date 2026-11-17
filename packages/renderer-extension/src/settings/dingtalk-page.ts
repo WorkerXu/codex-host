@@ -126,7 +126,7 @@ export function createDingTalkSettingsPage(
         text,
         onRefresh: () => void loadConversations(),
         onRetry: () => {
-          void loadStatus();
+          void loadStatus(true);
           void loadConversations();
         },
       });
@@ -925,12 +925,12 @@ export function createDingTalkSettingsPage(
         if (!done) setNotice(text.embedFailed);
       };
 
-      const loadStatus = async (): Promise<void> => {
+      const loadStatus = async (refresh = false): Promise<void> => {
         if (!client) {
           pageMenu.setStatus(null);
           return;
         }
-        const status = await client.status().catch(() => null);
+        const status = await client.status(refresh).catch(() => null);
         if (!disposed) pageMenu.setStatus(status);
       };
 

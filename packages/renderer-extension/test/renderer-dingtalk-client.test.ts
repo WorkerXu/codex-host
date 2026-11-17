@@ -116,6 +116,7 @@ describe("DingTalk renderer routing", () => {
             : null,
     });
 
+    await client.status();
     await client.conversations();
     expect(localCalls).toEqual([DINGTALK_STATUS_METHOD]);
     // The route is probed once before data requests use it.
@@ -141,6 +142,7 @@ describe("DingTalk renderer routing", () => {
             : null,
     });
 
+    await client.status();
     await client.conversations();
     expect(remoteCalls).toEqual([DINGTALK_STATUS_METHOD]);
     expect(localCalls).toEqual([DINGTALK_STATUS_METHOD, DINGTALK_CONVERSATIONS_METHOD]);
@@ -171,6 +173,7 @@ describe("DingTalk renderer routing", () => {
     });
     const seen: (string | null)[] = [];
     client.subscribe((conversationId) => seen.push(conversationId));
+    await client.status();
     await client.conversations();
 
     local.listener?.({ params: { conversationId: "local-only" } });
@@ -192,11 +195,13 @@ describe("DingTalk renderer routing", () => {
             ? route("host-tencent", remote)
             : null,
     });
+    await client.status();
     await client.conversations();
     expect(remoteCalls).toEqual([DINGTALK_STATUS_METHOD, DINGTALK_CONVERSATIONS_METHOD]);
 
     localStatus = status({ defaultHost: "local", defaultHostId: null });
     client.beginSession();
+    await client.status();
     await client.conversations();
     expect(remoteCalls).toHaveLength(2);
     expect(localCalls.filter((method) => method === DINGTALK_CONVERSATIONS_METHOD)).toHaveLength(1);
@@ -227,6 +232,7 @@ describe("DingTalk renderer routing", () => {
             ? route("host-tencent", remote)
             : null,
     });
+    await client.status();
     expect(await client.members("cidA==")).toMatchObject({
       members: [{ openDingTalkId: "open-1", name: "王鹏远" }],
     });
@@ -249,4 +255,15 @@ describe("DingTalk change notifications", () => {
   it("uses the documented notification method", () => {
     expect(DINGTALK_CHANGED_METHOD).toBe("codexhost/dingtalk/changed");
   });
+});
+
+it("does not gate the first unread read on a pending auth status", async () => {
+  const calls: string[] = [];
+  const local = manager(calls);
+  const original = local.sendRequest.bind(local);
+  local.sendRequest = async (method, params, options) =>
+    method === DINGTALK_STATUS_METHOD ? new Promise(() => {}) : original(method, params, options);
+  const client = createRendererDingTalkClient({ forHost: () => route("local", local) });
+  expect((await client.conversations()).available).toBe(true);
+  expect(calls).toEqual([DINGTALK_CONVERSATIONS_METHOD]);
 });

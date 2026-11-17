@@ -27,7 +27,6 @@ import type {
 
 export const DINGTALK_DISPATCH_PROJECT = "钉钉智能体";
 const APPROVAL_POLL_MS = 60_000;
-const IDENTITY_TTL_MS = 5 * 60_000;
 const MAX_CONTEXT_MESSAGES = 20;
 
 export interface DingTalkDispatchService {
@@ -236,9 +235,6 @@ export class DingTalkDispatcher {
   }
 
   async #identityName(): Promise<string | null> {
-    if (this.#identity && this.#now() - this.#identity.at < IDENTITY_TTL_MS) {
-      return this.#identity.userName;
-    }
     const status = await this.#options.service.status().catch(() => null);
     if (!status?.userName) return null;
     this.#identity = { userName: status.userName, userId: status.userId, at: this.#now() };

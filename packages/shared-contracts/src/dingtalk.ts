@@ -249,6 +249,8 @@ export const DINGTALK_MAX_CONVERSATIONS = 50;
 export const DINGTALK_MAX_MEMBERS = 500;
 export const DINGTALK_MAX_AT_MEMBERS = 100;
 
+export const dingtalkStatusParamsSchema = z.object({ refresh: z.boolean().optional() }).strict();
+
 export const dingtalkStatusSchema = z
   .object({
     installed: z.boolean(),

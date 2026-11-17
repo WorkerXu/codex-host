@@ -222,55 +222,15 @@ describe("DingTalk conversation views", () => {
     service.dispose();
   });
 
-  it("loads auth and unread concurrently without waiting for @me", async () => {
+  it("returns the unread list while authentication and @me are still pending", async () => {
     const env = await environment();
     const fake = state({ unread: [conversation("a", 100)] });
     const cli = fakeCli(fake);
-    let authStarted = false;
-    let unreadStarted = false;
-    let atMeStarted = false;
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const arrive = (): void => {
-      if (authStarted && unreadStarted) release?.();
-    };
-    cli.authStatus = async () => {
-      authStarted = true;
-      arrive();
-      await gate;
-      return {
-        installed: true,
-        authenticated: true,
-        userId: "me",
-        userName: "我",
-        corpName: "测试公司",
-        errorCode: null,
-      };
-    };
-    cli.unreadConversations = async () => {
-      unreadStarted = true;
-      arrive();
-      await gate;
-      return { conversations: fake.unread, errorCode: null };
-    };
-    cli.atMeHits = async () => {
-      atMeStarted = true;
-      arrive();
-      await gate;
-      return { hits: [], errorCode: null };
-    };
+    cli.authStatus = async () => new Promise(() => {});
+    cli.atMeHits = async () => new Promise(() => {});
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
-    const result = await Promise.race([
-      service.conversations(),
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error("requests ran sequentially")), 2_000),
-      ),
-    ]);
-    expect(authStarted).toBe(true);
-    expect(unreadStarted).toBe(true);
-    expect(atMeStarted).toBe(false);
+    void service.status();
+    const result = await service.conversations();
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
     service.dispose();
   });
