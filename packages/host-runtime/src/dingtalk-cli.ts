@@ -40,6 +40,8 @@ export interface DingTalkCliOptions {
   timeoutMs?: number;
   /** Working directory for commands that must write inside it (media download). */
   cwd?: string;
+  /** Re-read the visible page once identity enrichment can classify open-ID senders. */
+  onIdentityResolved?(): void;
   /** Runs on the configured DingTalk Host instead of the local CLI. */
   runImpl?: (args: readonly string[], timeoutMs: number) => Promise<DwsResult>;
   /** Opens the event stream on a peer; null means this Host is local. */
@@ -857,6 +859,16 @@ export function parsePendingApprovals(value: unknown): DingTalkPendingApproval[]
   return approvals;
 }
 
+function confirmedDwsWrite(result: DwsResult): boolean {
+  return (
+    result.errorCode === null &&
+    result.exitCode === 0 &&
+    result.value !== null &&
+    !result.timedOut &&
+    !result.truncated
+  );
+}
+
 export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli {
   const environment = options.environment ?? process.env;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -879,7 +891,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
     if (
       args[0] !== "auth" &&
       result.errorCode !== null &&
-      /unauthenticated|not[_ -]?logged[_ -]?in|auth(?:entication)?[_ -]?(?:expired|invalid|failed|required)|token[_ -]?(?:expired|invalid)|login[_ -]?required|^401$/iu.test(
+      /unauthenticated|unauthorized|not[_ -]?logged[_ -]?in|auth(?:entication)?[_ -]?(?:expired|invalid|failed|required)|token[_ -]?(?:expired|invalid)|login[_ -]?required|(?:^|\s)401(?:\s|$)/iu.test(
         `${result.errorCode} ${result.errorMessage ?? ""}`,
       )
     ) {
@@ -913,6 +925,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       const openId = record(org) ? string(org.openDingTalkId) : "";
       if (identityVersion !== version || (cachedUser && cachedUser.id !== user.id)) return null;
       cachedUser = { ...user, ...(openId ? { openId } : {}) };
+      options.onIdentityResolved?.();
       return cachedUser;
     })();
     return identityPromise;
@@ -1187,9 +1200,9 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       );
       const result = await run(args, 30_000);
       return {
-        ok: result.errorCode === null,
+        ok: confirmedDwsWrite(result),
         bizId: findString(result.value, ["bizId", "biz_id", "bizid"]),
-        errorCode: result.errorCode,
+        errorCode: result.errorCode ?? (confirmedDwsWrite(result) ? null : "unknown_result"),
       };
     },
     async updateCard(input) {
@@ -1209,7 +1222,10 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         ],
         30_000,
       );
-      return { ok: result.errorCode === null, errorCode: result.errorCode };
+      return {
+        ok: confirmedDwsWrite(result),
+        errorCode: result.errorCode ?? (confirmedDwsWrite(result) ? null : "unknown_result"),
+      };
     },
     async pendingApprovals(limit) {
       const result = await run(

@@ -23,7 +23,7 @@ function fixture() {
   return { calls, card: new DingTalkProgressCard(cli) };
 }
 const content = (args: string[]) =>
-  (JSON.parse(args[args.indexOf("--content") + 1]!) as string[]).map((message) =>
+  (JSON.parse(args[args.indexOf("--content") + 1] ?? "null") as string[]).map((message) =>
     JSON.parse(message),
   );
 
@@ -45,7 +45,7 @@ describe("official A2UI lifecycle with fake dws", () => {
         "open-member",
       ]),
     );
-    const created = content(calls[0]!);
+    const created = content(calls[0] ?? []);
     expect(created[0].createSurface.dataModel.answer.displayText).toBe("思考中…");
     expect(created[0].createSurface.catalogId).toBe(
       "https://dingtalk.com/card/a2ui/catalogs/public/catalog.json",
@@ -58,17 +58,17 @@ describe("official A2UI lifecycle with fake dws", () => {
     await vi.advanceTimersByTimeAsync(4_999);
     expect(calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(content(calls[1]!)[0].updateDataModel.value).toBe("已读取资料");
+    expect(content(calls[1] ?? [])[0].updateDataModel.value).toBe("已读取资料");
     card.progress("已整理结果");
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(content(calls[2]!)[0].updateDataModel.value).toBe("已读取资料\n\n已整理结果");
+    expect(content(calls[2] ?? [])[0].updateDataModel.value).toBe("已读取资料\n\n已整理结果");
     expect(await card.finish("完整最终答案", true)).toBe(true);
     for (const update of calls.slice(1)) {
       expect(update).toContain("server-biz-id");
       expect(update).not.toContain("--at-open-dingtalk-ids");
       expect(JSON.stringify(content(update))).not.toContain("createSurface");
     }
-    const final = calls.at(-1)!;
+    const final = calls.at(-1) ?? [];
     expect(final).toContain("FINISH");
     expect(final).toContain("--a2ui-annotations");
     expect(content(final).at(-1).updateDataModel.value).toBe("完整最终答案");

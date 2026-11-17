@@ -217,11 +217,16 @@ export function createRendererDingTalkClient(
    * A DingTalk Host whose Runtime predates direct reads answers "unavailable";
    * the page then keeps using local forwarding instead of failing.
    */
-  const probeRemote = async (route: RendererDingTalkRoute | null): Promise<boolean> => {
+  const probeRemote = async (
+    route: RendererDingTalkRoute | null,
+    refresh = false,
+  ): Promise<boolean> => {
     if (!route) return false;
     try {
       dingtalkStatusSchema.parse(
-        await route.manager.sendRequest(DINGTALK_STATUS_METHOD, {}, { timeoutMs: 10_000 }),
+        await route.manager.sendRequest(DINGTALK_STATUS_METHOD, refresh ? { refresh: true } : {}, {
+          timeoutMs: 10_000,
+        }),
       );
       return true;
     } catch {
@@ -249,7 +254,7 @@ export function createRendererDingTalkClient(
           { timeoutMs: 45_000 },
         ),
       );
-      const remoteUsable = await probeRemote(remoteRouteFor(status));
+      const remoteUsable = await probeRemote(remoteRouteFor(status), refresh);
       if (generation === session) applyStatus(status, remoteUsable);
       return status;
     })().finally(() => {

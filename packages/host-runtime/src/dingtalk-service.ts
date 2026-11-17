@@ -175,6 +175,9 @@ export class DingTalkService {
       options.cli ??
       createDingTalkCli({
         environment: this.#environment,
+        onIdentityResolved: () => {
+          if (!this.#disposed) this.#notify(null);
+        },
         runImpl: (args, timeoutMs) => this.#transport.run(args, timeoutMs),
         openEventsImpl: (input) => this.#transport.openEvents(input),
         ...(options.spawnImpl ? { spawnImpl: options.spawnImpl } : {}),

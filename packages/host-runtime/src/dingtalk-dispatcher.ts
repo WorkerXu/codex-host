@@ -357,7 +357,7 @@ export class DingTalkDispatcher {
     const direct = event.kind === "direct" || route.replyScope === "direct";
     const senderId = event.senderId ?? null;
     if (!senderId) {
-      await this.#setStatus(agent.fileName, "failed", "无法解析发送人的 openDingTalkId");
+      await this.#setStatus(agent.fileName, "failed", "无法确定发送人的钉钉身份，未派发");
       return;
     }
     const context =

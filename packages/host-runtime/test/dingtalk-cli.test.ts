@@ -666,3 +666,67 @@ it("returns messages while identity enrichment remains pending", async () => {
   });
   expect((await cli.messages({ conversationId: "cid", limit: 30 })).errorCode).toBeNull();
 });
+
+it.each(["missing-json", "truncated", "lost-exit"])(
+  "does not confirm an A2UI write with %s",
+  async (failure) => {
+    const cli = createDingTalkCli({
+      runImpl: async () => ({
+        value: failure === "missing-json" ? null : {},
+        exitCode: failure === "lost-exit" ? null : 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        truncated: failure === "truncated",
+        errorCode: null,
+        errorMessage: null,
+      }),
+    });
+    expect(
+      await cli.updateCard({ bizId: "server-id", content: "已读取", flowStatus: "INPUTTING" }),
+    ).toMatchObject({ ok: false, errorCode: "unknown_result" });
+  },
+);
+
+it("notifies once when a slow identity becomes available without blocking the message page", async () => {
+  const profile = Promise.withResolvers<Record<string, unknown>>();
+  const onIdentityResolved = vi.fn();
+  const cli = createDingTalkCli({
+    onIdentityResolved,
+    runImpl: async (args) => ({
+      value:
+        args[0] === "auth"
+          ? { authenticated: true, user_id: "self", user_name: "我" }
+          : args[0] === "contact"
+            ? await profile.promise
+            : {
+                messages: [
+                  {
+                    messageId: "mine",
+                    conversationId: "cid",
+                    sender: "我",
+                    senderId: "self-open",
+                    text: "收到",
+                    createTime: 2000,
+                  },
+                ],
+              },
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      truncated: false,
+      errorCode: null,
+      errorMessage: null,
+    }),
+  });
+  await cli.authStatus();
+  expect((await cli.messages({ conversationId: "cid", limit: 30 })).messages[0]?.mine).toBe(false);
+  expect(onIdentityResolved).not.toHaveBeenCalled();
+  profile.resolve({
+    result: [{ orgEmployeeModel: { userId: "self", openDingTalkId: "self-open" } }],
+  });
+  await vi.waitFor(() => expect(onIdentityResolved).toHaveBeenCalledOnce());
+  expect((await cli.messages({ conversationId: "cid", limit: 30 })).messages[0]?.mine).toBe(true);
+  expect(onIdentityResolved).toHaveBeenCalledOnce();
+});

@@ -730,7 +730,7 @@ it("reads rows and labels fresh and never serves old rows after a read error", a
     const first = await service.conversations();
     expect((await service.details(first.conversations)).conversations[0]?.memberCount).toBe(2);
     members = 7;
-    fake.unread[0]!.title = "新标题";
+    fake.unread[0] = { ...conversation("a", 100), title: "新标题" };
     const second = await service.conversations();
     expect(second.conversations[0]?.title).toBe("新标题");
     expect((await service.details(second.conversations)).conversations[0]?.memberCount).toBe(7);
