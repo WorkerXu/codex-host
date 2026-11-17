@@ -14,6 +14,9 @@ const distFile = path.join(previewRoot, "dist/preview.js");
 const shadowContextPath = process.env.CODEX_SHADOW_CONTEXT ?? "";
 // Global Desktop stylesheet for native-DOM scenarios (Composer @ popup).
 const desktopCssPath = process.env.CODEX_DESKTOP_CSS ?? "";
+const nativeTheme = process.env.CODEX_PREVIEW_NATIVE_THEME === "1";
+if (nativeTheme && (!desktopCssPath || !existsSync(desktopCssPath)))
+  throw new Error("Native theme preview requires CODEX_DESKTOP_CSS");
 const host = "127.0.0.1";
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 
@@ -41,7 +44,7 @@ function readShadowContext() {
 
 function shadowContextCss() {
   const context = readShadowContext();
-  const declarations = Object.entries(context.vars ?? {})
+  const declarations = Object.entries(nativeTheme ? {} : (context.vars ?? {}))
     .map(([name, value]) => `  ${name}: ${value};`)
     .join("\n");
   return `:root {\n${declarations}\n  font-family: ${context.fontFamily ?? "system-ui, sans-serif"};\n}\nhtml, body { font-family: ${context.fontFamily ?? "system-ui, sans-serif"}; }\n`;
@@ -54,7 +57,8 @@ function shadowContextMetadata() {
     varCount: Object.keys(context.vars ?? {}).length,
     colorScheme: context.colorScheme ?? "light",
     // The export carries light values; dark captures stay approximate.
-    darkApproximate: (context.colorScheme ?? "light") !== "dark",
+    darkApproximate: !nativeTheme && (context.colorScheme ?? "light") !== "dark",
+    nativeTheme,
   };
 }
 
@@ -66,7 +70,17 @@ function send(response, status, type, body) {
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
   if (url.pathname === "/" || url.pathname === "/index.html") {
-    send(response, 200, types.get(".html"), readFileSync(path.join(previewRoot, "index.html")));
+    send(
+      response,
+      200,
+      types.get(".html"),
+      readFileSync(path.join(previewRoot, "index.html"), "utf8").replace(
+        '<html lang="zh-CN"',
+        nativeTheme
+          ? '<html lang="zh-CN" data-native-theme="true" data-codex-window-type="electron" data-codex-os="darwin" data-appearance-preset="codex"'
+          : '<html lang="zh-CN"',
+      ),
+    );
     return;
   }
   if (url.pathname === "/shadow-context.css") {

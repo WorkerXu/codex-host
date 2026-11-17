@@ -1,3 +1,4 @@
+import { hubAdminScenarios } from "./hub-admin-scenarios.js";
 import { createMcpAdminPage } from "../../../packages/renderer-extension/src/settings/mcp-admin-page.js";
 import { createMemoryAdminPage } from "../../../packages/renderer-extension/src/settings/memory-admin-page.js";
 import { createHubPreviewClient } from "./hub-admin.js";
@@ -942,106 +943,14 @@ async function mountUnreadScenario(): Promise<void> {
 }
 
 const scenarios: Record<string, () => Promise<void>> = {
-  ...Object.fromEntries(
-    [
-      "hub-servers",
-      "hub-search",
-      "hub-filter",
-      "hub-add",
-      "hub-add-stdio",
-      "hub-edit",
-      "hub-tools",
-      "hub-server-delete",
-      "hub-server-disable",
-      "hub-key-create",
-      "hub-key-edit",
-      "hub-key-delete",
-      "hub-key-regenerate",
-      "hub-key-reveal",
-      "hub-auth-disable",
-      "hub-error",
-      "hub-memory",
-      "hub-memory-search",
-      "hub-memory-source",
-      "hub-memory-page",
-      "hub-memory-detail",
-      "hub-memory-empty",
-    ].map((name) => [
-      name,
-      async () => {
-        const memory = name.startsWith("hub-memory");
-        const { query, queryAll } = mountSettings(memory ? "memory" : "mcp-servers");
-        if (name === "hub-error") {
-          await waitFor(() => query(".hub-status")?.textContent === "无权限");
-          return;
-        }
-        await waitFor(() => query(memory ? ".hub-memory-row" : ".hub-server"));
-        const button = (text: string, scope = ".hub-page") => {
-          const element = queryAll<HTMLButtonElement>(`${scope} button`).find(
-            (button) => button.textContent === text,
-          );
-          if (!element) throw new Error(`Missing button ${text}`);
-          return element;
-        };
-        if (name === "hub-search")
-          await previewType(query<HTMLInputElement>('.hub-page input[type="search"]')!, "文档");
-        if (name === "hub-filter") await previewClick(button("离线"));
-        if (["hub-add", "hub-add-stdio"].includes(name)) {
-          await previewClick(button("添加服务器"));
-          await previewType(query(".hub-dialog input")!, "项目知识库");
-          if (name.endsWith("stdio")) {
-            await previewClick(query(".hub-dialog select")!);
-            await previewKey(query(".hub-dialog select")!, "End");
-            await previewKey(query(".hub-dialog select")!, "Enter");
-          }
-        }
-        if (name === "hub-edit") await previewClick(button("编辑", ".hub-server"));
-        if (name === "hub-tools") {
-          await previewClick(button("查看工具"));
-          await waitFor(() => query(".hub-dialog .hub-list-row"));
-        }
-        if (name === "hub-server-delete") await previewClick(button("删除", ".hub-server"));
-        if (name === "hub-server-disable")
-          await previewClick(query('.hub-server button[role="switch"]')!);
-        if (name === "hub-key-create") {
-          await previewClick(button("创建密钥"));
-          await previewType(query(".hub-dialog input")!, "测试连接");
-          await previewClick(query('.hub-dialog select[aria-label="访问范围"]')!);
-          await previewKey(query('.hub-dialog select[aria-label="访问范围"]')!, "End");
-          await previewKey(query('.hub-dialog select[aria-label="访问范围"]')!, "Enter");
-        }
-        if (name === "hub-key-edit") await previewClick(button("编辑", ".hub-key"));
-        if (name === "hub-key-delete") await previewClick(button("删除", ".hub-key"));
-        if (["hub-key-regenerate", "hub-key-reveal"].includes(name)) {
-          await previewClick(button("重新生成"));
-          if (name === "hub-key-reveal") {
-            await previewClick(button("确认", ".hub-dialog"));
-            await waitFor(() => query(".hub-dialog textarea[readonly]"));
-          }
-        }
-        if (name === "hub-auth-disable")
-          await previewClick(query('.hub-auth button[role="switch"]')!);
-        if (name === "hub-memory-search" || name === "hub-memory-empty") {
-          await previewType(
-            query('.hub-page input[type="search"]')!,
-            name.endsWith("empty") ? "不存在的内容" : "构建",
-          );
-          await previewClick(button("搜索"));
-        }
-        if (name === "hub-memory-source") {
-          const select = query('.hub-page select[aria-label="来源"]')!;
-          await previewClick(select);
-          await previewKey(select, "ArrowDown");
-          await previewKey(select, "Enter");
-        }
-        if (name === "hub-memory-page") await previewClick(button("下一页"));
-        if (name === "hub-memory-detail") {
-          await previewClick(query(".hub-memory-title")!);
-          await waitFor(() => query(".hub-memory-text"));
-        }
-      },
-    ]),
-  ),
+  ...hubAdminScenarios({
+    mount: (id) => mountSettings(id),
+    click: previewClick,
+    type: previewType,
+    key: previewKey,
+    hover: previewHover,
+    waitFor,
+  }),
   async "dingtalk-heavy"() {
     interface HeavyMetrics {
       openToListMs: number;

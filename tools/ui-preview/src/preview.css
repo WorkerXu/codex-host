@@ -192,7 +192,7 @@ body {
  * approximations keep dark captures legible; they are marked approximate in
  * report.json and never ship in the workbench CSS.
  */
-html[data-theme="dark"] {
+html[data-theme="dark"]:not([data-native-theme="true"]) {
   --color-token-main-surface-primary: #202020;
   --color-token-text-primary: #ececec;
   --color-token-text-secondary: #b4b4b4;

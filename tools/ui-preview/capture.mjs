@@ -407,6 +407,24 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      if (document.body.dataset.scenario?.startsWith("hub-")) {
+        check("hub-native-theme", document.documentElement.dataset.nativeTheme === "true");
+        check("hub-no-native-select", queryAll(".hub-page select").length === 0);
+        check(
+          "hub-no-developer-fields",
+          !query(".hub-page")?.textContent.includes("session-") &&
+            !query(".hub-page")?.textContent.includes("调用 —"),
+        );
+        const primary = query(".hub-primary");
+        if (primary) {
+          const color = getComputedStyle(primary).backgroundColor;
+          check(
+            "hub-neutral-primary",
+            !/rgb\(\s*0,\s*(105|106),\s*(204|205)\s*\)/u.test(color),
+            color,
+          );
+        }
+      }
 
       // Every custom property used by the workbench must resolve inside the
       // shadow root, or carry an explicit fallback.
