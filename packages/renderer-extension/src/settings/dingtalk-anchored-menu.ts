@@ -2,7 +2,11 @@ const GAP = 4;
 const MARGIN = 8;
 
 /** Positions both DingTalk overflow menus against their own trigger in viewport coordinates. */
-export function createDingTalkAnchoredMenu(menu: HTMLElement, anchor: HTMLButtonElement) {
+export function createDingTalkAnchoredMenu(
+  menu: HTMLElement,
+  anchor: HTMLButtonElement,
+  align: "left" | "right" = "left",
+) {
   const document = anchor.ownerDocument;
   const view = document.defaultView;
   anchor.setAttribute("aria-haspopup", "menu");
@@ -48,9 +52,10 @@ export function createDingTalkAnchoredMenu(menu: HTMLElement, anchor: HTMLButton
     menu.style.maxHeight = `${placeBelow ? below : above}px`;
     const size = menu.getBoundingClientRect();
     const maxLeft = Math.max(MARGIN, view.innerWidth - size.width - MARGIN);
+    const left = align === "right" ? rect.right - size.width : rect.left;
     const top = placeBelow ? rect.bottom + GAP : rect.top - GAP - size.height;
     const maxTop = Math.max(MARGIN, view.innerHeight - size.height - MARGIN);
-    menu.style.left = `${Math.min(Math.max(MARGIN, rect.left), maxLeft)}px`;
+    menu.style.left = `${Math.min(Math.max(MARGIN, left), maxLeft)}px`;
     menu.style.top = `${Math.min(Math.max(MARGIN, top), maxTop)}px`;
   };
 

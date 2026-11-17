@@ -615,23 +615,27 @@ for (const scenario of scenarios) {
         if (!menu) continue;
         const anchor = query(anchorSelector)?.getBoundingClientRect();
         const rect = menu.getBoundingClientRect();
-        const left =
-          anchor && Math.min(Math.max(8, anchor.left), window.innerWidth - rect.width - 8);
         check(
           `${menuSelector}-below-trigger`,
           anchor && Math.abs(rect.top - anchor.bottom - 4) <= 1,
           `top=${rect.top}, anchorBottom=${anchor?.bottom}`,
         );
         check(
-          `${menuSelector}-left-aligned-or-clamped`,
-          left !== undefined && Math.abs(rect.left - left) <= 1,
-          `left=${rect.left}, expected=${left}`,
+          `${menuSelector}-aligned-to-trigger`,
+          anchor &&
+            (menuSelector === ".dingtalk-header-menu"
+              ? Math.abs(rect.right - anchor.right) <= 1
+              : Math.abs(
+                  rect.left -
+                    Math.min(Math.max(8, anchor.left), window.innerWidth - rect.width - 8),
+                ) <= 1),
+          `menu=${rect.left}..${rect.right}, anchor=${anchor?.left}..${anchor?.right}`,
         );
         check(
           `${menuSelector}-inside-viewport`,
           rect.left >= 8 &&
-            rect.right <= window.innerWidth - 7 &&
-            rect.bottom <= window.innerHeight - 7,
+            rect.right <= window.innerWidth - 8 &&
+            rect.bottom <= window.innerHeight - 8,
         );
         check(`${menuSelector}-top-layer`, menu.matches(":popover-open"));
       }

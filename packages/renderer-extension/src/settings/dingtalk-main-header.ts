@@ -48,7 +48,7 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
   });
   const menu = createElementNode(document, "div", "dingtalk-header-menu");
   menu.setAttribute("role", "menu");
-  const placement = createDingTalkAnchoredMenu(menu, more);
+  const placement = createDingTalkAnchoredMenu(menu, more, "right");
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "dingtalk-menu-action";
