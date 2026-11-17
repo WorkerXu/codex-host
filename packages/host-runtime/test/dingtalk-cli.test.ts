@@ -35,6 +35,92 @@ function childWith(stdout: string, exitCode = 0) {
 }
 
 describe("dws CLI output", () => {
+  it("matches both authenticated userId and its verified open ID, never a display name", async () => {
+    const calls: string[] = [];
+    const cli = createDingTalkCli({
+      runImpl: async (args) => {
+        const command = args.slice(0, 3).join(" ");
+        calls.push(command);
+        const value =
+          args[0] === "auth"
+            ? { authenticated: true, user_id: "self-user", user_name: "许涛" }
+            : args[0] === "contact"
+              ? {
+                  result: [
+                    { orgEmployeeModel: { userId: "self-user", openDingTalkId: "self-open" } },
+                  ],
+                }
+              : {
+                  messages: [
+                    {
+                      messageId: "mine",
+                      conversationId: "cid",
+                      sender: "许涛",
+                      senderId: "self-open",
+                      text: "ok",
+                      createTime: 2000,
+                    },
+                    {
+                      messageId: "other",
+                      conversationId: "cid",
+                      sender: "许涛",
+                      senderId: "other-open",
+                      text: "ok",
+                      createTime: 1000,
+                    },
+                  ],
+                };
+        return {
+          value,
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          truncated: false,
+          errorCode: null,
+          errorMessage: null,
+        };
+      },
+    });
+    const [page] = await Promise.all([
+      cli.messages({ conversationId: "cid", limit: 30 }),
+      cli.messages({ conversationId: "cid", limit: 1 }),
+    ]);
+    expect(page.messages.map((message) => [message.messageId, message.mine])).toEqual([
+      ["mine", true],
+      ["other", false],
+    ]);
+    expect(calls.filter((command) => command === "contact user get-self")).toHaveLength(1);
+    expect(
+      parseMessagesPage(
+        {
+          messages: [
+            { messageId: "u", conversationId: "cid", senderUserId: "self-user", text: "ok" },
+          ],
+        },
+        ["self-user", "self-open"],
+      ).messages[0]?.mine,
+    ).toBe(true);
+  });
+
+  it("retains the stable ID returned by a successful send", async () => {
+    const cli = createDingTalkCli({
+      runImpl: async () => ({
+        value: { result: { messageId: "sent-id" } },
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        truncated: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    });
+    expect(await cli.send("fake-cid", "fake text")).toMatchObject({
+      ok: true,
+      messageId: "sent-id",
+    });
+  });
   it("deduplicates message rows by messageId without collapsing equal text", () => {
     const row = {
       messageId: "m1",

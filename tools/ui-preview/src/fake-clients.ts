@@ -54,6 +54,7 @@ export interface FakeDingTalkOptions {
   pushChangeAfterMs?: number;
   duplicateMessages?: boolean;
   changeRepeats?: number;
+  sendEcho?: "before" | "after";
 }
 
 const sleep = (milliseconds: number) =>
@@ -188,7 +189,7 @@ export function createFakeDingTalkClient(
       all.push({
         messageId: `sent-${sentAt}`,
         conversationId: params.conversationId,
-        senderName: "我",
+        senderName: options.sendEcho ? "许涛" : "我",
         senderId: "me",
         createdAt: sentAt,
         text: params.text,
@@ -202,7 +203,21 @@ export function createFakeDingTalkClient(
         conversation.lastMessageAt = sentAt;
         conversation.preview = `我：${params.text}`;
       }
-      return { ok: true, messageId: `sent-${sentAt}`, sentAt, errorCode: null };
+      if (options.sendEcho === "before") {
+        for (let index = 0; index < 5; index += 1)
+          for (const listener of listeners) listener(params.conversationId);
+        await sleep(350);
+      } else if (options.sendEcho === "after") {
+        setTimeout(() => {
+          for (const listener of listeners) listener(params.conversationId);
+        }, 50);
+      }
+      return {
+        ok: true,
+        messageId: options.sendEcho === "before" ? null : `sent-${sentAt}`,
+        sentAt,
+        errorCode: null,
+      };
     },
     async members() {
       await sleep(80);

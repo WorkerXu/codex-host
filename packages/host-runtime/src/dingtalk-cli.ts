@@ -578,9 +578,12 @@ function parseResources(
   return resources.length > 0 ? resources : undefined;
 }
 
+type SelfIdentity = string | readonly string[] | null;
+type SelfUser = { id: string; name: string; openId?: string };
+
 function messageFromRow(
   row: Record<string, unknown>,
-  selfId: string | null,
+  selfId: SelfIdentity,
 ): DingTalkMessage | null {
   const messageId = string(row.messageId) || string(row.openMessageId);
   const conversationId = string(row.conversationId) || string(row.openConversationId);
@@ -605,7 +608,9 @@ function messageFromRow(
     createdAt: parseDwsTime(row.createTime) ?? parseDwsTime(row.time) ?? 0,
     text: body.text,
     unsupported: body.text.length === 0 && !resources,
-    mine: selfId !== null && senderId === selfId,
+    mine: (typeof selfId === "string" ? [selfId] : (selfId ?? [])).some((id) =>
+      [senderId, string(row.senderUserId), string(row.senderOpenDingTalkId)].includes(id),
+    ),
     ...(quotedMessage ? { quotedMessage } : {}),
     ...(reactions ? { reactions } : {}),
     ...(resources ? { resources } : {}),
@@ -616,7 +621,7 @@ function messageFromRow(
 }
 
 /** `dws chat message list` / `+search-msg` → message rows, newest first. */
-export function parseMessages(value: unknown, selfId: string | null): DingTalkMessage[] {
+export function parseMessages(value: unknown, selfId: SelfIdentity): DingTalkMessage[] {
   if (!record(value)) return [];
   const rows = Array.isArray(value.messages) ? value.messages : [];
   const messages = rows
@@ -633,7 +638,7 @@ export interface MessagesPage {
   nextCursor: number | null;
 }
 
-export function parseMessagesPage(value: unknown, selfId: string | null): MessagesPage {
+export function parseMessagesPage(value: unknown, selfId: SelfIdentity): MessagesPage {
   const messages = parseMessages(value, selfId);
   if (!record(value)) return { messages, hasMore: false, nextCursor: null };
   const nextPage = record(value.nextPage) ? value.nextPage : null;
@@ -775,7 +780,7 @@ export interface DingTalkCli {
     conversationId: string,
     text: string,
     options?: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean },
-  ): Promise<{ ok: boolean; errorCode: string | null }>;
+  ): Promise<{ ok: boolean; messageId?: string | null; errorCode: string | null }>;
   sendDirect(
     openDingTalkId: string,
     text: string,
@@ -857,7 +862,8 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
   const environment = options.environment ?? process.env;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const external = options.runImpl;
-  let cachedUser: { id: string; name: string } | null = null;
+  let cachedUser: SelfUser | null = null;
+  let identityPromise: Promise<SelfUser | null> | null = null;
 
   const run = (args: readonly string[], requestTimeoutMs = timeoutMs): Promise<DwsResult> =>
     external
@@ -868,15 +874,25 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           timeoutMs: requestTimeoutMs,
         });
 
-  const self = async (): Promise<{ id: string; name: string } | null> => {
-    if (cachedUser) return cachedUser;
-    const data = dataObject(await run(["auth", "status", "--readonly"], 10_000));
-    if (data?.authenticated !== true) return null;
-    const userId = string(data.user_id);
-    const userName = string(data.user_name);
-    if (!userId) return null;
-    cachedUser = { id: userId, name: userName };
-    return cachedUser;
+  const self = (): Promise<SelfUser | null> => {
+    if (cachedUser?.openId) return Promise.resolve(cachedUser);
+    identityPromise ??= (async () => {
+      const data = dataObject(await run(["auth", "status", "--readonly"], 10_000));
+      if (data?.authenticated !== true || !string(data.user_id)) return null;
+      const user = { id: string(data.user_id), name: string(data.user_name) };
+      const profile = await run(["contact", "user", "get-self"], 10_000).catch(() => null);
+      const rows = profile?.value?.result;
+      const org = (Array.isArray(rows) ? rows : [])
+        .filter(record)
+        .map((row) => row.orgEmployeeModel)
+        .find((row) => record(row) && row.userId === user.id);
+      const openId = record(org) ? string(org.openDingTalkId) : "";
+      cachedUser = { ...user, ...(openId ? { openId } : {}) };
+      return cachedUser;
+    })().finally(() => {
+      identityPromise = null;
+    });
+    return identityPromise;
   };
 
   return {
@@ -1036,7 +1052,13 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         args.push("--page-all", "--page-limit", "10", "--max-items", String(input.maxItems ?? 300));
       }
       const [result, user] = await Promise.all([run(args, 45_000), self()]);
-      return { ...parseMessagesPage(result.value, user?.id ?? null), errorCode: result.errorCode };
+      return {
+        ...parseMessagesPage(
+          result.value,
+          user ? [user.id, user.openId ?? ""].filter(Boolean) : null,
+        ),
+        errorCode: result.errorCode,
+      };
     },
     async searchMessages(input) {
       const args = ["chat", "+search-msg"];
@@ -1047,7 +1069,10 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       args.push("--limit", String(Math.max(1, Math.min(input.limit, 100))), "--order", "desc");
       const [result, user] = await Promise.all([run(args, 35_000), self()]);
       return {
-        messages: parseMessages(result.value, user?.id ?? null),
+        messages: parseMessages(
+          result.value,
+          user ? [user.id, user.openId ?? ""].filter(Boolean) : null,
+        ),
         errorCode: result.errorCode,
       };
     },
@@ -1082,7 +1107,11 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
       if (options.atAll === true) args.push("--at-all");
       const result = await run(args, 30_000);
-      return { ok: result.errorCode === null, errorCode: result.errorCode };
+      return {
+        ok: result.errorCode === null,
+        messageId: findString(result.value, ["messageId", "openMessageId"]),
+        errorCode: result.errorCode,
+      };
     },
     async sendDirect(openDingTalkId, text, options = {}) {
       const args = [

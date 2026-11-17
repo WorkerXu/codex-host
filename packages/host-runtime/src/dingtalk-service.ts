@@ -442,7 +442,7 @@ export class DingTalkService {
     }
     return dingtalkSendResultSchema.parse({
       ok: result.ok,
-      messageId: null,
+      messageId: result.messageId ?? null,
       sentAt: this.#now(),
       errorCode: result.errorCode,
     });

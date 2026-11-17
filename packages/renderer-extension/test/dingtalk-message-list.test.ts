@@ -245,6 +245,15 @@ function hasClass(node: FakeElement, className: string): boolean {
 }
 
 describe("DingTalk message window rendering", () => {
+  it("merges an acknowledged local row when the server row arrived first", () => {
+    const document = new FakeDocument();
+    const { container, list } = createList(document, [], []);
+    list.reset([message("local-1", 1000), message("server-1", 1000)]);
+    list.update(message("server-1", 1000, { mine: true }), "local-1");
+    expect(renderedIds(container)).toEqual(["server-1"]);
+    expect(list.count).toBe(1);
+    list.dispose();
+  });
   it("deduplicates snapshots, overlapping pages and repeated concurrent deliveries", () => {
     const document = new FakeDocument();
     const { container, list } = createList(document, [], []);

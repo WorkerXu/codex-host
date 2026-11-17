@@ -892,6 +892,22 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(350);
   },
 
+  async "dingtalk-send-echo"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      sendEcho: "before",
+    });
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
+  async "dingtalk-send-ack"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      sendEcho: "after",
+    });
+    await waitFor(() => query(".dingtalk-message"));
+  },
+
   async "dingtalk-hover"() {
     resetConversationMemory();
     const { query } = mountSettings("dingtalk");

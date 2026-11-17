@@ -151,6 +151,8 @@ export interface ViewMessage extends DingTalkMessage {
   sendText?: string;
   atOpenDingTalkIds?: string[];
   atAll?: boolean;
+  /** Local send start; allows one-to-one reconciliation when dws omits the sent ID. */
+  echoStartedAt?: number;
 }
 
 /** Merge snapshots by stable message identity; repeated deliveries are idempotent. */
@@ -159,7 +161,24 @@ export function mergeDingTalkMessages(
   incoming: readonly ViewMessage[],
 ): ViewMessage[] {
   const byId = new Map<string, ViewMessage>();
-  for (const message of [...current, ...incoming]) byId.set(message.messageId, message);
+  for (const message of current) byId.set(message.messageId, message);
+  for (const message of incoming) {
+    if (message.mine && message.echoStartedAt === undefined && !byId.has(message.messageId)) {
+      const echo = [...byId.values()].find(
+        (local) =>
+          local.echoStartedAt !== undefined &&
+          local.messageId.startsWith("local-") &&
+          !local.failed &&
+          local.conversationId === message.conversationId &&
+          (local.text.trim() === message.text.trim() ||
+            local.sendText?.trim() === message.text.trim()) &&
+          message.createdAt >= local.echoStartedAt - 1_000 &&
+          message.createdAt <= local.echoStartedAt + 120_000,
+      );
+      if (echo) byId.delete(echo.messageId);
+    }
+    byId.set(message.messageId, message);
+  }
   return [...byId.values()].sort((left, right) => left.createdAt - right.createdAt);
 }
 

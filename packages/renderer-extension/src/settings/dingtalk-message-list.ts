@@ -339,6 +339,13 @@ export function createDingTalkMessageList(
       const index = order.indexOf(oldId);
       if (index < 0) return;
       const entry = entries.get(oldId);
+      if (oldId !== message.messageId && entries.has(message.messageId)) {
+        if (entry) releaseEntry(entry);
+        entries.delete(oldId);
+        order.splice(index, 1);
+        api.update(message);
+        return;
+      }
       if (entry) entry.message = message;
       if (oldId !== message.messageId) {
         entries.delete(oldId);

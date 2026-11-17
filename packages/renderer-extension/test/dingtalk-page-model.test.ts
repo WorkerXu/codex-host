@@ -12,6 +12,7 @@ import {
   formatDingTalkTime,
   highlightSegments,
   messagePreview,
+  mergeDingTalkMessages,
 } from "../src/settings/dingtalk-page-model.js";
 
 function message(overrides: Partial<DingTalkMessage> = {}): DingTalkMessage {
@@ -28,6 +29,23 @@ function message(overrides: Partial<DingTalkMessage> = {}): DingTalkMessage {
 }
 
 describe("DingTalk page model", () => {
+  it("reconciles an unidentified local echo once, before or after send acknowledgement", () => {
+    const echo = {
+      ...message({ messageId: "local-1", mine: true, createdAt: 2000 }),
+      echoStartedAt: 2000,
+      pending: true,
+    };
+    const remote = message({ messageId: "server-1", mine: true, createdAt: 2000 });
+    expect(mergeDingTalkMessages([echo], [remote, remote])).toEqual([remote]);
+    expect(mergeDingTalkMessages([{ ...echo, pending: false }], [remote])).toEqual([remote]);
+    const distinct = { ...remote, messageId: "server-2" };
+    expect(mergeDingTalkMessages([remote], [distinct])).toHaveLength(2);
+    expect(mergeDingTalkMessages([echo], [{ ...remote, mine: false }])).toHaveLength(2);
+    expect(mergeDingTalkMessages([echo], [{ ...remote, createdAt: 0 }])).toHaveLength(2);
+    expect(
+      mergeDingTalkMessages([echo, { ...echo, messageId: "local-2" }], [remote, distinct]),
+    ).toEqual([remote, distinct]);
+  });
   it("formats row times and date separators", () => {
     const now = new Date(2026, 10, 13, 18, 0, 0).getTime();
     expect(formatDingTalkTime(new Date(2026, 10, 13, 9, 5).getTime(), now)).toBe("09:05");

@@ -95,6 +95,7 @@ export function createDingTalkSettingsPage(
       let searchTimer: number | null = null;
       let highlightTimer: number | null = null;
       let scrollRequest = 0;
+      let sendSequence = 0;
       let searchExpanded = { conversations: false, messages: false };
       let searchCursor = -1;
       let loadingOlderRequest = false;
@@ -633,6 +634,7 @@ export function createDingTalkSettingsPage(
         if (!client) return;
         const generation = messageGeneration;
         const nearBottom = distanceFromBottom() <= 80;
+        const distance = distanceFromBottom();
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
           .catch(() => null);
@@ -658,11 +660,14 @@ export function createDingTalkSettingsPage(
           state.messages = state.messages.slice(overflow);
           messageListView.removeOldest(overflow);
         }
-        messageListView.append(
-          result.messages.filter((message) =>
-            state.messages.some((current) => current.messageId === message.messageId),
-          ),
-        );
+        if ([...known].some((id) => !state.messages.some((message) => message.messageId === id))) {
+          messageListView.reset(state.messages, nearBottom ? { scroll: "bottom" } : { distance });
+        } else
+          messageListView.append(
+            result.messages.filter((message) =>
+              state.messages.some((current) => current.messageId === message.messageId),
+            ),
+          );
         if (nearBottom) {
           scrollToBottom();
         } else {
@@ -836,6 +841,7 @@ export function createDingTalkSettingsPage(
       const deliver = async (message: ViewMessage): Promise<void> => {
         if (!client || state.selectedId === null) return;
         const conversationId = state.selectedId;
+        const generation = messageGeneration;
         const previousId = message.messageId;
         message.pending = true;
         message.failed = false;
@@ -850,7 +856,9 @@ export function createDingTalkSettingsPage(
             ...(message.atAll === true ? { atAll: true } : {}),
           })
           .catch(() => null);
-        if (disposed || state.selectedId !== conversationId) return;
+        if (disposed || generation !== messageGeneration || state.selectedId !== conversationId)
+          return;
+        if (!state.messages.includes(message)) return;
         message.pending = false;
         if (!result?.ok) {
           message.failed = true;
@@ -858,6 +866,7 @@ export function createDingTalkSettingsPage(
           return;
         }
         message.messageId = result.messageId ?? message.messageId;
+        if (result.messageId) delete message.echoStartedAt;
         message.createdAt = result.sentAt;
         if (state.currentConversation) {
           state.currentConversation.lastMessageAt = result.sentAt;
@@ -869,9 +878,11 @@ export function createDingTalkSettingsPage(
             : row,
         );
         previews.set(conversationId, `我：${message.text}`);
-        messageListView.update(message, previousId);
+        state.messages = mergeDingTalkMessages([], state.messages);
+        renderMessages({ scroll: "bottom" });
         scrollToBottom();
         renderList();
+        void refreshLatest(conversationId);
       };
 
       const sendMessage = (payload: {
@@ -882,7 +893,7 @@ export function createDingTalkSettingsPage(
       }): void => {
         if (state.selectedId === null) return;
         const pending: ViewMessage = {
-          messageId: `local-${Date.now()}`,
+          messageId: `local-${Date.now()}-${++sendSequence}`,
           conversationId: state.selectedId,
           senderName: "我",
           senderId: "me",
@@ -891,6 +902,7 @@ export function createDingTalkSettingsPage(
           unsupported: false,
           mine: true,
           pending: true,
+          echoStartedAt: Date.now(),
           sendText: payload.text,
           ...(payload.atOpenDingTalkIds.length > 0
             ? { atOpenDingTalkIds: payload.atOpenDingTalkIds }

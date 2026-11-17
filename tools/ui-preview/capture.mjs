@@ -17,6 +17,8 @@ const allScenarios = [
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-deduplicated",
+  "dingtalk-send-echo",
+  "dingtalk-send-ack",
   "dingtalk-hover",
   "dingtalk-conversation-hover",
   "dingtalk-image-unavailable",
@@ -312,6 +314,22 @@ for (const scenario of scenarios) {
       await page.hover(".agent-card[data-agent-name]");
     }
     const hoverSelector = hoverSelectors.get(scenario);
+    if (scenario === "dingtalk-send-echo" || scenario === "dingtalk-send-ack") {
+      await realClick(page, ".dingtalk-conversation", 2);
+      await page.waitForFunction(() =>
+        document
+          .querySelector("[data-codexhost-settings-shell]")
+          ?.shadowRoot?.querySelector(".dingtalk-composer-input")
+          ?.getAttribute("placeholder")
+          ?.includes("林晓"),
+      );
+      await page.waitForSelector(".dingtalk-message");
+      await realClick(page, ".dingtalk-composer-input");
+      await page.keyboard.type("已收到，我会核对这份材料。");
+      await realClick(page, ".dingtalk-send-button");
+      await page.waitForSelector('[data-message-id^="sent-"]');
+      await page.waitForTimeout(700);
+    }
     if (scenario === "dingtalk-deduplicated") {
       await realClick(page, ".dingtalk-conversation", 0);
       const list = await pointAt(page, ".dingtalk-message-list");
@@ -492,6 +510,14 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      if (["dingtalk-send-echo", "dingtalk-send-ack"].includes(document.body.dataset.scenario)) {
+        const echoes = queryAll(".dingtalk-message").filter((row) =>
+          row.textContent.includes("已收到，我会核对这份材料。"),
+        );
+        check("send-echo-once", echoes.length === 1);
+        check("send-echo-on-right", echoes[0]?.classList.contains("dingtalk-message--mine"));
+        check("send-echo-no-local-placeholder", !query('[data-message-id^="local-"]'));
+      }
       if (document.body.dataset.scenario === "dingtalk-deduplicated") {
         const ids = queryAll(".dingtalk-message").map((row) => row.dataset.messageId);
         check("message-ids-unique", new Set(ids).size === ids.length);
