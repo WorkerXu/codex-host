@@ -1,4 +1,6 @@
 import type { ModelService } from "./model-service.js";
+import type { CodeRepositories } from "./code-repositories.js";
+import { RepositoryError } from "./code-repository-process.js";
 import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
 import {
   DELEGATION_PROJECTS_METHOD,
@@ -487,6 +489,7 @@ export interface AppServerHostOptions {
   jarvis?: JarvisService;
   /** Desktop-local shared model credentials and structured connection tests. */
   modelService?: ModelService;
+  codeRepositories?: CodeRepositories;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1601,6 +1604,30 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (request.method.startsWith("codexhost/code-repositories/")) {
+      this.#dispatchDesktopReply(request, async () => {
+        if (!this.#options.codeRepositories) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await this.#options.codeRepositories.request(
+            request.method,
+            request.params,
+          );
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(
+              request,
+              -32602,
+              error instanceof RepositoryError ? error.code : "invalid_params",
+            ),
+          );
+        }
+      });
       return;
     }
     if (request.method.startsWith("codexhost/model-service/")) {
