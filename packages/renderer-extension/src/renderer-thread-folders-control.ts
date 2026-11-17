@@ -85,13 +85,14 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   let disposed = false;
   let busy = false;
   let browseGeneration = 0;
+  let browsing = false;
   let errorText = "";
   let revision = 0;
   const position = () => {
     if (!popover.matches(":popover-open")) return;
     const rect = trigger.getBoundingClientRect();
     popover.style.left = `${Math.max(12, Math.min(rect.left, d.documentElement.clientWidth - popover.offsetWidth - 12))}px`;
-    popover.style.maxHeight = `${Math.max(100, rect.top - 20)}px`;
+    popover.style.maxHeight = `min(420px, calc(100dvh - 120px), ${Math.max(0, rect.top - 20)}px)`;
     popover.style.top = `${Math.max(12, rect.top - popover.offsetHeight - 8)}px`;
   };
   const resize = new ResizeObserver(position);
@@ -118,6 +119,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     ].join("\n");
   };
   const close = () => {
+    browsing = false;
+    ++browseGeneration;
     if (!view) ++revision;
     popover.hidePopover();
     trigger.disabled = false;
@@ -125,7 +128,7 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     trigger.focus();
   };
   const applySelection = async (folders: string[], focusPath?: string) => {
-    if (busy || !view || !folders.length || disposed) return;
+    if (busy || !view || !folders.length || disposed) return false;
     const attempt = revision;
     busy = true;
     trigger.disabled = true;
@@ -134,12 +137,14 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     render();
     try {
       await options.save([...folders]);
-      if (disposed || attempt !== revision) return;
+      if (disposed || attempt !== revision) return false;
       selected = [...folders];
       view.folders = [...folders];
       updateChip(folders, view.additionalDirectories);
+      return true;
     } catch {
       if (attempt === revision) errorText = "未能保存工作文件夹，请重试";
+      return false;
     } finally {
       if (!disposed && attempt === revision) {
         busy = false;
@@ -154,8 +159,21 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       }
     }
   };
+  const returnToMain = (path?: string) => {
+    browsing = false;
+    ++browseGeneration;
+    render();
+    const target = path
+      ? [...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]")].find(
+          (item) => item.getAttribute("aria-label") === path,
+        )
+      : popover.querySelector<HTMLButtonElement>(".codexhost-folders-add");
+    if (target && !target.disabled) target.focus();
+    else popover.querySelector<HTMLButtonElement>(".codexhost-folders-add")?.focus();
+  };
   const render = () => {
-    if (disposed) return;
+    if (disposed || browsing) return;
+    delete popover.dataset.codexhostFoldersBrowser;
     popover.replaceChildren();
     const title = d.createElement("h3");
     title.textContent = "工作文件夹";
@@ -241,12 +259,11 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         (path) => !selected.includes(path) && !view?.projectFolders.includes(path),
       ),
     );
-    const browse = d.createElement("div");
     const addPath = async (path: string) => {
       const attempt = revision;
       await options.validate(path);
-      if (disposed || attempt !== revision) return;
-      if (!selected.includes(path)) await applySelection([...selected, path], path);
+      if (disposed || attempt !== revision) return false;
+      return selected.includes(path) || (await applySelection([...selected, path], path));
     };
     const openBrowser = async () => {
       if (!view) return;
@@ -263,48 +280,67 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
           return;
         }
       }
-      browse.replaceChildren();
+      browsing = true;
+      popover.dataset.codexhostFoldersBrowser = "";
       const form = d.createElement("form");
       form.className = "codexhost-folders-path";
+      const back = button("", () => returnToMain(), "codexhost-folders-back");
+      back.setAttribute("aria-label", "返回工作文件夹");
+      back.innerHTML =
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m11.5 5-5 5 5 5"/></svg>';
       const input = d.createElement("input");
       input.setAttribute("aria-label", view.remote ? "远程文件夹路径" : "文件夹路径");
       input.placeholder = "输入绝对路径…";
       input.value = selected[0] ?? view.projectFolders[0] ?? "/";
+      const add = d.createElement("button");
+      add.type = "submit";
+      add.className = "codexhost-folders-primary";
+      add.textContent = "添加";
       const suggestions = d.createElement("div");
+      suggestions.className = "codexhost-folders-children";
       suggestions.setAttribute("aria-label", "子文件夹");
+      const status = d.createElement("div");
+      status.className = "codexhost-folders-hint";
+      status.setAttribute("role", "status");
+      const normalizedPath = () => {
+        const raw = input.value.trim();
+        return /^[A-Za-z]:[\\/]+$/u.test(raw) ? raw : raw.replace(/[\\/]+$/u, "") || "/";
+      };
+      const attempt = revision;
+      const active = () => browsing && form.isConnected && !disposed && attempt === revision;
       const list = async () => {
         const generation = ++browseGeneration;
-        const typed = input.value;
-        const separator = Math.max(typed.lastIndexOf("/"), typed.lastIndexOf("\\"));
-        const parent =
-          typed.endsWith("/") || typed.endsWith("\\")
-            ? typed
-            : typed.slice(0, separator + 1) || "/";
+        suggestions.replaceChildren();
+        status.className = "codexhost-folders-hint";
+        status.setAttribute("role", "status");
+        add.disabled = !input.value.trim();
+        status.textContent = add.disabled ? "输入文件夹的绝对路径" : "正在读取目录…";
+        if (add.disabled) return;
         try {
-          const children = await options.list(parent);
-          if (generation !== browseGeneration || disposed) return;
-          suggestions.replaceChildren();
-          for (const path of children
-            .filter((path) => path.toLowerCase().startsWith(typed.toLowerCase()))
-            .slice(0, 40)) {
+          const children = await options.list(normalizedPath());
+          if (generation !== browseGeneration || !active()) return;
+          status.textContent = children.length ? "" : "此文件夹没有子文件夹";
+          for (const path of children) {
             const row = button(
               "",
               () => {
-                input.value = path.replace(/[\\/]+$/u, "") + (path.includes("\\") ? "\\" : "/");
+                input.value = path;
                 void list();
                 input.focus();
               },
-              "codexhost-folders-add",
+              "codexhost-folders-directory",
             );
             row.setAttribute("aria-label", path);
             row.title = path;
             row.innerHTML = folderIcon;
-            row.append(folderLabel(d, path));
+            const name = d.createElement("span");
+            name.textContent = folderName(path);
+            row.append(name);
             suggestions.append(row);
           }
         } catch {
-          if (generation === browseGeneration) {
-            suggestions.textContent = "无法读取此目录，请检查路径与连接";
+          if (generation === browseGeneration && active()) {
+            status.textContent = "无法读取此目录，请检查路径与连接";
           }
         }
       };
@@ -313,22 +349,42 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       });
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        const rawPath = input.value.trim();
-        const folderPath = /^[A-Za-z]:[\\/]+$/u.test(rawPath)
-          ? rawPath
-          : rawPath.replace(/[\\/]+$/u, "") || "/";
-        void addPath(folderPath).catch(() => {
-          errorText = "无法添加文件夹，请确认路径可用后重试";
-          const line = browse.querySelector('[role="alert"]') ?? d.createElement("div");
-          line.setAttribute("role", "alert");
-          line.className = "codexhost-folders-error";
-          line.textContent = errorText;
-          browse.append(line);
+        if (add.disabled || busy) return;
+        ++browseGeneration;
+        const path = normalizedPath();
+        input.disabled = add.disabled = true;
+        suggestions.querySelectorAll<HTMLButtonElement>("button").forEach((row) => {
+          row.disabled = true;
         });
+        status.className = "codexhost-folders-hint";
+        status.setAttribute("role", "status");
+        status.textContent = "正在添加文件夹…";
+        void (async () => {
+          try {
+            await options.validate(path);
+            if (!active()) return;
+            if (selected.includes(path) || (await applySelection([...selected, path], path))) {
+              if (active()) returnToMain(path);
+              return;
+            }
+            status.textContent = errorText;
+          } catch {
+            if (active()) status.textContent = "无法添加文件夹，请确认路径可用后重试";
+          } finally {
+            if (active()) {
+              input.disabled = add.disabled = false;
+              suggestions.querySelectorAll<HTMLButtonElement>("button").forEach((row) => {
+                row.disabled = false;
+              });
+              status.className = "codexhost-folders-error";
+              status.setAttribute("role", "alert");
+              input.focus();
+            }
+          }
+        })();
       });
-      const add = button("添加", () => form.requestSubmit());
-      form.append(input, add);
-      browse.append(form, suggestions);
+      form.append(back, input, add);
+      popover.replaceChildren(form, status, suggestions);
       input.focus();
       await list();
     };
@@ -340,7 +396,7 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       "codexhost-folders-add",
     );
     addFolder.innerHTML = `${folderIcon}<span>添加文件夹…</span>`;
-    popover.append(addFolder, browse);
+    popover.append(addFolder);
     if (errorText) {
       const error = d.createElement("div");
       error.className = "codexhost-folders-error";
@@ -409,10 +465,15 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      close();
+      if (browsing) returnToMain();
+      else close();
     }
   });
   popover.addEventListener("toggle", () => {
+    if (!popover.matches(":popover-open")) {
+      browsing = false;
+      ++browseGeneration;
+    }
     if (!popover.matches(":popover-open") && !view) {
       ++revision;
       trigger.disabled = false;
@@ -424,6 +485,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     trigger,
     updateChip,
     reset() {
+      browsing = false;
+      ++browseGeneration;
       ++revision;
       busy = false;
       trigger.disabled = false;

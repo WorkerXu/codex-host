@@ -50,7 +50,7 @@
   margin: 0;
   box-sizing: border-box;
   width: min(360px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  max-height: min(420px, calc(100dvh - 120px));
   overflow: auto;
   padding: 4px;
   border: 0.5px solid var(--color-token-border);
@@ -170,8 +170,10 @@
 }
 .codexhost-folders-path {
   display: flex;
-  gap: 4px;
-  margin: 4px 8px;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 4px;
+  flex: none;
 }
 .codexhost-folders-path input {
   min-width: 0;
@@ -180,7 +182,9 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  padding: 4px 8px;
+  height: var(--control-size-xs);
+  padding: 0 8px;
+  box-sizing: border-box;
   font: inherit;
 }
 .codexhost-folders-error {
@@ -235,4 +239,65 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.codexhost-folders-back,
+.codexhost-folders-directory {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.codexhost-folders-back {
+  padding: 4px;
+  flex: none;
+}
+.codexhost-folders-directory {
+  width: 100%;
+}
+.codexhost-folders-directory span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-back:hover,
+.codexhost-folders-directory:hover {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-folders-primary {
+  flex: none;
+  height: var(--control-size-xs);
+  padding: 0 var(--control-gutter-xs);
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: var(--color-background-primary-solid);
+  color: var(--color-text-primary-solid);
+}
+.codexhost-folders-primary:hover {
+  background: var(--color-background-primary-solid-hover);
+}
+.codexhost-folders-primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.codexhost-folders-popover:popover-open[data-codexhost-folders-browser] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.codexhost-folders-children {
+  min-height: 0;
+  overflow-y: auto;
+}
+[data-codexhost-folders-browser] > [role="status"],
+[data-codexhost-folders-browser] > [role="alert"] {
+  flex: none;
+}
+.codexhost-folders-popover [role="status"]:empty {
+  display: none;
 }

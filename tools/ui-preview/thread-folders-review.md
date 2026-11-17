@@ -1,6 +1,6 @@
 # 对话工作文件夹界面复审记录
 
-2026-11-17；按 ui-quality-bar.md 和 review-thread-folders-ui.md 的 0–8 项修改。以下 26 张最终截图均经过真实鼠标 / 键盘操作，并逐张打开查看。常规窗口 1280×900，窄窗口 390×740。
+2026-11-17；按 ui-quality-bar.md 和 review-thread-folders-ui.md 的 0–8 项修改。第二轮 26 张截图均经过真实鼠标 / 键盘操作，并逐张打开查看；其中 05/06 的当前结果以下方第三轮记录为准。常规窗口 1280×900，窄窗口 390×740。
 
 ## 原生结构与主题来源
 
@@ -9,7 +9,28 @@
 - 文件夹场景不加载浅色 shadow-context，也不注入 preview.css 的近似深色映射。浅 / 深色都由 Desktop 自带 `[data-theme]` 和 `light-dark()` 规则解析。实测深色页面 surface 为 `#181818`、菜单为 `rgb(45, 45, 45)`、错误文字为 `rgb(250, 66, 62)`。
 - CSS SHA-256：`45b6cbc843f0dd1b94491ae1ed8ff03fcb9cdf53b16eb10896673037648dd987`。截图及来源校验记录在上述目录的 `manifest.json`；图片不纳入 Git。
 
-## 逐图复查
+## 第三轮：目录浏览子视图（当前 05/06）
+
+点击「添加文件夹…」后整个弹层切换为浏览视图。顶部仅保留返回箭头、路径输入和原生小号主按钮；下面只列当前路径的子目录名。回车 / 添加成功后返回主视图；Esc 先返回主视图，再关闭。高度上限为 `min(420px, 视口高度 - 120px)`，仅子目录列表滚动，路径栏保持可见。
+
+仍使用上述真实 Desktop CSS、原生 Composer DOM 和 agent-browser 真实鼠标 / 键盘。1280×900，以下 8 张最终截图均已逐张打开检查，替代第二轮 05/06：
+
+| 截图 | 修正问题与复查结果 |
+| --- | --- |
+| [05-local-browser-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/05-local-browser-light.png>) | 点击添加入口后仅显示 packages / docs 子目录，移除最近使用等主列表重复内容；紧凑子视图不再撑向视口顶部，主按钮按原生小号尺寸和主题着色。 |
+| [06-remote-browser-hover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/06-remote-browser-hover-light.png>) | 进入远程 packages 并悬停 desktop-control。仅显示该路径的直接子目录名，取消每行重复长路径；目录列表内部滚动，浮层保持 chip 锚点和高度上限。 |
+| [05-local-browser-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/05-local-browser-keyboard-light.png>) | 真实 Tab / Enter 打开浏览并聚焦「添加」；长列表保持 420px 上限，主按钮焦点环可见。随后 Enter 已验证加入所填目录并返回主视图。 |
+| [06-remote-browser-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/06-remote-browser-keyboard-light.png>) | 真实 Tab / End 移到最后一个子目录，列表滚到底部；路径栏保持原位，焦点环完整。修正滚动文字从固定栏下露出的瑕疵；随后两次 Esc 分别返回主视图、关闭弹层，焦点返回 chip。 |
+| [05-local-browser-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/05-local-browser-dark.png>) | 点击添加入口后仅显示 packages / docs 子目录，移除最近使用等主列表重复内容；紧凑子视图不再撑向视口顶部，主按钮按原生小号尺寸和主题着色。 |
+| [06-remote-browser-hover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/06-remote-browser-hover-dark.png>) | 进入远程 packages 并悬停 desktop-control。仅显示该路径的直接子目录名，取消每行重复长路径；目录列表内部滚动，浮层保持 chip 锚点和高度上限。 |
+| [05-local-browser-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/05-local-browser-keyboard-dark.png>) | 真实 Tab / Enter 打开浏览并聚焦「添加」；长列表保持 420px 上限，主按钮焦点环可见。随后 Enter 已验证加入所填目录并返回主视图。 |
+| [06-remote-browser-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round3/06-remote-browser-keyboard-dark.png>) | 真实 Tab / End 移到最后一个子目录，列表滚到底部；路径栏保持原位，焦点环完整。修正滚动文字从固定栏下露出的瑕疵；随后两次 Esc 分别返回主视图、关闭弹层，焦点返回 chip。 |
+
+本轮验证：`npm run build:typescript`、`npm run build:renderer`、预览构建、`npm run lint`、改动文件 Prettier、`git diff --check` 均通过。真实 Desktop CSS 下 8 个 Playwright 用例通过，新增浅 / 深色子视图替换、内部滚动和固定路径栏、添加按钮、两级 Esc、保存失败回退检查。
+
+本轮仅修改目录浏览 UI 及对应预览、测试和文档。未 push、merge 或部署；未读取禁止的 runtime 目录。
+
+## 第二轮逐图复查
 
 | 截图 | 对应审查项 | 已修问题与复查结果 |
 | --- | --- | --- |

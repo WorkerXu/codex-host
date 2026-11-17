@@ -97,7 +97,30 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
     },
     async list(path) {
       const base = path.replace(/\/+$/u, "");
-      if (base === `${prefix}/Projects`) return [project, ...recent, `${prefix}/Projects/sandbox`];
+      if (base === `${prefix}/Projects`)
+        return [
+          project,
+          `${prefix}/Projects/shared-ui`,
+          `${prefix}/Projects/docs`,
+          `${prefix}/Projects/sandbox`,
+          `${prefix}/Projects/workbench`,
+        ];
+      if (base === `${project}/packages`)
+        return [
+          "adapters",
+          "console-server",
+          "desktop-control",
+          "harness-adapter",
+          "harness-broker",
+          "harness-discovery",
+          "harness-plugin-files",
+          "host-runtime",
+          "mapping-store",
+          "protocol-core",
+          "renderer-extension",
+          "shared-contracts",
+          "update-manager",
+        ].map((name) => `${base}/${name}`);
       if (base === project) return [`${project}/packages`, `${project}/docs`];
       return [`${base}/frontend`, `${base}/backend`, `${base}/shared`];
     },

@@ -77,7 +77,7 @@ test("multi-select and main folder immediately update an existing conversation; 
   ).toBeFocused();
 });
 
-test("read-only remote directory completion accepts keyboard input and keeps the popover in the viewport", async ({
+test("read-only remote folder browsing accepts keyboard input and keeps the popover in the viewport", async ({
   page,
 }) => {
   await page.goto("about:blank#thread-folders-remote");
@@ -163,4 +163,88 @@ test("loading can be dismissed, failures are localized, and an empty catalog off
     await expect(page.getByRole("dialog")).not.toBeVisible();
     await expect(page.getByRole("button", { name: /^工作文件夹/u })).toBeEnabled();
   }
+});
+
+for (const theme of ["light", "dark"]) {
+  test(`folder browser replaces the main menu, scrolls internally, and returns in two Escape steps (${theme})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 900, height: 600 });
+    await page.goto("about:blank#thread-folders-local");
+    await page.setContent(`<!doctype html><html data-theme="${theme}"><body></body></html>`);
+    await page.addScriptTag({ content: bundle });
+    const trigger = page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true });
+    await trigger.click();
+    await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+    await expect(page.getByRole("menuitemcheckbox")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "添加文件夹…", exact: true })).toHaveCount(0);
+    const rows = page.locator(".codexhost-folders-directory");
+    await expect(rows).toHaveText(["packages", "docs"]);
+    const input = page.getByRole("textbox", { name: "文件夹路径", exact: true });
+    await page
+      .getByRole("button", { name: "/Users/lin/Projects/codexhost/packages", exact: true })
+      .click();
+    await expect(input).toHaveValue("/Users/lin/Projects/codexhost/packages");
+    await expect(rows).toHaveCount(13);
+    const dialog = page.getByRole("dialog");
+    const bounds = await dialog.boundingBox();
+    expect(
+      bounds &&
+        bounds.height <= Math.min(420, 600 - 120) &&
+        bounds.y >= 0 &&
+        bounds.y + bounds.height <= 600,
+    ).toBeTruthy();
+    await input.press("Tab");
+    await expect(page.getByRole("button", { name: "添加", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("End");
+    await expect(rows.last()).toBeFocused();
+    expect(
+      await page.locator(".codexhost-folders-children").evaluate((node) => node.scrollTop),
+    ).toBeGreaterThan(0);
+    expect(await dialog.evaluate((node) => node.scrollTop)).toBe(0);
+    await expect(input).toBeVisible();
+    const header = await input.boundingBox();
+    expect(bounds && header && header.y >= bounds.y && header.y < bounds.y + 48).toBeTruthy();
+    await page.keyboard.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "添加文件夹…", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+    await input.fill("/Users/lin/Projects/codexhost/packages");
+    await page.getByRole("button", { name: "添加", exact: true }).click();
+    await expect(input).toHaveCount(0);
+    await expect(
+      page.getByRole("menuitemcheckbox", {
+        name: "/Users/lin/Projects/codexhost/packages",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+}
+
+test("a rejected addition stays in the browser and a back action restores the main selection", async ({
+  page,
+}) => {
+  await page.goto("about:blank#thread-folders-save-error");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "文件夹路径", exact: true });
+  await input.fill("/Users/lin/Projects/codexhost/packages");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toHaveText("未能保存工作文件夹，请重试");
+  await expect(input).toBeFocused();
+  await expect(page.getByRole("button", { name: "添加", exact: true })).toBeEnabled();
+  await expect(page.getByRole("menuitemcheckbox")).toHaveCount(0);
+  await page.getByRole("button", { name: "返回工作文件夹", exact: true }).click();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "/Users/lin/Projects/codexhost", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(
+    page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }),
+  ).toBeEnabled();
 });
