@@ -23,7 +23,7 @@ class FakeElement {
   className = "";
   textContent = "";
   type = "";
-  style: Record<string, string> & { setProperty(name: string, value: string): void } = {
+  style: Record<string, unknown> & { setProperty(name: string, value: string): void } = {
     setProperty(name: string, value: string) {
       this[name] = value;
     },

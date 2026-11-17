@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { HostCommand } from "@codexhost/harness-adapter";
+
 import {
   createFixture,
   requestId,
@@ -52,7 +54,7 @@ describe("External Thread thread/inject_items", () => {
     await fixture.collector.waitFor((message) => turnEvent(message, "turn/completed", first));
     await sendTurn(32, "question two");
 
-    const texts = execute.mock.calls
+    const texts = (execute.mock.calls as unknown as [HostCommand][])
       .map(([command]) => command)
       .filter((command) => command.type === "turn.start")
       .map((command) => (command.type === "turn.start" ? command.input[0]?.text : undefined));
