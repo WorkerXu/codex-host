@@ -37,6 +37,7 @@ export class DingTalkNativeRunner {
       timer: ReturnType<typeof setTimeout>;
       texts: Map<string, string>;
       turnId?: string;
+      onProgress?: (text: string) => void;
     }
   >();
   async start(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
@@ -62,7 +63,7 @@ export class DingTalkNativeRunner {
     const threadId = thread && typeof thread.id === "string" ? thread.id : null;
     if (!threadId) throw new Error("Official thread/start returned no Thread identity");
     await this.#request("thread/name/set", { threadId, name: input.title }).catch(() => undefined);
-    const completion = this.#watchDingTalkTurn(threadId);
+    const completion = this.#watchDingTalkTurn(threadId, input.onProgress);
     let turnId: string;
     try {
       const turn = await this.#request("turn/start", {
@@ -142,7 +143,10 @@ export class DingTalkNativeRunner {
     return overrides;
   }
 
-  #watchDingTalkTurn(threadId: string): Promise<DingTalkDispatchRunResult> {
+  #watchDingTalkTurn(
+    threadId: string,
+    onProgress?: (text: string) => void,
+  ): Promise<DingTalkDispatchRunResult> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         const waiter = this.#dingTalkTurnWaiters.get(threadId);
@@ -166,6 +170,7 @@ export class DingTalkNativeRunner {
         },
         timer,
         texts: new Map(),
+        ...(onProgress ? { onProgress } : {}),
       });
     });
   }
@@ -186,10 +191,22 @@ export class DingTalkNativeRunner {
     if (waiter.turnId && typeof turnId === "string" && turnId !== waiter.turnId) return;
     if (value.method === "item/completed" && isRecord(params.item)) {
       const item = params.item;
+      if (
+        item.type === "agentMessage" &&
+        item.phase === "commentary" &&
+        typeof item.text === "string"
+      ) {
+        waiter.onProgress?.(item.text);
+      }
       if (item.type === "agentMessage" && item.phase !== "commentary") {
         const id = typeof item.id === "string" ? item.id : String(waiter.texts.size);
         if (typeof item.text === "string") waiter.texts.set(id, item.text);
       }
+      return;
+    }
+    if (value.method === "turn/plan/updated" && Array.isArray(params.plan)) {
+      const current = params.plan.find((step) => isRecord(step) && step.status === "in_progress");
+      if (isRecord(current) && typeof current.step === "string") waiter.onProgress?.(current.step);
       return;
     }
     if (value.method !== "turn/completed") return;

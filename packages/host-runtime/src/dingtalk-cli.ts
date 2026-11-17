@@ -9,6 +9,8 @@ import type {
   DingTalkMessage,
 } from "@codexhost/shared-contracts";
 
+import { dingtalkA2uiCreate, dingtalkA2uiUpdate, DINGTALK_A2UI_ARTIFACT } from "./dingtalk-a2ui.js";
+
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 25_000;
 const EVENT_OUTPUT_BYTES = 1 * 1024 * 1024;
@@ -717,9 +719,14 @@ export type DingTalkCardTarget = { group: string } | { openDingTalkId: string };
 export interface DingTalkCardInput {
   target: DingTalkCardTarget;
   content: string;
-  flowStatus: 1 | 2 | 3 | 4 | 5;
   atOpenDingTalkIds?: readonly string[];
   atAll?: boolean;
+}
+
+export interface DingTalkCardUpdate {
+  bizId: string;
+  content: string;
+  flowStatus: "INPUTTING" | "FINISH";
 }
 
 export interface DingTalkCardResult {
@@ -787,11 +794,7 @@ export interface DingTalkCli {
     options?: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean },
   ): Promise<{ ok: boolean; errorCode: string | null }>;
   sendCard(input: DingTalkCardInput): Promise<DingTalkCardResult>;
-  updateCard(input: {
-    bizId: string;
-    content: string;
-    flowStatus: 1 | 2 | 3 | 4 | 5;
-  }): Promise<{ ok: boolean; errorCode: string | null }>;
+  updateCard(input: DingTalkCardUpdate): Promise<{ ok: boolean; errorCode: string | null }>;
   pendingApprovals(limit: number): Promise<{
     approvals: DingTalkPendingApproval[];
     errorCode: string | null;
@@ -1148,16 +1151,26 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       return { ok: result.errorCode === null, errorCode: result.errorCode };
     },
     async sendCard(input) {
-      const args = ["chat", "+messages-send-card"];
+      const args = ["chat", "message", "send-a2ui-card"];
       if ("group" in input.target) {
-        args.push("--group", input.target.group);
+        args.push("--conversation-id", input.target.group);
         const atIds = [...new Set((input.atOpenDingTalkIds ?? []).filter(Boolean))];
         if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
         if (input.atAll === true) args.push("--at-all");
       } else {
-        args.push("--receiver-open-dingtalk-id", input.target.openDingTalkId);
+        args.push("--open-dingtalk-id", input.target.openDingTalkId);
       }
-      args.push("--content", input.content, "--flow-status", String(input.flowStatus), "--yes");
+      args.push(
+        "--summary",
+        "任务进度与结果",
+        "--content",
+        dingtalkA2uiCreate(
+          input.content,
+          "group" in input.target ? input.atOpenDingTalkIds : [],
+          "group" in input.target && input.atAll === true,
+        ),
+        "--yes",
+      );
       const result = await run(args, 30_000);
       return {
         ok: result.errorCode === null,
@@ -1169,13 +1182,15 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
       const result = await run(
         [
           "chat",
-          "+messages-update-card",
+          "message",
+          "update-a2ui-card",
           "--biz-id",
           input.bizId,
           "--content",
-          input.content,
+          dingtalkA2uiUpdate(input.content, input.flowStatus === "FINISH"),
           "--flow-status",
-          String(input.flowStatus),
+          input.flowStatus,
+          ...(input.flowStatus === "FINISH" ? ["--a2ui-annotations", DINGTALK_A2UI_ARTIFACT] : []),
           "--yes",
         ],
         30_000,

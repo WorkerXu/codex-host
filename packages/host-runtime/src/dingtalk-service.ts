@@ -33,6 +33,7 @@ import {
 import {
   createDingTalkCli,
   type DingTalkCardInput,
+  type DingTalkCardUpdate,
   type DingTalkCardResult,
   type DingTalkCli,
   type DingTalkGroupMeta,
@@ -480,11 +481,7 @@ export class DingTalkService {
     return await this.#cli.sendCard(input);
   }
 
-  async updateCard(input: {
-    bizId: string;
-    content: string;
-    flowStatus: 1 | 2 | 3 | 4 | 5;
-  }): Promise<{ ok: boolean; errorCode: string | null }> {
+  async updateCard(input: DingTalkCardUpdate): Promise<{ ok: boolean; errorCode: string | null }> {
     await this.#ensure();
     return await this.#cli.updateCard(input);
   }

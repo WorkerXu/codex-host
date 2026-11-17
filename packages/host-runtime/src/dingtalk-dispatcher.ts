@@ -1,3 +1,5 @@
+import { DingTalkProgressCard } from "./dingtalk-progress-card.js";
+import type { DingTalkCardInput, DingTalkCardResult, DingTalkCardUpdate } from "./dingtalk-cli.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,8 +27,6 @@ import type {
 export const DINGTALK_DISPATCH_PROJECT = "钉钉智能体";
 const APPROVAL_POLL_MS = 60_000;
 const IDENTITY_TTL_MS = 5 * 60_000;
-const MAX_CARD_CHARACTERS = 7_000;
-const MAX_MESSAGE_CHARACTERS = 3_500;
 const MAX_CONTEXT_MESSAGES = 20;
 
 export interface DingTalkDispatchService {
@@ -42,17 +42,8 @@ export interface DingTalkDispatchService {
     atOpenDingTalkIds?: string[];
   }): Promise<{ ok: boolean }>;
   sendDirect(openDingTalkId: string, text: string): Promise<{ ok: boolean }>;
-  sendCard(input: {
-    target: { group: string } | { openDingTalkId: string };
-    content: string;
-    flowStatus: 1 | 2 | 3 | 4 | 5;
-    atOpenDingTalkIds?: readonly string[];
-  }): Promise<{ ok: boolean; bizId: string | null }>;
-  updateCard(input: {
-    bizId: string;
-    content: string;
-    flowStatus: 1 | 2 | 3 | 4 | 5;
-  }): Promise<{ ok: boolean }>;
+  sendCard(input: DingTalkCardInput): Promise<DingTalkCardResult>;
+  updateCard(input: DingTalkCardUpdate): Promise<{ ok: boolean }>;
   pendingApprovals(limit: number): Promise<{ approvals: DingTalkPendingApproval[] }>;
   subscribeEvents(listener: (record: DwsEventRecord) => void): () => void;
   startListening(): Promise<void>;
@@ -138,6 +129,7 @@ export class DingTalkDispatcher {
   #approvalTimer: ReturnType<typeof setInterval> | null = null;
   #identity: { userName: string; userId: string | null; at: number } | null = null;
   #queue: Promise<void> = Promise.resolve();
+  readonly #cards = new Set<DingTalkProgressCard>();
   #disposed = false;
   #enabled = false;
   #unsubscribeEvents: (() => void) | null = null;
@@ -214,6 +206,8 @@ export class DingTalkDispatcher {
 
   dispose(): void {
     this.#disposed = true;
+    for (const card of this.#cards) card.dispose();
+    this.#cards.clear();
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#unsubscribeEvents?.();
@@ -365,25 +359,18 @@ export class DingTalkDispatcher {
       knownContext ??
       (approval ? { conversation: null, messages: [] } : await this.#context(event));
     if (this.#disposed) return;
-    let cardBizId: string | null = null;
-    const cardTarget = direct
-      ? { openDingTalkId: senderId as string }
-      : { group: event.conversationId };
-    const card = await this.#options.service
-      .sendCard({
+    const cardTarget = direct ? { openDingTalkId: senderId } : { group: event.conversationId };
+    const card = new DingTalkProgressCard(this.#options.service);
+    this.#cards.add(card);
+    if (
+      !(await card.create({
         target: cardTarget,
-        content: `${agent.name} 正在处理…`,
-        flowStatus: 1,
-        ...(!direct && senderId ? { atOpenDingTalkIds: [senderId] } : {}),
-      })
-      .catch(() => null);
-    cardBizId = card?.ok && card.bizId ? card.bizId : null;
-    if (!cardBizId) {
-      const sent = await this.#sendText(direct, senderId, cardTarget, `${agent.name} 正在处理…`);
-      if (!sent) {
-        await this.#setStatus(agent.fileName, "failed", "无法发送进度消息");
-        return;
-      }
+        ...(!direct ? { atOpenDingTalkIds: [senderId] } : {}),
+      }))
+    ) {
+      this.#cards.delete(card);
+      await this.#setStatus(agent.fileName, "failed", "进度卡创建未确认，已停止派发，请检查钉钉");
+      return;
     }
 
     if (this.#disposed) return;
@@ -391,6 +378,7 @@ export class DingTalkDispatcher {
     try {
       run = await this.#options.startThread({
         cwd: this.#projectDirectory,
+        onProgress: (text) => card.progress(text),
         title: approval
           ? `${agent.name} · 审批 · ${truncate(approval.title, 40)}`
           : this.#title(agent, event, conversationName(context.conversation, event)),
@@ -411,27 +399,10 @@ export class DingTalkDispatcher {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.#finish(
-        agent.fileName,
-        cardBizId,
-        direct,
-        senderId,
-        cardTarget,
-        `处理失败：${message}`,
-        false,
-      );
+      await this.#finish(agent.fileName, card, `处理失败：${message}`, false);
       return;
     }
 
-    if (cardBizId) {
-      await this.#options.service
-        .updateCard({
-          bizId: cardBizId,
-          content: `${agent.name} 已启动 Codex 对话，正在整理回答…`,
-          flowStatus: 4,
-        })
-        .catch(() => undefined);
-    }
     const completed: DingTalkDispatchRunResult = await run.completed.catch((error: unknown) => ({
       answer: "",
       status: "failed" as const,
@@ -442,90 +413,28 @@ export class DingTalkDispatcher {
     if (completed.status !== "completed") {
       await this.#finish(
         agent.fileName,
-        cardBizId,
-        direct,
-        senderId,
-        cardTarget,
+        card,
         `处理失败：${completed.errorMessage ?? completed.status}`,
         false,
       );
       return;
     }
-    await this.#finish(
-      agent.fileName,
-      cardBizId,
-      direct,
-      senderId,
-      cardTarget,
-      answer || "已完成，但没有返回文本。",
-      true,
-    );
+    await this.#finish(agent.fileName, card, answer || "已完成，但没有返回文本。", true);
   }
 
   async #finish(
     fileName: string,
-    cardBizId: string | null,
-    direct: boolean,
-    senderId: string | null,
-    cardTarget: { group: string } | { openDingTalkId: string },
+    card: DingTalkProgressCard,
     content: string,
     success: boolean,
   ): Promise<void> {
-    const text = content.slice(0, MAX_MESSAGE_CHARACTERS);
-    const cardContent =
-      content.length <= MAX_CARD_CHARACTERS ? content : "结果较长，完整内容见后续消息。";
-    let delivered = false;
-    if (cardBizId) {
-      const updated = await this.#options.service
-        .updateCard({
-          bizId: cardBizId,
-          content: cardContent,
-          flowStatus: success ? 3 : 5,
-        })
-        .catch(() => null);
-      delivered = updated?.ok === true;
-    }
-    if (!delivered || content.length > MAX_CARD_CHARACTERS) {
-      delivered = true;
-      for (let offset = 0; offset < content.length; offset += MAX_MESSAGE_CHARACTERS) {
-        if (
-          !(await this.#sendText(
-            direct,
-            senderId,
-            cardTarget,
-            content.slice(offset, offset + MAX_MESSAGE_CHARACTERS),
-          ))
-        ) {
-          delivered = false;
-          break;
-        }
-      }
-    }
+    const delivered = await card.finish(content, success);
+    this.#cards.delete(card);
     await this.#setStatus(
       fileName,
-      delivered ? (success ? "replied" : "failed") : "failed",
-      delivered ? (success ? undefined : text) : "回复发送失败",
+      delivered && success ? "replied" : "failed",
+      delivered ? (success ? undefined : content) : "进度卡更新未确认，已停止更新，请检查钉钉",
     );
-  }
-
-  async #sendText(
-    direct: boolean,
-    senderId: string | null,
-    cardTarget: { group: string } | { openDingTalkId: string },
-    text: string,
-  ): Promise<boolean> {
-    if (direct) {
-      if (!senderId) return false;
-      const result = await this.#options.service.sendDirect(senderId, text).catch(() => null);
-      return result?.ok === true;
-    }
-    if (!("group" in cardTarget)) return false;
-    const at = senderId ? { atOpenDingTalkIds: [senderId] } : {};
-    const content = senderId ? `<@${senderId}> ${text}` : text;
-    const result = await this.#options.service
-      .send({ conversationId: cardTarget.group, text: content, ...at })
-      .catch(() => null);
-    return result?.ok === true;
   }
 
   async #context(event: DwsEventRecord): Promise<{

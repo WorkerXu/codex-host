@@ -75,8 +75,8 @@ async function setup(
     runImpl: async (args) => {
       commands.push([...args]);
       const error =
-        (options.cardFails && args[1] === "+messages-send-card") ||
-        (options.updateFails && args[1] === "+messages-update-card");
+        (options.cardFails && args[2] === "send-a2ui-card") ||
+        (options.updateFails && args[2] === "update-a2ui-card");
       return {
         value: { bizId: "card-1" },
         exitCode: error ? 1 : 0,
@@ -191,6 +191,13 @@ async function setup(
     matcher,
     startThread,
     emit: (input = event()) => listener?.(input),
+    complete: async () => {
+      finish.resolve({
+        answer: "# 答案\n\n第一步\n第二步",
+        status: "completed",
+        errorMessage: null,
+      });
+    },
     finish: async () => {
       finish.resolve({
         answer: "# 答案\n\n第一步\n第二步",
@@ -233,8 +240,8 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     expect(f.startThread.mock.calls[0]?.[0].prompt).toContain("回复位置：原群聊");
     expect(f.commands[0]).toEqual(
       expect.arrayContaining([
-        "+messages-send-card",
-        "--group",
+        "send-a2ui-card",
+        "--conversation-id",
         "group-1",
         "--at-open-dingtalk-ids",
         "open-sender",
@@ -245,17 +252,10 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     await vi.waitFor(async () =>
       expect((await f.state.status())["qa.toml"]?.result).toBe("replied"),
     );
-    const updates = f.commands.filter((args) => args[1] === "+messages-update-card");
-    expect(updates).toHaveLength(2);
+    const updates = f.commands.filter((args) => args[2] === "update-a2ui-card");
+    expect(updates).toHaveLength(1);
     expect(updates.at(-1)).toEqual(
-      expect.arrayContaining([
-        "--biz-id",
-        "card-1",
-        "--content",
-        "# 答案\n\n第一步\n第二步",
-        "--flow-status",
-        "3",
-      ]),
+      expect.arrayContaining(["--biz-id", "card-1", "--flow-status", "FINISH"]),
     );
   });
 
@@ -273,7 +273,7 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     });
     f.emit(event({ kind, atMe: kind === "group" }));
     await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    expect(f.commands[0]).toContain("--receiver-open-dingtalk-id");
+    expect(f.commands[0]).toContain("--open-dingtalk-id");
     expect(f.commands[0]).toContain("open-sender");
     expect(f.commands[0]).not.toContain("--group");
     await f.finish();
@@ -362,29 +362,27 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     },
   );
 
-  it.each([{ cardFails: true }, { updateFails: true }])(
-    "falls back to markdown if cards fail: %o",
-    async (failure) => {
-      const f = await setup(failure);
-      f.emit();
-      await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-      await f.finish();
-      await vi.waitFor(async () =>
-        expect((await f.state.status())["qa.toml"]?.result).toBe("replied"),
-      );
-      expect(f.commands.at(-1)).toEqual(
-        expect.arrayContaining([
-          "chat",
-          "message",
-          "send",
-          "--conversation-id",
-          "group-1",
-          "--yes",
-        ]),
-      );
-      expect(f.commands.at(-1)?.join(" ")).toContain("# 答案\n\n第一步");
-    },
-  );
+  it("does not run or send fallback text after unconfirmed card creation", async () => {
+    const f = await setup({ cardFails: true });
+    f.emit();
+    await vi.waitFor(async () =>
+      expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
+    );
+    expect(f.startThread).not.toHaveBeenCalled();
+    expect(f.commands).toHaveLength(1);
+  });
+
+  it("records an unconfirmed update without sending fallback text or another card", async () => {
+    const f = await setup({ updateFails: true });
+    f.emit();
+    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+    // The completion is successful but delivery is unconfirmed.
+    await f.complete();
+    await vi.waitFor(async () =>
+      expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
+    );
+    expect(f.commands.map((args) => args[2])).toEqual(["send-a2ui-card", "update-a2ui-card"]);
+  });
 
   it("puts startup failure in the card", async () => {
     const f = await setup({ runFails: true });
@@ -392,9 +390,8 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     await vi.waitFor(async () =>
       expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
     );
-    expect(f.commands.at(-1)).toEqual(
-      expect.arrayContaining(["处理失败：无法启动", "--flow-status", "5"]),
-    );
+    expect(f.commands.at(-1)).toEqual(expect.arrayContaining(["--flow-status", "FINISH"]));
+    expect(f.commands.at(-1)?.join(" ")).toContain("处理失败：无法启动");
   });
 
   it("summarizes approval data with tools disabled and only a private progress card to self", async () => {

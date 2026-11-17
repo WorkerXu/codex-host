@@ -9,6 +9,8 @@ export interface DingTalkDispatchThreadInput {
   model: string | null;
   reasoningEffort: string | null;
   prompt: string;
+  /** Complete public commentary or plan steps, never reasoning or tool output. */
+  onProgress?(text: string): void;
   /** Approval summaries run with all execution and connector tools disabled. */
   readOnlySummary?: boolean;
 }
