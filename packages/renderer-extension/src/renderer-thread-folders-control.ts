@@ -18,8 +18,44 @@ export interface ThreadFoldersControlOptions {
   pickLocal?(): Promise<string[] | null>;
 }
 
-const folderIcon =
+export const folderIcon =
   '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M2.5 6V4.5a1 1 0 0 1 1-1h4L9 5h7.5a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V6Z"/></svg>';
+
+function folderName(path: string): string {
+  return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
+}
+
+function folderPathLabel(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/u, "~");
+}
+
+function folderLabel(d: Document, path: string): HTMLElement {
+  const text = d.createElement("span");
+  text.className = "codexhost-folders-label";
+  const name = d.createElement("span");
+  name.textContent = folderName(path);
+  const detail = d.createElement("span");
+  detail.className = "codexhost-folders-detail";
+  const abbreviated = folderPathLabel(path);
+  const split = Math.max(abbreviated.lastIndexOf("/"), abbreviated.lastIndexOf("\\")) + 1;
+  const parent = d.createElement("span");
+  parent.className = "codexhost-folders-path-parent";
+  parent.textContent = abbreviated.slice(0, Math.max(0, split - 1));
+  const leaf = d.createElement("span");
+  leaf.className = "codexhost-folders-path-leaf";
+  leaf.textContent = abbreviated.slice(Math.max(0, split - 1));
+  detail.append(parent, leaf);
+  text.append(name, detail);
+  return text;
+}
+
+export function updateThreadFoldersNote(note: HTMLElement, folders: string[]): void {
+  const label = note.ownerDocument.createElement("span");
+  label.className = "codexhost-folders-note-label";
+  label.textContent = `工作文件夹已改为 ${folders.map((path, index) => `${folderName(path)}${index === 0 ? "（主要）" : ""}`).join("、")}`;
+  note.replaceChildren(label);
+  note.title = folders.join("\n");
+}
 
 export function createThreadFoldersControl(options: ThreadFoldersControlOptions) {
   const d = options.document;
@@ -55,10 +91,13 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     if (!popover.matches(":popover-open")) return;
     const rect = trigger.getBoundingClientRect();
     popover.style.left = `${Math.max(12, Math.min(rect.left, d.documentElement.clientWidth - popover.offsetWidth - 12))}px`;
+    popover.style.maxHeight = `${Math.max(100, rect.top - 20)}px`;
     popover.style.top = `${Math.max(12, rect.top - popover.offsetHeight - 8)}px`;
   };
   const resize = new ResizeObserver(position);
   resize.observe(popover);
+  d.defaultView?.addEventListener("resize", position);
+  d.addEventListener("scroll", position, true);
   const button = (text: string, action: () => void, className = "codexhost-folders-action") => {
     const b = d.createElement("button");
     b.type = "button";
@@ -79,19 +118,62 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     ].join("\n");
   };
   const close = () => {
+    if (!view) ++revision;
     popover.hidePopover();
+    trigger.disabled = false;
     trigger.setAttribute("aria-expanded", "false");
     trigger.focus();
   };
+  const applySelection = async (folders: string[], focusPath?: string) => {
+    if (busy || !view || !folders.length || disposed) return;
+    const attempt = revision;
+    busy = true;
+    trigger.disabled = true;
+    popover.setAttribute("aria-busy", "true");
+    errorText = "";
+    render();
+    try {
+      await options.save([...folders]);
+      if (disposed || attempt !== revision) return;
+      selected = [...folders];
+      view.folders = [...folders];
+      updateChip(folders, view.additionalDirectories);
+    } catch {
+      if (attempt === revision) errorText = "未能保存工作文件夹，请重试";
+    } finally {
+      if (!disposed && attempt === revision) {
+        busy = false;
+        trigger.disabled = false;
+        popover.removeAttribute("aria-busy");
+        render();
+        if (focusPath) {
+          [...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]")]
+            .find((item) => item.getAttribute("aria-label") === focusPath)
+            ?.focus();
+        }
+      }
+    }
+  };
   const render = () => {
-    if (!view || disposed) return;
+    if (disposed) return;
     popover.replaceChildren();
     const title = d.createElement("h3");
     title.textContent = "工作文件夹";
-    const hint = d.createElement("div");
-    hint.className = "codexhost-folders-hint";
-    hint.textContent = `${view.machine} · ${view.existing ? "从下一轮开始生效" : "用于这次新对话"}`;
-    popover.append(title, hint);
+    popover.append(title);
+    if (!view) {
+      const status = d.createElement("div");
+      status.className = errorText ? "codexhost-folders-error" : "codexhost-folders-hint";
+      status.setAttribute("role", errorText ? "alert" : "status");
+      status.textContent = errorText || "正在读取文件夹…";
+      popover.append(status);
+      return;
+    }
+    if (!selected.length && !view.projectFolders.length && !view.recent.length) {
+      const empty = d.createElement("div");
+      empty.className = "codexhost-folders-hint";
+      empty.textContent = "添加文件夹，开始这次对话";
+      popover.append(empty);
+    }
     if (!view.additionalDirectories) {
       const hint = d.createElement("div");
       hint.className = "codexhost-folders-hint";
@@ -103,30 +185,37 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       const heading = d.createElement("div");
       heading.className = "codexhost-folders-heading";
       heading.textContent = title;
-      popover.append(heading);
+      const menu = d.createElement("div");
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", title);
+      popover.append(heading, menu);
       for (const path of folders) {
         const row = d.createElement("div");
         row.className = "codexhost-folders-row";
-        const label = d.createElement("label");
-        const checkbox = d.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.disabled = busy;
-        checkbox.checked = selected.includes(path);
-        const text = d.createElement("span");
-        text.textContent = path;
-        text.title = path;
-        checkbox.setAttribute("aria-label", path);
-        checkbox.addEventListener("change", () => {
-          selected = checkbox.checked
-            ? [...selected, path]
-            : selected.filter((item) => item !== path);
-          render();
-          popover.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((input) => {
-            if (input.getAttribute("aria-label") === path) input.focus();
-          });
-        });
-        label.append(checkbox, text);
-        row.append(label);
+        const checked = selected.includes(path);
+        const choose = button(
+          "",
+          () => {
+            void applySelection(
+              checked ? selected.filter((item) => item !== path) : [...selected, path],
+              path,
+            );
+          },
+          "codexhost-folders-choice",
+        );
+        choose.setAttribute("role", "menuitemcheckbox");
+        choose.setAttribute("aria-checked", String(checked));
+        choose.setAttribute("aria-label", path);
+        choose.disabled = busy || (checked && selected.length === 1);
+        choose.title = path;
+        const check = d.createElement("span");
+        check.className = "codexhost-folders-check";
+        if (checked)
+          check.innerHTML =
+            '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>';
+        const text = folderLabel(d, path);
+        choose.append(check, text);
+        row.append(choose);
         if (path === selected[0]) {
           const main = d.createElement("span");
           main.className = "codexhost-folders-main";
@@ -135,12 +224,10 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         } else if (selected.includes(path))
           row.append(
             button("设为主要", () => {
-              selected = [path, ...selected.filter((item) => item !== path)];
-              render();
-              popover.querySelector<HTMLInputElement>('input[type="checkbox"]')?.focus();
+              void applySelection([path, ...selected.filter((item) => item !== path)], path);
             }),
           );
-        popover.append(row);
+        menu.append(row);
       }
     };
     section("当前文件夹", selected);
@@ -156,11 +243,10 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     );
     const browse = d.createElement("div");
     const addPath = async (path: string) => {
+      const attempt = revision;
       await options.validate(path);
-      if (disposed) return;
-      if (!selected.includes(path)) selected.push(path);
-      errorText = "";
-      render();
+      if (disposed || attempt !== revision) return;
+      if (!selected.includes(path)) await applySelection([...selected, path], path);
     };
     const openBrowser = async () => {
       if (!view) return;
@@ -171,8 +257,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
             for (const path of picked) await addPath(path);
             return;
           }
-        } catch (error) {
-          errorText = error instanceof Error ? error.message : String(error);
+        } catch {
+          errorText = "无法添加文件夹，请确认路径可用后重试";
           render();
           return;
         }
@@ -201,18 +287,24 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
           for (const path of children
             .filter((path) => path.toLowerCase().startsWith(typed.toLowerCase()))
             .slice(0, 40)) {
-            const row = button(path, () => {
-              input.value = path.replace(/[\\/]+$/u, "") + (path.includes("\\") ? "\\" : "/");
-              void list();
-              input.focus();
-            });
-            row.style.cssText =
-              "display:block;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+            const row = button(
+              "",
+              () => {
+                input.value = path.replace(/[\\/]+$/u, "") + (path.includes("\\") ? "\\" : "/");
+                void list();
+                input.focus();
+              },
+              "codexhost-folders-add",
+            );
+            row.setAttribute("aria-label", path);
+            row.title = path;
+            row.innerHTML = folderIcon;
+            row.append(folderLabel(d, path));
             suggestions.append(row);
           }
-        } catch (error) {
+        } catch {
           if (generation === browseGeneration) {
-            suggestions.textContent = `无法列出目录：${error instanceof Error ? error.message : String(error)}`;
+            suggestions.textContent = "无法读取此目录，请检查路径与连接";
           }
         }
       };
@@ -225,8 +317,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         const folderPath = /^[A-Za-z]:[\\/]+$/u.test(rawPath)
           ? rawPath
           : rawPath.replace(/[\\/]+$/u, "") || "/";
-        void addPath(folderPath).catch((error) => {
-          errorText = error instanceof Error ? error.message : String(error);
+        void addPath(folderPath).catch(() => {
+          errorText = "无法添加文件夹，请确认路径可用后重试";
           const line = browse.querySelector('[role="alert"]') ?? d.createElement("div");
           line.setAttribute("role", "alert");
           line.className = "codexhost-folders-error";
@@ -240,12 +332,15 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       input.focus();
       await list();
     };
-    popover.append(
-      button("添加文件夹…", () => {
+    const addFolder = button(
+      "添加文件夹…",
+      () => {
         void openBrowser();
-      }),
-      browse,
+      },
+      "codexhost-folders-add",
     );
+    addFolder.innerHTML = `${folderIcon}<span>添加文件夹…</span>`;
+    popover.append(addFolder, browse);
     if (errorText) {
       const error = d.createElement("div");
       error.className = "codexhost-folders-error";
@@ -253,46 +348,6 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       error.textContent = errorText;
       popover.append(error);
     }
-    const footer = d.createElement("div");
-    footer.className = "codexhost-folders-footer";
-    const apply = button(
-      busy ? "保存中…" : "应用",
-      () => {
-        if (busy || !selected.length) return;
-        if (view && JSON.stringify(selected) === JSON.stringify(view.folders)) {
-          close();
-          return;
-        }
-        const attempt = revision;
-        const saved = [...selected];
-        const additional = view?.additionalDirectories ?? false;
-        busy = true;
-        errorText = "";
-        render();
-        void options
-          .save(saved)
-          .then(() => {
-            if (!disposed && attempt === revision) {
-              updateChip(saved, additional);
-              close();
-            }
-          })
-          .catch((error) => {
-            if (attempt === revision)
-              errorText = error instanceof Error ? error.message : String(error);
-          })
-          .finally(() => {
-            if (attempt === revision) {
-              busy = false;
-              render();
-            }
-          });
-      },
-      "codexhost-folders-apply",
-    );
-    apply.disabled = busy || !selected.length;
-    footer.append(button("取消", close), apply);
-    popover.append(footer);
   };
   trigger.addEventListener("click", () => {
     if (popover.matches(":popover-open")) {
@@ -300,6 +355,12 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       return;
     }
     trigger.disabled = true;
+    view = null;
+    errorText = "";
+    render();
+    popover.showPopover();
+    trigger.setAttribute("aria-expanded", "true");
+    position();
     const attempt = ++revision;
     void options
       .load()
@@ -312,10 +373,14 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         popover.showPopover();
         trigger.setAttribute("aria-expanded", "true");
         position();
-        popover.querySelector<HTMLInputElement>('input[type="checkbox"]')?.focus();
+        popover
+          .querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]:not(:disabled)')
+          ?.focus();
       })
-      .catch((error) => {
-        trigger.title = error instanceof Error ? error.message : String(error);
+      .catch(() => {
+        if (disposed || attempt !== revision) return;
+        errorText = "无法读取工作文件夹，请检查连接后重试";
+        render();
       })
       .finally(() => {
         trigger.disabled = false;
@@ -324,6 +389,23 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   // Keep Desktop's document listeners from treating a press inside this control as a Composer submission.
   popover.addEventListener("pointerdown", (event) => event.stopPropagation());
   popover.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (
+      ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) &&
+      !(event.target as Element).closest("input")
+    ) {
+      const items = [...popover.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+      if (!items.length) return;
+      const current = items.indexOf(d.activeElement as HTMLButtonElement);
+      const index =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+      event.preventDefault();
+      items[index]?.focus();
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -331,6 +413,10 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     }
   });
   popover.addEventListener("toggle", () => {
+    if (!popover.matches(":popover-open") && !view) {
+      ++revision;
+      trigger.disabled = false;
+    }
     trigger.setAttribute("aria-expanded", String(popover.matches(":popover-open")));
   });
   return {
@@ -340,6 +426,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     reset() {
       ++revision;
       busy = false;
+      trigger.disabled = false;
+      popover.removeAttribute("aria-busy");
       view = null;
       if (popover.matches(":popover-open")) popover.hidePopover();
     },
@@ -348,6 +436,8 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
       ++browseGeneration;
       ++revision;
       resize.disconnect();
+      d.defaultView?.removeEventListener("resize", position);
+      d.removeEventListener("scroll", position, true);
       popover.remove();
       root.remove();
     },

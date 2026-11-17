@@ -1,23 +1,84 @@
-import { createThreadFoldersControl } from "../../../packages/renderer-extension/src/renderer-thread-folders-control.js";
+import nativeComposerHtml from "../fixtures/native-composer.html";
+import {
+  createThreadFoldersControl,
+  folderIcon,
+  updateThreadFoldersNote,
+} from "../../../packages/renderer-extension/src/renderer-thread-folders-control.js";
 
-/** The production control, with deterministic filesystem and Host replies for pointer/keyboard review. */
+/** Captured Desktop Composer DOM; only filesystem and Host replies are fixtures. */
 export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
+  document.documentElement.dataset.codexWindowType = "electron";
   const remote = scenario === "thread-folders-remote";
   const existing = scenario === "thread-folders-existing";
   const prefix = remote ? "/home/ubuntu" : "/Users/lin";
   const project = `${prefix}/Projects/codexhost`;
-  let folders = [project];
-  const recent = [`${prefix}/Projects/shared-ui`, `${prefix}/Projects/docs`];
-  const stage = document.createElement("div");
-  stage.className = "preview-stage";
-  stage.innerHTML = `<aside class="preview-projects"><div class="preview-projects-heading">项目</div><div class="preview-project-row">codexhost</div><div class="preview-project-row">shared-ui</div></aside><main class="preview-canvas"><article class="preview-thread" style="width:min(760px,100%);align-self:stretch;display:flex;flex-direction:column;justify-content:flex-end"><h1>${existing ? "继续梳理组件结构" : "开始新对话"}</h1><p>${existing ? "已经整理好基础组件，下一步检查共享目录。" : "选择工作文件夹，让这次对话从合适的位置开始。"}</p><div data-preview-folder-notes></div><div data-preview-folder-toolbar style="display:flex;gap:6px;align-items:center;margin-top:30px;margin-bottom:8px"><span style="font-size:12px;color:var(--color-token-text-secondary);padding:0 8px">${remote ? "开发机" : "本机"} · codexhost</span></div><div class="preview-composer" contenteditable="true" role="textbox" aria-label="消息" style="min-height:85px;margin:0">${existing ? "接着检查共享组件…" : "输入消息…"}</div><div style="font-size:12px;text-align:right;padding:12px;color:var(--color-token-text-secondary)">${scenario === "thread-folders-limited" ? "Example Harness" : "Codex"} ⌄ &nbsp; ↑</div></article></main>`;
+  let folders = scenario === "thread-folders-empty" ? [] : [project];
+  const recent =
+    scenario === "thread-folders-empty"
+      ? []
+      : [
+          `${prefix}/Projects/shared-ui`,
+          `${prefix}/Projects/docs`,
+          `${prefix}/Projects/workbench/packages/design-system/components/shared-components`,
+        ];
+  const style = document.createElement("style");
+  style.textContent = `
+    html, body, #preview-root { width:100%; height:100%; margin:0; }
+    #preview-root { background:var(--color-token-main-surface-primary); }
+    body { background:var(--color-token-main-surface-primary); color:var(--color-token-text-primary); font-family:var(--font-sans); }
+    .folders-preview { box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-end; gap:24px; width:min(800px,100%); height:100dvh; margin:auto; padding:32px 24px; }
+    .folders-preview [data-above-composer-portal] { padding-bottom:8px; }
+    .folders-preview-transcript { margin-bottom:32px; font-size:var(--font-text-sm-size); line-height:1.6; }
+    .folders-preview-transcript p { margin:12px 0; }
+    .folders-preview-transcript h1 { margin:0 0 32px; font-size:var(--font-heading-lg-size); font-weight:600; }
+  `;
+  document.head.append(style);
+  const stage = document.createElement("main");
+  stage.className = "folders-preview";
+  if (existing) {
+    const transcript = document.createElement("article");
+    transcript.className = "folders-preview-transcript";
+    transcript.innerHTML =
+      "<h1>梳理组件结构</h1><p>基础组件已整理好。接下来检查共享目录里的引用关系。</p>";
+    stage.append(transcript);
+  }
+  const note = document.createElement("div");
+  note.className = "codexhost-folders-note";
+  note.setAttribute("role", "status");
+  note.hidden = true;
+  stage.append(note);
+  const fragment = document.createElement("div");
+  fragment.innerHTML = nativeComposerHtml;
+  const composer = fragment.querySelector<HTMLElement>("[data-codex-composer-root]")!;
+  const editor = composer.querySelector<HTMLElement>("[contenteditable]")!;
+  editor.innerHTML =
+    '<p data-empty-paragraph="true" data-placeholder="和 Codex 一起工作" class="placeholder before:composer-placeholder"><br class="ProseMirror-trailingBreak"></p>';
+  stage.append(composer);
   root.append(stage);
+  const above = composer.querySelector<HTMLElement>("[data-above-composer-portal]")!;
+  const machine = document.createElement("button");
+  machine.type = "button";
+  machine.className = "codexhost-folders-chip";
+  machine.innerHTML = `${folderIcon}<span>${remote ? "开发机" : "本机"} · codexhost</span>`;
+  machine.setAttribute("aria-label", "机器与项目");
+  above.append(machine);
+  const nativeButton = composer.querySelector<HTMLButtonElement>(
+    "[data-composer-navigation-target=add-context]",
+  )!;
+  const model = nativeButton.cloneNode(false) as HTMLButtonElement;
+  model.classList.remove("aspect-square", "!px-0");
+  model.removeAttribute("aria-label");
+  model.removeAttribute("data-composer-navigation-target");
+  model.textContent = scenario === "thread-folders-limited" ? "Example Harness ⌄" : "Codex ⌄";
+  nativeButton.after(model);
   const control = createThreadFoldersControl({
     document,
     async load() {
+      if (scenario === "thread-folders-loading") await new Promise(() => {});
+      if (scenario === "thread-folders-error") throw new Error("Connection lost");
       return {
         folders,
-        projectFolders: [project],
+        projectFolders: scenario === "thread-folders-empty" ? [] : [project],
         recent,
         remote,
         existing,
@@ -26,13 +87,12 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
       };
     },
     async save(selected) {
+      if (scenario === "thread-folders-save-error") throw new Error("Connection lost");
       folders = selected;
       document.body.dataset.folderSelection = JSON.stringify(selected);
       if (existing) {
-        const note = stage.querySelector<HTMLElement>("[data-preview-folder-notes]")!;
-        note.className = "codexhost-folders-note";
-        note.setAttribute("role", "status");
-        note.textContent = `工作文件夹已改为 ${selected.join("、")}（主要：${selected[0]}）`;
+        updateThreadFoldersNote(note, selected);
+        note.hidden = false;
       }
     },
     async list(path) {
@@ -45,6 +105,6 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
       if (!path.startsWith("/")) throw new Error("请输入绝对路径");
     },
   });
-  stage.querySelector("[data-preview-folder-toolbar]")!.append(control.root);
+  above.append(control.root);
   control.updateChip(folders, scenario !== "thread-folders-limited");
 }

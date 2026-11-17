@@ -35,13 +35,29 @@ const locale = "zh-CN" as const;
 const messages = rendererSettingsMessages(locale);
 
 const style = document.createElement("style");
-style.textContent = previewCss;
+style.textContent = scenarioName.startsWith("thread-folders-") ? "" : previewCss;
 document.head.append(style);
 document.documentElement.dataset.theme = theme;
 document.documentElement.style.colorScheme = theme;
 
 const root = document.getElementById("preview-root");
 if (!root) throw new Error("Preview root is missing");
+
+async function loadDesktopCss(): Promise<void> {
+  if (document.querySelector("link[data-preview-desktop-css]")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/codex-desktop.css";
+  link.dataset.previewDesktopCss = "";
+  const loaded = new Promise<void>((resolve, reject) => {
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener("error", () => reject(new Error("Desktop CSS unavailable")), {
+      once: true,
+    });
+  });
+  document.head.append(link);
+  await loaded;
+}
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => {
@@ -1049,16 +1065,34 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(120);
   },
 
+  ...Object.fromEntries(
+    ["empty", "loading", "error", "save-error"].map((state) => [
+      `thread-folders-${state}`,
+      async () => {
+        document.querySelector('link[href="/shadow-context.css"]')?.remove();
+        await loadDesktopCss();
+        mountThreadFoldersPreview(root!, `thread-folders-${state}`);
+      },
+    ]),
+  ),
   async "thread-folders-local"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
     mountThreadFoldersPreview(root!, "thread-folders-local");
   },
   async "thread-folders-remote"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
     mountThreadFoldersPreview(root!, "thread-folders-remote");
   },
   async "thread-folders-existing"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
     mountThreadFoldersPreview(root!, "thread-folders-existing");
   },
   async "thread-folders-limited"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
     mountThreadFoldersPreview(root!, "thread-folders-limited");
   },
 

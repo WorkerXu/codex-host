@@ -9,6 +9,7 @@ import {
 import { findScopedDraftModelBinding } from "@codexhost/desktop-control/renderer-bindings";
 import {
   createThreadFoldersControl,
+  updateThreadFoldersNote,
   type ThreadFoldersView,
 } from "./renderer-thread-folders-control.js";
 import { readComposerProject } from "./renderer-project-mirror-model.js";
@@ -126,7 +127,7 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
         ? [workspace]
         : [];
     const lastNote = state.selection?.notes.at(-1);
-    notes.textContent = lastNote?.text ?? "";
+    if (lastNote) updateThreadFoldersNote(notes, folders);
     notes.hidden = !lastNote;
     placeNote();
     return {
@@ -157,8 +158,8 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
           }),
         );
         if (disposed || identity().key !== current.key) return;
-        notes.textContent = selection.notes.at(-1)?.text ?? "";
-        notes.hidden = !notes.textContent;
+        updateThreadFoldersNote(notes, selection.folders);
+        notes.hidden = false;
         placeNote();
       } else {
         if (!current.route.policy.selectWorkingFolders)
@@ -196,7 +197,10 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
     refresh() {
       if (disposed) return;
       const above = composer.querySelector("[data-above-composer-portal]");
-      if (!control.root.isConnected) (above ?? composer).prepend(control.root);
+      if (!control.root.isConnected) {
+        if (above) above.append(control.root);
+        else composer.prepend(control.root);
+      }
       if (!notes.isConnected) placeNote();
       const c = context();
       const key = JSON.stringify([c.hostId, c.target, c.agent]);
@@ -209,9 +213,9 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
           if (!disposed && attempt === generation)
             control.updateChip(view.folders, view.additionalDirectories);
         })
-        .catch((error) => {
+        .catch(() => {
           if (!disposed && attempt === generation)
-            control.trigger.title = error instanceof Error ? error.message : String(error);
+            control.trigger.title = "无法读取工作文件夹，请检查连接后重试";
         });
     },
     dispose() {
