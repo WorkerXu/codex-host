@@ -14,6 +14,9 @@ const previewRoot = import.meta.dirname;
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
+  "skills-matrix",
+  "skills-conflict",
+  "skills-link-preview",
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-hover",
@@ -449,6 +452,30 @@ for (const scenario of scenarios) {
           unresolved.size === 0,
           [...unresolved].slice(0, 8).join(" | "),
         );
+      }
+
+      if (query(".skills-hub")) {
+        check("skills-matrix-rows", queryAll(".skills-matrix tbody tr").length === 3);
+        check("skills-machine-sections", queryAll(".skills-machine").length === 3);
+        if (document.body.dataset.scenario === "skills-conflict") {
+          check("skills-conflict-dialog", visible(query("dialog[open]")));
+          check("skills-conflict-versions", queryAll(".skills-version").length === 2);
+          check(
+            "skills-conflict-keyboard-selection",
+            queryAll(".skills-version input:checked").length === 1,
+          );
+          check(
+            "skills-conflict-diff",
+            query(".skills-diff")?.textContent.includes("+ version: 1.3"),
+          );
+        }
+        if (document.body.dataset.scenario === "skills-link-preview") {
+          check("skills-link-actions", queryAll(".skills-link-row").length === 3);
+          check(
+            "skills-link-adopt",
+            query(".skills-dialog-body")?.textContent.includes("收进中央库"),
+          );
+        }
       }
 
       if (document.querySelector(".dingtalk-workbench")) {

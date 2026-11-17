@@ -1,3 +1,4 @@
+import { mountSkillsPreview } from "./skills.js";
 import previewCss from "./preview.css";
 import {
   createDingTalkEntryRow,
@@ -1573,6 +1574,32 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => document.querySelector('[data-jarvis-chip="status:1"]') === null, 4_000);
     await delay(120);
   },
+};
+
+scenarios["skills-matrix"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+};
+scenarios["skills-conflict"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  const fill = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "全部补齐",
+  );
+  await previewClick(fill!);
+  await waitFor(() => shadow.querySelector(".skills-version"));
+  const radio = shadow.querySelector<HTMLInputElement>(".skills-version input");
+  await previewClick(radio!);
+  await previewInputOn(radio!, "key", { key: "ArrowDown" });
+};
+scenarios["skills-link-preview"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  const link = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "一键链接",
+  );
+  await previewClick(link!);
+  await waitFor(() => shadow.querySelector(".skills-link-row"));
 };
 
 async function main() {
