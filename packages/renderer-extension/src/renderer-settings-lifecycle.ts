@@ -1,3 +1,4 @@
+import type { RendererSkillsSettingsOptions } from "./settings/skills-page.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
@@ -45,6 +46,7 @@ export interface RendererSettingsLifecycleOptions {
   jarvis?: RendererJarvisSettingsOptions;
   dingtalk?: RendererDingTalkPageOptions;
   codexAgents?: RendererCodexAgentsSettingsOptions;
+  skills?: RendererSkillsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
   onLocaleChange?(locale: RendererSettingsLocale): void;
 }
@@ -107,6 +109,7 @@ export function installRendererSettingsLifecycle(
       options.jarvis,
       options.dingtalk,
       options.codexAgents,
+      options.skills,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

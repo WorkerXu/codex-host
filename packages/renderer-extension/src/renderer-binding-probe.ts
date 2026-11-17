@@ -1,3 +1,4 @@
+import { createRendererSkillsClient, SKILLS_HUB_METHOD } from "./renderer-skills-client.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
@@ -951,6 +952,17 @@ export function installRendererBindingProbe(
     },
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
+    skills: {
+      createClient: () =>
+        createRendererSkillsClient(async (params) => {
+          const route = window.__codexhostHostRoutingV1?.forHost("local");
+          if (!route) throw new Error("connection_failed");
+          return route.manager.sendRequest(SKILLS_HUB_METHOD, params, {
+            priority: "interactive",
+            timeoutMs: 120_000,
+          });
+        }),
+    },
     jarvis: { createClient: () => jarvisClient },
     dingtalk: {
       createClient: () => dingtalkClient,
