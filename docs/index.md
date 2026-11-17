@@ -27,6 +27,7 @@
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
+| [`architecture/skills-hub.md`](architecture/skills-hub.md) | 每机技能中央库、动态发现、链接预览与撤销、手动跨机同步和冲突选择；修改技能中心时阅读。 |
 | [`architecture/peer-delegation.md`](architecture/peer-delegation.md) | 通过 SSH 别名跨机器调用 Host Runtime 控制 API 的 peer 配置、控制文件、传输、`#` 选择器与跨机 watch；修改跨机委派时阅读。 |
 | [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、规则优先的结构化查询、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
 | [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
