@@ -14,7 +14,7 @@ Composer 上方的「工作文件夹」显示主要目录的末级名称和额�
 
 ## 原生 Codex 请求
 
-- `initialize.capabilities.experimentalApi` 开启环境与运行时工作目录接口。
+- 环境与运行时工作目录接口需要 `initialize.capabilities.experimentalApi`。Desktop 连接保留客户端原始的能力协商参数；Host 自有的私有客户端在初始化时声明该能力。
 - 新对话设置 `thread/start.cwd` 为主要目录、`runtimeWorkspaceRoots` 为所有目录；原请求的 `projectId`、权限和其他字段保留。
 - Renderer 的草稿选择按 `hostId + client-new-thread ID` 隔离。原生创建通过单次调用的 ThreadCreation 参数和 request client 传递目录；主进程 RPC 创建改写同一个草稿的 `startConversation` 输入。选择后清理预热池，消费时拒绝不匹配目录的旧预热。
 - Host 私有参数 `codexhostWorkingFolders` 在转发给 Codex 前移除。Desktop 已提供的 `cwd + runtimeWorkspaceRoots` 也保存为初始选择。

@@ -1401,14 +1401,7 @@ export class AppServerHost {
           await this.#usagePluginsReady;
           const params = requestObject(request);
           const options = this.#observedSessionUsage.requestOptions("initialize", params);
-          const enhanced = options ? { ...params, ...options } : params;
-          const nativeParams = {
-            ...enhanced,
-            capabilities: {
-              ...(isRecord(enhanced.capabilities) ? enhanced.capabilities : {}),
-              experimentalApi: true,
-            },
-          };
+          const nativeParams = options ? { ...params, ...options } : params;
           const response = await this.#officialRuntime.initializeProtocol(nativeParams);
           if (!isRecord(response.error)) this.#observedSessionUsage.initialized(nativeParams);
           await this.#writer.json({ ...response, id: request.id });
@@ -5177,12 +5170,12 @@ export class AppServerHost {
   }
 
   async #notifyExternalThreadStarted(thread: JsonObject): Promise<void> {
-    await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
     await this.#writer.json({
       method: "thread/started",
       emittedAtMs: Date.now(),
       params: { thread: { ...thread, turns: [] } },
     });
+    await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
   }
 
   async #revertExternalThread(
