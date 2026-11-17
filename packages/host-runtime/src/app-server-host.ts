@@ -1,3 +1,5 @@
+import { SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
+import { getSkillsHub, skillsError, type SkillsHubService } from "./skills-hub/service.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -470,6 +472,7 @@ export interface AppServerHostOptions {
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
   jarvis?: JarvisService;
+  skillsHub?: Pick<SkillsHubService, "request">;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1497,6 +1500,19 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (request.method === SKILLS_HUB_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service =
+            this.#options.skillsHub ?? getSkillsHub(this.#options.environment ?? process.env);
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32096, skillsError(error)));
+        }
+      });
       return;
     }
     if (request.method.startsWith("codexhost/jarvis/")) {

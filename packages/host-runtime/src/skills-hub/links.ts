@@ -181,6 +181,7 @@ export async function undoChanges(
   for (const change of manifest.changes) {
     if (change.stage === "pending") continue;
     const a = change.action;
+    if (a.kind === "adopt") await safePath(paths.home, a.target);
     if (change.stage === "done" && change.sourceAfter !== undefined) {
       const current = (await sourceOverrides(paths))[a.skill] ?? null;
       if (JSON.stringify(current) !== JSON.stringify(change.sourceAfter)) fail("undo_conflict");

@@ -1,3 +1,4 @@
+import { getSkillsHub } from "./skills-hub/service.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -173,6 +174,7 @@ async function prepareDelegationRuntime(input: {
     token,
     api: registry,
     watchApi: registry,
+    skills: getSkillsHub(input.environment).local,
     dingtalkDws: {
       async runDingTalkDws(args) {
         const raw = await runDwsRaw(args, {
