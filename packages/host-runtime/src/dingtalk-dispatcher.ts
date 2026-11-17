@@ -58,7 +58,12 @@ export interface DingTalkDispatchMatcher {
   scoreDingTalkCandidates(
     text: string,
     candidates: readonly { fileName: string; name: string; description: string }[],
-  ): Promise<{ available: boolean; scores: Record<string, number>; errorCode: string | null }>;
+  ): Promise<{
+    available: boolean;
+    scores: Record<string, number>;
+    probabilities?: Record<string, Record<string, number>>;
+    errorCode: string | null;
+  }>;
 }
 
 export interface DingTalkDispatcherOptions {
@@ -117,6 +122,22 @@ function eventTypesFor(event: DwsEventRecord): DingTalkEventType[] {
 
 function approvalEventId(approval: DingTalkPendingApproval): string {
   return `approval:${approval.taskId}`;
+}
+
+function matchDetail(
+  match: { scores: Record<string, number>; probabilities?: Record<string, Record<string, number>> },
+  fileName: string,
+  threshold: number,
+): string {
+  const score = match.scores[fileName];
+  if (typeof score !== "number" || !Number.isFinite(score)) return "无法取得匹配度，未派发";
+  const distribution = Object.entries(match.probabilities?.[fileName] ?? {}).map(
+    ([criterion, probability]) => `${criterion} ${probability.toFixed(2)}`,
+  );
+  return [
+    `匹配度 ${score.toFixed(2)}，${score >= threshold ? "已达" : "未达"}阈值 ${threshold.toFixed(2)}`,
+    ...distribution,
+  ].join("，");
 }
 
 /** Listens, matches, starts native Codex Threads and owns their reply destinations. */
@@ -290,13 +311,21 @@ export class DingTalkDispatcher {
         Number.isFinite(match.scores[fileName]) && (match.scores[fileName] ?? 0) >= threshold,
     );
     for (const { agent } of agents.filter((entry) => !selected.includes(entry))) {
-      await this.#setStatus(agent.fileName, "skipped", "匹配分数低于阈值");
+      await this.#setStatus(
+        agent.fileName,
+        "skipped",
+        matchDetail(match, agent.fileName, this.#settings.threshold),
+      );
     }
     if (this.#disposed) return;
     for (const target of selected) {
-      void this.#dispatch(target, event, undefined, context).catch((error: unknown) =>
-        this.#diagnose(error),
-      );
+      void this.#dispatch(
+        target,
+        event,
+        undefined,
+        context,
+        matchDetail(match, target.agent.fileName, threshold),
+      ).catch((error: unknown) => this.#diagnose(error));
     }
   }
 
@@ -331,12 +360,15 @@ export class DingTalkDispatcher {
     fileName: string,
     result: DingTalkDispatchAgentStatus["result"],
     detail?: string,
+    matching?: string,
   ): Promise<void> {
     try {
       await this.#options.state.setStatus(fileName, {
         lastDispatchAt: this.#now(),
         result,
-        ...(detail ? { detail: truncate(detail, 200) } : {}),
+        ...(detail || matching
+          ? { detail: truncate([matching, detail].filter(Boolean).join("；"), 200) }
+          : {}),
       });
     } catch (error) {
       this.#diagnose(error);
@@ -348,6 +380,7 @@ export class DingTalkDispatcher {
     event: DwsEventRecord,
     approval?: DingTalkPendingApproval,
     knownContext?: { conversation: DingTalkConversation | null; messages: DingTalkMessage[] },
+    matching?: string,
   ): Promise<void> {
     if (this.#disposed) return;
     const { agent } = target;
@@ -357,7 +390,7 @@ export class DingTalkDispatcher {
     const direct = event.kind === "direct" || route.replyScope === "direct";
     const senderId = event.senderId ?? null;
     if (!senderId) {
-      await this.#setStatus(agent.fileName, "failed", "无法确定发送人的钉钉身份，未派发");
+      await this.#setStatus(agent.fileName, "failed", "无法确定发送人的钉钉身份，未派发", matching);
       return;
     }
     const context =
@@ -374,7 +407,12 @@ export class DingTalkDispatcher {
       }))
     ) {
       this.#cards.delete(card);
-      await this.#setStatus(agent.fileName, "failed", "进度卡创建未确认，已停止派发，请检查钉钉");
+      await this.#setStatus(
+        agent.fileName,
+        "failed",
+        "进度卡创建未确认，已停止派发，请检查钉钉",
+        matching,
+      );
       return;
     }
 
@@ -405,7 +443,7 @@ export class DingTalkDispatcher {
     } catch (error) {
       this.#diagnose(error);
       const message = dingtalkRunError(error);
-      await this.#finish(agent.fileName, card, `处理失败：${message}`, false);
+      await this.#finish(agent.fileName, card, `处理失败：${message}`, false, matching);
       return;
     }
 
@@ -422,10 +460,11 @@ export class DingTalkDispatcher {
         card,
         `处理失败：${dingtalkRunError(completed.errorMessage ?? completed.status)}`,
         false,
+        matching,
       );
       return;
     }
-    await this.#finish(agent.fileName, card, answer || "已完成，但没有返回文本。", true);
+    await this.#finish(agent.fileName, card, answer || "已完成，但没有返回文本。", true, matching);
   }
 
   async #finish(
@@ -433,6 +472,7 @@ export class DingTalkDispatcher {
     card: DingTalkProgressCard,
     content: string,
     success: boolean,
+    matching?: string,
   ): Promise<void> {
     const delivered = await card.finish(content, success);
     this.#cards.delete(card);
@@ -440,6 +480,7 @@ export class DingTalkDispatcher {
       fileName,
       delivered && success ? "replied" : "failed",
       delivered ? (success ? undefined : content) : "进度卡更新未确认，已停止更新，请检查钉钉",
+      matching,
     );
   }
 
@@ -553,11 +594,20 @@ export class DingTalkDispatcher {
         if (this.#disposed) return;
         const score = match.scores[agent.fileName];
         if (!Number.isFinite(score) || (score ?? 0) < this.#settings.threshold) {
-          await this.#setStatus(agent.fileName, "skipped", "匹配分数低于阈值");
+          await this.#setStatus(
+            agent.fileName,
+            "skipped",
+            matchDetail(match, agent.fileName, this.#settings.threshold),
+          );
           return;
         }
         if (!selfId) {
-          await this.#setStatus(agent.fileName, "failed", "无法解析本人私聊目标，未派发审批");
+          await this.#setStatus(
+            agent.fileName,
+            "failed",
+            "无法解析本人私聊目标，未派发审批",
+            matchDetail(match, agent.fileName, this.#settings.threshold),
+          );
           return;
         }
         await this.#dispatch(
@@ -574,6 +624,8 @@ export class DingTalkDispatcher {
             atAll: false,
           },
           approval,
+          undefined,
+          matchDetail(match, agent.fileName, this.#settings.threshold),
         );
       }),
     );

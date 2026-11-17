@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -301,7 +302,7 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
       "b.toml",
       "low.toml",
     ]);
-    expect((await f.state.status())["low.toml"]?.detail).toContain("低于阈值");
+    expect((await f.state.status())["low.toml"]?.detail).toBe("匹配度 0.84，未达阈值 0.85");
     await f.finish();
   });
 
@@ -430,4 +431,53 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
         ),
     ).toBe(5000);
   });
+});
+
+it.each([false, true])(
+  "does not dispatch the real 1.034 Decisions answer for messages/approvals (%s)",
+  async (approvals) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-score-scale-"));
+    directories.push(directory);
+    const store = new ModelServiceSettingsStore({ configDirectory: directory });
+    await store.update({ key: { provider: "gemini", value: "fake-key" } });
+    const sample = JSON.parse(
+      readFileSync(
+        new URL("./fixtures/dingtalk-decisions-review-score.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const matcher = createDingTalkDispatchMatcher({
+      settings: store,
+      fetchImpl: async () => Response.json(sample),
+    });
+    const f = await setup({ matcher, approvals });
+    if (!approvals) f.emit(event({ text: "<2 个 MR 链接> @许涛 帮review下这个代码" }));
+    await vi.waitFor(async () =>
+      expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
+        result: "skipped",
+        detail: "匹配度 0.52，未达阈值 0.85，不相关 0.29，有点相关 0.39，高度相关 0.32",
+      }),
+    );
+    expect(f.startThread).not.toHaveBeenCalled();
+    expect(f.commands).toEqual([]);
+  },
+);
+
+it("retains the normalized score and probabilities after a selected task replies", async () => {
+  const f = await setup({
+    matcher: {
+      scoreDingTalkCandidates: async () => ({
+        available: true,
+        scores: { "qa.toml": 0.9 },
+        probabilities: { "qa.toml": { 不相关: 0.05, 有点相关: 0.1, 高度相关: 0.85 } },
+        errorCode: null,
+      }),
+    },
+  });
+  f.emit();
+  await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+  await f.finish();
+  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe(
+    "匹配度 0.90，已达阈值 0.85，不相关 0.05，有点相关 0.10，高度相关 0.85",
+  );
 });

@@ -12,7 +12,7 @@ const CANDIDATES = [
   { fileName: "review.toml", name: "代码评审", description: "评审代码变更" },
 ];
 const response = () =>
-  Response.json({ answers: { agent_0: { score: 0.95 }, agent_1: { score: 0.2 } } });
+  Response.json({ answers: { agent_0: { score: 1.9 }, agent_1: { score: 0.4 } } });
 async function settings() {
   const configDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-decisions-test-"));
   directories.push(configDirectory);
@@ -42,6 +42,7 @@ describe("DingTalk Gemini Decisions matching", () => {
         available: true,
         errorCode: null,
         scores: { "qa.toml": 0.95, "review.toml": 0.2 },
+        probabilities: { "qa.toml": {}, "review.toml": {} },
       });
       expect(provider).not.toHaveBeenCalled();
       expect(readKey).toHaveBeenCalledExactlyOnceWith("gemini");

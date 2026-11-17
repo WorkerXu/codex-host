@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import type { JarvisBug } from "@codexhost/shared-contracts";
@@ -8,6 +9,7 @@ import {
   createJarvisDecisions,
   parseBugDecisionAnswers,
   parseBugOrderResponse,
+  parseAgentScores,
 } from "../src/jarvis-decisions.js";
 
 const bug = (id: number, title: string, updatedAt: string): JarvisBug => ({
@@ -96,7 +98,7 @@ describe("Jarvis bug Decisions responses", () => {
   it("reads scores in question order and defaults missing answers to zero", () => {
     expect(
       parseBugOrderResponse({ answers: { rel_0: { score: 1.8 }, rel_1: { score: 0.4 } } }, 3),
-    ).toEqual([1.8, 0.4, 0]);
+    ).toEqual([0.9, 0.2, 0]);
   });
 
   it("applies the threshold and turns answers into search conditions", async () => {
@@ -220,7 +222,7 @@ describe("DingTalk agent matching", () => {
       expect(body.questions.agent_1.instructions).toContain("采购审批");
       return new Response(
         JSON.stringify({
-          answers: { agent_0: { score: 0.85 }, agent_1: { score: 0.95 }, agent_2: { score: "1" } },
+          answers: { agent_0: { score: 1.7 }, agent_1: { score: 1.9 }, agent_2: { score: "1" } },
         }),
       );
     });
@@ -234,7 +236,10 @@ describe("DingTalk agent matching", () => {
         { fileName: "b.toml", name: "采购", description: "采购审批" },
         { fileName: "c.toml", name: "闲聊", description: "聊天" },
       ]),
-    ).toEqual({ "a.toml": 0.85, "b.toml": 0.95, "c.toml": 0 });
+    ).toEqual({
+      scores: { "a.toml": 0.85, "b.toml": 0.95, "c.toml": 0 },
+      probabilities: { "a.toml": {}, "b.toml": {}, "c.toml": {} },
+    });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
   it("requires a local Gemini key", async () => {
@@ -245,4 +250,69 @@ describe("DingTalk agent matching", () => {
     ).rejects.toMatchObject({ code: "missing_key" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+});
+
+const realReviewScore = JSON.parse(
+  readFileSync(new URL("./fixtures/dingtalk-decisions-review-score.json", import.meta.url), "utf8"),
+);
+it("accepts probabilities keyed by criterion text", () => {
+  const parsed = parseAgentScores(
+    { answers: { agent_0: { score: 2, probabilities: { 高度相关: 0.9 } } } },
+    [{ fileName: "a.toml" }],
+  );
+  expect(parsed.scores["a.toml"]).toBe(1);
+  expect(parsed.probabilities["a.toml"]).toEqual({ 高度相关: 0.9 });
+});
+
+it("normalizes the reported MR-review answer by the number of criterion intervals", () => {
+  const parsed = parseAgentScores(realReviewScore, [{ fileName: "问源代问.toml" }]);
+  expect(parsed.scores["问源代问.toml"]).toBeCloseTo(0.517);
+  expect(parsed.scores["问源代问.toml"]).toBeLessThan(0.85);
+  // Real Decisions answers key probabilities by criterion index and name them in `legend`.
+  const distribution = parsed.probabilities["问源代问.toml"] ?? {};
+  expect(Object.keys(distribution).sort()).toEqual(["不相关", "有点相关", "高度相关"].sort());
+  expect(distribution["不相关"]).toBeCloseTo(0.288, 3);
+  expect(distribution["有点相关"]).toBeCloseTo(0.39, 2);
+  expect(distribution["高度相关"]).toBeCloseTo(0.322, 3);
+});
+
+it.each([
+  [0, 0],
+  [1, 0.5],
+  [2, 1],
+  [Number.NaN, 0],
+  [Number.POSITIVE_INFINITY, 0],
+  ["1.034", 0],
+])("normalizes score %s and keeps malformed scores closed", (raw, expected) => {
+  expect(
+    parseAgentScores({ answers: { agent_0: { score: raw } } }, [{ fileName: "a" }]).scores.a,
+  ).toBe(expected);
+});
+
+it("keeps valid scores above one distinct when sorting Jarvis bugs", async () => {
+  const decisions = createJarvisDecisions({
+    readApiKey: async () => "fake-key",
+    fetchImpl: async () =>
+      Response.json({
+        answers: {
+          rel_0: realReviewScore.answers.agent_0,
+          rel_1: { score: 1.8 },
+          rel_2: { score: 0.9 },
+        },
+      }),
+  });
+  const bugs = [
+    bug(1, "登录异常", "2026-11-15"),
+    bug(2, "登录失败", "2026-11-14"),
+    bug(3, "登录超时", "2026-11-13"),
+  ];
+  const order = parseBugOrderResponse(
+    { answers: { rel_0: realReviewScore.answers.agent_0, rel_1: { score: 1.8 } } },
+    2,
+  );
+  expect(order[0]).toBeCloseTo(0.517, 3);
+  expect(order[1]).toBeCloseTo(0.9, 6);
+  expect((await decisions.orderBugs("登录失败", bugs)).bugs.map((bug) => bug.id)).toEqual([
+    2, 1, 3,
+  ]);
 });

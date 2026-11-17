@@ -53,6 +53,11 @@ export interface JarvisDecisionsOptions {
   now?: () => number;
 }
 
+export interface AgentDecisionScores {
+  scores: Record<string, number>;
+  probabilities: Record<string, Record<string, number>>;
+}
+
 export interface JarvisDecisions {
   interpret(
     query: string,
@@ -67,7 +72,7 @@ export interface JarvisDecisions {
   scoreCandidates(
     text: string,
     candidates: readonly { fileName: string; name: string; description: string }[],
-  ): Promise<Record<string, number>>;
+  ): Promise<AgentDecisionScores>;
   test(): Promise<{ ok: boolean; latencyMs: number | null; errorCode: string | null }>;
   clear(): void;
 }
@@ -232,14 +237,55 @@ export function buildAgentScoreRequest(input: {
 export function parseAgentScores(
   value: unknown,
   candidates: readonly { fileName: string }[],
-): Record<string, number> {
+): AgentDecisionScores {
   const answers = record(value) && record(value.answers) ? value.answers : {};
-  return Object.fromEntries(
-    candidates.map((candidate, index) => {
-      const answer = record(answers[`agent_${index}`]) ? answers[`agent_${index}`] : {};
-      return [candidate.fileName, unit(record(answer) ? answer.score : 0)];
-    }),
-  );
+  const scores: Record<string, number> = {};
+  const probabilities: Record<string, Record<string, number>> = {};
+  candidates.forEach((candidate, index) => {
+    const answer = answers[`agent_${index}`];
+    scores[candidate.fileName] = normalizeDecisionScore(
+      record(answer) ? answer.score : undefined,
+      SCORE_CRITERIA,
+    );
+    probabilities[candidate.fileName] = criterionProbabilities(answer, SCORE_CRITERIA);
+  });
+  return { scores, probabilities };
+}
+
+/**
+ * Decisions keys `probabilities` by criterion index ("0", "1", …) and maps the
+ * index to the criterion text in `legend`; older/fake shapes keyed by text are
+ * accepted too.
+ */
+function criterionProbabilities(
+  answer: unknown,
+  criteria: readonly string[],
+): Record<string, number> {
+  if (!record(answer) || !record(answer.probabilities)) return {};
+  const distribution = answer.probabilities;
+  const legend = record(answer.legend) ? answer.legend : {};
+  const result: Record<string, number> = {};
+  criteria.forEach((criterion, index) => {
+    const legendKey = Object.keys(legend).find((key) => legend[key] === criterion);
+    const probability =
+      distribution[legendKey ?? String(index)] ??
+      distribution[String(index)] ??
+      distribution[criterion];
+    if (
+      typeof probability === "number" &&
+      Number.isFinite(probability) &&
+      probability >= 0 &&
+      probability <= 1
+    )
+      result[criterion] = probability;
+  });
+  return result;
+}
+
+/** Decisions score is an expected criterion index; probabilities/confidence already use 0..1. */
+function normalizeDecisionScore(value: unknown, criteria: readonly string[]): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || criteria.length < 2) return 0;
+  return unit(value / (criteria.length - 1));
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -323,7 +369,7 @@ export function parseBugOrderResponse(value: unknown, count: number): number[] {
     const answer = answers && record(answers[`rel_${index}`]) ? answers[`rel_${index}`] : null;
     if (!record(answer)) return 0;
     const score = answer.score;
-    return typeof score === "number" && Number.isFinite(score) ? score : 0;
+    return normalizeDecisionScore(score, SCORE_CRITERIA);
   });
 }
 
@@ -444,7 +490,7 @@ export function createJarvisDecisions(options: JarvisDecisionsOptions): JarvisDe
       return { available: true, bugs: ordered };
     },
     async scoreCandidates(text, candidates) {
-      if (candidates.length === 0) return {};
+      if (candidates.length === 0) return { scores: {}, probabilities: {} };
       if (candidates.length > 64) {
         throw new JarvisDecisionError("too_many_candidates", "Too many dispatch candidates");
       }

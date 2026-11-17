@@ -16,7 +16,7 @@ export function createDingTalkDispatchMatcher(options: {
       try {
         return {
           available: true,
-          scores: await decisions.scoreCandidates(text, candidates),
+          ...(await decisions.scoreCandidates(text, candidates)),
           errorCode: null,
         };
       } catch (error) {
