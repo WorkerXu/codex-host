@@ -126,3 +126,4 @@ export const packageMetadata = {
     updateManager.name,
   ],
 } as const;
+export { probeRemoteThreadFolders } from "./thread-folders-probe.js";

@@ -1,3 +1,4 @@
+import { mountThreadFoldersPreview } from "./thread-folders.js";
 import previewCss from "./preview.css";
 import {
   createDingTalkEntryRow,
@@ -1046,6 +1047,19 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("jarvis");
     await waitFor(() => query(".settings-jarvis-machines .settings-jarvis-row"));
     await delay(120);
+  },
+
+  async "thread-folders-local"() {
+    mountThreadFoldersPreview(root!, "thread-folders-local");
+  },
+  async "thread-folders-remote"() {
+    mountThreadFoldersPreview(root!, "thread-folders-remote");
+  },
+  async "thread-folders-existing"() {
+    mountThreadFoldersPreview(root!, "thread-folders-existing");
+  },
+  async "thread-folders-limited"() {
+    mountThreadFoldersPreview(root!, "thread-folders-limited");
   },
 
   async "at-entry"() {

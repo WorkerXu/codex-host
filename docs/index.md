@@ -134,6 +134,7 @@
 | --- | --- |
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
 | [`product/harness-schedules.md`](product/harness-schedules.md) | 设置侧栏直达官方任务页，原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
+| [`architecture/thread-folders.md`](architecture/thread-folders.md) | 每个对话独立工作文件夹、多目录环境、Host 持久化、Harness 降级与 Desktop 根目录显示边界。 |
 | [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | 跨机同名项目：只填名字项目识别、远程同名目录与项目创建、Agent 菜单「其他机器」入口、Harness 预选与自动分组；修改跨机项目入口时阅读。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |
 | [`product/usage-metering.md`](product/usage-metering.md) | 外部 Harness 与官方 Codex 的会话用量、插件可选能力、实时刷新、费用、缓存命中、首字延迟及速度限制；修改计量、价格表或 `pricing.json` 时阅读。 |
