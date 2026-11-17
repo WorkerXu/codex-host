@@ -80,6 +80,41 @@ describe("DingTalk expansion on the remote listener session", () => {
     }
   });
 
+  it("tells the agent to use the routed CLI when reading fails", async () => {
+    const expandMentions = vi.fn(async () => {
+      throw new Error("DingTalk Host unreachable");
+    });
+    const fixture = remoteListenerSession({
+      dingtalk: { expandMentions, addNotifier: () => () => undefined, dispose: () => undefined },
+    });
+    try {
+      await fixture.ready;
+      writeRequest(fixture.desktopInput, {
+        id: 32,
+        method: "turn/start",
+        params: {
+          threadId: "official-thread",
+          input: [
+            {
+              type: "text",
+              text: "[@【线上群】]\\(dingtalk://conversation/cidifW8hA1yxL0HHqFGnPZ2OQ%3D%3D) 最近5条消息",
+            },
+          ],
+        },
+      });
+      const forwarded = await forwardedRequest(fixture);
+      const text = String(((forwarded.params as JsonObject).input as JsonObject[])[0]?.text);
+      expect(text).toContain("@【线上群】 最近5条消息");
+      expect(text).toContain("conversationId=cidifW8hA1yxL0HHqFGnPZ2OQ==");
+      expect(text).toContain("codexhost dingtalk dws --");
+      expect(text).not.toContain("dingtalk://");
+      answerTurn(fixture, 32);
+      await fixture.collector.waitFor((message) => requestId(message, 32));
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
   it.each([
     {
       name: "a newline between the label and target",

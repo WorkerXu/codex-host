@@ -144,7 +144,7 @@ import {
   rewriteDelegationMentionText,
 } from "./delegation-mention-rewrite.js";
 import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
-import { hasDingTalkCarrier } from "@codexhost/shared-contracts";
+import { hasDingTalkCarrier, stripDingTalkMentions } from "@codexhost/shared-contracts";
 import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
 import { DingTalkServiceError, type DingTalkService } from "./dingtalk-service.js";
 import type {
@@ -2520,7 +2520,7 @@ export class AppServerHost {
       return await this.#options.dingtalk.expandMentions(text);
     } catch (error) {
       this.#diagnose(error);
-      return text;
+      return dingTalkReadFailureNote(text);
     }
   }
 
@@ -6981,4 +6981,26 @@ export class AppServerHost {
   #diagnose(error: unknown): void {
     this.#options.diagnosticOutput.write(`codexhost Host Runtime: ${errorMessage(error)}\n`);
   }
+}
+
+/**
+ * When the Host cannot read a mentioned DingTalk conversation, the agent still
+ * gets the conversation ids and the routed CLI entry, so it does not look for
+ * a local `dws` that only exists on the DingTalk Host.
+ */
+export function dingTalkReadFailureNote(text: string): string {
+  const { text: readable, mentions } = stripDingTalkMentions(text);
+  if (mentions.length === 0) return text;
+  const lines = mentions.map(
+    (mention) => `- 「${mention.label}」：conversationId=${mention.conversationId}`,
+  );
+  return [
+    readable,
+    "",
+    "[codexhost DingTalk]",
+    "Host 这次没能读取下面提到的钉钉会话内容。",
+    ...lines,
+    "钉钉 CLI（dws）只装在 DingTalk Host 上，本机没有 dws，不要在本机查找或安装。",
+    "需要读取时运行 `codexhost dingtalk dws -- <只读 dws 参数>`，例如 `codexhost dingtalk dws -- chat message list --conversation-id '<conversationId>'`。",
+  ].join("\n");
 }
