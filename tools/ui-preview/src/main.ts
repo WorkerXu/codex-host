@@ -669,7 +669,7 @@ async function mountUnreadScenario(): Promise<void> {
 }
 
 async function mountModelSettings(
-  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add" | "menu",
+  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add",
 ) {
   let settings: ModelServiceSettings = {
     provider: "openai",
@@ -758,8 +758,6 @@ async function mountModelSettings(
     await previewKey(queryButton("openai", "测试"), "Tab");
   }
   if (state === "hover") await previewHover(queryButton("openai", "更换"));
-  if (state === "menu")
-    await previewClick(shadow.querySelector<HTMLButtonElement>("#model-service-provider")!);
   document.body.dataset.modelServiceState = state;
   await delay(120);
 }
@@ -1372,9 +1370,6 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
   async "model-service-add"() {
     await mountModelSettings("add");
-  },
-  async "model-service-menu"() {
-    await mountModelSettings("menu");
   },
   async "jarvis-mode-openai-missing-key"() {
     await mountJarvisSearch(

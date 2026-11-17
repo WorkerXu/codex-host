@@ -63,7 +63,7 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 ## 共享模型服务
 
-通用页的「模型服务」管理 OpenAI 和 Gemini 的 API Key、保存/清除、测试和解析模型。该区复用通用页的卡片行布局，Key 行平时只显示配置后缀、连接状态与测试/更换/清除操作；添加或更换时展开掩码输入、保存和取消，保存成功直接更新状态。解析模型位于卡片第三行，使用带选中标记、方向键与 Esc 支持的菜单。解析模型仅提供 `OpenAI · gpt-4.1-mini`；旧配置选择 Gemini 时读取为 OpenAI，不迁移或共用密钥。OpenAI 连接测试验证严格 JSON 结构化响应，Gemini Key 连接测试使用钉钉同款 `gemini-decision-1` Decisions API（原 8 秒超时）。测试返回耗时或稳定错误码。
+通用页的「模型服务」管理 OpenAI 和 Gemini 的 API Key、保存/清除、测试和解析模型。该区复用通用页的卡片行布局，Key 行平时只显示配置后缀、连接状态与测试/更换/清除操作；添加或更换时展开掩码输入、保存和取消，保存成功直接更新状态。解析模型位于卡片第三行，右侧以次要文字色静态显示 `OpenAI · gpt-4.1-mini`，无箭头或交互；旧配置选择 Gemini 时读取为 OpenAI，不迁移或共用密钥。OpenAI 连接测试验证严格 JSON 结构化响应，Gemini Key 连接测试使用钉钉同款 `gemini-decision-1` Decisions API（原 8 秒超时）。测试返回耗时或稳定错误码。
 
 `model-service-settings.ts` 的 `ModelServiceSettingsStore` 在 Desktop 本地 Host 读取 `~/.config/codexhost`：复用 `gemini-api-key`，新增 `openai-api-key`，模型选择写入 `model-service.json`；原子写入，文件权限 0600。`readKey(provider)` 只供 Host 内部使用；公开 `read()/update()` 与 `codexhost/model-service/get|set|test` 只返回 `configured` 和末四位，不回传密钥。Renderer 不持久化密钥，保存成功后清空密码输入框。远程 Host 不注册这些共享设置 RPC。
 

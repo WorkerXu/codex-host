@@ -83,7 +83,6 @@ const allScenarios = [
   "model-service-hover",
   "model-service-edit",
   "model-service-add",
-  "model-service-menu",
   "jarvis-mode-openai-missing-key",
   "jarvis-mode-openai-quota",
   "jarvis-mode-openai-timeout",
@@ -1719,12 +1718,19 @@ for (const scenario of scenarios) {
           "no-stale-saved-or-subtitle",
           !section?.textContent?.includes("已保存") && !query(".settings-page-description"),
         );
+        const model = query("#model-service-provider");
         check(
-          "model-native-menu-trigger",
-          !section?.querySelector("select") &&
-            query("#model-service-provider")?.getAttribute("aria-haspopup") === "menu",
+          "model-static-label",
+          model?.tagName === "SPAN" && model.textContent === "OpenAI · gpt-4.1-mini",
         );
-        check("model-default-openai", query("#model-service-provider")?.dataset.value === "openai");
+        check("model-secondary-text", model?.classList.contains("text-settings-muted") === true);
+        check(
+          "model-no-interaction",
+          !model?.hasAttribute("tabindex") &&
+            !model?.hasAttribute("aria-haspopup") &&
+            !model?.querySelector("svg") &&
+            !query("#model-service-model-menu"),
+        );
         check(
           "no-removed-nav-or-routes",
           !query('[data-page-id="session-import"]') &&
@@ -1789,26 +1795,8 @@ for (const scenario of scenarios) {
           );
         if (state === "hover")
           check("change-hover", query("#model-service-edit-openai")?.matches(":hover") === true);
-        if (state === "menu") {
-          const menu = query("#model-service-model-menu");
-          const rect = menu?.getBoundingClientRect();
-          check("model-menu-visible", Boolean(menu && visible(menu)));
-          check(
-            "model-menu-selected",
-            menu?.querySelector('[data-value="openai"]')?.getAttribute("aria-checked") === "true",
-          );
-          check(
-            "model-menu-in-viewport",
-            Boolean(
-              rect &&
-              rect.left >= 0 &&
-              rect.right <= window.innerWidth &&
-              rect.top >= 0 &&
-              rect.bottom <= window.innerHeight,
-            ),
-          );
-        }
       }
+
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(
           "slow-notice",
