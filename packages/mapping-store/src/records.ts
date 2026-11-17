@@ -202,7 +202,7 @@ export const storedDelegationRecordV1Schema = z
     taskDigest: z.string().regex(/^[a-f0-9]{64}$/u),
     desktopProject: z
       .object({
-        sourceHostId: z.string().min(1),
+        sourceHostId: z.string().min(1).optional(),
         sourceThreadId: z.string().min(1).optional(),
         projectId: z.string().min(1).nullable().optional(),
       })

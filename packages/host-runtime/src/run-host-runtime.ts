@@ -1,5 +1,6 @@
 import { createDingTalkDispatchMatcher } from "./dingtalk-dispatch-matcher.js";
 import { ModelService } from "./model-service.js";
+import { CodeRepositories } from "./code-repositories.js";
 import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
@@ -389,6 +390,7 @@ export async function runHostRuntime(input: {
               usageStatistics,
               jarvis,
               modelService: new ModelService(modelSettings),
+              codeRepositories: new CodeRepositories({ environment: delegationEnvironment }),
               dingtalk,
               codexAgents,
               dingTalkDispatch,
@@ -464,6 +466,7 @@ export async function runHostRuntime(input: {
             modelService: new ModelService(
               new ModelServiceSettingsStore({ environment: delegationEnvironment }),
             ),
+            codeRepositories: new CodeRepositories({ environment: delegationEnvironment }),
             dingtalk,
             codexAgents,
             dingTalkDispatch,

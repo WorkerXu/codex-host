@@ -111,6 +111,13 @@ async function forEachConcurrent<T>(
 
 type ParentMetadata = { cwd?: string; title?: string; projectId?: string | null };
 
+export type OfficialDelegationStartInput = DelegationStartInput & {
+  parentThreadId: string;
+  cwd: string;
+  title: string;
+  desktopProject: NonNullable<StoredDelegationRecordV1["desktopProject"]>;
+};
+
 function truncateTitle(value: string, length: number): string {
   return value.slice(0, length).replace(/[\uD800-\uDBFF]$/u, "");
 }
@@ -272,9 +279,7 @@ export class HarnessDelegationCoordinator {
   readonly #readOfficial: (input: ThreadReadInput) => Promise<DelegationThreadSnapshot>;
   readonly #sendOfficial: (input: ThreadSendInput) => Promise<ThreadSendResult>;
   readonly #cancelOfficial: (input: ThreadCancelInput) => Promise<ThreadCancelResult>;
-  readonly #startOfficial: (
-    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
-  ) => Promise<DelegationStartResult>;
+  readonly #startOfficial: (input: OfficialDelegationStartInput) => Promise<DelegationStartResult>;
   readonly #listOfficial: (input: ThreadListInput) => Promise<DelegationThreadListResult>;
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
   readonly #projectForThread:
@@ -306,9 +311,7 @@ export class HarnessDelegationCoordinator {
     readOfficial(input: ThreadReadInput): Promise<DelegationThreadSnapshot>;
     sendOfficial(input: ThreadSendInput): Promise<ThreadSendResult>;
     cancelOfficial(input: ThreadCancelInput): Promise<ThreadCancelResult>;
-    startOfficial(
-      input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
-    ): Promise<DelegationStartResult>;
+    startOfficial(input: OfficialDelegationStartInput): Promise<DelegationStartResult>;
     listOfficial(input: ThreadListInput): Promise<DelegationThreadListResult>;
     officialThreadMetadata(threadId: string): Promise<ParentMetadata>;
     projectForThread?(threadId: string): Promise<string | null | undefined>;
@@ -462,7 +465,16 @@ export class HarnessDelegationCoordinator {
     const parent = origin
       ? { harnessId: "codex" as RoutedHarnessId }
       : await this.#parentMetadata(parentThreadId);
-    const desktopProject =
+    const desktopProject = {
+      ...(origin
+        ? {
+            sourceHostId: origin.hostId,
+            ...(origin.threadId ? { sourceThreadId: origin.threadId } : {}),
+          }
+        : { sourceThreadId: parentThreadId }),
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    };
+    const parentProjectId =
       !origin && input.projectId === undefined
         ? await this.#projectForThread?.(parentThreadId)
         : undefined;
@@ -471,8 +483,8 @@ export class HarnessDelegationCoordinator {
         ? input.projectId
         : origin
           ? undefined
-          : desktopProject !== undefined
-            ? desktopProject
+          : parentProjectId !== undefined
+            ? parentProjectId
             : parent.projectId;
     input = { ...input, ...(projectId !== undefined ? { projectId } : {}) };
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
@@ -483,6 +495,7 @@ export class HarnessDelegationCoordinator {
         parentThreadId,
         cwd: selectedCwd,
         title,
+        desktopProject,
       });
       return {
         ...result,
@@ -575,15 +588,7 @@ export class HarnessDelegationCoordinator {
           status: "creating",
           ...(input.requestId ? { requestId: input.requestId } : {}),
           taskDigest: digest,
-          ...(origin
-            ? {
-                desktopProject: {
-                  sourceHostId: origin.hostId,
-                  ...(origin.threadId ? { sourceThreadId: origin.threadId } : {}),
-                  ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-                },
-              }
-            : {}),
+          desktopProject,
         });
         const opened = await adapter.open({
           kind: "create",
@@ -981,6 +986,7 @@ export class HarnessDelegationCoordinator {
         harnessId: record.harnessId as RoutedHarnessId,
         cwd: this.#externalRuntime.get(parentThreadId)?.cwd ?? record.cwd,
         title: record.title,
+        ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
       };
     const metadata = await this.#officialThreadMetadata(parentThreadId).catch(() => ({}));
     return { harnessId: "codex", ...metadata };

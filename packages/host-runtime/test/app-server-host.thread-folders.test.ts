@@ -1,4 +1,6 @@
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import type { DelegationControlRegistration } from "../src/delegation-types.js";
 import { FakeHarnessSession } from "@codexhost/harness-adapter/testing";
 import { hostThreadIdSchema } from "@codexhost/shared-contracts";
@@ -15,6 +17,54 @@ import {
 } from "./app-server-host-fixture.js";
 
 describe("working folders through the app-server Host path", () => {
+  it("loads installed Harness capabilities before answering a first folder request", async () => {
+    const fixture = createFixture();
+    await closeFixture(fixture);
+    const pluginDirectory = path.join(fixture.mappingStoreDirectory, "plugins");
+    const directory = path.join(pluginDirectory, "claude-code");
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(pluginDirectory, "enabled.json"),
+      JSON.stringify({ version: 1, enabled: ["claude-code"] }),
+    );
+    await writeFile(
+      path.join(directory, "manifest.json"),
+      JSON.stringify({
+        manifestVersion: 1,
+        id: "claude-code",
+        name: "Claude Code",
+        version: "1.0.0",
+        adapterApiVersion: 1,
+        entry: "index.mjs",
+      }),
+    );
+    await writeFile(
+      path.join(directory, "index.mjs"),
+      `
+      import { FakeHarnessAdapter } from ${JSON.stringify(pathToFileURL(path.resolve("packages/harness-adapter/dist/testing.js")).href)};
+      export async function createHarnessAdapter() {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return Object.assign(new FakeHarnessAdapter("claude-code"), { additionalDirectories: true });
+      }
+    `,
+    );
+    const loaded = createFixture({
+      pluginDirectory,
+      mappingStoreDirectory: fixture.mappingStoreDirectory,
+    });
+    try {
+      writeRequest(loaded.desktopInput, {
+        id: 99,
+        method: "codexhost/thread-folders/get",
+        params: { harnessId: "claude-code" },
+      });
+      expect(await loaded.collector.waitFor((m) => requestId(m, 99))).toMatchObject({
+        result: { additionalDirectories: true },
+      });
+    } finally {
+      await closeFixture(loaded);
+    }
+  });
   it("forwards native starts and turn environments while leaving projectId untouched", async () => {
     const fixture = createFixture();
     await fixture.ready;

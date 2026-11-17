@@ -6,7 +6,8 @@ export const DELEGATION_PROJECTS_CHANGED_METHOD =
 export const delegationProjectSchema = z
   .object({
     threadId: z.string().min(1),
-    sourceHostId: z.string().min(1),
+    /** Omitted when the parent lives on the Host serving this assignment. */
+    sourceHostId: z.string().min(1).optional(),
     sourceThreadId: z.string().min(1).optional(),
     /** Omitted inherits on the Desktop; null explicitly chooses no project. */
     projectId: z.string().min(1).nullable().optional(),

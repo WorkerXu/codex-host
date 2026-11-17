@@ -1127,3 +1127,42 @@ it.each([null, "desktop-project"])(
     }
   },
 );
+
+it.each([undefined, "override", null])(
+  "inherits an external parent's stored project when Desktop is unavailable (%s)",
+  async (projectId) => {
+    const value = await fixture();
+    try {
+      const parent = await value.repository.createProvisional({
+        hostThreadId: hostThreadIdSchema.parse("external-parent"),
+        createRequestId: "external-parent",
+        harnessId: harnessIdSchema.parse("pi"),
+        cwd: "/parent",
+        title: "Parent",
+        transportModelId: "codexhost/pi-native",
+        ephemeral: false,
+        historyMode: "paginated",
+      });
+      await value.repository.updateMetadata(parent.hostThreadId, { projectId: "stored-project" });
+      const child = await value.coordinator.start({
+        harnessId: "pi",
+        task: "check",
+        parentThreadId: parent.hostThreadId,
+        cwd: "/different",
+        ...(projectId !== undefined ? { projectId } : {}),
+      });
+      expect((await value.repository.find(child.threadId))?.projectId).toBe(
+        projectId === null ? undefined : (projectId ?? "stored-project"),
+      );
+      expect(
+        (await value.repository.getDelegationByChild(hostThreadIdSchema.parse(child.threadId)))
+          ?.desktopProject,
+      ).toEqual({
+        sourceThreadId: parent.hostThreadId,
+        ...(projectId !== undefined ? { projectId } : {}),
+      });
+    } finally {
+      await value.close();
+    }
+  },
+);

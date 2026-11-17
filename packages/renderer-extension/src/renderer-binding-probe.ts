@@ -1,3 +1,4 @@
+import { createCodeRepositoriesClient } from "./code-repositories-client.js";
 import { createRendererModelServiceClient } from "./model-service-client.js";
 import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-project.js";
 import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
@@ -957,6 +958,9 @@ export function installRendererBindingProbe(
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     jarvis: { createClient: () => jarvisClient },
+    codeRepositories: createCodeRepositoriesClient(
+      () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+    ),
     modelService: createRendererModelServiceClient(
       () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
     ),

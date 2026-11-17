@@ -2,6 +2,7 @@ import { createDefaultRendererSettingsPages } from "../../../packages/renderer-e
 import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import type { RendererModelServiceClient } from "../../../packages/renderer-extension/src/model-service-client.js";
 import { mountThreadFoldersPreview } from "./thread-folders.js";
+import { createRepositoryPreviewClient } from "./code-repositories.js";
 import previewCss from "./preview.css";
 import { applyDesktopTheme } from "./desktop-theme.js";
 import {
@@ -771,6 +772,48 @@ async function mountModelSettings(
 }
 
 const scenarios: Record<string, () => Promise<void>> = {
+  async "code-repositories-settings"() {
+    const definitions = createDefaultRendererSettingsPages(
+      messages,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        async read() {
+          return {
+            provider: "openai",
+            openai: { configured: true, lastFour: "demo" },
+            gemini: { configured: false, lastFour: null },
+          };
+        },
+        async update() {
+          return this.read();
+        },
+        async test() {
+          return { ok: true, latencyMs: 120, errorCode: null };
+        },
+      },
+      createRepositoryPreviewClient(parameters.get("repository") ?? "ready"),
+    );
+    const shell = installRendererSettingsShell(definitions, messages);
+    shell.openSettings(undefined, "appearance");
+    await waitFor(() =>
+      shell.root.shadowRoot?.querySelector<HTMLButtonElement>(
+        "#repository-token-edit:not(:disabled)",
+      ),
+    );
+    shell.root.shadowRoot?.querySelector("#code-repositories")?.scrollIntoView({ block: "center" });
+  },
   async "dingtalk-heavy"() {
     interface HeavyMetrics {
       openToListMs: number;

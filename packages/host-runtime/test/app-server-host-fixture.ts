@@ -295,6 +295,7 @@ export function createFixture(
     delegationPeers?: AppServerHostOptions["delegationPeers"];
     jarvis?: AppServerHostOptions["jarvis"];
     modelService?: AppServerHostOptions["modelService"];
+    codeRepositories?: AppServerHostOptions["codeRepositories"];
     dingtalk?: AppServerHostOptions["dingtalk"];
     codexAgents?: AppServerHostOptions["codexAgents"];
     dingTalkDispatch?: AppServerHostOptions["dingTalkDispatch"];
@@ -365,6 +366,7 @@ export function createFixture(
       : {}),
     ...(options.jarvis ? { jarvis: options.jarvis } : {}),
     ...(options.modelService ? { modelService: options.modelService } : {}),
+    ...(options.codeRepositories ? { codeRepositories: options.codeRepositories } : {}),
     ...(options.dingtalk ? { dingtalk: options.dingtalk } : {}),
     ...(options.codexAgents ? { codexAgents: options.codexAgents } : {}),
     ...(options.dingTalkDispatch ? { dingTalkDispatch: options.dingTalkDispatch } : {}),

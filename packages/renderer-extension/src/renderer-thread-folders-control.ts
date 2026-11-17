@@ -1,4 +1,6 @@
 import css from "./renderer-thread-folders.css";
+import { folderIcon, mountFolderBrowser } from "./renderer-folder-browser.js";
+export { folderIcon } from "./renderer-folder-browser.js";
 
 export interface ThreadFoldersView {
   folders: string[];
@@ -16,10 +18,8 @@ export interface ThreadFoldersControlOptions {
   list(path: string): Promise<string[]>;
   validate(path: string): Promise<void>;
   pickLocal?(): Promise<string[] | null>;
+  fromRepository?(add: (path: string) => Promise<void>): Promise<void>;
 }
-
-export const folderIcon =
-  '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M2.5 6V4.5a1 1 0 0 1 1-1h4L9 5h7.5a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V6Z"/></svg>';
 
 function folderName(path: string): string {
   return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
@@ -84,7 +84,6 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   let selected: string[] = [];
   let disposed = false;
   let busy = false;
-  let browseGeneration = 0;
   let browsing = false;
   let errorText = "";
   let revision = 0;
@@ -120,8 +119,9 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   };
   const close = () => {
     browsing = false;
-    ++browseGeneration;
-    if (!view) ++revision;
+    ++revision;
+    busy = false;
+    popover.removeAttribute("aria-busy");
     popover.hidePopover();
     trigger.disabled = false;
     trigger.setAttribute("aria-expanded", "false");
@@ -152,16 +152,16 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         popover.removeAttribute("aria-busy");
         render();
         if (focusPath) {
-          [...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]")]
-            .find((item) => item.getAttribute("aria-label") === focusPath)
-            ?.focus();
+          const target = [
+            ...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]"),
+          ].find((item) => item.getAttribute("aria-label") === focusPath);
+          (target ?? popover.querySelector<HTMLButtonElement>(".codexhost-folders-add"))?.focus();
         }
       }
     }
   };
   const returnToMain = (path?: string) => {
     browsing = false;
-    ++browseGeneration;
     render();
     const target = path
       ? [...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]")].find(
@@ -259,134 +259,70 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         (path) => !selected.includes(path) && !view?.projectFolders.includes(path),
       ),
     );
-    const addPath = async (path: string) => {
-      const attempt = revision;
-      await options.validate(path);
-      if (disposed || attempt !== revision) return false;
-      return selected.includes(path) || (await applySelection([...selected, path], path));
-    };
     const openBrowser = async () => {
-      if (!view) return;
+      if (!view || busy) return;
+      const attempt = revision;
+      const activeMenu = () =>
+        !disposed && attempt === revision && popover.matches(":popover-open");
       if (!view.remote && options.pickLocal) {
+        let picked: string[] | null = null;
+        busy = true;
+        trigger.disabled = true;
+        render();
         try {
-          const picked = await options.pickLocal();
-          if (picked) {
-            for (const path of picked) await addPath(path);
-            return;
+          picked = await options.pickLocal();
+          if (!activeMenu()) return;
+          if (picked !== null) {
+            try {
+              for (const path of picked) {
+                await options.validate(path);
+                if (!activeMenu()) return;
+              }
+            } catch {
+              if (activeMenu()) errorText = "无法添加文件夹，请确认路径可用后重试";
+              picked = [];
+            }
           }
         } catch {
-          errorText = "无法添加文件夹，请确认路径可用后重试";
-          render();
+          // Unavailable native dialogs use the same browser as remote hosts.
+        } finally {
+          if (!disposed && attempt === revision) {
+            busy = false;
+            trigger.disabled = false;
+            render();
+          }
+        }
+        if (!activeMenu()) return;
+        if (picked !== null) {
+          const folders = [...new Set([...selected, ...picked])];
+          if (folders.length !== selected.length) {
+            const saved = await applySelection(folders, picked[0]);
+            if (!saved && activeMenu())
+              popover.querySelector<HTMLButtonElement>(".codexhost-folders-add")?.focus();
+          } else popover.querySelector<HTMLButtonElement>(".codexhost-folders-add")?.focus();
           return;
         }
       }
       browsing = true;
       popover.dataset.codexhostFoldersBrowser = "";
-      const form = d.createElement("form");
-      form.className = "codexhost-folders-path";
-      const back = button("", () => returnToMain(), "codexhost-folders-back");
-      back.setAttribute("aria-label", "返回工作文件夹");
-      back.innerHTML =
-        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m11.5 5-5 5 5 5"/></svg>';
-      const input = d.createElement("input");
-      input.setAttribute("aria-label", view.remote ? "远程文件夹路径" : "文件夹路径");
-      input.placeholder = "输入绝对路径…";
-      input.value = selected[0] ?? view.projectFolders[0] ?? "/";
-      const add = d.createElement("button");
-      add.type = "submit";
-      add.className = "codexhost-folders-primary";
-      add.textContent = "添加";
-      const suggestions = d.createElement("div");
-      suggestions.className = "codexhost-folders-children";
-      suggestions.setAttribute("aria-label", "子文件夹");
-      const status = d.createElement("div");
-      status.className = "codexhost-folders-hint";
-      status.setAttribute("role", "status");
-      const normalizedPath = () => {
-        const raw = input.value.trim();
-        return /^[A-Za-z]:[\\/]+$/u.test(raw) ? raw : raw.replace(/[\\/]+$/u, "") || "/";
-      };
-      const attempt = revision;
-      const active = () => browsing && form.isConnected && !disposed && attempt === revision;
-      const list = async () => {
-        const generation = ++browseGeneration;
-        suggestions.replaceChildren();
-        status.className = "codexhost-folders-hint";
-        status.setAttribute("role", "status");
-        add.disabled = !input.value.trim();
-        status.textContent = add.disabled ? "输入文件夹的绝对路径" : "正在读取目录…";
-        if (add.disabled) return;
-        try {
-          const children = await options.list(normalizedPath());
-          if (generation !== browseGeneration || !active()) return;
-          status.textContent = children.length ? "" : "此文件夹没有子文件夹";
-          for (const path of children) {
-            const row = button(
-              "",
-              () => {
-                input.value = path;
-                void list();
-                input.focus();
-              },
-              "codexhost-folders-directory",
-            );
-            row.setAttribute("aria-label", path);
-            row.title = path;
-            row.innerHTML = folderIcon;
-            const name = d.createElement("span");
-            name.textContent = folderName(path);
-            row.append(name);
-            suggestions.append(row);
-          }
-        } catch {
-          if (generation === browseGeneration && active()) {
-            status.textContent = "无法读取此目录，请检查路径与连接";
-          }
-        }
-      };
-      input.addEventListener("input", () => {
-        void list();
-      });
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        if (add.disabled || busy) return;
-        ++browseGeneration;
-        const path = normalizedPath();
-        input.disabled = add.disabled = true;
-        suggestions.querySelectorAll<HTMLButtonElement>("button").forEach((row) => {
-          row.disabled = true;
-        });
-        status.className = "codexhost-folders-hint";
-        status.setAttribute("role", "status");
-        status.textContent = "正在添加文件夹…";
-        void (async () => {
+      mountFolderBrowser(popover, {
+        path: selected[0] ?? view.projectFolders[0] ?? "/",
+        remote: view.remote,
+        active: () => browsing && !disposed && attempt === revision,
+        back: () => returnToMain(),
+        list: options.list,
+        async choose(path) {
           try {
             await options.validate(path);
-            if (!active()) return;
-            if (selected.includes(path) || (await applySelection([...selected, path], path))) {
-              if (active()) returnToMain(path);
-              return;
-            }
-            status.textContent = errorText;
           } catch {
-            if (active()) status.textContent = "无法添加文件夹，请确认路径可用后重试";
-          } finally {
-            if (active()) {
-              input.disabled = add.disabled = false;
-              suggestions.querySelectorAll<HTMLButtonElement>("button").forEach((row) => {
-                row.disabled = false;
-              });
-              status.className = "codexhost-folders-error";
-              status.setAttribute("role", "alert");
-              input.focus();
-            }
+            throw new Error("无法添加文件夹，请确认路径可用后重试");
           }
-        })();
+          if (disposed || attempt !== revision || !browsing) return;
+          if (selected.includes(path) || (await applySelection([...selected, path], path)))
+            returnToMain(path);
+          else throw new Error(errorText);
+        },
       });
-      form.append(back, input, add);
-      popover.replaceChildren(form, status, suggestions);
-      input.focus();
-      await list();
     };
     const addFolder = button(
       "添加文件夹…",
@@ -397,6 +333,27 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     );
     addFolder.innerHTML = `${folderIcon}<span>添加文件夹…</span>`;
     popover.append(addFolder);
+    if (options.fromRepository) {
+      const addRepository = button(
+        "从仓库添加…",
+        () => {
+          const folders = [...selected];
+          const additionalDirectories = view?.additionalDirectories;
+          close();
+          void options.fromRepository?.(async (path) => {
+            if (disposed) throw new Error("对话已关闭");
+            const next = [...new Set([...folders, path])];
+            await options.save(next);
+            if (disposed) return;
+            selected = next;
+            updateChip(next, additionalDirectories);
+          });
+        },
+        "codexhost-folders-add",
+      );
+      addRepository.innerHTML = `${folderIcon}<span>从仓库添加…</span>`;
+      popover.append(addRepository);
+    }
     if (errorText) {
       const error = d.createElement("div");
       error.className = "codexhost-folders-error";
@@ -472,10 +429,9 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   popover.addEventListener("toggle", () => {
     if (!popover.matches(":popover-open")) {
       browsing = false;
-      ++browseGeneration;
-    }
-    if (!popover.matches(":popover-open") && !view) {
       ++revision;
+      busy = false;
+      popover.removeAttribute("aria-busy");
       trigger.disabled = false;
     }
     trigger.setAttribute("aria-expanded", String(popover.matches(":popover-open")));
@@ -486,7 +442,6 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     updateChip,
     reset() {
       browsing = false;
-      ++browseGeneration;
       ++revision;
       busy = false;
       trigger.disabled = false;
@@ -496,7 +451,6 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     },
     dispose() {
       disposed = true;
-      ++browseGeneration;
       ++revision;
       resize.disconnect();
       d.defaultView?.removeEventListener("resize", position);

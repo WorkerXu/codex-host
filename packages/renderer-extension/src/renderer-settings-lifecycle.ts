@@ -1,3 +1,4 @@
+import type { CodeRepositoriesClient } from "./code-repositories-client.js";
 import type { RendererModelServiceClient } from "./model-service-client.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
@@ -45,6 +46,7 @@ export interface RendererSettingsLifecycleOptions {
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider;
   jarvis?: RendererJarvisSettingsOptions;
   modelService?: RendererModelServiceClient;
+  codeRepositories?: CodeRepositoriesClient;
   dingtalk?: RendererDingTalkPageOptions;
   codexAgents?: RendererCodexAgentsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
@@ -110,6 +112,7 @@ export function installRendererSettingsLifecycle(
       options.dingtalk,
       options.codexAgents,
       options.modelService,
+      options.codeRepositories,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

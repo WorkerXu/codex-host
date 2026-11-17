@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   desktopProjectsCatalogSchema,
+  threadProjectAssignmentSchema,
   type DesktopLocalProject,
   type DesktopProjectsCatalog,
   type DesktopRemoteConnection,
@@ -67,12 +68,8 @@ function remoteProject(value: unknown): DesktopRemoteProject | null {
 }
 
 function assignment(value: unknown): ThreadProjectAssignment | null {
-  const entry = record(value);
-  if (!entry) return null;
-  const kind =
-    entry.projectKind === "local" || entry.projectKind === "remote" ? entry.projectKind : null;
-  const projectId = string(entry.projectId);
-  return kind && projectId ? { projectKind: kind, projectId } : null;
+  const parsed = threadProjectAssignmentSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function connection(value: unknown): DesktopRemoteConnection | null {

@@ -1,3 +1,4 @@
+import type { CodeRepositoriesClient } from "../code-repositories-client.js";
 import type { RendererModelServiceClient } from "../model-service-client.js";
 import {
   createUsageStatisticsPage,
@@ -684,6 +685,7 @@ export function createDefaultRendererSettingsPages(
   dingtalk?: RendererDingTalkPageOptions,
   codexAgents?: RendererCodexAgentsSettingsOptions,
   modelService: RendererModelServiceClient | null = null,
+  codeRepositories: CodeRepositoriesClient | null = null,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -705,7 +707,7 @@ export function createDefaultRendererSettingsPages(
       },
     ),
     createCodexAgentsSettingsPage(messages, codexAgents ?? { createClient: () => null }),
-    createAppearanceSettingsPage(messages, getLoadedSessionsClient, modelService),
+    createAppearanceSettingsPage(messages, getLoadedSessionsClient, modelService, codeRepositories),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
   ]);

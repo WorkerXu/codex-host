@@ -13,6 +13,9 @@ import {
   type ThreadFoldersView,
 } from "./renderer-thread-folders-control.js";
 import { readComposerProject } from "./renderer-project-mirror-model.js";
+import { pickDesktopFolders } from "./renderer-folder-picker.js";
+import { createCodeRepositoriesClient } from "./code-repositories-client.js";
+import { openRepositoryDialog } from "./renderer-repository-dialog.js";
 
 interface FolderContext {
   hostId: string | null;
@@ -148,6 +151,33 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
   const control = createThreadFoldersControl({
     document: d,
     load,
+    async fromRepository(add) {
+      const current = identity();
+      await openRepositoryDialog({
+        document: d,
+        hostId: current.hostId,
+        machine: current.hostId === "local" ? "本机" : current.hostId,
+        client: createCodeRepositoriesClient(
+          () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+        ),
+        pickLocal: () =>
+          pickDesktopFolders(window, undefined, { allowMultiple: false, title: "选择克隆位置" }),
+        async add(path) {
+          if (disposed || identity().key !== current.key) throw new Error("对话已切换");
+          const metadata = await current.route.manager.sendRequest("fs/getMetadata", { path });
+          if (!record(metadata) || metadata.isDirectory !== true)
+            throw new Error("请选择存在的文件夹");
+          if (disposed || identity().key !== current.key) throw new Error("对话已切换");
+          await add(path);
+        },
+      });
+    },
+    async pickLocal() {
+      const current = identity();
+      if (current.hostId !== "local") return [];
+      const picked = await pickDesktopFolders(window);
+      return disposed || identity().key !== current.key ? [] : picked;
+    },
     async save(folders) {
       const current = identity();
       if (current.existing) {

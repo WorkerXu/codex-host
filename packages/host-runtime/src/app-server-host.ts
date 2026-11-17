@@ -1,4 +1,6 @@
 import type { ModelService } from "./model-service.js";
+import type { CodeRepositories } from "./code-repositories.js";
+import { RepositoryError } from "./code-repository-process.js";
 import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
 import {
   DELEGATION_PROJECTS_METHOD,
@@ -317,7 +319,10 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
 } from "./delegation-types.js";
-import { HarnessDelegationCoordinator } from "./harness-delegation-coordinator.js";
+import {
+  HarnessDelegationCoordinator,
+  type OfficialDelegationStartInput,
+} from "./harness-delegation-coordinator.js";
 import { loadHarnessPlugins } from "./harness-plugin-loader.js";
 import type { HarnessPluginRegistry } from "./harness-plugin-registry.js";
 import {
@@ -490,6 +495,7 @@ export interface AppServerHostOptions {
   jarvis?: JarvisService;
   /** Desktop-local shared model credentials and structured connection tests. */
   modelService?: ModelService;
+  codeRepositories?: CodeRepositories;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1524,6 +1530,7 @@ export class AppServerHost {
           const { threadId, harnessId: draftHarness } = threadFoldersGetParamsSchema.parse(
             request.params,
           );
+          await this.#waitForPlugins();
           const location = threadId ? await this.#locateExternalThread(threadId) : null;
           const harnessId =
             location?.kind === "external" ? location.record.harnessId : (draftHarness ?? "codex");
@@ -1603,6 +1610,30 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (request.method.startsWith("codexhost/code-repositories/")) {
+      this.#dispatchDesktopReply(request, async () => {
+        if (!this.#options.codeRepositories) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await this.#options.codeRepositories.request(
+            request.method,
+            request.params,
+          );
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(
+              request,
+              -32602,
+              error instanceof RepositoryError ? error.code : "invalid_params",
+            ),
+          );
+        }
+      });
       return;
     }
     if (request.method.startsWith("codexhost/model-service/")) {
@@ -3019,7 +3050,7 @@ export class AppServerHost {
   }
 
   async #startOfficialDelegation(
-    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
+    input: OfficialDelegationStartInput,
   ): Promise<DelegationStartResult> {
     let requestedModel: HarnessModelRef | undefined;
     try {
@@ -3161,18 +3192,9 @@ export class AppServerHost {
         status: pendingTerminal ?? "running",
         ...(input.requestId ? { requestId: input.requestId } : {}),
         taskDigest: digest,
-        ...(input.origin
-          ? {
-              desktopProject: {
-                sourceHostId: input.origin.hostId,
-                ...(input.origin.threadId ? { sourceThreadId: input.origin.threadId } : {}),
-                ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-              },
-            }
-          : {}),
+        desktopProject: input.desktopProject,
       });
-      if (input.origin)
-        await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
+      await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
       return {
         delegationId,
         threadId,

@@ -1,4 +1,7 @@
 import nativeComposerHtml from "../fixtures/native-composer.html";
+import { pickDesktopFolders } from "../../../packages/renderer-extension/src/renderer-folder-picker.js";
+import { openRepositoryDialog } from "../../../packages/renderer-extension/src/renderer-repository-dialog.js";
+import { createRepositoryPreviewClient } from "./code-repositories.js";
 import {
   createThreadFoldersControl,
   folderIcon,
@@ -12,6 +15,17 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
   const existing = scenario === "thread-folders-existing";
   const prefix = remote ? "/home/ubuntu" : "/Users/lin";
   const project = `${prefix}/Projects/codexhost`;
+  const pickerMode = new URL(location.href).searchParams.get("picker") ?? "unavailable";
+  const repositoryState = new URL(location.href).searchParams.get("repository");
+  const pickerModule =
+    location.protocol === "about:"
+      ? "about:rpc-folder-picker-preview.js"
+      : new URL("/assets/rpc-folder-picker-preview.js", location.href).href;
+  Reflect.set(window, "__codexhostLoadedModulesV1", {
+    complete: true,
+    documentUrl: location.href,
+    urls: [pickerModule],
+  });
   let folders = scenario === "thread-folders-empty" ? [] : [project];
   const recent =
     scenario === "thread-folders-empty"
@@ -73,6 +87,50 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
   nativeButton.after(model);
   const control = createThreadFoldersControl({
     document,
+    ...(repositoryState
+      ? {
+          async fromRepository(add: (path: string) => Promise<void>) {
+            await openRepositoryDialog({
+              document,
+              hostId: remote ? "preview-server" : "local",
+              machine: remote ? "开发机" : "本机",
+              client: createRepositoryPreviewClient(repositoryState),
+              async pickLocal() {
+                document.body.dataset.repositoryNativePicker = "directory";
+                return pickerMode === "unavailable"
+                  ? null
+                  : pickerMode === "cancel"
+                    ? []
+                    : ["/Users/lin/Downloads"];
+              },
+              add,
+            });
+          },
+        }
+      : {}),
+    pickLocal: () =>
+      pickDesktopFolders(window, async () => ({
+        appServices:
+          pickerMode === "unavailable"
+            ? {}
+            : {
+                fileAttachments: {
+                  async pickFiles(input: unknown) {
+                    document.body.dataset.folderPickerCall = JSON.stringify(input);
+                    if (pickerMode === "error") throw new Error("Native dialog unavailable");
+                    if (pickerMode === "delayed")
+                      await new Promise((resolve) => setTimeout(resolve, 500));
+                    document.body.dataset.folderPickerReturned = "true";
+                    if (pickerMode === "cancel") return [];
+                    return ["shared-ui", "docs", "shared-ui"].map((name) => ({
+                      fsPath: `${prefix}/Projects/${name}`,
+                      path: `${prefix}/Projects/${name}/`,
+                      label: name,
+                    }));
+                  },
+                },
+              },
+      })),
     async load() {
       if (scenario === "thread-folders-loading") await new Promise(() => {});
       if (scenario === "thread-folders-error") throw new Error("Connection lost");

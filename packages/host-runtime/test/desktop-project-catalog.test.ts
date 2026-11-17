@@ -45,7 +45,11 @@ function stateFile(): Record<string, unknown> {
       },
     ],
     "thread-project-assignments": {
-      "thread-1": { projectKind: "remote", projectId: "project-beta" },
+      "thread-1": {
+        projectKind: "remote",
+        projectId: "project-beta",
+        hostId: "remote-ssh-discovered:beta",
+      },
     },
     "codex-managed-remote-connections": [
       {
@@ -80,6 +84,7 @@ describe("Desktop project catalog reader", () => {
     expect(catalog.threadProjectAssignments["thread-1"]).toEqual({
       projectKind: "remote",
       projectId: "project-beta",
+      hostId: "remote-ssh-discovered:beta",
     });
     expect(catalog.codexManagedRemoteConnections[0]).toEqual({
       hostId: "remote-ssh-discovered:beta",
