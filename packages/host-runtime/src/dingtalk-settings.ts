@@ -91,7 +91,7 @@ export interface DingTalkHostResolutionResult extends DingTalkHostResolution {
 }
 
 /**
- * Auto prefers the `tencent` peer; on that machine the peer is absent from its
+ * Auto prefers the `mac` peer; on that machine the peer is absent from its
  * own peers.json, so the same default resolves to the local dws login.
  */
 export async function resolveDingTalkHost(

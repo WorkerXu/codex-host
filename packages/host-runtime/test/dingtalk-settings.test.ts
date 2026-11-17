@@ -22,31 +22,31 @@ afterEach(async () => {
 });
 
 describe("DingTalk host resolution", () => {
-  it("defaults to the tencent peer without exposing a login choice", async () => {
+  it("defaults to the mac peer without exposing a login choice", async () => {
     const environment = await environmentWithPeers({
-      tencent: { ssh: "tencent", hostIds: ["host-tencent"] },
+      mac: { ssh: "mac", hostIds: ["host-mac"] },
       other: { ssh: "other", hostIds: ["host-other"] },
     });
     const resolved = await resolveDingTalkHost(environment, null);
     expect(resolved).toMatchObject({
-      name: "tencent",
-      hostId: "host-tencent",
+      name: "mac",
+      hostId: "host-mac",
       local: false,
       configured: null,
     });
-    expect(resolved.peer?.name).toBe("tencent");
+    expect(resolved.peer?.name).toBe("mac");
   });
 
   it("still reads a manual defaultHost override from the config file", async () => {
     const environment = await environmentWithPeers({
-      tencent: { ssh: "tencent", hostIds: ["host-tencent"] },
+      mac: { ssh: "mac", hostIds: ["host-mac"] },
     });
     const resolved = await resolveDingTalkHost(environment, "local");
     expect(resolved.name).toBe("local");
     expect(resolved.local).toBe(true);
   });
 
-  it("falls back to the local login when tencent is not configured", async () => {
+  it("falls back to the local login when mac is not configured", async () => {
     const environment = await environmentWithPeers({});
     const resolved = await resolveDingTalkHost(environment, null);
     expect(resolved.name).toBe("local");

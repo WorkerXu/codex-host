@@ -245,7 +245,7 @@ export const DINGTALK_VIEWED_METHOD = "codexhost/dingtalk/viewed";
 /** Host → Renderer notification: cached unread state changed. */
 export const DINGTALK_CHANGED_METHOD = "codexhost/dingtalk/changed";
 
-export const DINGTALK_DEFAULT_PEER = "tencent";
+export const DINGTALK_DEFAULT_PEER = "mac";
 export const DINGTALK_MAX_MESSAGES = 100;
 export const DINGTALK_MAX_CONVERSATIONS = 50;
 export const DINGTALK_MAX_MEMBERS = 500;
@@ -277,7 +277,7 @@ export type DingTalkHostOption = z.infer<typeof dingtalkHostOptionSchema>;
 
 export const dingtalkSettingsSchema = z
   .object({
-    /** `null` means auto: the `tencent` peer when configured, otherwise local. */
+    /** `null` means auto: the `mac` peer when configured, otherwise local. */
     defaultHost: z.string().max(128).nullable(),
     effectiveHost: z.string().max(128),
     effectiveHostId: z.string().max(256).nullable(),
