@@ -22,6 +22,11 @@ export function parseRepositoryList(
   if (!Array.isArray(value)) throw new RepositoryError("invalid_response");
   return value.slice(0, 20).map((item) => {
     if (!record(item)) throw new RepositoryError("invalid_response");
+    if (
+      (typeof item.id !== "number" && typeof item.id !== "string") ||
+      !/^\d+$/u.test(String(item.id))
+    )
+      throw new RepositoryError("invalid_response");
     const url = new URL(text(provider === "github" ? item.clone_url : item.http_url_to_repo));
     if (
       url.origin !== (provider === "github" ? "https://github.com" : GITLAB_ORIGIN) ||

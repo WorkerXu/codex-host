@@ -70,6 +70,7 @@ describe("code repository catalog and credentials", () => {
       ]),
     ).toThrow();
     expect(() => parseRepositoryList("github", [{ ...github, full_name: "owner/.." }])).toThrow();
+    expect(() => parseRepositoryList("github", [{ ...github, id: undefined }])).toThrow();
     expect(parseRepositoryList("github", Array(30).fill(github))).toHaveLength(20);
   });
   it("stores a private token with 0600 permissions and returns only a suffix", async () => {
