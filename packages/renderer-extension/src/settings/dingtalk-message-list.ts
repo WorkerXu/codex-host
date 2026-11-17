@@ -1,6 +1,11 @@
 import type { DingTalkMessage, DingTalkResourceResult } from "@codexhost/shared-contracts";
 
-import { continuesDingTalkGroup, dayKey, type ViewMessage } from "./dingtalk-page-model.js";
+import {
+  continuesDingTalkGroup,
+  dayKey,
+  mergeDingTalkMessages,
+  type ViewMessage,
+} from "./dingtalk-page-model.js";
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import {
   createDateSeparator,
@@ -269,13 +274,22 @@ export function createDingTalkMessageList(
     return created;
   };
 
+  const newMessages = (messages: readonly ViewMessage[]): ViewMessage[] => {
+    const unique = mergeDingTalkMessages([], messages);
+    for (const message of unique) {
+      const entry = entries.get(message.messageId);
+      if (entry && JSON.stringify(entry.message) !== JSON.stringify(message)) api.update(message);
+    }
+    return unique.filter((message) => !entries.has(message.messageId));
+  };
+
   const api: DingTalkMessageList = {
     get count() {
       return order.length;
     },
     reset(messages, behavior) {
       api.clear();
-      const created = entryList(messages);
+      const created = entryList(mergeDingTalkMessages([], messages));
       const fragment = document.createDocumentFragment();
       for (const entry of created) {
         entries.set(entry.message.messageId, entry);
@@ -290,9 +304,10 @@ export function createDingTalkMessageList(
       }
     },
     append(messages) {
+      const fresh = newMessages(messages);
       const lastId = order.at(-1);
       const previous = lastId ? entries.get(lastId)?.message : undefined;
-      const created = entryList(messages, previous);
+      const created = entryList(fresh, previous);
       const fragment = document.createDocumentFragment();
       for (const entry of created) {
         entries.set(entry.message.messageId, entry);
@@ -302,11 +317,12 @@ export function createDingTalkMessageList(
       container.append(fragment);
     },
     prepend(messages) {
-      if (messages.length === 0) return;
+      const fresh = newMessages(messages);
+      if (fresh.length === 0) return;
       const firstId = order[0];
       const firstEntry = firstId ? entries.get(firstId) : undefined;
       const nextNode = firstEntry?.nodes[0] ?? null;
-      const created = entryList(messages);
+      const created = entryList(fresh);
       const fragment = document.createDocumentFragment();
       for (const entry of created) {
         entries.set(entry.message.messageId, entry);

@@ -8,6 +8,7 @@ import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext }
 import type { RendererSettingsLocale, RendererSettingsMessages } from "./localization.js";
 import {
   conversationMention,
+  mergeDingTalkMessages,
   type DingTalkPageState,
   type ViewMessage,
 } from "./dingtalk-page-model.js";
@@ -567,9 +568,7 @@ export function createDingTalkSettingsPage(
             row.conversationId === conversationId ? { ...row, ...viewed } : row,
           );
         }
-        state.messages = [...result.messages].sort(
-          (left, right) => left.createdAt - right.createdAt,
-        );
+        state.messages = mergeDingTalkMessages([], result.messages);
         state.hasMore = result.hasMore;
         state.nextCursor = result.nextCursor;
         state.messagesError = result.errorCode !== null && state.messages.length === 0;
@@ -613,16 +612,10 @@ export function createDingTalkSettingsPage(
           return;
         }
         const known = new Set(state.messages.map((message) => message.messageId));
-        const older = result.messages
+        const older = mergeDingTalkMessages([], result.messages)
           .filter((message) => !known.has(message.messageId))
           .sort((left, right) => left.createdAt - right.createdAt);
-        const merged = new Map<string, ViewMessage>();
-        for (const message of [...state.messages, ...result.messages]) {
-          merged.set(message.messageId, message);
-        }
-        state.messages = [...merged.values()].sort(
-          (left, right) => left.createdAt - right.createdAt,
-        );
+        state.messages = mergeDingTalkMessages(state.messages, result.messages);
         const overflow = Math.max(0, state.messages.length - MAX_MESSAGE_WINDOW);
         if (overflow > 0) {
           state.messages = state.messages.slice(0, -overflow);
@@ -639,7 +632,6 @@ export function createDingTalkSettingsPage(
       const refreshLatest = async (conversationId: string): Promise<void> => {
         if (!client) return;
         const generation = messageGeneration;
-        const known = new Set(state.messages.map((message) => message.messageId));
         const nearBottom = distanceFromBottom() <= 80;
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
@@ -652,26 +644,25 @@ export function createDingTalkSettingsPage(
         ) {
           return;
         }
-        const merged = new Map<string, ViewMessage>();
-        for (const message of [...state.messages, ...result.messages]) {
-          merged.set(message.messageId, message);
-        }
+        const known = new Set(state.messages.map((message) => message.messageId));
         if (result.conversation) {
           state.currentConversation = result.conversation;
           updateHeader();
         }
-        const fresh = result.messages
+        const fresh = mergeDingTalkMessages([], result.messages)
           .filter((message) => !known.has(message.messageId))
           .sort((left, right) => left.createdAt - right.createdAt);
-        state.messages = [...merged.values()].sort(
-          (left, right) => left.createdAt - right.createdAt,
-        );
+        state.messages = mergeDingTalkMessages(state.messages, result.messages);
         const overflow = Math.max(0, state.messages.length - MAX_MESSAGE_WINDOW);
         if (overflow > 0) {
           state.messages = state.messages.slice(overflow);
           messageListView.removeOldest(overflow);
         }
-        if (fresh.length > 0) messageListView.append(fresh);
+        messageListView.append(
+          result.messages.filter((message) =>
+            state.messages.some((current) => current.messageId === message.messageId),
+          ),
+        );
         if (nearBottom) {
           scrollToBottom();
         } else {

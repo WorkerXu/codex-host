@@ -245,6 +245,23 @@ function hasClass(node: FakeElement, className: string): boolean {
 }
 
 describe("DingTalk message window rendering", () => {
+  it("deduplicates snapshots, overlapping pages and repeated concurrent deliveries", () => {
+    const document = new FakeDocument();
+    const { container, list } = createList(document, [], []);
+    const m1 = message("m1", 1_000);
+    const m2 = message("m2", 2_000);
+    list.reset([m1, m1]);
+    list.append([m1, m2, m2]);
+    list.append([m2, m2]);
+    list.prepend([message("m0", 0), m1, message("m0", 0)]);
+    expect(renderedIds(container)).toEqual(["m0", "m1", "m2"]);
+    expect(list.count).toBe(3);
+    list.append([{ ...m2, text: "updated" }]);
+    expect(renderedIds(container)).toEqual(["m0", "m1", "m2"]);
+    expect(list.nodeFor("m2")?.textContent).toContain("updated");
+    list.dispose();
+  });
+
   it("appends new messages and prepends older pages without rebuilding rows", () => {
     const document = new FakeDocument();
     const created: string[] = [];

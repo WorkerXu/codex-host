@@ -881,6 +881,17 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-deduplicated"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      duplicateMessages: true,
+      changeRepeats: 5,
+      pushChangeAfterMs: 800,
+    });
+    await waitFor(() => query('[data-message-id^="preview-live-"]'));
+    await delay(350);
+  },
+
   async "dingtalk-hover"() {
     resetConversationMemory();
     const { query } = mountSettings("dingtalk");

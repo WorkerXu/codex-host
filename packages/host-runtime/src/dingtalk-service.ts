@@ -166,6 +166,7 @@ export class DingTalkService {
   #notifyTimer: ReturnType<typeof setTimeout> | null = null;
   #pendingNotify = new Set<string | null>();
   readonly #eventListeners = new Set<(record: DwsEventRecord) => void>();
+  readonly #seenEvents = new Set<string>();
   #disposed = false;
 
   constructor(options: DingTalkServiceOptions) {
@@ -950,6 +951,13 @@ export class DingTalkService {
 
   #onEvent(record: DwsEventRecord): void {
     if (this.#disposed) return;
+    const key = JSON.stringify([record.conversationId, record.messageId]);
+    if (this.#seenEvents.has(key)) return;
+    this.#seenEvents.add(key);
+    if (this.#seenEvents.size > 4_000) {
+      const oldest = this.#seenEvents.values().next().value;
+      if (oldest !== undefined) this.#seenEvents.delete(oldest);
+    }
     const selfName = this.#lastAuth?.userName?.trim();
     const atMe =
       record.atMe ||
@@ -1053,6 +1061,7 @@ export class DingTalkService {
     this.#notifiers.clear();
     this.#pendingNotify.clear();
     this.#eventListeners.clear();
+    this.#seenEvents.clear();
     this.#events.dispose();
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);
     if (this.#viewedWriteTimer) clearTimeout(this.#viewedWriteTimer);

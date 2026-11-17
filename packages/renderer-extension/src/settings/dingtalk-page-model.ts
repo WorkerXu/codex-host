@@ -153,6 +153,16 @@ export interface ViewMessage extends DingTalkMessage {
   atAll?: boolean;
 }
 
+/** Merge snapshots by stable message identity; repeated deliveries are idempotent. */
+export function mergeDingTalkMessages(
+  current: readonly ViewMessage[],
+  incoming: readonly ViewMessage[],
+): ViewMessage[] {
+  const byId = new Map<string, ViewMessage>();
+  for (const message of [...current, ...incoming]) byId.set(message.messageId, message);
+  return [...byId.values()].sort((left, right) => left.createdAt - right.createdAt);
+}
+
 export function formatDingTalkFileSize(bytes: number | null | undefined): string {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "";
   if (bytes < 1024) return `${Math.round(bytes)} B`;

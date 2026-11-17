@@ -35,6 +35,17 @@ function childWith(stdout: string, exitCode = 0) {
 }
 
 describe("dws CLI output", () => {
+  it("deduplicates message rows by messageId without collapsing equal text", () => {
+    const row = {
+      messageId: "m1",
+      conversationId: "cid",
+      sender: "甲",
+      text: "same",
+      createTime: 1000,
+    };
+    const page = parseMessagesPage({ messages: [row, row, { ...row, messageId: "m2" }] }, null);
+    expect(page.messages.map((message) => message.messageId)).toEqual(["m1", "m2"]);
+  });
   it("parses unread conversations and muted state", () => {
     const conversations = parseUnreadConversations({
       success: true,

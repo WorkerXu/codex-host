@@ -508,6 +508,36 @@ describe("DingTalk keyword search", () => {
 });
 
 describe("DingTalk change notifications", () => {
+  it("shares one stream between workbench and dispatch and applies a replay only once", async () => {
+    const env = await environment();
+    const row = conversation("a", 100);
+    const fake = state({ unread: [row] });
+    const cli = fakeCli(fake);
+    const open = vi.spyOn(cli, "openEvents");
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    const dispatch = vi.fn();
+    service.subscribeEvents(dispatch);
+    service.setListeningHold(true);
+    await Promise.all([
+      service.startListening(),
+      service.conversations(),
+      service.startListening(),
+    ]);
+    await vi.waitFor(() => expect(fake.onRecord).toBeDefined());
+    expect(open).toHaveBeenCalledTimes(1);
+    const event = {
+      messageId: "repeat",
+      conversationId: "a",
+      senderName: "甲",
+      text: "new",
+      createdAt: RECENT_BASE + 1000,
+    };
+    for (let i = 0; i < 5; i += 1) fake.onRecord?.(event);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    cli.unreadConversations = async () => ({ conversations: [], errorCode: "offline" });
+    expect((await service.conversations()).conversations[0]?.unreadCount).toBe(2);
+    service.dispose();
+  });
   it("notifies every Desktop session that shares the service", async () => {
     const env = await environment();
     const row = conversation("a", 100);

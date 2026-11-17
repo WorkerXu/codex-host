@@ -619,11 +619,12 @@ function messageFromRow(
 export function parseMessages(value: unknown, selfId: string | null): DingTalkMessage[] {
   if (!record(value)) return [];
   const rows = Array.isArray(value.messages) ? value.messages : [];
-  return rows
+  const messages = rows
     .filter((row): row is Record<string, unknown> => record(row))
     .map((row) => messageFromRow(row, selfId))
     .filter((message): message is DingTalkMessage => message !== null)
     .sort((left, right) => right.createdAt - left.createdAt);
+  return [...new Map(messages.map((message) => [message.messageId, message])).values()];
 }
 
 export interface MessagesPage {

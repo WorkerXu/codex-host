@@ -16,6 +16,7 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "dingtalk-heavy",
   "dingtalk-list",
+  "dingtalk-deduplicated",
   "dingtalk-hover",
   "dingtalk-conversation-hover",
   "dingtalk-image-unavailable",
@@ -311,6 +312,12 @@ for (const scenario of scenarios) {
       await page.hover(".agent-card[data-agent-name]");
     }
     const hoverSelector = hoverSelectors.get(scenario);
+    if (scenario === "dingtalk-deduplicated") {
+      await realClick(page, ".dingtalk-conversation", 0);
+      const list = await pointAt(page, ".dingtalk-message-list");
+      await page.mouse.move(list.x, list.y);
+      await page.mouse.wheel(0, 1200);
+    }
     if (scenario === "dingtalk-hover") {
       await realHover(page, ".dingtalk-message", -1);
       await page.waitForTimeout(150);
@@ -485,6 +492,14 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      if (document.body.dataset.scenario === "dingtalk-deduplicated") {
+        const ids = queryAll(".dingtalk-message").map((row) => row.dataset.messageId);
+        check("message-ids-unique", new Set(ids).size === ids.length);
+        check(
+          "replayed-message-once",
+          ids.filter((id) => id.startsWith("preview-live-")).length === 1,
+        );
+      }
       check(
         "native-desktop-theme",
         document.body.dataset.nativeTheme === document.body.dataset.theme,

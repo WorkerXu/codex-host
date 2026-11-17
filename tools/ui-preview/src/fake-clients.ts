@@ -52,6 +52,8 @@ export interface FakeDingTalkOptions {
   onViewed?(conversationId: string, active: boolean): void;
   /** Preview-only: notify subscribers after this delay, like a dws event. */
   pushChangeAfterMs?: number;
+  duplicateMessages?: boolean;
+  changeRepeats?: number;
 }
 
 const sleep = (milliseconds: number) =>
@@ -171,7 +173,7 @@ export function createFakeDingTalkClient(
       return {
         available: true,
         conversation: conversation ? { ...conversation } : null,
-        messages: [...page].reverse(),
+        messages: (options.duplicateMessages ? [...page, ...page, ...page] : [...page]).reverse(),
         hasMore,
         nextCursor: page[0]?.createdAt ?? null,
         cachedAt: Date.now(),
@@ -320,7 +322,8 @@ export function createFakeDingTalkClient(
             unsupported: false,
             mine: false,
           });
-          for (const callback of listeners) callback(row.conversationId);
+          for (let index = 0; index < (options.changeRepeats ?? 1); index += 1)
+            for (const callback of listeners) callback(row.conversationId);
         }, options.pushChangeAfterMs);
       }
       return () => listeners.delete(listener);
