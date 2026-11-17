@@ -10,7 +10,11 @@ function entry(key: string, variant = "a") {
     key,
     name: key,
     description:
-      key === "design-review" ? "检查界面的一致性、交互和可访问性" : "检索项目资料并整理结果",
+      key === "design-review"
+        ? "检查界面的一致性、交互和可访问性"
+        : key === "writing-guide"
+          ? "统一文档结构、措辞和写作风格"
+          : "检索项目资料并整理结果",
     version: variant === "a" ? "1.2" : "1.3",
     fingerprint: variant.repeat(64),
     modifiedAt: variant === "a" ? "2026-11-16T09:30:00Z" : "2026-11-17T02:10:00Z",
@@ -121,6 +125,7 @@ function fakeClient(): RendererSkillsClient {
     },
   ];
   let current: SkillSyncPlan | undefined;
+  document.body.dataset.skillsLinkApplies = "0";
   return {
     status: async () => structuredClone(machines),
     async linkPlan(hostId, adopt) {
@@ -131,6 +136,15 @@ function fakeClient(): RendererSkillsClient {
         actions: [
           {
             kind: "link",
+            agentId: "claude-code",
+            skill: "project-search",
+            path: "~/.claude/skills/project-search",
+            target: "~/.agents/skills/project-search",
+            fingerprint: null,
+            previousLink: null,
+          },
+          {
+            kind: "link",
             agentId: "cursor",
             skill: "project-search",
             path: "~/.cursor/skills/project-search",
@@ -139,7 +153,11 @@ function fakeClient(): RendererSkillsClient {
             previousLink: null,
           },
           {
-            kind: adopt?.length ? "adopt" : "conflict",
+            kind: adopt?.some(
+              (item) => item.agentId === "claude-code" && item.skill === "design-review",
+            )
+              ? "adopt"
+              : "conflict",
             agentId: "claude-code",
             skill: "design-review",
             path: "~/.claude/skills/design-review",
@@ -159,10 +177,19 @@ function fakeClient(): RendererSkillsClient {
         ],
       };
     },
-    linkApply: async () => ({ id: uuid, changed: 2 }),
+    linkApply: async () => {
+      document.body.dataset.skillsLinkApplies = String(
+        Number(document.body.dataset.skillsLinkApplies) + 1,
+      );
+      return { id: uuid, changed: 2 };
+    },
     undo: async () => ({ id: uuid, changed: 2 }),
     async exclusions(hostId, agents) {
-      machines.find((m) => m.hostId === hostId)!.inventory!.exclusions = agents;
+      const inventory = machines.find((m) => m.hostId === hostId)?.inventory;
+      if (inventory) {
+        inventory.exclusions = agents;
+        for (const agent of inventory.agents) agent.excluded = agents.includes(agent.id);
+      }
     },
     async syncPlan(input) {
       const versions = machines

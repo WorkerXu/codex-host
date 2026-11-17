@@ -15,7 +15,14 @@ const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "skills-matrix",
+  "skills-hover",
+  "skills-focus",
+  "skills-agents",
+  "skills-exclusions",
+  "skills-link-choice",
+  "skills-sync-selection",
   "skills-conflict",
+  "skills-conflict-files",
   "skills-link-preview",
   "dingtalk-heavy",
   "dingtalk-list",
@@ -138,6 +145,7 @@ if (!(await serverIsUp())) {
 }
 
 const hoverSelectors = new Map([
+  ["skills-hover", "[data-skills-refresh]"],
   ["agents-menu", ".agent-menu-item"],
   ["at-entry", "[data-codexhost-jarvis-entry-row]"],
   ["at-entry-native-visible", "[data-codexhost-dingtalk-entry]"],
@@ -286,6 +294,15 @@ for (const scenario of scenarios) {
       await page.hover(".agent-card[data-agent-name]");
     }
     const hoverSelector = hoverSelectors.get(scenario);
+    let skillsTooltipDismissed = false;
+    if (scenario === "skills-hover") {
+      await hoverPreviewElement(page, "[data-skills-refresh]");
+      await realClick(page, "[data-skills-refresh]");
+      await page.keyboard.press("Escape");
+      skillsTooltipDismissed = !(await page.locator('[role="tooltip"]').isVisible());
+      await page.mouse.move(0, 0);
+      await page.keyboard.press("Tab");
+    }
     if (scenario === "dingtalk-hover") {
       await realHover(page, ".dingtalk-message", 1);
       await page.waitForTimeout(150);
@@ -454,12 +471,129 @@ for (const scenario of scenarios) {
         );
       }
 
+      if (document.body.dataset.scenario?.startsWith("skills-"))
+        check("skills-page-visible", visible(query(".skills-hub")));
       if (query(".skills-hub")) {
         check("skills-matrix-rows", queryAll(".skills-matrix tbody tr").length === 3);
         check("skills-machine-sections", queryAll(".skills-machine").length === 3);
-        if (document.body.dataset.scenario === "skills-conflict") {
+        const hub = query(".skills-hub");
+        const native = getComputedStyle(hub);
+        const primary = query(
+          ".skills-head .skills-button:not(.settings-command-button--secondary)",
+        );
+        check(
+          "skills-native-primary",
+          getComputedStyle(primary).backgroundColor !== "rgba(0, 0, 0, 0)",
+          getComputedStyle(primary).backgroundColor,
+        );
+        check(
+          "skills-native-theme",
+          getComputedStyle(query(".skills-machine")).backgroundColor ===
+            (document.body.dataset.theme === "dark" ? "rgb(24, 24, 24)" : "rgb(255, 255, 255)"),
+          native.getPropertyValue("--app-color-background-surface"),
+        );
+        check(
+          "skills-semantic-status",
+          queryAll(".skills-status").length === 9 && queryAll(".skills-status svg").length === 6,
+        );
+        const warning = query(".skills-status.text-settings-warning");
+        const focusProbe = document.createElement("span");
+        focusProbe.style.color = "var(--settings-focus)";
+        hub.append(focusProbe);
+        check(
+          "skills-warning-color",
+          getComputedStyle(warning).color !== getComputedStyle(focusProbe).color,
+          getComputedStyle(warning).color,
+        );
+        focusProbe.remove();
+        const consistent = queryAll(".skills-matrix tbody tr").find((row) =>
+          row.textContent.includes("project-search"),
+        );
+        check("skills-consistent-no-action", consistent && !consistent.querySelector("button"));
+        check(
+          "skills-writing-description",
+          queryAll(".skills-description")[1]?.textContent !==
+            queryAll(".skills-description")[2]?.textContent,
+        );
+        const rows = queryAll(".skills-agent-row");
+        const columnPositions = rows.map((row) =>
+          [...row.children].map((cell) => Math.round(cell.getBoundingClientRect().x)),
+        );
+        check(
+          "skills-agent-alignment",
+          columnPositions.every(
+            (positions) => JSON.stringify(positions) === JSON.stringify(columnPositions[0]),
+          ),
+          JSON.stringify(columnPositions),
+        );
+        const excluded = query('[data-agent="github-copilot"]');
+        check(
+          "skills-excluded-only",
+          excluded?.textContent.includes("已排除") &&
+            !excluded.textContent.includes("需链接") &&
+            !excluded.textContent.includes("已链接"),
+        );
+        check(
+          "skills-linked-denominator",
+          query('[data-agent="claude-code"]')?.textContent.includes("已链接 1/3"),
+        );
+        check(
+          "skills-one-exclusion-footer",
+          queryAll(".skills-exclusions").length === 1 &&
+            query(".skills-exclusions")?.textContent.includes("GitHub Copilot、Qoder"),
+        );
+        check(
+          "skills-no-developer-data",
+          !/a{12}|b{12}|c{12}|claude-code|github-copilot/.test(hub.textContent),
+        );
+        check(
+          "skills-one-machine-primary",
+          queryAll(".skills-machine-head").every(
+            (head) =>
+              head.querySelectorAll(".skills-button:not(.settings-command-button--secondary)")
+                .length === 1,
+          ),
+        );
+        if (document.body.dataset.scenario === "skills-focus")
+          check("skills-keyboard-focus", primary.matches(":focus-visible"));
+        const dialog = query("dialog[open]");
+        if (dialog) {
+          const rect = dialog.getBoundingClientRect();
+          check(
+            "skills-dialog-fits-viewport",
+            rect.x >= 0 &&
+              rect.y >= 0 &&
+              rect.right <= window.innerWidth &&
+              rect.bottom <= window.innerHeight,
+          );
+        }
+
+        if (["skills-conflict", "skills-conflict-files"].includes(document.body.dataset.scenario)) {
           check("skills-conflict-dialog", visible(query("dialog[open]")));
           check("skills-conflict-versions", queryAll(".skills-version").length === 2);
+          const cards = queryAll(".skills-version");
+          check(
+            "skills-conflict-selection-border",
+            getComputedStyle(cards[0]).borderColor !== getComputedStyle(cards[1]).borderColor,
+          );
+          check(
+            "skills-conflict-radio-outline",
+            getComputedStyle(query(".skills-version input:checked")).outlineStyle === "none",
+          );
+          check(
+            "skills-diff-tints",
+            getComputedStyle(query(".skills-diff-add")).backgroundColor !== "rgba(0, 0, 0, 0)" &&
+              getComputedStyle(query(".skills-diff-remove")).backgroundColor !== "rgba(0, 0, 0, 0)",
+          );
+          check(
+            "skills-diff-file-separation",
+            !query(".skills-diff")?.textContent.includes("SKILL.md") &&
+              query(".skills-file-list")?.textContent.includes("references/checklist.md"),
+          );
+          check(
+            "skills-conflict-continue",
+            query(".skills-actions button:last-child")?.textContent === "继续",
+          );
           check(
             "skills-conflict-keyboard-selection",
             queryAll(".skills-version input:checked").length === 1,
@@ -469,8 +603,22 @@ for (const scenario of scenarios) {
             query(".skills-diff")?.textContent.includes("+ version: 1.3"),
           );
         }
-        if (document.body.dataset.scenario === "skills-link-preview") {
-          check("skills-link-actions", queryAll(".skills-link-row").length === 3);
+        if (
+          ["skills-link-preview", "skills-link-choice"].includes(document.body.dataset.scenario)
+        ) {
+          check("skills-link-actions", queryAll(".skills-link-row").length === 4);
+          check("skills-link-groups", queryAll(".skills-link-group").length === 2);
+          check(
+            "skills-link-choice-default",
+            query("[data-skill-adoption]")?.checked ===
+              (document.body.dataset.scenario === "skills-link-choice"),
+          );
+          check(
+            "skills-link-footer",
+            query(".skills-actions button:first-child")?.textContent === "取消" &&
+              query(".skills-actions button:last-child")?.textContent === "应用",
+          );
+          check("skills-link-no-apply", document.body.dataset.skillsLinkApplies === "0");
           check(
             "skills-link-adopt",
             query(".skills-dialog-body")?.textContent.includes("收进中央库"),
@@ -1552,14 +1700,23 @@ for (const scenario of scenarios) {
         fullPage: false,
         animations: "disabled",
       });
+      const hoverChecks =
+        scenario === "skills-hover"
+          ? [
+              {
+                name: "skills-refresh-tooltip",
+                ok: skillsTooltipDismissed && (await page.locator('[role="tooltip"]').isVisible()),
+              },
+            ]
+          : [];
       report.captures.push({
         scenario: `${scenario}-hover`,
         theme,
         approximate: theme === "dark" && shadowContext.darkApproximate === true,
         screenshot: path.join(outputDirectory, hoverFile),
         pageErrors: errors,
-        checks: [],
-        ok: errors.length === 0,
+        checks: hoverChecks,
+        ok: errors.length === 0 && hoverChecks.every((check) => check.ok),
       });
       console.log(`[ui-preview] ${hoverFile}`);
     }

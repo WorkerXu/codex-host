@@ -75,6 +75,8 @@ codexhost skills link --host oracle-main --confirm <previous-confirmation>
 
 聚焦测试覆盖假 home 下的库存、指纹、发现、排除、真实目录冲突、失效链接、收进中央库、撤销、来源重建、预览失效、分块偏移，以及两台假机器通过认证路由同步与撤销。真实用户目录验证只运行 dry-run。
 
-`tools/ui-preview` 提供 `skills-matrix`、`skills-conflict`、`skills-link-preview`，使用真实鼠标/键盘桥和真实设置页 Shadow DOM。浅色使用 Desktop 导出的变量；仅有浅色导出时，深色报告标记为 approximate。
+`tools/ui-preview` 覆盖矩阵、机器卡片、排除编辑、冲突选择及文件列表、链接预览和收进中央库的选择，并提供悬停与键盘焦点场景。场景通过真实鼠标/键盘桥操作设置页 Shadow DOM。`CODEX_DESKTOP_CSS` 指向 Desktop 样式时，预览提取原始主题变量、深色选择器及媒体条件，避免浅色导出值遮蔽深色变量；截图报告记录主题来源。仅提供浅色变量导出时，深色报告仍标记为 approximate。
+
+链接预览按 Agent 显示名和目录分组。「收进中央库」默认不勾选；更改选择后重新生成预览，点击「应用」才执行该预览。机器卡片共用列宽，排除编辑入口统一放在页面底部，设置仍按机器保存。
 
 真实 Desktop 需验证：本机设置入口与 peer 名单；Mac/SSH peer 的实际技能发现；每个 Agent 对链接技能的原生加载；跨机断连与权限错误；同名冲突反复询问；确认后的同步、收进中央库及撤销。macOS/Windows 的符号链接权限和文件系统行为需在对应平台实测。
