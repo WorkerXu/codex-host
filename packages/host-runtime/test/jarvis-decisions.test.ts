@@ -211,3 +211,38 @@ describe("Jarvis bug Decisions responses", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe("DingTalk agent matching", () => {
+  it("scores all descriptions in one request and fails closed for malformed scores", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(Object.keys(body.questions)).toEqual(["agent_0", "agent_1", "agent_2"]);
+      expect(body.questions.agent_1.instructions).toContain("采购审批");
+      return new Response(
+        JSON.stringify({
+          answers: { agent_0: { score: 0.85 }, agent_1: { score: 0.95 }, agent_2: { score: "1" } },
+        }),
+      );
+    });
+    const decisions = createJarvisDecisions({
+      readApiKey: async () => "fake-key",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    expect(
+      await decisions.scoreCandidates("采购服务器", [
+        { fileName: "a.toml", name: "技术", description: "回答技术问题" },
+        { fileName: "b.toml", name: "采购", description: "采购审批" },
+        { fileName: "c.toml", name: "闲聊", description: "聊天" },
+      ]),
+    ).toEqual({ "a.toml": 0.85, "b.toml": 0.95, "c.toml": 0 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it("requires a local Gemini key", async () => {
+    const fetchImpl = vi.fn();
+    const decisions = createJarvisDecisions({ readApiKey: async () => null, fetchImpl });
+    await expect(
+      decisions.scoreCandidates("hi", [{ fileName: "a.toml", name: "a", description: "a" }]),
+    ).rejects.toMatchObject({ code: "missing_key" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

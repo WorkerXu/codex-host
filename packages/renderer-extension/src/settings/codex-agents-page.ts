@@ -7,6 +7,7 @@ import {
   type CodexAgentRecord,
   type CodexAgentSummary,
   type DingTalkAgentDispatch,
+  type DingTalkDispatchAgentStatus,
   type DingTalkDispatchSettings,
   type DingTalkEventType,
 } from "@codexhost/shared-contracts";
@@ -92,6 +93,8 @@ export function createCodexAgentsSettingsPage(
       page.append(status, list, emptyCopy, issues);
 
       let dispatchSettings: DingTalkDispatchSettings = defaultDingTalkDispatchSettings();
+      let dispatchStatus: Record<string, DingTalkDispatchAgentStatus> = {};
+      let dispatchStatusTimer: number | null = null;
       let editingFile: string | null = null;
       let createCard: HTMLButtonElement | null = null;
       let dispatchQueue: Promise<void> = Promise.resolve();
@@ -283,7 +286,12 @@ export function createCodexAgentsSettingsPage(
           tags.append(dispatched);
         }
 
-        card.append(top, name, description, tags);
+        const dispatchLine = document.createElement("p");
+        dispatchLine.className = "agent-dingtalk-status";
+        const last = dispatchStatus[agent.fileName];
+        dispatchLine.hidden = !last;
+        dispatchLine.textContent = last ? dispatchStatusText(last) : "";
+        card.append(top, name, description, tags, dispatchLine);
         const activate = (event: Event): void => {
           if (
             event.target instanceof Element &&
@@ -440,6 +448,47 @@ export function createCodexAgentsSettingsPage(
           if (changed) renderRoutes();
         } catch {
           if (!disposed) dingtalk.setStatus("failed");
+        }
+      };
+
+      function dispatchStatusText(value: DingTalkDispatchAgentStatus): string {
+        const result =
+          value.result === "replied"
+            ? text.dingtalk.dispatchReplied
+            : value.result === "failed"
+              ? text.dingtalk.dispatchFailed
+              : text.dingtalk.dispatchSkipped;
+        const clock = new Date(value.lastDispatchAt).toLocaleString([], {
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        return `${text.dingtalk.agentLastDispatch} ${clock} · ${result}${value.detail ? `（${value.detail}）` : ""}`;
+      }
+
+      const renderDingtalkStatus = (): void => {
+        for (const card of list.querySelectorAll<HTMLElement>(".agent-card[data-agent-file]")) {
+          const line = card.querySelector<HTMLElement>(".agent-dingtalk-status");
+          const value = dispatchStatus[card.dataset.agentFile ?? ""];
+          if (line) {
+            line.hidden = !value;
+            line.textContent = value ? dispatchStatusText(value) : "";
+          }
+        }
+        const value = editingFile ? dispatchStatus[editingFile] : undefined;
+        editor.dingtalkStatus.hidden = !value;
+        editor.dingtalkStatus.textContent = value ? dispatchStatusText(value) : "";
+      };
+
+      const loadDispatchStatus = async (): Promise<void> => {
+        try {
+          const next = await client.dispatchStatus();
+          if (disposed) return;
+          dispatchStatus = next;
+          renderDingtalkStatus();
+        } catch {
+          /* Status is supplementary; keep the last known values. */
         }
       };
 
@@ -665,6 +714,7 @@ export function createCodexAgentsSettingsPage(
           mention_me: text.dingtalk.agentEventMentionMe,
           mention_all: text.dingtalk.agentEventMentionAll,
           approval_pending: text.dingtalk.agentEventApprovalPending,
+          direct_message: text.dingtalk.agentEventDirectMessage,
         };
         for (const eventType of DINGTALK_EVENT_TYPES) {
           const label = document.createElement("label");
@@ -708,7 +758,10 @@ export function createCodexAgentsSettingsPage(
           dingtalkReplyGroup.append(option);
         }
         dingtalkReplyField.append(dingtalkReplyTitle, dingtalkReplyGroup);
-        dingtalkBody.append(dingtalkEventsField, dingtalkReplyField);
+        const dingtalkStatus = document.createElement("p");
+        dingtalkStatus.className = "agent-dingtalk-status";
+        dingtalkStatus.hidden = true;
+        dingtalkBody.append(dingtalkEventsField, dingtalkReplyField, dingtalkStatus);
         dingtalkGroup.append(dingtalkSwitchRow, dingtalkBody);
 
         const error = document.createElement("p");
@@ -758,6 +811,7 @@ export function createCodexAgentsSettingsPage(
           dingtalkBody,
           dingtalkEvents,
           dingtalkReply,
+          dingtalkStatus,
           error,
           save,
           cancel,
@@ -964,6 +1018,7 @@ export function createCodexAgentsSettingsPage(
             ? agentDingTalkDraft(dispatchSettings, record.fileName)
             : defaultDingTalkAgentDispatch(),
         );
+        renderDingtalkStatus();
         savingEditor = false;
         editor.save.textContent = text.save;
         updateInstructionCount();
@@ -1158,11 +1213,15 @@ export function createCodexAgentsSettingsPage(
       void loadAgents();
       void loadCatalog();
       void loadDispatch();
+      void loadDispatchStatus();
+      dispatchStatusTimer = view.setInterval(() => void loadDispatchStatus(), 10_000);
 
       return () => {
         disposed = true;
         listGeneration += 1;
         catalogGeneration += 1;
+        if (dispatchStatusTimer !== null) view.clearInterval(dispatchStatusTimer);
+        dispatchStatusTimer = null;
         closeRowMenu();
         document.removeEventListener("keydown", onKey, true);
         dingtalk.dispose();

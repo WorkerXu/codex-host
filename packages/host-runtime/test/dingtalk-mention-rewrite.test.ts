@@ -58,6 +58,8 @@ describe("DingTalk mention expansion", () => {
     expect(result.text).toContain("张三：第一条");
     expect(result.text).toContain("codexhost dingtalk dws");
     expect(result.text).toContain("--yes");
+    expect(result.text).toContain("审批状态只能由你本人在钉钉里处理");
+    expect(result.text).toContain("派发对话中所有 dws 写命令都被禁止");
     expect(result.text).not.toContain("dingtalk://");
   });
 

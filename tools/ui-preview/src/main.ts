@@ -1,4 +1,5 @@
 import previewCss from "./preview.css";
+import { applyDesktopTheme } from "./desktop-theme.js";
 import {
   createDingTalkEntryRow,
   installRendererDingTalkEntry,
@@ -144,7 +145,28 @@ function prepareSettings(
       dingtalkOptions.onViewed?.(conversationId, active);
     },
   });
-  const agentsClient = createFakeCodexAgentsClient({ withAgents: !agentsEmpty });
+  const dispatchPreview = scenarioName.startsWith("agents-dispatch-");
+  const agentsClient = createFakeCodexAgentsClient({
+    withAgents: !agentsEmpty,
+    ...(dispatchPreview
+      ? {
+          dispatchStatus: {
+            "reviewer.toml": {
+              lastDispatchAt: Date.now() - 60_000,
+              result: scenarioName.includes("missing-key")
+                ? ("skipped" as const)
+                : ("replied" as const),
+              ...(scenarioName.includes("missing-key") ? { detail: "未配置 Gemini，未派发" } : {}),
+            },
+            "writer.toml": {
+              lastDispatchAt: Date.now() - 120_000,
+              result: "failed" as const,
+              detail: "回复发送失败",
+            },
+          },
+        }
+      : {}),
+  });
   const dingtalkPage = createDingTalkSettingsPage(messages, {
     createClient: () => dingtalkClient,
     readLocale: () => locale,
@@ -1047,6 +1069,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-conversation-hover"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
+  async "dingtalk-image-unavailable"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
   async "dingtalk-lightbox"() {
     resetConversationMemory();
     const { query } = mountSettings("dingtalk");
@@ -1081,6 +1111,24 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
+  },
+
+  async "dingtalk-empty-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", true);
+    await waitFor(() => query(".dingtalk-empty-list"));
+  },
+
+  async "dingtalk-empty-menu-narrow"() {
+    await scenarios["dingtalk-empty-menu"]();
+  },
+
+  async "dingtalk-header-menu-open"() {
+    await scenarios["dingtalk-header-menu"]();
+  },
+
+  async "dingtalk-header-menu-narrow"() {
+    await scenarios["dingtalk-header-menu"]();
   },
 
   async "dingtalk-at-send"() {
@@ -1199,6 +1247,19 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(260);
   },
 
+  async "dingtalk-search-empty"() {
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
+  async "dingtalk-loading"() {
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      conversationsPending: true,
+    });
+    await waitFor(() => query(".dingtalk-skeleton-list"));
+  },
+
   async "dingtalk-search-more"() {
     const { query, queryAll } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
@@ -1224,6 +1285,16 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-error"() {
     const { query } = mountSettings("dingtalk", false, true);
     await waitFor(() => query(".dingtalk-empty-list"));
+  },
+
+  async "agents-dispatch-status"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-dingtalk-status:not([hidden])"));
+  },
+
+  async "agents-dispatch-missing-key"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-dingtalk-status:not([hidden])"));
   },
 
   async "agents-cards"() {
@@ -1579,6 +1650,7 @@ async function main() {
   const run = scenarios[scenarioName];
   if (!run) throw new Error(`Unknown preview scenario: ${scenarioName}`);
   try {
+    await applyDesktopTheme(theme);
     await run();
     await delay(250);
     document.body.dataset.scenario = scenarioName;

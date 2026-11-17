@@ -29,7 +29,7 @@
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/peer-delegation.md`](architecture/peer-delegation.md) | 通过 SSH 别名跨机器调用 Host Runtime 控制 API 的 peer 配置、控制文件、传输、`#` 选择器与跨机 watch；修改跨机委派时阅读。 |
 | [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、规则优先的结构化查询、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
-| [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
+| [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、智能体监听派发和卡片回复、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
 | [`architecture/codex-agents.md`](architecture/codex-agents.md) | 工作台「智能体」页的 `$CODEX_HOME/agents` 读写、TOML 未知键保留、模型目录、钉钉分发设置与审批边界；修改自定义 Agent 或钉钉设置时阅读。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |

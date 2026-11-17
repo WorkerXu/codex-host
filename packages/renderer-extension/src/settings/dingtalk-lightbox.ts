@@ -43,7 +43,7 @@ export function createDingTalkLightbox(options: DingTalkLightboxOptions): DingTa
   const createObjectUrl = options.createObjectUrl ?? ((blob: Blob) => URL.createObjectURL(blob));
   const revokeObjectUrl = options.revokeObjectUrl ?? ((url: string) => URL.revokeObjectURL(url));
   const decodeImage = options.decodeImage ?? decodeDingTalkDataUrl;
-  const overlay = createElementNode(document, "div", "dingtalk-lightbox");
+  const overlay = createElementNode(document, "dialog", "dingtalk-lightbox") as HTMLDialogElement;
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
@@ -160,6 +160,7 @@ export function createDingTalkLightbox(options: DingTalkLightboxOptions): DingTa
     if (!open) return;
     open = false;
     generation += 1;
+    overlay.close();
     overlay.hidden = true;
     image.hidden = true;
     image.removeAttribute("src");
@@ -211,6 +212,10 @@ export function createDingTalkLightbox(options: DingTalkLightboxOptions): DingTa
   next.addEventListener("click", () => navigate(1));
   image.addEventListener("click", (event) => event.stopPropagation());
   overlay.addEventListener("pointerdown", onPointerDown);
+  overlay.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    close();
+  });
   document.addEventListener("keydown", onKey, true);
 
   return {
@@ -221,6 +226,7 @@ export function createDingTalkLightbox(options: DingTalkLightboxOptions): DingTa
       open = true;
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       overlay.hidden = false;
+      if (!overlay.open) overlay.showModal();
       overlay.focus({ preventScroll: true });
       update();
     },

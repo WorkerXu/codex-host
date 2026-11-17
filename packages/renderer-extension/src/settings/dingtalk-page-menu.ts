@@ -5,6 +5,7 @@ import type { DingTalkStatus } from "@codexhost/shared-contracts";
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import { createElementNode, createIcon, createIconButton } from "./dingtalk-page-view.js";
 import EllipsisIcon from "lucide/dist/esm/icons/ellipsis.mjs";
+import { createDingTalkAnchoredMenu } from "./dingtalk-anchored-menu.js";
 
 export interface DingTalkPageMenuOptions {
   document: Document;
@@ -23,18 +24,15 @@ export interface DingTalkPageMenu {
   setStatus(status: DingTalkStatus | null): void;
 }
 
-/** The top-right ⋯ menu: connection state and refresh. */
+/** The sidebar ⋯ menu: connection state and refresh. */
 export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTalkPageMenu {
   const { document, text } = options;
   const moreButton = createIconButton(document, text.moreActions, EllipsisIcon, {
     className: "dingtalk-more-button",
   });
-  moreButton.setAttribute("aria-haspopup", "menu");
-  moreButton.setAttribute("aria-expanded", "false");
-
   const menu = createElementNode(document, "div", "dingtalk-page-menu");
   menu.setAttribute("role", "menu");
-  menu.hidden = true;
+  const placement = createDingTalkAnchoredMenu(menu, moreButton);
   const statusRow = createElementNode(document, "div", "dingtalk-menu-status");
   const dot = createElementNode(document, "span", "dingtalk-menu-dot");
   const statusText = createElementNode(document, "span", "dingtalk-menu-status-text");
@@ -65,14 +63,8 @@ export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTa
     contains(node) {
       return menu.contains(node) || moreButton.contains(node);
     },
-    toggle() {
-      menu.hidden = !menu.hidden;
-      moreButton.setAttribute("aria-expanded", String(!menu.hidden));
-    },
-    close() {
-      menu.hidden = true;
-      moreButton.setAttribute("aria-expanded", "false");
-    },
+    toggle: placement.toggle,
+    close: placement.close,
     setStatus(status) {
       const connected = status?.authenticated === true;
       dot.classList.toggle("dingtalk-menu-dot--error", !connected);
@@ -89,6 +81,7 @@ export function createDingTalkPageMenu(options: DingTalkPageMenuOptions): DingTa
       }
       statusText.title = statusText.textContent;
       retry.hidden = connected;
+      placement.reposition();
     },
   };
   moreButton.addEventListener("click", (event) => {

@@ -91,8 +91,13 @@ function fakeCli(state: FakeState): DingTalkCli {
       return { members: state.members, errorCode: null };
     },
     send: async () => ({ ok: true, errorCode: null }),
+    sendDirect: async () => ({ ok: true, errorCode: null }),
+    sendCard: async () => ({ ok: true, bizId: "card-test", errorCode: null }),
+    updateCard: async () => ({ ok: true, errorCode: null }),
+    pendingApprovals: async () => ({ approvals: [], errorCode: null }),
     openEvents: async (input) => {
-      state.onRecord = input.onRecord;
+      state.onRecord = (record) =>
+        input.onRecord({ kind: "group", atMe: false, atAll: false, ...record });
       return { stop: () => undefined };
     },
   };
@@ -561,4 +566,53 @@ describe("DingTalk change notifications", () => {
     expect(changes.filter((event) => event.conversationId !== null)).toHaveLength(0);
     service.dispose();
   });
+});
+
+it("normalizes a real @display-name mention for the background dispatcher and releases its subscriber", async () => {
+  const env = await environment();
+  const fake = state();
+  const cli = fakeCli(fake);
+  cli.authStatus = async () => ({
+    installed: true,
+    authenticated: true,
+    userName: "许涛",
+    userId: "self",
+    corpName: null,
+    errorCode: null,
+  });
+  const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+  const events: unknown[] = [];
+  const unsubscribe = service.subscribeEvents((event) => events.push(event));
+  try {
+    await service.status();
+    await service.startListening();
+    await vi.waitFor(() => expect(fake.onRecord).toBeDefined());
+    fake.onRecord?.({
+      messageId: "m1",
+      conversationId: "c1",
+      senderName: "林晓",
+      text: "@许涛(许涛) 安心买上线了吗",
+      createdAt: Date.now(),
+    });
+    expect(events[0]).toMatchObject({ atMe: true });
+    fake.onRecord?.({
+      messageId: "m2",
+      conversationId: "c1",
+      senderName: "林晓",
+      text: "@许涛涛 不是本人",
+      createdAt: Date.now(),
+    });
+    expect(events[1]).toMatchObject({ atMe: false });
+    unsubscribe();
+    fake.onRecord?.({
+      messageId: "m3",
+      conversationId: "c1",
+      senderName: "林晓",
+      text: "@许涛 hello",
+      createdAt: Date.now(),
+    });
+    expect(events).toHaveLength(2);
+  } finally {
+    service.dispose();
+  }
 });

@@ -5,7 +5,7 @@ const BACKOFF_MS = [5_000, 10_000, 20_000, 40_000, 60_000] as const;
 
 export interface DingTalkEventListenerOptions {
   cli: Pick<DingTalkCli, "authStatus" | "openEvents">;
-  /** Only the Host that owns the dws login may open the stream. */
+  /** Whether a local or SSH-backed dws stream is available. */
   local: () => boolean;
   authenticate(): Promise<boolean>;
   onRecord(record: DwsEventRecord): void;
@@ -24,6 +24,7 @@ export class DingTalkEventListener {
   #starting = false;
   #attempt = 0;
   #wanted = false;
+  #hold = false;
   #lastActivity = 0;
   #idleTimer: ReturnType<typeof setTimeout> | null = null;
   #restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -43,9 +44,23 @@ export class DingTalkEventListener {
     this.#lastActivity = this.#now();
     this.#wanted = true;
     if (this.#idleTimer) clearTimeout(this.#idleTimer);
-    this.#idleTimer = setTimeout(() => this.stop(), IDLE_STOP_MS);
+    this.#idleTimer = setTimeout(() => {
+      if (!this.#hold) this.stop();
+    }, IDLE_STOP_MS);
     this.#idleTimer.unref?.();
     if (!this.#stream && !this.#starting) void this.#start();
+  }
+
+  /** A dispatcher keeps the stream alive even when no page is reading. */
+  setHold(value: boolean): void {
+    this.#hold = value;
+    if (value) {
+      this.touch();
+      return;
+    }
+    if (this.#idleTimer) clearTimeout(this.#idleTimer);
+    this.#idleTimer = setTimeout(() => this.stop(), IDLE_STOP_MS);
+    this.#idleTimer.unref?.();
   }
 
   async #start(): Promise<void> {
@@ -53,22 +68,34 @@ export class DingTalkEventListener {
     if (!this.#options.local()) return;
     this.#starting = true;
     try {
-      if (!(await this.#options.authenticate())) return;
+      if (!(await this.#options.authenticate())) {
+        this.#onExit();
+        return;
+      }
       if (this.#disposed) return;
+      let exited = false;
       const stream = await this.#options.cli.openEvents({
         onRecord: (record) => {
           if (this.#disposed) return;
           this.#lastActivity = this.#now();
           this.#options.onRecord(record);
         },
-        onExit: () => this.#onExit(),
+        onExit: () => {
+          exited = true;
+          this.#onExit();
+        },
       });
-      if (!stream || this.#disposed) {
+      if (!stream || this.#disposed || !this.#wanted || exited) {
         stream?.stop();
+        if (!this.#disposed && !exited) this.#onExit();
         return;
       }
       this.#stream = stream;
+      if (this.#restartTimer) clearTimeout(this.#restartTimer);
+      this.#restartTimer = null;
       this.#attempt = 0;
+    } catch {
+      this.#onExit();
     } finally {
       this.#starting = false;
     }
@@ -76,8 +103,9 @@ export class DingTalkEventListener {
 
   #onExit(): void {
     this.#stream = null;
+    if (this.#restartTimer) return;
     if (this.#disposed || !this.#wanted) return;
-    if (this.#now() - this.#lastActivity >= IDLE_STOP_MS) {
+    if (this.#now() - this.#lastActivity >= IDLE_STOP_MS && !this.#hold) {
       this.#wanted = false;
       return;
     }

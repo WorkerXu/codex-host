@@ -25,7 +25,11 @@ import {
 
 import { JarvisBugSearcher } from "./jarvis-bug-search.js";
 import { createJarvisCli, type JarvisCli } from "./jarvis-cli.js";
-import { createJarvisDecisions, type JarvisDecisions } from "./jarvis-decisions.js";
+import {
+  createJarvisDecisions,
+  JarvisDecisionError,
+  type JarvisDecisions,
+} from "./jarvis-decisions.js";
 import {
   createJarvisArtifactPath,
   detectJarvisPlatform,
@@ -136,6 +140,26 @@ export class JarvisService {
   async searchBugs(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
     const threshold = await this.#settings.readThreshold();
     return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params, threshold));
+  }
+
+  /** Scores a DingTalk message for the dispatch runtime; the key stays local. */
+  async scoreDingTalkCandidates(
+    text: string,
+    candidates: readonly { fileName: string; name: string; description: string }[],
+  ): Promise<{ available: boolean; scores: Record<string, number>; errorCode: string | null }> {
+    try {
+      return {
+        available: true,
+        scores: await this.#decisions.scoreCandidates(text, candidates),
+        errorCode: null,
+      };
+    } catch (error) {
+      return {
+        available: false,
+        scores: {},
+        errorCode: error instanceof JarvisDecisionError ? error.code : "failed",
+      };
+    }
   }
 
   async settings(): Promise<JarvisSettingsResult> {

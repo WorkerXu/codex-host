@@ -74,6 +74,24 @@ describe("DingTalk carriers", () => {
     });
   });
 
+  it("accepts Desktop's Markdown-escaped carrier", () => {
+    const text =
+      "[@【线上系统问题反馈群】]\\(dingtalk://conversation/cidifW8hA1yxL0HHqFGnPZ2OQ%3D%3D) 最近5条消息是什么\n";
+    expect(stripDingTalkMentions(text)).toEqual({
+      text: "@【线上系统问题反馈群】 最近5条消息是什么\n",
+      mentions: [
+        {
+          kind: "conversation",
+          conversationId: "cidifW8hA1yxL0HHqFGnPZ2OQ==",
+          label: "【线上系统问题反馈群】",
+        },
+      ],
+    });
+    expect(
+      stripDingTalkMentions("[@a\\_b\\[1\\]]\\(dingtalk://conversation/cid1)").mentions[0]?.label,
+    ).toBe("a_b[1]");
+  });
+
   it("builds a message path with encoded ids", () => {
     expect(dingtalkMessagePath("cid/a", ["m 1", "m/2"])).toBe(
       `dingtalk://message/${encodeURIComponent("cid/a")}/${encodeURIComponent("m 1")},${encodeURIComponent("m/2")}`,

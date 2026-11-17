@@ -17,12 +17,18 @@ const allScenarios = [
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-hover",
+  "dingtalk-conversation-hover",
+  "dingtalk-image-unavailable",
   "dingtalk-lightbox",
   "dingtalk-at-picker",
   "dingtalk-at-chip",
   "dingtalk-at-send",
   "dingtalk-header-menu",
   "dingtalk-page-menu",
+  "dingtalk-empty-menu",
+  "dingtalk-empty-menu-narrow",
+  "dingtalk-header-menu-open",
+  "dingtalk-header-menu-narrow",
   "dingtalk-unread-open",
   "dingtalk-unread-left",
   "dingtalk-live",
@@ -33,10 +39,14 @@ const allScenarios = [
   "dingtalk-direct",
   "dingtalk-scrolled-top",
   "dingtalk-search",
+  "dingtalk-search-empty",
+  "dingtalk-loading",
   "dingtalk-search-more",
   "dingtalk-empty",
   "dingtalk-error",
   "agents-cards",
+  "agents-dispatch-status",
+  "agents-dispatch-missing-key",
   "agents-cards-narrow",
   "agents-empty",
   "agents-menu",
@@ -279,13 +289,43 @@ for (const scenario of scenarios) {
         );
       });
     }
+    if (scenario.startsWith("agents-dispatch-")) {
+      await realClick(page, ".agent-card[data-agent-file]", 0);
+      await page.waitForSelector(".agent-editor:not([hidden])");
+      const point = await pointAt(page, ".agent-editor-body");
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.wheel(0, 1600);
+      await page.waitForTimeout(200);
+    }
     if (scenario === "agents-cards") {
       await page.hover(".agent-card[data-agent-name]");
     }
     const hoverSelector = hoverSelectors.get(scenario);
     if (scenario === "dingtalk-hover") {
-      await realHover(page, ".dingtalk-message", 1);
+      await realHover(page, ".dingtalk-message", -1);
       await page.waitForTimeout(150);
+    }
+    if (scenario === "dingtalk-conversation-hover") {
+      await realHover(page, ".dingtalk-conversation", 1);
+    }
+    if (scenario === "dingtalk-search" || scenario === "dingtalk-search-empty") {
+      await realClick(page, ".dingtalk-search-input");
+      await page.keyboard.type(scenario.endsWith("-empty") ? "不存在的会话XYZ" : "示例Sprint");
+      await page.waitForSelector(
+        scenario.endsWith("-empty")
+          ? ".dingtalk-search-results .dingtalk-empty-list"
+          : ".dingtalk-search-result",
+      );
+    }
+    if (scenario === "dingtalk-image-unavailable") {
+      const list = await pointAt(page, ".dingtalk-message-list");
+      const target = await page.locator('[data-message-id="msg-launch-193"]').boundingBox();
+      if (!target) throw new Error("Missing image fixture is not rendered");
+      await page.mouse.move(list.x, list.y);
+      await page.mouse.wheel(0, target.y + target.height / 2 - list.y);
+      await page.waitForSelector(
+        '[data-message-id="msg-launch-193"] .dingtalk-message-image--unavailable',
+      );
     }
     if (scenario === "dingtalk-lightbox") {
       await realClick(page, ".dingtalk-message-image--loaded", 0);
@@ -370,6 +410,34 @@ for (const scenario of scenarios) {
       await page.mouse.up();
       await page.waitForTimeout(150);
     }
+    if (scenario.startsWith("dingtalk-empty-menu")) {
+      await realClick(page, ".dingtalk-sidebar .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])", { state: "hidden" });
+      await realClick(page, ".dingtalk-sidebar .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])");
+      if (scenario.endsWith("-narrow")) {
+        await page.setViewportSize({ width: 360, height: 140 });
+        await page.waitForFunction(() => {
+          const root = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+          const anchor = root
+            ?.querySelector(".dingtalk-sidebar .dingtalk-more-button")
+            ?.getBoundingClientRect();
+          const menu = root?.querySelector(".dingtalk-page-menu")?.getBoundingClientRect();
+          return anchor && menu && menu.top >= 8 && menu.bottom <= anchor.top - 3;
+        });
+        await page.evaluate(() => {
+          window.__dingtalkMenuFlippedAbove = true;
+        });
+        await page.setViewportSize({ width: 360, height: 900 });
+      }
+    }
+    if (scenario === "dingtalk-header-menu-open" || scenario === "dingtalk-header-menu-narrow") {
+      await realClick(page, ".dingtalk-main-actions .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-header-menu:not([hidden])");
+      if (scenario.endsWith("-narrow")) await page.setViewportSize({ width: 640, height: 900 });
+    }
     if (scenario === "dingtalk-live") {
       const list = await pointAt(page, ".dingtalk-message-list");
       await page.mouse.move(list.x, list.y);
@@ -407,6 +475,10 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      check(
+        "native-desktop-theme",
+        document.body.dataset.nativeTheme === document.body.dataset.theme,
+      );
 
       // Every custom property used by the workbench must resolve inside the
       // shadow root, or carry an explicit fallback.
@@ -451,7 +523,7 @@ for (const scenario of scenarios) {
         );
       }
 
-      if (document.querySelector(".dingtalk-workbench")) {
+      if (query(".dingtalk-conversation-list:not([hidden]) .dingtalk-conversation")) {
         const list = query(".dingtalk-conversation-list");
         check("conversation-list-visible", visible(list));
         const sidebar = query(".settings-sidebar");
@@ -495,6 +567,98 @@ for (const scenario of scenarios) {
             listRect ? `${Math.round(firstRowRect.left - listRect.left)}px` : "missing",
           );
         }
+      }
+      for (const row of queryAll(".dingtalk-conversation")) {
+        const title = row.querySelector(".dingtalk-conversation-title");
+        const tag = row.querySelector(".dingtalk-conversation-tag");
+        if (tag && !tag.hidden && title) {
+          check("title-before-tag", title.scrollWidth <= title.clientWidth, title.textContent);
+        }
+        if (row.querySelector(".dingtalk-unread-badge"))
+          check("ordinary-unread-no-prefix", !row.querySelector(".dingtalk-conversation-count"));
+        const dot = row.querySelector(".dingtalk-avatar-unread");
+        if (dot) {
+          check("muted-unread-prefix", Boolean(row.querySelector(".dingtalk-conversation-count")));
+          check(
+            "muted-dot-gray",
+            getComputedStyle(dot).backgroundColor ===
+              getComputedStyle(row.querySelector(".dingtalk-conversation-time")).color,
+          );
+        }
+      }
+      if (document.body.dataset.scenario === "dingtalk-header-menu-narrow") {
+        for (const id of ["cid-launch", "cid-finance"]) {
+          const row = query(`[data-conversation-id="${id}"]`);
+          const title = row?.querySelector(".dingtalk-conversation-title");
+          const tag = row?.querySelector(".dingtalk-conversation-tag");
+          check(
+            `narrow-name-priority-${id}`,
+            title && tag?.hidden && title.scrollWidth <= title.clientWidth,
+          );
+        }
+        const width = query(".dingtalk-sidebar")?.getBoundingClientRect().width ?? 0;
+        check("sidebar-responsive-width", width >= 240 && width <= 320, String(width));
+      }
+      for (const [id, label] of [
+        ["cid-partner", "华东"],
+        ["cid-budget", "预算"],
+      ]) {
+        const avatar = query(`[data-conversation-id="${id}"] .dingtalk-avatar`);
+        if (avatar) check(`avatar-${id}`, avatar.textContent === label, avatar.textContent);
+      }
+      for (const avatar of queryAll(".dingtalk-message--bot .dingtalk-message-avatar"))
+        check("bot-icon-avatar", Boolean(avatar.querySelector("svg")) && !avatar.textContent);
+      if (document.body.dataset.scenario === "dingtalk-image-unavailable") {
+        const frame = query(
+          '[data-message-id="msg-launch-193"] .dingtalk-message-image--unavailable',
+        );
+        const bubble = frame?.closest(".dingtalk-message-bubble");
+        const frameRect = frame?.getBoundingClientRect();
+        const bubbleRect = bubble?.getBoundingClientRect();
+        check(
+          "unavailable-image-regular-bubble",
+          bubble &&
+            !bubble.classList.contains("dingtalk-message-bubble--image") &&
+            getComputedStyle(bubble).backgroundColor !== "rgba(0, 0, 0, 0)",
+        );
+        check(
+          "unavailable-image-text-aligned",
+          frameRect && bubbleRect && Math.abs(frameRect.left - bubbleRect.left - 12) <= 1,
+        );
+        check(
+          "unavailable-image-visible",
+          frameRect && frameRect.top >= 100 && frameRect.bottom <= window.innerHeight,
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-conversation-hover") {
+        const selected = query('.dingtalk-conversation[aria-selected="true"]');
+        const hovered = query(".dingtalk-conversation:hover");
+        check("conversation-hover-and-selected", selected && hovered && selected !== hovered);
+        check(
+          "conversation-hover-distinct",
+          selected &&
+            hovered &&
+            getComputedStyle(selected).backgroundColor !==
+              getComputedStyle(hovered).backgroundColor,
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-loading") {
+        check("loading-skeleton", queryAll(".dingtalk-skeleton-row").length === 6);
+        check("loading-no-composer", !visible(query(".dingtalk-composer-area")));
+      }
+      if (document.body.dataset.scenario === "dingtalk-search-empty") {
+        check(
+          "search-empty-chinese",
+          query(".dingtalk-search-results")?.textContent.includes("没有找到相关会话或消息"),
+        );
+        check("search-empty-no-results", queryAll(".dingtalk-search-result").length === 0);
+      }
+      if (document.body.dataset.scenario === "dingtalk-error") {
+        check("error-no-composer", !visible(query(".dingtalk-composer-area")));
+        check(
+          "error-chinese",
+          query(".dingtalk-empty-list")?.textContent.includes("钉钉连接不可用，请稍后重试"),
+        );
       }
       if (document.body.dataset.scenario.startsWith("dingtalk-status-")) {
         const text = query(".dingtalk-menu-status-text")?.textContent ?? "";
@@ -592,7 +756,31 @@ for (const scenario of scenarios) {
         const overlay = query(".dingtalk-lightbox");
         const image = query(".dingtalk-lightbox-image");
         const rect = image?.getBoundingClientRect();
-        check("lightbox-open", Boolean(overlay) && !overlay.hidden);
+        check("lightbox-open", Boolean(overlay) && !overlay.hidden && overlay.matches(":modal"));
+        const overlayRect = overlay?.getBoundingClientRect();
+        check(
+          "lightbox-covers-page",
+          Boolean(overlayRect) &&
+            overlayRect.x === 0 &&
+            overlayRect.y === 0 &&
+            Math.abs(overlayRect.width - window.innerWidth) < 1 &&
+            Math.abs(overlayRect.height - window.innerHeight) < 1,
+        );
+        const close = query(".dingtalk-lightbox-close");
+        const closeRect = close?.getBoundingClientRect();
+        check(
+          "lightbox-close-top-right",
+          Boolean(closeRect) && closeRect.top < 40 && window.innerWidth - closeRect.right < 40,
+        );
+        const headerClose = query(".settings-header-actions button");
+        const headerRect = headerClose?.getBoundingClientRect();
+        if (headerRect) {
+          const hit = shell.elementFromPoint(
+            headerRect.x + headerRect.width / 2,
+            headerRect.y + headerRect.height / 2,
+          );
+          check("page-close-covered", hit !== headerClose && Boolean(overlay?.contains(hit)));
+        }
         check(
           "lightbox-overlay-dark",
           Boolean(overlay) && getComputedStyle(overlay).backgroundColor.startsWith("rgba(0, 0, 0"),
@@ -643,6 +831,11 @@ for (const scenario of scenarios) {
           "at-picker-all-row",
           queryAll(".dingtalk-mention-option").some((row) => row.textContent?.includes("所有人")),
         );
+        const allAvatar = query(".dingtalk-mention-option .dingtalk-mention-avatar");
+        check(
+          "at-picker-all-icon",
+          Boolean(allAvatar?.querySelector("svg")) && !allAvatar.textContent,
+        );
         const active = queryAll(".dingtalk-mention-option").findIndex((row) =>
           row.classList.contains("dingtalk-mention-option--active"),
         );
@@ -660,6 +853,49 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario === "dingtalk-page-menu") {
         check("page-menu-open-after-down", window.__dingtalkPageMenuOpenAfterDown === true);
         check("page-menu-still-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
+      }
+      for (const [menuSelector, anchorSelector] of [
+        [".dingtalk-page-menu", ".dingtalk-sidebar .dingtalk-more-button"],
+        [".dingtalk-header-menu", ".dingtalk-main-actions .dingtalk-more-button"],
+      ]) {
+        const menu = query(`${menuSelector}:not([hidden])`);
+        if (!menu) continue;
+        const anchor = query(anchorSelector)?.getBoundingClientRect();
+        const rect = menu.getBoundingClientRect();
+        check(
+          `${menuSelector}-below-trigger`,
+          anchor && Math.abs(rect.top - anchor.bottom - 4) <= 1,
+          `top=${rect.top}, anchorBottom=${anchor?.bottom}`,
+        );
+        check(
+          `${menuSelector}-aligned-to-trigger`,
+          anchor &&
+            (menuSelector === ".dingtalk-header-menu"
+              ? Math.abs(rect.right - anchor.right) <= 1
+              : Math.abs(
+                  rect.left -
+                    Math.min(Math.max(8, anchor.left), window.innerWidth - rect.width - 8),
+                ) <= 1),
+          `menu=${rect.left}..${rect.right}, anchor=${anchor?.left}..${anchor?.right}`,
+        );
+        check(
+          `${menuSelector}-inside-viewport`,
+          rect.left >= 8 &&
+            rect.right <= window.innerWidth - 8 &&
+            rect.bottom <= window.innerHeight - 8,
+        );
+        check(`${menuSelector}-top-layer`, menu.matches(":popover-open"));
+      }
+      if (document.body.dataset.scenario.startsWith("dingtalk-empty-menu")) {
+        check("menu-with-empty-right-pane", visible(query(".dingtalk-conversation-empty")));
+        check("sidebar-menu-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
+        check(
+          "empty-menu-no-conversations",
+          queryAll(".dingtalk-conversation").length === 0 && Boolean(query(".dingtalk-empty-list")),
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-empty-menu-narrow") {
+        check("menu-flips-above-in-short-window", window.__dingtalkMenuFlippedAbove === true);
       }
       if (document.body.dataset.scenario === "dingtalk-at-chip") {
         const chips = query(".dingtalk-composer-chips");
@@ -875,11 +1111,27 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "dingtalk-empty") {
         const main = query(".dingtalk-main");
+        const empty = query(".dingtalk-conversation-empty");
+        const mainRect = main?.getBoundingClientRect();
+        const emptyRect = empty?.getBoundingClientRect();
         check(
-          "empty-hides-right-pane",
-          Boolean(main) && getComputedStyle(main).display === "none",
-          main ? getComputedStyle(main).display : "missing",
+          "empty-shows-right-pane",
+          visible(main) && visible(empty) && Boolean(empty?.querySelector("svg")),
         );
+        check(
+          "empty-centered",
+          mainRect &&
+            emptyRect &&
+            Math.abs(emptyRect.x + emptyRect.width / 2 - mainRect.x - mainRect.width / 2) <= 1 &&
+            Math.abs(emptyRect.y + emptyRect.height / 2 - mainRect.y - mainRect.height / 2) <= 1,
+        );
+        check(
+          "empty-unread-hint-once",
+          empty?.textContent === "最近 48 小时没有未读消息" &&
+            !query(".dingtalk-conversation-list")?.textContent.includes("最近 48 小时没有未读消息"),
+        );
+        check("empty-no-composer", !visible(query(".dingtalk-composer-area")));
+        check("empty-no-header-actions", !visible(query(".dingtalk-main-head")));
       }
       if (
         document.body.dataset.scenario === "agents-cards" ||

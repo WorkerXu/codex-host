@@ -60,6 +60,8 @@ import { downloadDingTalkMedia } from "./dingtalk-media.js";
 import { createDingTalkService } from "./dingtalk-service.js";
 import { CodexAgentStore } from "./codex-agents.js";
 import { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
+import { DingTalkDispatchStateStore } from "./dingtalk-dispatch-state.js";
+import { DingTalkDispatcher } from "./dingtalk-dispatcher.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -356,8 +358,26 @@ export async function runHostRuntime(input: {
           const dingTalkDispatch = new DingTalkDispatchSettingsStore({
             environment: delegationEnvironment,
           });
+          const dingTalkState = new DingTalkDispatchStateStore({
+            environment: delegationEnvironment,
+          });
+          let host: AppServerHost | undefined;
+          const dispatcher = new DingTalkDispatcher({
+            service: dingtalk,
+            settings: dingTalkDispatch,
+            agents: codexAgents,
+            state: dingTalkState,
+            matcher: jarvis,
+            startThread: (input) => {
+              if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
+              return host.startDingTalkAgentRun(input);
+            },
+            environment: delegationEnvironment,
+            diagnose: (error) =>
+              process.stderr.write(`codexhost DingTalk dispatch: ${String(error)}\n`),
+          });
           try {
-            const host = new AppServerHost({
+            host = new AppServerHost({
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
@@ -365,6 +385,7 @@ export async function runHostRuntime(input: {
               dingtalk,
               codexAgents,
               dingTalkDispatch,
+              dingTalkDispatcher: dispatcher,
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -392,11 +413,22 @@ export async function runHostRuntime(input: {
               ...(updateCoordinator ? { updateCoordinator } : {}),
               ...(consoleOpener ? { consoleOpener } : {}),
             });
-            return await runWithConsoleControl(
-              host,
-              consoleOpener !== undefined,
-              delegationEnvironment,
-            );
+            const dispatchStart = setTimeout(() => {
+              void dispatcher.start().catch((error: unknown) => {
+                process.stderr.write(`codexhost DingTalk dispatch: ${String(error)}\n`);
+              });
+            }, 2_000);
+            dispatchStart.unref?.();
+            try {
+              return await runWithConsoleControl(
+                host,
+                consoleOpener !== undefined,
+                delegationEnvironment,
+              );
+            } finally {
+              clearTimeout(dispatchStart);
+              dispatcher.dispose();
+            }
           } finally {
             jarvis.dispose();
             dingtalk.dispose();

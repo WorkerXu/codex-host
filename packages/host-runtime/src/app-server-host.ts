@@ -1,3 +1,4 @@
+import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -77,7 +78,10 @@ import {
   codexAgentDeleteResultSchema,
   DINGTALK_DISPATCH_GET_METHOD,
   DINGTALK_DISPATCH_SET_METHOD,
+  DINGTALK_DISPATCH_STATUS_METHOD,
+  DINGTALK_DISPATCH_PROJECT_READY_METHOD,
   dingtalkDispatchSettingsSchema,
+  dingtalkDispatchStatusSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -140,9 +144,14 @@ import {
   rewriteDelegationMentionText,
 } from "./delegation-mention-rewrite.js";
 import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
-import { hasDingTalkCarrier } from "@codexhost/shared-contracts";
+import { hasDingTalkCarrier, stripDingTalkMentions } from "@codexhost/shared-contracts";
 import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
 import { DingTalkServiceError, type DingTalkService } from "./dingtalk-service.js";
+import type {
+  DingTalkDispatchRun,
+  DingTalkDispatchThreadInput,
+} from "./dingtalk-dispatch-types.js";
+import type { DingTalkDispatcher } from "./dingtalk-dispatcher.js";
 import { CodexAgentError, type CodexAgentStore } from "./codex-agents.js";
 import { codexAgentCatalogFromModelList } from "./codex-agent-models.js";
 import type {
@@ -476,6 +485,8 @@ export interface AppServerHostOptions {
   codexAgents?: CodexAgentStore;
   /** Local-only DingTalk dispatch settings read by the separate listener runtime. */
   dingTalkDispatch?: DingTalkDispatchSettingsStore;
+  /** Local-only runtime that listens, matches and starts dispatched Threads. */
+  dingTalkDispatcher?: Pick<DingTalkDispatcher, "status">;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -804,6 +815,10 @@ export class AppServerHost {
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
   #unsubscribeDingTalk: (() => void) | undefined;
+  readonly #dingTalkNativeRunner = new DingTalkNativeRunner(
+    (method, params) => this.#requestOfficial(method, params),
+    (message) => this.#writer.json(message),
+  );
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
@@ -1175,6 +1190,7 @@ export class AppServerHost {
       await this.#closeOfficialRuntime();
       return this.#closeRequested ? 0 : 1;
     } finally {
+      this.#dingTalkNativeRunner.dispose();
       this.#options.sharedThreads?.close();
       this.#unsubscribeDingTalk?.();
       this.#unsubscribeDingTalk = undefined;
@@ -2504,7 +2520,7 @@ export class AppServerHost {
       return await this.#options.dingtalk.expandMentions(text);
     } catch (error) {
       this.#diagnose(error);
-      return text;
+      return dingTalkReadFailureNote(text);
     }
   }
 
@@ -2604,6 +2620,7 @@ export class AppServerHost {
     } catch (error) {
       this.#diagnose(error);
     }
+    this.#dingTalkNativeRunner.observe(parsed);
     this.#routeObservationTracker.bindOfficialResponse(parsed);
     const privateTelemetry =
       isRecord(parsed) &&
@@ -2687,6 +2704,10 @@ export class AppServerHost {
       const failure = codexAccountRpcError(error);
       await this.#writer.json(rpcError(request, failure.code, failure.message));
     }
+  }
+
+  startDingTalkAgentRun(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
+    return this.#dingTalkNativeRunner.start(input);
   }
 
   async #observeOfficialTurnLifecycle(value: JsonValue): Promise<void> {
@@ -3846,6 +3867,13 @@ export class AppServerHost {
       let result: unknown;
       if (request.method === DINGTALK_DISPATCH_GET_METHOD) {
         result = await store.read(await this.#dingTalkDispatchAgents());
+      } else if (request.method === DINGTALK_DISPATCH_PROJECT_READY_METHOD) {
+        this.#dingTalkNativeRunner.projectReady(request.params);
+        result = {};
+      } else if (request.method === DINGTALK_DISPATCH_STATUS_METHOD) {
+        result = dingtalkDispatchStatusSchema.parse(
+          (await this.#options.dingTalkDispatcher?.status()) ?? {},
+        );
       } else if (request.method === DINGTALK_DISPATCH_SET_METHOD) {
         const params = dingtalkDispatchSettingsSchema.safeParse(request.params);
         if (!params.success) {
@@ -6953,4 +6981,26 @@ export class AppServerHost {
   #diagnose(error: unknown): void {
     this.#options.diagnosticOutput.write(`codexhost Host Runtime: ${errorMessage(error)}\n`);
   }
+}
+
+/**
+ * When the Host cannot read a mentioned DingTalk conversation, the agent still
+ * gets the conversation ids and the routed CLI entry, so it does not look for
+ * a local `dws` that only exists on the DingTalk Host.
+ */
+export function dingTalkReadFailureNote(text: string): string {
+  const { text: readable, mentions } = stripDingTalkMentions(text);
+  if (mentions.length === 0) return text;
+  const lines = mentions.map(
+    (mention) => `- 「${mention.label}」：conversationId=${mention.conversationId}`,
+  );
+  return [
+    readable,
+    "",
+    "[codexhost DingTalk]",
+    "Host 这次没能读取下面提到的钉钉会话内容。",
+    ...lines,
+    "钉钉 CLI（dws）只装在 DingTalk Host 上，本机没有 dws，不要在本机查找或安装。",
+    "需要读取时运行 `codexhost dingtalk dws -- <只读 dws 参数>`，例如 `codexhost dingtalk dws -- chat message list --conversation-id '<conversationId>'`。",
+  ].join("\n");
 }

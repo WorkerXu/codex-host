@@ -15,9 +15,12 @@ import { z } from "zod";
 export const DINGTALK_MENTION_PATH_PREFIX = "dingtalk://";
 
 // Desktop may wrap or split a long carrier between the label and the target;
-// whitespace there is layout, not a different mention.
+// whitespace there is layout, not a different mention. Desktop's Markdown
+// serializer also escapes the opening parenthesis (`]\(`) and characters in the
+// label (`\[`, `\]`, `\_`), so backslash escapes are accepted and removed.
 const MENTION_LINK_PATTERN =
-  /\[([^\]\n]{0,512})\]\s*\(<?\s*dingtalk:\/\/(conversation|message)\/([^\s()<>]+)>?\)/gu;
+  /\[((?:\\.|[^\]\n\\]){0,512})\]\s*\\?\(<?\s*dingtalk:\/\/(conversation|message)\/([^\s()<>\\]+)>?\\?\)/gu;
+const MARKDOWN_ESCAPE = /\\([\\`*_{}[\]()#+\-.!|<>~])/gu;
 const ID_SEGMENT = /^[^()<>\r\n]{1,512}$/u;
 const MAX_MESSAGE_IDS = 200;
 
@@ -129,7 +132,7 @@ export function stripDingTalkMentions(text: string): DingTalkMentionRewrite {
     (match, label: string, kind: string, tail: string) => {
       const parsed = parsePath(kind, tail);
       if (!parsed) return match;
-      const trimmedLabel = label.trim().replace(/^@+/u, "").trim();
+      const trimmedLabel = label.replace(MARKDOWN_ESCAPE, "$1").trim().replace(/^@+/u, "").trim();
       parsed.label = trimmedLabel || "钉钉";
       const existing = index.get(parsed.conversationId);
       if (!existing) {

@@ -1,4 +1,5 @@
 import SendIcon from "lucide/dist/esm/icons/send.mjs";
+import AtSignIcon from "lucide/dist/esm/icons/at-sign.mjs";
 
 import type { DingTalkMember, DingTalkMembersResult } from "@codexhost/shared-contracts";
 
@@ -104,7 +105,8 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
     if (chips.hidden) return;
     if (atAll) {
       const chip = createElementNode(document, "span", "dingtalk-composer-chip");
-      const avatar = createElementNode(document, "span", "dingtalk-composer-chip-avatar", "所");
+      const avatar = createElementNode(document, "span", "dingtalk-composer-chip-avatar");
+      avatar.append(createIcon(document, AtSignIcon, 14));
       chip.append(
         avatar,
         createElementNode(document, "span", "dingtalk-chip-name", text.mentionAll),
