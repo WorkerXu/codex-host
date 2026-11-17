@@ -1,3 +1,9 @@
+import { skillsNativeTokens } from "./skills-style.js";
+import { renderSkillsInventory } from "./skills-inventory-view.js";
+import { showSkillConflicts } from "./skills-conflicts.js";
+import { showSkillLinks } from "./skills-link-preview.js";
+import { editSkillExclusions, renderSkillExclusions } from "./skills-exclusions.js";
+import { createRendererSettingsIcon } from "./icons.js";
 import { required } from "./skills-dialog.js";
 import type {
   SkillMachine,
@@ -27,12 +33,15 @@ export function createSkillsSettingsPage(
     mount(context) {
       const document = context.content.ownerDocument;
       const root = skillNode(document, "div", "", "skills-hub");
+      for (const [name, value] of Object.entries(skillsNativeTokens))
+        root.style.setProperty(name, value);
       const head = skillNode(document, "div", "", "skills-head");
       head.append(skillNode(document, "h1", "技能"));
       const notice = skillNode(document, "div", "", "skills-notice");
       notice.setAttribute("role", "status");
       const matrix = skillNode(document, "div", "", "skills-matrix");
       const agents = skillNode(document, "div", "", "skills-machines");
+      const exclusions = skillNode(document, "div", "", "skills-exclusions");
       const client = options.createClient();
       let machines: SkillMachine[] = [],
         busy = false;
@@ -77,7 +86,38 @@ export function createSkillsSettingsPage(
         machines = await client.status();
         if (!context.signal.aborted) render();
       }
-      const refresh = button("刷新", () => void perform(load, () => {}));
+      const refresh = button("", () => void perform(load, () => {}));
+      refresh.setAttribute("aria-label", "刷新");
+      refresh.dataset.skillsRefresh = "true";
+      refresh.append(createRendererSettingsIcon("refresh", 14));
+      const refreshWrap = node("span", "", "group relative inline-flex");
+      const refreshTip = node(
+        "span",
+        "刷新",
+        "pointer-events-none invisible absolute top-full right-0 z-20 mt-2 rounded-md border border-settings-border bg-settings-panel px-2 py-1 text-xs whitespace-nowrap text-settings-text shadow-sm group-hover:visible group-focus-within:visible",
+      );
+      refreshTip.setAttribute("role", "tooltip");
+      refreshTip.id = "skills-refresh-tooltip";
+      refresh.setAttribute("aria-describedby", refreshTip.id);
+      refreshWrap.addEventListener("pointerenter", () => {
+        refreshTip.hidden = false;
+      });
+      refreshWrap.addEventListener("focusin", () => {
+        refreshTip.hidden = false;
+      });
+      const dismissTooltip = (event: KeyboardEvent) => {
+        if (
+          event.key === "Escape" &&
+          !refreshTip.hidden &&
+          refreshWrap.matches(":hover, :focus-within") &&
+          refreshWrap.getClientRects().length
+        ) {
+          event.preventDefault();
+          refreshTip.hidden = true;
+        }
+      };
+      document.defaultView?.addEventListener("keydown", dismissTooltip, true);
+      refreshWrap.append(refresh, refreshTip);
       const fill = button(
         "全部补齐",
         () =>
@@ -89,146 +129,36 @@ export function createSkillsSettingsPage(
           }),
         true,
       );
-      head.append(refresh, fill);
-      root.append(head, notice, matrix, agents);
+      head.append(refreshWrap, fill);
+      root.append(head, notice, matrix, agents, exclusions);
       context.content.append(root);
       function render(): void {
-        matrix.replaceChildren();
-        agents.replaceChildren();
-        const keys = [
-          ...new Set(machines.flatMap((m) => m.inventory?.skills.map((s) => s.key) ?? [])),
-        ].sort();
-        fill.disabled = machines.filter((m) => m.inventory).length < 2;
-        if (!keys.length) matrix.append(node("p", "中央库中还没有技能", "skills-empty"));
-        else {
-          const table = node("table");
-          const header = node("tr");
-          header.append(node("th", "技能"));
-          for (const machine of machines) header.append(node("th", machine.name));
-          header.append(node("th", ""));
-          const thead = node("thead");
-          thead.append(header);
-          table.append(thead);
-          const body = node("tbody");
-          for (const key of keys) {
-            const entries = machines.flatMap(
-              (m) => m.inventory?.skills.filter((s) => s.key === key) ?? [],
-            );
-            const different = new Set(entries.map((s) => s.fingerprint)).size > 1;
-            const row = node("tr");
-            const name = node("td");
-            name.append(node("strong", key));
-            const description = node("span", entries[0]?.description ?? "", "skills-description");
-            description.title = description.textContent ?? "";
-            name.append(description);
-            row.append(name);
-            for (const machine of machines) {
-              const entry = machine.inventory?.skills.find((s) => s.key === key);
-              const cell = node("td");
-              const status = node(
-                "span",
-                !machine.inventory
-                  ? skillsErrorText(machine.error)
-                  : !entry
-                    ? "缺失"
-                    : different
-                      ? "版本不同"
-                      : "一致",
-                entry && different ? "skills-different" : !entry ? "skills-muted" : "",
-              );
-              if (entry)
-                status.title = `${entry.version ?? ""} · ${new Date(entry.modifiedAt).toLocaleString("zh-CN")} · ${entry.fingerprint.slice(0, 12)}`;
-              cell.append(status);
-              row.append(cell);
-            }
-            const action = node("td");
-            action.append(button("同步…", () => syncSelection(key)));
-            row.append(action);
-            body.append(row);
-          }
-          table.append(body);
-          matrix.append(table);
-        }
-        for (const machine of machines) {
-          const section = node("section", "", "skills-machine");
-          const heading = node("div", "", "skills-head");
-          heading.append(node("h2", machine.name));
-          const state = node(
-            "span",
-            progress.get(machine.hostId) ??
-              (machine.inventory ? "" : skillsErrorText(machine.error)),
-            "skills-muted",
-          );
-          state.setAttribute("role", "status");
-          heading.append(state);
-          if (machine.inventory) {
-            heading.append(
-              button("推送中央库…", () => syncSelection("--all", machine.hostId)),
-              button("一键链接", () => void linkPreview(machine.hostId)),
-            );
-            const history = changes.get(machine.hostId) ?? [];
-            if (history.length)
-              heading.append(
-                button("撤销上次更改", () => confirmUndo(machine.hostId, required(history.at(-1)))),
-              );
-          } else heading.append(button("重试", () => void perform(load, () => {})));
-          section.append(heading);
-          if (machine.inventory) {
-            const table = node("table");
-            const tbody = node("tbody");
-            for (const agent of machine.inventory.agents) {
-              const row = node("tr");
-              const name = node("td", agent.name);
-              name.title = agent.evidence;
-              row.append(
-                name,
-                node(
-                  "td",
-                  agent.skillsDir.replace(/^.*(?=\/\.[^/]+\/skills$)/u, "~"),
-                  "skills-path",
-                ),
-                node(
-                  "td",
-                  agent.native === true ? "原生支持" : agent.native === false ? "需链接" : "待核实",
-                ),
-              );
-              row.append(
-                node(
-                  "td",
-                  agent.excluded
-                    ? "已排除"
-                    : agent.native
-                      ? "直接读取中央库"
-                      : `${agent.linked} 已链接 · ${agent.missing} 待链接${agent.conflicts ? ` · ${agent.conflicts} 冲突` : ""}${agent.managed ? ` · ${agent.managed} 自动管理` : ""}`,
-                  "skills-muted",
-                ),
-              );
-              tbody.append(row);
-            }
-            if (!machine.inventory.agents.length) tbody.append(node("tr", "未发现智能体"));
-            table.append(tbody);
-            section.append(table);
-            const exclusions = node("div", "", "skills-exclusions");
-            exclusions.append(
-              node(
-                "span",
-                `排除：${machine.inventory.exclusions.join("、") || "无"}`,
-                "skills-muted",
+        fill.disabled = machines.filter((machine) => machine.inventory).length < 2;
+        renderSkillsInventory({
+          matrix,
+          agents,
+          machines,
+          progress,
+          changes,
+          sync: syncSelection,
+          link: (hostId) => void linkPreview(hostId),
+          undo: confirmUndo,
+          refresh: () => void perform(load, () => {}),
+        });
+        renderSkillExclusions(exclusions, machines, () =>
+          editSkillExclusions({
+            root,
+            machines,
+            save: (hostId, ids, close) =>
+              void perform(
+                () => required(client).exclusions(hostId, ids),
+                async () => {
+                  close();
+                  await load();
+                },
               ),
-              button("编辑", () => editExclusions(machine)),
-            );
-            section.append(exclusions);
-            if (machine.inventory.warnings.length)
-              section.append(
-                node(
-                  "p",
-                  `${machine.inventory.warnings.length} 个技能或目录无法读取，请检查文件与权限`,
-                  "skills-muted",
-                ),
-              );
-          }
-          agents.append(section);
-        }
+          }),
+        );
       }
       function confirmUndo(hostId: string, id: string): void {
         const dialog = skillsDialog(root, "撤销更改");
@@ -250,37 +180,10 @@ export function createSkillsSettingsPage(
           ),
         );
       }
-      function editExclusions(machine: SkillMachine): void {
-        const dialog = skillsDialog(root, "排除的智能体");
-        const input = node("textarea");
-        input.value = required(machine.inventory).exclusions.join("\n");
-        input.setAttribute("aria-label", "智能体标识，每行一个");
-        dialog.body.append(node("p", "每行一个智能体标识；排除后不会创建链接。"), input);
-        dialog.footer.append(
-          button("取消", dialog.close),
-          button(
-            "保存",
-            () =>
-              void perform(
-                () =>
-                  required(client).exclusions(
-                    machine.hostId,
-                    input.value.split(/[\s,，]+/u).filter(Boolean),
-                  ),
-                async () => {
-                  dialog.close();
-                  await load();
-                },
-              ),
-            true,
-          ),
-        );
-        input.focus();
-      }
       function syncSelection(skill: string, fixedSource?: string): void {
         const dialog = skillsDialog(
           root,
-          fixedSource ? `推送 ${machineName(fixedSource)} 的中央库` : `同步 ${skill}`,
+          fixedSource ? `从 ${machineName(fixedSource)} 同步到其他机器` : `同步 ${skill}`,
         );
         const source = node("select");
         source.setAttribute("aria-label", "来源机器");
@@ -296,7 +199,7 @@ export function createSkillsSettingsPage(
           source.value = fixedSource;
           source.disabled = true;
         }
-        const label = node("label", "来源机器");
+        const label = node("label", "来源机器", "skills-field");
         label.append(source);
         dialog.body.append(label, node("p", "同步到"));
         const targets: {
@@ -315,7 +218,7 @@ export function createSkillsSettingsPage(
         source.addEventListener("change", () => {
           for (const target of targets) target.input.checked = target.hostId !== source.value;
         });
-        const error = node("p", "", "skills-muted");
+        const error = node("p", "", "skills-muted empty:hidden");
         dialog.body.append(error);
         dialog.footer.append(
           button("取消", dialog.close),
@@ -348,58 +251,12 @@ export function createSkillsSettingsPage(
       }
       function showSync(plan: SkillSyncPlan, input: SyncRequest): void {
         if (plan.conflicts.length) {
-          const dialog = skillsDialog(root, "选择保留的版本");
-          const choices = Object.assign(
-            Object.create(null) as Record<string, string>,
-            input.choices,
-          );
-          let continueButton: HTMLButtonElement | null = null;
-          for (const conflict of plan.conflicts) {
-            dialog.body.append(node("h3", conflict.skill));
-            for (const version of conflict.versions) {
-              const label = node("label", "", "skills-version");
-              const radio = node("input");
-              radio.type = "radio";
-              radio.name = conflict.skill;
-              radio.value = version.hostId;
-              radio.addEventListener("change", () => {
-                choices[conflict.skill] = version.hostId;
-                if (continueButton)
-                  continueButton.disabled = plan.conflicts.some((entry) => !choices[entry.skill]);
-              });
-              const detail = node("div");
-              detail.append(
-                node("strong", version.name),
-                node(
-                  "span",
-                  `${new Date(version.entry.modifiedAt).toLocaleString("zh-CN")} · ${version.entry.fingerprint.slice(0, 12)}`,
-                  "skills-description",
-                ),
-                node(
-                  "span",
-                  version.entry.files.map((f) => f.path).join("、"),
-                  "skills-description",
-                ),
-              );
-              label.append(radio, detail);
-              dialog.body.append(label);
-            }
-            const diff = node("pre", conflict.diff, "skills-diff");
-            diff.setAttribute("aria-label", `${conflict.skill} 差异`);
-            dialog.body.append(diff);
-          }
-          const next = button(
-            "继续预览",
-            () => {
-              if (plan.conflicts.some((c) => !choices[c.skill])) return;
-              dialog.close();
-              void previewSync({ ...input, choices, basedOn: plan.id });
-            },
-            true,
-          );
-          continueButton = next;
-          next.disabled = true;
-          dialog.footer.append(button("取消", dialog.close), next);
+          showSkillConflicts({
+            root,
+            plan,
+            choices: input.choices,
+            continueWith: (choices) => void previewSync({ ...input, choices, basedOn: plan.id }),
+          });
           return;
         }
         const dialog = skillsDialog(root, "同步预览");
@@ -459,70 +316,26 @@ export function createSkillsSettingsPage(
           agentId: string;
           skill: string;
         }[] = [],
+        focus?: string,
       ): Promise<void> {
         await perform(
           () => required(client).linkPlan(hostId, adopt),
-          (plan) => showLinks(plan, adopt),
+          (plan) => showLinks(plan, adopt, focus),
         );
       }
       function showLinks(
         plan: SkillLinkPlan,
-        adopt: {
-          agentId: string;
-          skill: string;
-        }[],
+        adopt: { agentId: string; skill: string }[],
+        focus?: string,
       ): void {
-        const dialog = skillsDialog(root, `${machineName(plan.hostId)} · 链接预览`);
-        dialog.body.append(node("p", "现有文件会保留；收进中央库的目录会移动并留下链接，可撤销。"));
-        for (const action of plan.actions) {
-          const row = node("div", "", "skills-link-row");
-          row.append(
-            node("strong", action.skill),
-            node("span", action.agentId, "skills-muted"),
-            node(
-              "span",
-              {
-                link: "创建链接",
-                "remove-dangling": "清理失效链接",
-                conflict: "现有文件冲突",
-                adopt: "收进中央库并替换同名版本",
-              }[action.kind],
-            ),
-          );
-          if (action.kind === "conflict" && action.fingerprint)
-            row.append(
-              button("收进中央库", () => {
-                const confirm = skillsDialog(root, "收进中央库");
-                confirm.body.append(
-                  node(
-                    "p",
-                    `将 ${action.agentId} 的 ${action.skill} 移入中央库，同名中央版本会备份。请确认保留这个版本。`,
-                  ),
-                );
-                confirm.footer.append(
-                  button("取消", confirm.close),
-                  button(
-                    "保留此版本并预览",
-                    () => {
-                      confirm.close();
-                      dialog.close();
-                      void linkPreview(plan.hostId, [
-                        ...adopt,
-                        { agentId: action.agentId, skill: action.skill },
-                      ]);
-                    },
-                    true,
-                  ),
-                );
-              }),
-            );
-          dialog.body.append(row);
-        }
-        if (!plan.actions.length) dialog.body.append(node("p", "链接已就绪，无需更改。"));
-        const apply = button(
-          "应用链接",
-          () => {
-            dialog.close();
+        showSkillLinks({
+          root,
+          machines,
+          plan,
+          adopt,
+          focus,
+          replan: (selected, focus) => void linkPreview(plan.hostId, selected, focus),
+          apply: () => {
             progress.set(plan.hostId, "正在链接…");
             render();
             void perform(
@@ -534,10 +347,7 @@ export function createSkillsSettingsPage(
               },
             );
           },
-          true,
-        );
-        apply.disabled = !plan.actions.some((a) => a.kind !== "conflict");
-        dialog.footer.append(button("取消", dialog.close), apply);
+        });
       }
       matrix.append(node("div", "", "skills-skeleton"));
       if (client) void perform(load, () => {});
@@ -546,6 +356,7 @@ export function createSkillsSettingsPage(
         notice.textContent = "连接失败";
       }
       return () => {
+        document.defaultView?.removeEventListener("keydown", dismissTooltip, true);
         root.querySelectorAll("dialog").forEach((dialog) => {
           dialog.close();
           dialog.remove();

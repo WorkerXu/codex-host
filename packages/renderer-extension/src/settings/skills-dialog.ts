@@ -1,4 +1,4 @@
-import { skillsClass, skillsButtonClass } from "./skills-style.js";
+import { skillsClass } from "./skills-style.js";
 export interface SkillsDialog {
   body: HTMLElement;
   footer: HTMLElement;
@@ -45,8 +45,8 @@ export function skillButton(
   button.type = "button";
   button.textContent = label;
   button.className = primary
-    ? `${skillsButtonClass} bg-settings-active font-semibold`
-    : skillsButtonClass;
+    ? "skills-button settings-command-button"
+    : "skills-button settings-command-button settings-command-button--secondary";
   button.addEventListener("click", action);
   return button;
 }
