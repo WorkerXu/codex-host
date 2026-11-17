@@ -1,4 +1,5 @@
 import previewCss from "./preview.css";
+import { applyDesktopTheme } from "./desktop-theme.js";
 import {
   createDingTalkEntryRow,
   installRendererDingTalkEntry,
@@ -984,6 +985,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-conversation-hover"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
+  async "dingtalk-image-unavailable"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
   async "dingtalk-lightbox"() {
     resetConversationMemory();
     const { query } = mountSettings("dingtalk");
@@ -1147,12 +1156,17 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
-    const input = query<HTMLInputElement>(".dingtalk-search-input");
-    if (!input) throw new Error("Search input is missing");
-    input.value = "示例Sprint";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => query(".dingtalk-search-result"));
-    await delay(260);
+  },
+
+  async "dingtalk-search-empty"() {
+    await scenarios["dingtalk-search"]();
+  },
+
+  async "dingtalk-loading"() {
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      conversationsPending: true,
+    });
+    await waitFor(() => query(".dingtalk-skeleton-list"));
   },
 
   async "dingtalk-search-more"() {
@@ -1487,6 +1501,7 @@ async function main() {
   const run = scenarios[scenarioName];
   if (!run) throw new Error(`Unknown preview scenario: ${scenarioName}`);
   try {
+    await applyDesktopTheme(theme);
     await run();
     await delay(250);
     document.body.dataset.scenario = scenarioName;

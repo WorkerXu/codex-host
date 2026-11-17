@@ -12,7 +12,7 @@ import path from "node:path";
 const previewRoot = import.meta.dirname;
 const distFile = path.join(previewRoot, "dist/preview.js");
 const shadowContextPath = process.env.CODEX_SHADOW_CONTEXT ?? "";
-// Global Desktop stylesheet for native-DOM scenarios (Composer @ popup).
+// Exported Desktop stylesheet supplies theme variables and native-DOM scenarios.
 const desktopCssPath = process.env.CODEX_DESKTOP_CSS ?? "";
 const host = "127.0.0.1";
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
@@ -53,8 +53,8 @@ function shadowContextMetadata() {
     path: shadowContextPath,
     varCount: Object.keys(context.vars ?? {}).length,
     colorScheme: context.colorScheme ?? "light",
-    // The export carries light values; dark captures stay approximate.
-    darkApproximate: (context.colorScheme ?? "light") !== "dark",
+    nativeThemeStylesheet: desktopCssPath,
+    darkApproximate: !desktopCssPath || !existsSync(desktopCssPath),
   };
 }
 

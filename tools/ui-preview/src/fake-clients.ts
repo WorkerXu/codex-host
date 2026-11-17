@@ -42,6 +42,7 @@ export type FakeDingTalkStatus = "connected" | "not-logged-in" | "unreachable";
 export interface FakeDingTalkOptions {
   empty?: boolean;
   error?: boolean;
+  conversationsPending?: boolean;
   messageDelayMs?: number;
   status?: FakeDingTalkStatus;
   heavy?: boolean;
@@ -138,6 +139,7 @@ export function createFakeDingTalkClient(
       };
     },
     async conversations(): Promise<DingTalkConversationsResult> {
+      if (options.conversationsPending) return new Promise(() => {});
       await sleep(40);
       return conversationsResult();
     },

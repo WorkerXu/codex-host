@@ -416,6 +416,7 @@ export function createDingTalkSettingsPage(
       const updateHeader = (): void => {
         const conversation = state.currentConversation;
         mainHead.setConversation(conversation);
+        composer.element.hidden = conversation === null;
         composer.setPlaceholder(conversation?.title || "");
       };
 

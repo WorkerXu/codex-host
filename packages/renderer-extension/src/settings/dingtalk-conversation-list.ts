@@ -25,9 +25,23 @@ export function createDingTalkConversationList(
 ): DingTalkConversationList {
   const { document, container, text } = options;
   const rows = new Map<string, HTMLButtonElement>();
+  const fitTags = (): void => {
+    const entries = [...rows.values()].map((row) => ({
+      title: row.querySelector<HTMLElement>(".dingtalk-conversation-title"),
+      tag: row.querySelector<HTMLElement>(".dingtalk-conversation-tag"),
+    }));
+    for (const { tag } of entries) if (tag) tag.hidden = false;
+    const clipped = entries.map(({ title }) =>
+      Boolean(title && title.scrollWidth > title.clientWidth),
+    );
+    for (const [index, { tag }] of entries.entries()) if (tag) tag.hidden = clipped[index] ?? false;
+  };
+  const ResizeObserver = document.defaultView?.ResizeObserver;
+  const observer = ResizeObserver ? new ResizeObserver(fitTags) : null;
 
   const api: DingTalkConversationList = {
     render(conversations, selectedId) {
+      observer?.observe(container);
       for (const child of [...container.children]) {
         if (!(child as HTMLElement).dataset.conversationId) child.remove();
       }
@@ -55,11 +69,13 @@ export function createDingTalkConversationList(
           container.insertBefore(row, cursor);
         }
       }
+      fitTags();
     },
     elementFor(conversationId) {
       return rows.get(conversationId) ?? null;
     },
     clear() {
+      observer?.disconnect();
       for (const row of rows.values()) row.remove();
       rows.clear();
     },

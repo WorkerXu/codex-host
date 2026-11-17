@@ -17,6 +17,8 @@ const allScenarios = [
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-hover",
+  "dingtalk-conversation-hover",
+  "dingtalk-image-unavailable",
   "dingtalk-lightbox",
   "dingtalk-at-picker",
   "dingtalk-at-chip",
@@ -37,6 +39,8 @@ const allScenarios = [
   "dingtalk-direct",
   "dingtalk-scrolled-top",
   "dingtalk-search",
+  "dingtalk-search-empty",
+  "dingtalk-loading",
   "dingtalk-search-more",
   "dingtalk-empty",
   "dingtalk-error",
@@ -178,8 +182,30 @@ for (const scenario of scenarios) {
       await page.hover(".agent-card[data-agent-name]");
     }
     if (scenario === "dingtalk-hover") {
-      await realHover(page, ".dingtalk-message", 1);
+      await realHover(page, ".dingtalk-message", -1);
       await page.waitForTimeout(150);
+    }
+    if (scenario === "dingtalk-conversation-hover") {
+      await realHover(page, ".dingtalk-conversation", 1);
+    }
+    if (scenario === "dingtalk-search" || scenario === "dingtalk-search-empty") {
+      await realClick(page, ".dingtalk-search-input");
+      await page.keyboard.type(scenario.endsWith("-empty") ? "不存在的会话XYZ" : "示例Sprint");
+      await page.waitForSelector(
+        scenario.endsWith("-empty")
+          ? ".dingtalk-search-results .dingtalk-empty-list"
+          : ".dingtalk-search-result",
+      );
+    }
+    if (scenario === "dingtalk-image-unavailable") {
+      const list = await pointAt(page, ".dingtalk-message-list");
+      const target = await page.locator('[data-message-id="msg-launch-193"]').boundingBox();
+      if (!target) throw new Error("Missing image fixture is not rendered");
+      await page.mouse.move(list.x, list.y);
+      await page.mouse.wheel(0, target.y + target.height / 2 - list.y);
+      await page.waitForSelector(
+        '[data-message-id="msg-launch-193"] .dingtalk-message-image--unavailable',
+      );
     }
     if (scenario === "dingtalk-lightbox") {
       await realClick(page, ".dingtalk-message-image--loaded", 0);
@@ -329,6 +355,10 @@ for (const scenario of scenarios) {
       const result = [];
       const check = (name, ok, detail = "") => result.push({ name, ok: Boolean(ok), detail });
       const visible = (element) => Boolean(element) && element.getBoundingClientRect().height > 0;
+      check(
+        "native-desktop-theme",
+        document.body.dataset.nativeTheme === document.body.dataset.theme,
+      );
 
       // Every custom property used by the workbench must resolve inside the
       // shadow root, or carry an explicit fallback.
@@ -373,7 +403,7 @@ for (const scenario of scenarios) {
         );
       }
 
-      if (document.querySelector(".dingtalk-workbench")) {
+      if (query(".dingtalk-conversation-list:not([hidden]) .dingtalk-conversation")) {
         const list = query(".dingtalk-conversation-list");
         check("conversation-list-visible", visible(list));
         const sidebar = query(".settings-sidebar");
@@ -417,6 +447,98 @@ for (const scenario of scenarios) {
             listRect ? `${Math.round(firstRowRect.left - listRect.left)}px` : "missing",
           );
         }
+      }
+      for (const row of queryAll(".dingtalk-conversation")) {
+        const title = row.querySelector(".dingtalk-conversation-title");
+        const tag = row.querySelector(".dingtalk-conversation-tag");
+        if (tag && !tag.hidden && title) {
+          check("title-before-tag", title.scrollWidth <= title.clientWidth, title.textContent);
+        }
+        if (row.querySelector(".dingtalk-unread-badge"))
+          check("ordinary-unread-no-prefix", !row.querySelector(".dingtalk-conversation-count"));
+        const dot = row.querySelector(".dingtalk-avatar-unread");
+        if (dot) {
+          check("muted-unread-prefix", Boolean(row.querySelector(".dingtalk-conversation-count")));
+          check(
+            "muted-dot-gray",
+            getComputedStyle(dot).backgroundColor ===
+              getComputedStyle(row.querySelector(".dingtalk-conversation-time")).color,
+          );
+        }
+      }
+      if (document.body.dataset.scenario === "dingtalk-header-menu-narrow") {
+        for (const id of ["cid-launch", "cid-finance"]) {
+          const row = query(`[data-conversation-id="${id}"]`);
+          const title = row?.querySelector(".dingtalk-conversation-title");
+          const tag = row?.querySelector(".dingtalk-conversation-tag");
+          check(
+            `narrow-name-priority-${id}`,
+            title && tag?.hidden && title.scrollWidth <= title.clientWidth,
+          );
+        }
+        const width = query(".dingtalk-sidebar")?.getBoundingClientRect().width ?? 0;
+        check("sidebar-responsive-width", width >= 240 && width <= 320, String(width));
+      }
+      for (const [id, label] of [
+        ["cid-partner", "华东"],
+        ["cid-budget", "预算"],
+      ]) {
+        const avatar = query(`[data-conversation-id="${id}"] .dingtalk-avatar`);
+        if (avatar) check(`avatar-${id}`, avatar.textContent === label, avatar.textContent);
+      }
+      for (const avatar of queryAll(".dingtalk-message--bot .dingtalk-message-avatar"))
+        check("bot-icon-avatar", Boolean(avatar.querySelector("svg")) && !avatar.textContent);
+      if (document.body.dataset.scenario === "dingtalk-image-unavailable") {
+        const frame = query(
+          '[data-message-id="msg-launch-193"] .dingtalk-message-image--unavailable',
+        );
+        const bubble = frame?.closest(".dingtalk-message-bubble");
+        const frameRect = frame?.getBoundingClientRect();
+        const bubbleRect = bubble?.getBoundingClientRect();
+        check(
+          "unavailable-image-regular-bubble",
+          bubble &&
+            !bubble.classList.contains("dingtalk-message-bubble--image") &&
+            getComputedStyle(bubble).backgroundColor !== "rgba(0, 0, 0, 0)",
+        );
+        check(
+          "unavailable-image-text-aligned",
+          frameRect && bubbleRect && Math.abs(frameRect.left - bubbleRect.left - 12) <= 1,
+        );
+        check(
+          "unavailable-image-visible",
+          frameRect && frameRect.top >= 100 && frameRect.bottom <= window.innerHeight,
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-conversation-hover") {
+        const selected = query('.dingtalk-conversation[aria-selected="true"]');
+        const hovered = query(".dingtalk-conversation:hover");
+        check("conversation-hover-and-selected", selected && hovered && selected !== hovered);
+        check(
+          "conversation-hover-distinct",
+          selected &&
+            hovered &&
+            getComputedStyle(selected).backgroundColor !==
+              getComputedStyle(hovered).backgroundColor,
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-loading") {
+        check("loading-skeleton", queryAll(".dingtalk-skeleton-row").length === 6);
+        check("loading-no-composer", !visible(query(".dingtalk-composer-area")));
+      }
+      if (document.body.dataset.scenario === "dingtalk-search-empty") {
+        check(
+          "search-empty-chinese",
+          query(".dingtalk-search-results")?.textContent.includes("没有找到相关会话或消息"),
+        );
+        check("search-empty-no-results", queryAll(".dingtalk-search-result").length === 0);
+      }
+      if (document.body.dataset.scenario === "dingtalk-error") {
+        check("error-no-composer", !visible(query(".dingtalk-composer-area")));
+        check(
+          "error-chinese",
+          query(".dingtalk-empty-list")?.textContent.includes("钉钉连接不可用，请稍后重试"),
+        );
       }
       if (document.body.dataset.scenario.startsWith("dingtalk-status-")) {
         const text = query(".dingtalk-menu-status-text")?.textContent ?? "";
