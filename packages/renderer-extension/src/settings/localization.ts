@@ -315,7 +315,7 @@ export interface RendererSettingsMessages {
     installProgress: string;
     actionFailed: string;
   };
-  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
+  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId | "session-import", string>>;
 }
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({

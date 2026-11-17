@@ -1,3 +1,4 @@
+import { modelServiceErrorText } from "./model-service-client.js";
 import {
   JARVIS_BUG_SEARCH_METHOD,
   JARVIS_DOWNLOAD_CHUNK_METHOD,
@@ -136,7 +137,22 @@ function base64ByteLength(value: string): number {
 export function jarvisErrorText(
   code: string | null | undefined,
   locale: RendererSettingsLocale,
+  provider: string = "openai",
 ): string {
+  if (
+    [
+      "missing_key",
+      "quota_exhausted",
+      "unauthorized",
+      "invalid_key",
+      "timeout",
+      "network",
+      "invalid_response",
+      "provider_failed",
+      "rate_limited",
+    ].includes(code ?? "")
+  )
+    return modelServiceErrorText(code, provider);
   const zh: Record<string, string> = {
     not_installed: "未安装 jarvis CLI",
     auth_failed: "jarvis CLI 未登录",

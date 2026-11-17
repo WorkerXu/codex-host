@@ -609,7 +609,7 @@ export function renderJarvisEmpty(
       ? locale === "zh-CN"
         ? "Jarvis 未安装或未登录"
         : "Jarvis is not installed or signed in"
-      : jarvisErrorText(result.errorCode, locale)
+      : jarvisErrorText(result.errorCode, locale, result.source)
     : locale === "zh-CN"
       ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
       : "No matching bugs. Try removing a condition or rephrasing.";

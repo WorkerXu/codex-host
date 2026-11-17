@@ -40,7 +40,7 @@ const HARNESS_SESSION_LIST_METHOD = "codexhost/harness/session-import/list";
 const HARNESS_SESSION_IMPORT_METHOD = "codexhost/harness/session-import/import";
 import {
   CODEXHOST_RELEASES_LATEST_URL,
-  createDefaultRendererSettingsPages,
+  createDefaultRendererSettingsPages as createSettingsPages,
 } from "../../src/settings/pages.js";
 import type {
   RendererConnectionDiagnostics,
@@ -50,6 +50,18 @@ import type {
 import { pluginDescriptor } from "../../../../tests/fixtures/harness-plugin-descriptors.js";
 import { createHarnessInstallationPanel } from "../../src/settings/harness-installation-panel.js";
 
+import { createSessionImportSettingsPage } from "../../src/settings/session-import-page.js";
+function createDefaultRendererSettingsPages(...args: Parameters<typeof createSettingsPages>) {
+  return [
+    ...createSettingsPages(...args),
+    createSessionImportSettingsPage(
+      args[0] ?? rendererSettingsMessages("en"),
+      args[4] ?? (() => null),
+      args[5] ?? null,
+      args[2],
+    ),
+  ];
+}
 class FakeElement {
   readonly children: unknown[] = [];
   readonly dataset: Record<string, string> = {};

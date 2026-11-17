@@ -1,3 +1,4 @@
+import type { RendererModelServiceClient } from "./model-service-client.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
@@ -43,6 +44,7 @@ export interface RendererSettingsLifecycleOptions {
   /** Machines the usage statistics page may read besides the local Host. */
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider;
   jarvis?: RendererJarvisSettingsOptions;
+  modelService?: RendererModelServiceClient;
   dingtalk?: RendererDingTalkPageOptions;
   codexAgents?: RendererCodexAgentsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
@@ -107,6 +109,7 @@ export function installRendererSettingsLifecycle(
       options.jarvis,
       options.dingtalk,
       options.codexAgents,
+      options.modelService,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

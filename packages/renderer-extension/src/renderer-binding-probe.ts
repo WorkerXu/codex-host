@@ -1,3 +1,4 @@
+import { createRendererModelServiceClient } from "./model-service-client.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
@@ -952,6 +953,9 @@ export function installRendererBindingProbe(
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     jarvis: { createClient: () => jarvisClient },
+    modelService: createRendererModelServiceClient(
+      () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+    ),
     dingtalk: {
       createClient: () => dingtalkClient,
       readLocale: () => settingsLifecycle.locale,
@@ -3669,7 +3673,7 @@ export function installRendererBindingProbe(
           };
         }
       ).__codexhostSettingsShellV1;
-      shell?.openSettings(opener, "jarvis");
+      shell?.openSettings(opener, "appearance");
     },
   });
   dingtalkMention = installRendererDingTalkEntry(document, {

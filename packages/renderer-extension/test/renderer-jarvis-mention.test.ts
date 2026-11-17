@@ -205,13 +205,13 @@ describe("Renderer Jarvis client", () => {
     expect(jarvisErrorText("not_installed", "zh-CN")).toBe("未安装 jarvis CLI");
     expect(jarvisErrorText("forward_failed", "zh-CN")).toBe("无法建立登录回调转发");
     expect(jarvisErrorText("unknown_code", "zh-CN")).toBe("Jarvis 操作失败");
-    expect(jarvisErrorText("missing_key", "zh-CN")).toBe("未配置 Gemini 密钥");
-    expect(jarvisErrorText("quota_exhausted", "zh-CN")).toBe("Gemini 额度不足");
-    expect(jarvisErrorText("unauthorized", "zh-CN")).toBe("Gemini 密钥无效");
+    expect(jarvisErrorText("missing_key", "zh-CN")).toBe("未配置 OpenAI Key");
+    expect(jarvisErrorText("quota_exhausted", "zh-CN")).toBe("OpenAI 额度不足");
+    expect(jarvisErrorText("unauthorized", "zh-CN")).toBe("OpenAI Key 无效");
     expect(jarvisErrorText("network", "zh-CN")).toBe("网络连接失败");
     expect(jarvisCodeFromError(new Error("quota_exhausted"))).toBe("quota_exhausted");
     expect(jarvisErrorText("prepayment credits are depleted", "zh-CN")).toBe("Jarvis 操作失败");
-    expect(jarvisErrorText("invalid_response", "zh-CN")).toContain("Gemini 查询理解结果无效");
+    expect(jarvisErrorText("invalid_response", "zh-CN")).toContain("解析结果无效");
     expect(jarvisErrorText("gemini_failed", "zh-CN")).toContain("Gemini 查询理解失败");
     expect(jarvisCodeFromError({ message: "not_installed" })).toBe("not_installed");
     expect(jarvisCodeFromError(new Error("boom"))).toBe("jarvis_failed");
