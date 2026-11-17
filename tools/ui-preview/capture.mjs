@@ -25,6 +25,9 @@ const allScenarios = [
   "skills-conflict-files",
   "skills-conflict-files-focus",
   "skills-link-preview",
+  "skills-link-focus",
+  "skills-link-checked-focus",
+  "skills-agents-focus",
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-hover",
@@ -572,6 +575,13 @@ for (const scenario of scenarios) {
         );
         if (document.body.dataset.scenario === "skills-focus")
           check("skills-keyboard-focus", primary.matches(":focus-visible"));
+        if (document.body.dataset.scenario === "skills-agents-focus")
+          check(
+            "skills-agent-keyboard-focus",
+            query(
+              ".skills-machine-head .skills-button:not(.settings-command-button--secondary)",
+            )?.matches(":focus-visible"),
+          );
         const dialog = query("dialog[open]");
         if (dialog) {
           const rect = dialog.getBoundingClientRect();
@@ -608,7 +618,9 @@ for (const scenario of scenarios) {
           if (document.body.dataset.scenario === "skills-conflict-files-focus")
             check(
               "skills-file-keyboard-focus",
-              summary.matches(":focus-visible") && Boolean(query("details[open]")),
+              summary.matches(":focus-visible") &&
+                getComputedStyle(summary).outlineOffset === "-2px" &&
+                Boolean(query("details[open]")),
             );
           check("skills-conflict-dialog", visible(query("dialog[open]")));
           check("skills-conflict-versions", queryAll(".skills-version").length === 2);
@@ -644,15 +656,36 @@ for (const scenario of scenarios) {
             query(".skills-diff")?.textContent.includes("+ version: 1.3"),
           );
         }
-        if (
-          ["skills-link-preview", "skills-link-choice"].includes(document.body.dataset.scenario)
-        ) {
+        if (document.body.dataset.scenario.startsWith("skills-link")) {
+          const checkbox = query("[data-skill-adoption]");
+          const checkboxStyle = getComputedStyle(checkbox);
+          check(
+            "skills-desktop-checkbox",
+            checkboxStyle.appearance === "none" &&
+              checkboxStyle.width === "18px" &&
+              checkboxStyle.borderStyle === "solid",
+          );
+          check(
+            "skills-checkbox-mark",
+            getComputedStyle(checkbox, "::after").opacity === (checkbox.checked ? "1" : "0"),
+          );
+          if (
+            ["skills-link-focus", "skills-link-checked-focus"].includes(
+              document.body.dataset.scenario,
+            )
+          )
+            check(
+              "skills-checkbox-keyboard-focus",
+              checkbox.matches(":focus-visible") && checkboxStyle.outlineStyle === "solid",
+            );
           check("skills-link-actions", queryAll(".skills-link-row").length === 4);
           check("skills-link-groups", queryAll(".skills-link-group").length === 2);
           check(
             "skills-link-choice-default",
             query("[data-skill-adoption]")?.checked ===
-              (document.body.dataset.scenario === "skills-link-choice"),
+              ["skills-link-choice", "skills-link-checked-focus"].includes(
+                document.body.dataset.scenario,
+              ),
           );
           check(
             "skills-link-footer",

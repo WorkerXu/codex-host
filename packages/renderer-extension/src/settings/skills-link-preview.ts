@@ -1,5 +1,6 @@
 import type { SkillLinkPlan, SkillMachine } from "@codexhost/shared-contracts";
 import { skillButton, skillNode, skillsDialog } from "./skills-dialog.js";
+import { createPreferenceCheckbox } from "./preference-ui.js";
 import { skillAgentName, skillDirectory } from "./skills-presentation.js";
 export interface SkillAdoption {
   agentId: string;
@@ -62,8 +63,7 @@ export function showSkillLinks(options: {
       );
       if ((action.kind === "conflict" && action.fingerprint) || action.kind === "adopt") {
         const label = skillNode(document, "label", "", "skills-link-choice");
-        const check = skillNode(document, "input");
-        check.type = "checkbox";
+        const check = createPreferenceCheckbox(document);
         check.checked = action.kind === "adopt";
         const key = `${agentId}/${action.skill}`;
         check.dataset.skillAdoption = key;

@@ -1633,6 +1633,26 @@ scenarios["skills-link-choice"] = async () => {
     key: "Tab",
   });
 };
+scenarios["skills-link-focus"] = async () => {
+  await scenarios["skills-link-preview"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>("dialog")!, "key", { key: "Tab" });
+  await waitFor(() => shadow.activeElement === shadow.querySelector("[data-skill-adoption]"));
+};
+scenarios["skills-link-checked-focus"] = async () => {
+  await scenarios["skills-link-focus"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>("[data-skill-adoption]")!, "key", {
+    key: "Space",
+  });
+  await waitFor(() => shadow.querySelector<HTMLInputElement>("[data-skill-adoption]")?.checked);
+};
+scenarios["skills-agents-focus"] = async () => {
+  await scenarios["skills-agents"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  const buttons = shadow.querySelectorAll<HTMLElement>(".skills-machine-head button");
+  await previewInputOn(buttons[0]!, "key", { key: "Tab" });
+};
 scenarios["skills-conflict-files"] = async () => {
   await scenarios["skills-conflict"]();
   const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;

@@ -72,8 +72,7 @@ const classes: Record<string, string> = {
     "skills-link-row flex min-h-11 flex-wrap items-center gap-3 border-b border-settings-divider px-3 py-2 last:border-b-0 [&_strong]:mr-auto [&_strong]:font-normal",
   "skills-action-tag":
     "skills-action-tag rounded bg-settings-hover px-2 py-0.5 text-xs text-settings-muted",
-  "skills-link-choice":
-    "skills-link-choice flex cursor-pointer items-center gap-2 text-xs [&_input]:size-4 [&_input]:accent-settings-focus [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-2 [&_input:focus-visible]:outline-settings-focus",
+  "skills-link-choice": "skills-link-choice flex cursor-pointer items-center gap-2 text-xs",
 };
 export function skillsClass(name: string): string {
   return classes[name] ?? name;
