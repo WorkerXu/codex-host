@@ -1,5 +1,7 @@
 import nativeComposerHtml from "../fixtures/native-composer.html";
 import { pickDesktopFolders } from "../../../packages/renderer-extension/src/renderer-folder-picker.js";
+import { openRepositoryDialog } from "../../../packages/renderer-extension/src/renderer-repository-dialog.js";
+import { createRepositoryPreviewClient } from "./code-repositories.js";
 import {
   createThreadFoldersControl,
   folderIcon,
@@ -14,6 +16,7 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
   const prefix = remote ? "/home/ubuntu" : "/Users/lin";
   const project = `${prefix}/Projects/codexhost`;
   const pickerMode = new URL(location.href).searchParams.get("picker") ?? "unavailable";
+  const repositoryState = new URL(location.href).searchParams.get("repository");
   const pickerModule =
     location.protocol === "about:"
       ? "about:rpc-folder-picker-preview.js"
@@ -84,6 +87,27 @@ export function mountThreadFoldersPreview(root: HTMLElement, scenario: string) {
   nativeButton.after(model);
   const control = createThreadFoldersControl({
     document,
+    ...(repositoryState
+      ? {
+          async fromRepository(add: (path: string) => Promise<void>) {
+            await openRepositoryDialog({
+              document,
+              hostId: remote ? "preview-server" : "local",
+              machine: remote ? "开发机" : "本机",
+              client: createRepositoryPreviewClient(repositoryState),
+              async pickLocal() {
+                document.body.dataset.repositoryNativePicker = "directory";
+                return pickerMode === "unavailable"
+                  ? null
+                  : pickerMode === "cancel"
+                    ? []
+                    : ["/Users/lin/Downloads"];
+              },
+              add,
+            });
+          },
+        }
+      : {}),
     pickLocal: () =>
       pickDesktopFolders(window, async () => ({
         appServices:

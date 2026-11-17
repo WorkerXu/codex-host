@@ -250,6 +250,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
       if (disposed || attempt !== generation) return;
       parent = target.parent;
       renderTarget();
+      if (options.hostId === "local") await chooseParent();
     } catch (error) {
       if (disposed || attempt !== generation) return;
       header("选择克隆位置");
