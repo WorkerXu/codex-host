@@ -144,7 +144,7 @@ ssh \
 - 选择器先列本机 Harness，再按 peer 分组列出远端 Harness；行文本形如 `Grok · oracle-sg`。分组标题优先使用 Desktop 连接目录中该 peer `hostIds` 对应的 `displayName`（与侧边栏 remote host 名一致）；hostId 对不上时再用 peer 的 SSH 别名/主机名匹配，最后回退 `peers.json` 的 peer 名。不可达但已知 Harness 的机器显示为置灰行；从未成功获取过 Harness 的机器显示为单个置灰行（不重复标题），错误文案本地化为「连接超时」/「连接失败」。输入查询可以匹配 Harness 名、ID 或机器名。
 - 选中远端 Harness 后，mention 链接为 `[@Grok](subagent://codexhost.grok?host=oracle-sg)`；`host` 是 peer 名。旧的无 `host` 链接继续按本机处理。
 - Host 端的 mention rewrite 会生成可直接执行的完整命令，包含 `--host`、`--task-name`、`--task`、`--watch true` 和 `--format compact`，并明确要求不要先跑 `--help` 或 `peer list`；本机 mention 不带 host，行为不变。
-- 随包安装的 delegation 技能同步升级到 v13：有完整命令时直接执行，优先 `delegate start --watch true` 后结束本轮，不循环 `thread wait`；只有缺少命令细节时才查 help。
+- 随包安装的 delegation 技能（v15）：有完整命令时直接执行，优先 `delegate start --watch true` 后结束本轮，不循环 `thread wait`；只有缺少命令细节时才查 help。
 
 ## CLI 路由
 
@@ -225,3 +225,12 @@ ssh \
 - `delegation-skill` 内容包含 `peer list`、`--host`、跨机 watch 和禁止读取 `~/.codexhost/runtime/` 的约束。
 
 测试通过注入的 spawn 模拟 SSH，不会建立真实连接。真实跨机连通性、主机密钥、远端 `PATH` 和远端 Host Runtime 状态需要在部署环境中另行验证。
+
+
+## 对话项目归属
+
+`delegate start` 默认继承发起对话的项目，与子对话 `--cwd` 无关。未显式指定 `--cwd` 时，使用父会话当前主工作文件夹。`--project <projectId>` 显式指定项目，`--project none` 创建无项目子对话；显式选择优先于继承。同机原生 Codex 在 `thread/start` 携带 `projectId`，外部 Harness 把它保存在 Thread metadata。
+
+跨机的项目 ID 属于 Desktop，不能当作目标机器 app-server 的项目 ID。Host 将来源 Host、来源 Thread 和显式项目选择保存在委派记录中，Renderer 通过 Desktop 的 Thread 项目分配服务登记；服务未就绪时保留记录并重试。已有人工作出的子对话归属不被覆盖。
+
+工作文件夹、持久化与真实 Desktop 绑定限制见 [对话工作文件夹](thread-folders.md)。

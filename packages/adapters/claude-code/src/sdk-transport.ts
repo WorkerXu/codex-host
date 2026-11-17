@@ -132,6 +132,7 @@ interface AutonomousSegment {
 }
 
 export interface ClaudeSdkTransportOptions {
+  additionalDirectories?: readonly string[];
   command?: string;
   environment?: NodeJS.ProcessEnv;
   cwd: string;
@@ -467,6 +468,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   readonly #closeTimeoutMs: number;
   readonly #command: string | undefined;
   readonly #cwd: string;
+  readonly #additionalDirectories: readonly string[];
   readonly #environment: NodeJS.ProcessEnv;
   readonly #input = new PushableInput<SDKUserMessage>();
   readonly #model: string | undefined;
@@ -518,6 +520,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   constructor(options: ClaudeSdkTransportOptions) {
     this.sessionId = options.sessionId;
     this.#cwd = options.cwd;
+    this.#additionalDirectories = options.additionalDirectories ?? [];
     this.#abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
     this.#steerQueuedTimeoutMs = options.steerQueuedTimeoutMs ?? DEFAULT_STEER_QUEUED_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs;
@@ -567,6 +570,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
       prompt: this.#input,
       options: {
         cwd: this.#cwd,
+        additionalDirectories: [...this.#additionalDirectories],
         ...(this.#openMode === "resume"
           ? { resume: this.sessionId }
           : { sessionId: this.sessionId }),

@@ -264,3 +264,52 @@ it.each([false, true])(
     expect(draft.modelSettings).toBeNull();
   },
 );
+
+it("keeps concurrent native creations' folder requests separate across asynchronous preparation", async () => {
+  const sent = vi.fn();
+  const client = { sendRequest: sent };
+  const pool = {
+    hasPrewarmedThread: () => false,
+    consumePrewarmedThread: vi.fn(),
+    deletePrewarmedThread: vi.fn(),
+  };
+  class Creation {
+    constructor(
+      readonly params: { requestClient: typeof client; prewarmedThreadManager: typeof pool },
+    ) {}
+    async createConversation(input: Record<string, unknown>, ready: Promise<void>) {
+      await ready;
+      return this.params.requestClient.sendRequest("thread/start", {
+        cwd: input.cwd,
+        projectId: input.projectId,
+      });
+    }
+  }
+  const creation = new Creation({ requestClient: client, prewarmedThreadManager: pool });
+  const manager = { threadCreation: creation, startConversation: vi.fn() };
+  const policy = isolateRendererPrewarmConsumption(manager, vi.fn(), { client, send: sent });
+  const a = mode("native");
+  const b = mode("native");
+  policy?.selectWorkingFolders("client-new-thread:a", ["/a", "/extra-a"], [a.collaborationMode]);
+  policy?.selectWorkingFolders("client-new-thread:b", ["/b", "/extra-b"], [b.collaborationMode]);
+  const ready = Promise.withResolvers<undefined>();
+  const first = creation.createConversation({ ...a, projectId: "project-a" }, ready.promise);
+  await creation.createConversation({ ...b, projectId: "project-b" }, Promise.resolve());
+  ready.resolve(undefined);
+  await first;
+  expect(sent.mock.calls.map((call) => call[1])).toEqual([
+    {
+      cwd: "/b",
+      projectId: "project-b",
+      runtimeWorkspaceRoots: ["/b", "/extra-b"],
+      codexhostWorkingFolders: ["/b", "/extra-b"],
+    },
+    {
+      cwd: "/a",
+      projectId: "project-a",
+      runtimeWorkspaceRoots: ["/a", "/extra-a"],
+      codexhostWorkingFolders: ["/a", "/extra-a"],
+    },
+  ]);
+  policy?.dispose();
+});

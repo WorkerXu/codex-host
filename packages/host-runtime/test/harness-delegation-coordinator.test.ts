@@ -28,7 +28,9 @@ async function fixture(
   adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi")),
   officialThreadCwd: (
     threadId: string,
-  ) => Promise<string | undefined | { cwd?: string; title?: string }> = async () => undefined,
+  ) => Promise<
+    string | undefined | { cwd?: string; title?: string; projectId?: string }
+  > = async () => undefined,
   environment: NodeJS.ProcessEnv = {},
   externalThreadBusy: (thread: ExternalThread) => boolean = (thread) => thread.running,
   activeOfficialParents: () => string[] = () => [],
@@ -51,7 +53,9 @@ async function fixture(
     consumeOutputs: async () => undefined,
     diagnose: () => undefined,
   });
+  const projectForThread = vi.fn(async (): Promise<string | null | undefined> => undefined);
   const coordinator = new HarnessDelegationCoordinator({
+    projectForThread,
     adapters,
     environment,
     externalRuntime: runtime,
@@ -92,6 +96,7 @@ async function fixture(
   return {
     adapter,
     coordinator,
+    projectForThread,
     directory,
     delivered,
     notifications,
@@ -1050,3 +1055,75 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 });
+
+describe("delegation project inheritance", () => {
+  it.each([undefined, "override-project", null])(
+    "resolves project independently of child cwd (%s)",
+    async (projectId) => {
+      const value = await fixture(undefined, async () => ({
+        cwd: "/parent",
+        projectId: "parent-project",
+      }));
+      try {
+        const result = await value.coordinator.start({
+          harnessId: "pi",
+          task: "check folders",
+          cwd: "/different",
+          parentThreadId: "parent",
+          ...(projectId !== undefined ? { projectId } : {}),
+        });
+        const record = await value.repository.find(result.threadId);
+        expect(record?.projectId).toBe(
+          projectId === null ? undefined : (projectId ?? "parent-project"),
+        );
+        expect(record?.cwd).toBe(path.resolve("/different"));
+      } finally {
+        await value.close();
+      }
+    },
+  );
+  it("persists peer origin and explicit Desktop project for renderer assignment", async () => {
+    const value = await fixture();
+    try {
+      const result = await value.coordinator.start({
+        harnessId: "pi",
+        task: "remote task",
+        cwd: "/remote",
+        projectId: "mac-project",
+        origin: { kind: "peer", hostId: "local", threadId: "mac-parent" },
+      });
+      const stored = await value.repository.getDelegationByChild(
+        hostThreadIdSchema.parse(result.threadId),
+      );
+      expect(stored?.desktopProject).toEqual({
+        sourceHostId: "local",
+        sourceThreadId: "mac-parent",
+        projectId: "mac-project",
+      });
+      expect((await value.repository.find(result.threadId))?.projectId).toBeUndefined();
+    } finally {
+      await value.close();
+    }
+  });
+});
+
+it.each([null, "desktop-project"])(
+  "prefers Desktop's assignment over stale native metadata (%s)",
+  async (projectId) => {
+    const value = await fixture(undefined, async () => ({
+      cwd: "/parent",
+      projectId: "stale-native",
+    }));
+    value.projectForThread.mockResolvedValue(projectId);
+    try {
+      const child = await value.coordinator.start({
+        harnessId: "pi",
+        task: "check",
+        parentThreadId: "parent",
+      });
+      expect((await value.repository.find(child.threadId))?.projectId).toBe(projectId ?? undefined);
+    } finally {
+      await value.close();
+    }
+  },
+);

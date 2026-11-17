@@ -1,4 +1,6 @@
 import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-project.js";
+import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
+import { mountRendererThreadFolders } from "./renderer-thread-folders.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
@@ -610,6 +612,7 @@ export function isOwnershipSubmissionBlocked(status: ComposerOwnershipStatus): b
 }
 
 interface MountedComposer {
+  workingFolders?: ReturnType<typeof mountRendererThreadFolders>;
   composer: Element;
   composerId: string;
   control: ComposerAgentControl;
@@ -1215,6 +1218,12 @@ export function installRendererBindingProbe(
   const renderMounted = (mounted: MountedComposer): void => {
     if (!isMountedComposer(mounted.composer)) return;
     const hostId = mounted.hostId;
+    mounted.workingFolders ??= mountRendererThreadFolders(mounted.composer, () => ({
+      hostId: mounted.hostId,
+      target: mounted.modelTarget,
+      agent: controller.get(mounted.composer).agent,
+    }));
+    mounted.workingFolders.refresh();
     mounted.control.setPlugins(
       hostId
         ? (hostHarnessAvailabilityState(hostId).plugins ?? EMPTY_PLUGINS).map(
@@ -3191,12 +3200,14 @@ export function installRendererBindingProbe(
     void refreshCommands(mounted);
   };
 
+  const delegationProjects = installRendererDelegationProjects();
   const scan = (): void => {
     scanScheduled = false;
     const refreshTargets = refreshTargetsOnNextScan;
     refreshTargetsOnNextScan = false;
     if (disposed) return;
     settingsLifecycle.refresh();
+    delegationProjects.refresh();
     const transferredComposers = new Set<Element>();
     for (const [target, replacement] of pendingReplacements) {
       const sourceState = controller.get(replacement.source.composer);
@@ -3239,6 +3250,7 @@ export function installRendererBindingProbe(
           usageRefreshTimers.delete(composer);
         }
         mounted.codexUsageGate.dispose();
+        mounted.workingFolders?.dispose();
         disposeComposerAgentControl(mounted.control);
         ownershipRecovery.delete(mounted);
         modelRecovery.delete(mounted);
@@ -3834,6 +3846,7 @@ export function installRendererBindingProbe(
       }
     },
     dispose() {
+      delegationProjects.dispose();
       if (disposed) return;
       disposed = true;
       questions.dispose();
@@ -3872,6 +3885,7 @@ export function installRendererBindingProbe(
         mounted.usageRequestGeneration += 1;
         usageRefreshAttempts.delete(mounted.composer);
         mounted.codexUsageGate.dispose();
+        mounted.workingFolders?.dispose();
         disposeComposerAgentControl(mounted.control);
       }
       mountedByComposer.clear();

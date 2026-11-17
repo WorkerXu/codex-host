@@ -553,7 +553,7 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
-export * from "./project-groups.js";
+export * from "./desktop-projects.js";
 export * from "./project-mirror.js";
 
 export {
@@ -633,3 +633,5 @@ export {
   type DingTalkDispatchStatus,
   type DingTalkDispatchAgentStatus,
 } from "./dingtalk-dispatch.js";
+export * from "./thread-folders.js";
+export * from "./delegation-projects.js";

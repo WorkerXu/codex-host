@@ -2,17 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { ProjectGroup } from "@codexhost/shared-contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DesktopProjectCatalogError,
   DesktopProjectCatalogReader,
 } from "../src/desktop-project-catalog.js";
-import {
-  ProjectGroupsService,
-  ProjectGroupRevisionConflictError,
-} from "../src/project-groups-service.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -64,25 +59,6 @@ function stateFile(): Record<string, unknown> {
     ],
     "project-order": ["local-alpha", "project-beta"],
     "selected-project": { type: "local", projectId: "local-alpha" },
-  };
-}
-
-function group(): ProjectGroup {
-  return {
-    id: "5e5f0a4d-24bd-4af8-9e8e-2e7f2f8d4a1b",
-    name: "Cross-host",
-    order: 0,
-    collapsed: false,
-    members: [
-      {
-        projectKind: "local",
-        projectId: "local-alpha",
-        rootPaths: ["/Users/test/alpha"],
-        label: "alpha",
-      },
-    ],
-    createdAt: "2026-11-11T10:00:00.000Z",
-    updatedAt: "2026-11-11T10:00:00.000Z",
   };
 }
 
@@ -146,50 +122,5 @@ describe("Desktop project catalog reader", () => {
     await expect(new DesktopProjectCatalogReader({ codexHome }).read()).rejects.toBeInstanceOf(
       DesktopProjectCatalogError,
     );
-  });
-});
-
-describe("Project groups service", () => {
-  it("reports a quarantined config once", async () => {
-    const directory = await temporaryDirectory();
-    await writeFile(path.join(directory, "groups.json"), "{broken", "utf8");
-    const service = new ProjectGroupsService({
-      directory,
-      now: () => new Date("2026-11-11T11:00:00.000Z"),
-    });
-    await expect(service.list()).resolves.toMatchObject({
-      revision: 0,
-      groups: [],
-      warning: { kind: "quarantined", backupName: "groups.json.1794394800000.invalid" },
-    });
-    await expect(service.list()).resolves.toEqual({ revision: 0, groups: [] });
-  });
-
-  it("persists revisions and refreshes updatedAt", async () => {
-    const directory = await temporaryDirectory();
-    const codexHome = await temporaryDirectory();
-    await writeFile(
-      path.join(codexHome, ".codex-global-state.json"),
-      JSON.stringify(stateFile()),
-      "utf8",
-    );
-    const service = new ProjectGroupsService({
-      directory,
-      codexHome,
-      now: () => new Date("2026-11-11T11:00:00.000Z"),
-      catalogCacheTtlMs: 0,
-    });
-    const written = await service.replace({ revision: 0, groups: [group()] });
-    expect(written).toMatchObject({
-      revision: 1,
-      groups: [{ updatedAt: "2026-11-11T11:00:00.000Z" }],
-    });
-    await expect(service.list()).resolves.toEqual(written);
-    await expect(service.replace({ revision: 0, groups: [group()] })).rejects.toBeInstanceOf(
-      ProjectGroupRevisionConflictError,
-    );
-    await expect(service.readDesktopCatalog()).resolves.toMatchObject({
-      projectOrder: ["local-alpha", "project-beta"],
-    });
   });
 });

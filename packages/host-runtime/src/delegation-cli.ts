@@ -432,6 +432,7 @@ export async function runDelegationCli(input: {
         "--harness",
         "--task",
         "--task-name",
+        "--project",
         "--cwd",
         "--model",
         "--thinking",
@@ -488,6 +489,12 @@ export async function runDelegationCli(input: {
         body: {
           harnessId,
           task,
+          ...(value(parsed, "--project") !== undefined
+            ? {
+                projectId:
+                  value(parsed, "--project") === "none" ? null : value(parsed, "--project"),
+              }
+            : {}),
           ...(value(parsed, "--task-name") !== undefined
             ? { taskName: value(parsed, "--task-name") }
             : {}),

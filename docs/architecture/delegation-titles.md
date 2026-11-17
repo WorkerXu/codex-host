@@ -13,3 +13,12 @@ codexhost delegate start --harness example --task-name "协议审查" --task "�
 原生 Codex 先通过 `thread/name/set` 保存名称，再开始任务；名称只用于展示，命名失败时保留默认标题，任务照常投递。外部 Harness 使用既有的 Thread 映射存储，在 Session 创建前保存标题。
 
 显示名称不参与任务执行去重；同一 `request-id` 重试仍返回原子会话及原名称。此规则不修改历史子会话，也不控制 Harness 在内部自行创建的原生子 Agent。
+
+
+## 对话项目归属
+
+`delegate start` 默认继承发起对话的项目，与子对话 `--cwd` 无关。未显式指定 `--cwd` 时，使用父会话当前主工作文件夹。`--project <projectId>` 显式指定项目，`--project none` 创建无项目子对话；显式选择优先于继承。同机原生 Codex 在 `thread/start` 携带 `projectId`，外部 Harness 把它保存在 Thread metadata。
+
+跨机的项目 ID 属于 Desktop，不能当作目标机器 app-server 的项目 ID。Host 将来源 Host、来源 Thread 和显式项目选择保存在委派记录中，Renderer 通过 Desktop 的 Thread 项目分配服务登记；服务未就绪时保留记录并重试。已有人工作出的子对话归属不被覆盖。
+
+工作文件夹、持久化与真实 Desktop 绑定限制见 [对话工作文件夹](thread-folders.md)。

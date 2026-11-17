@@ -200,6 +200,14 @@ export const storedDelegationRecordV1Schema = z
     status: delegationStatusSchema,
     requestId: nonBlankTextSchema.max(1_024).optional(),
     taskDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    desktopProject: z
+      .object({
+        sourceHostId: z.string().min(1),
+        sourceThreadId: z.string().min(1).optional(),
+        projectId: z.string().min(1).nullable().optional(),
+      })
+      .strict()
+      .optional(),
     createdAt: isoDateSchema,
     updatedAt: isoDateSchema,
   })
@@ -212,6 +220,7 @@ export const storedDelegationRecordV1Schema = z
 export type StoredDelegationRecordV1 = z.infer<typeof storedDelegationRecordV1Schema>;
 
 export interface CreateDelegationInput {
+  desktopProject?: StoredDelegationRecordV1["desktopProject"];
   delegationId: HostThreadId;
   parentHostThreadId: HostThreadId;
   childHostThreadId: HostThreadId;

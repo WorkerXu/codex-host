@@ -100,7 +100,7 @@ export interface ProjectMirrorUpdate {
 }
 
 /**
- * Independent mirror registry beside the project-group configuration. It never
+ * Registry of remote project mirrors. It never
  * touches Desktop state; it only remembers which remote projects codexhost
  * created and which source projects the user confirmed as name-only.
  */
