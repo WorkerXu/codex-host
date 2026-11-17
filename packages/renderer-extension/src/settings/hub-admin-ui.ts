@@ -1,3 +1,6 @@
+import { hubSelect } from "./hub-admin-menu.js";
+import { createRendererSettingsIcon, type RendererSettingsIconName } from "./icons.js";
+export { hubSelect } from "./hub-admin-menu.js";
 import { hubErrorText, type RendererHubAdminClient } from "../renderer-hub-admin-client.js";
 import type { RendererSettingsPageMountContext } from "./core.js";
 
@@ -18,12 +21,7 @@ export function hubButton(
   action: () => void,
   primary = false,
 ): HTMLButtonElement {
-  const button = hubElement(
-    document,
-    "button",
-    primary ? "agent-primary" : "agent-secondary",
-    text,
-  );
+  const button = hubElement(document, "button", primary ? "hub-primary" : "hub-secondary", text);
   button.type = "button";
   button.addEventListener("click", action);
   return button;
@@ -43,25 +41,59 @@ export function hubField(
   parent.append(label);
   return input;
 }
-export function hubSelect(
+export function hubFieldError(input: HTMLElement, message: string): void {
+  const parent = input.parentElement;
+  if (!parent) return;
+  let error = parent.querySelector<HTMLElement>(".hub-field-error");
+  if (!error) {
+    error = hubElement(input.ownerDocument, "p", "hub-field-error");
+    error.setAttribute("role", "alert");
+    parent.append(error);
+  }
+  error.textContent = message;
+  if (message) input.setAttribute("aria-invalid", "true");
+  else input.removeAttribute("aria-invalid");
+}
+export function hubIconButton(
   document: Document,
   label: string,
-  values: readonly (readonly [string, string])[],
-): HTMLSelectElement {
-  const select = hubElement(document, "select");
-  select.setAttribute("aria-label", label);
-  for (const [value, text] of values) {
-    const option = hubElement(document, "option", "", text);
-    option.value = value;
-    select.append(option);
-  }
-  return select;
+  icon: RendererSettingsIconName,
+  action: () => void,
+): HTMLButtonElement {
+  const button = hubButton(document, "", action);
+  button.className = "hub-icon-button";
+  button.setAttribute("aria-label", label);
+  button.dataset.tooltip = label;
+  button.append(createRendererSettingsIcon(icon, 16));
+  return button;
 }
-export function hubDate(time: number | null): string {
+export function hubSwitch(
+  document: Document,
+  label: string,
+  checked: boolean,
+  action: () => void,
+): HTMLButtonElement {
+  const button = hubButton(document, "", action);
+  button.className = "hub-switch";
+  button.setAttribute("role", "switch");
+  button.setAttribute("aria-label", label);
+  button.setAttribute("aria-checked", String(checked));
+  return button;
+}
+export function hubDate(time: number | null, now = new Date()): string {
   if (time === null) return "—";
-  return new Date(time < 100000000000 ? time * 1000 : time).toLocaleString("zh-CN", {
-    hour12: false,
-  });
+  const date = new Date(time < 100000000000 ? time * 1000 : time);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(midnight);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const prefix =
+    date >= midnight && date < new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      ? "今天"
+      : date >= yesterday && date < midnight
+        ? "昨天"
+        : `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${prefix} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function createHubPage(
@@ -91,12 +123,13 @@ export function createHubPage(
       activeDialog = null;
     }
   };
-  const dialog = (title: string) => {
+  const dialog = (title: string, readOnly = false) => {
     closeDialog();
     const opener = document.activeElement?.shadowRoot?.activeElement as HTMLElement | null;
     const root = hubElement(document, "dialog", "hub-dialog");
     root.setAttribute("aria-label", title);
-    root.append(hubElement(document, "h3", "", title));
+    const heading = hubElement(document, "h3", "", title);
+    root.append(heading);
     const content = hubElement(document, "div", "hub-dialog-content");
     const error = hubElement(document, "p", "hub-status");
     error.setAttribute("role", "alert");
@@ -105,7 +138,7 @@ export function createHubPage(
       if (activeDialog === root) closeDialog();
       opener?.focus();
     };
-    footer.append(hubButton(document, "取消", close));
+    footer.append(hubButton(document, readOnly ? "关闭" : "取消", close));
     root.append(content, error, footer);
     page.append(root);
     activeDialog = root;
@@ -114,7 +147,7 @@ export function createHubPage(
       if (!root.dataset.busy) close();
     });
     root.showModal();
-    return { root, content, footer, error, close };
+    return { root, heading, content, footer, error, close };
   };
   const confirm = (title: string, detail: string, action: () => Promise<void>) => {
     const modal = dialog(title);
@@ -171,11 +204,10 @@ export function createHubPage(
     try {
       const values = await client.hosts();
       if (context.signal.aborted) return;
-      for (const host of values) {
-        const option = hubElement(document, "option", "", host.displayName);
-        option.value = host.hostId;
-        hosts.append(option);
-      }
+      hosts.setOptions([
+        ["", "选择主机"],
+        ...values.map((host) => [host.hostId, host.displayName] as const),
+      ]);
       const preferred = values.find(
         (host) => host.displayName.toLowerCase() === target || host.hostId === target,
       );
@@ -186,7 +218,16 @@ export function createHubPage(
       status.textContent = "连接失败";
     }
   };
-  context.signal.addEventListener("abort", closeDialog, { once: true });
+  context.signal.addEventListener(
+    "abort",
+    () => {
+      for (const menu of page.querySelectorAll<HTMLElement>(".hub-select-menu")) {
+        if (menu.matches(":popover-open")) menu.hidePopover();
+      }
+      closeDialog();
+    },
+    { once: true },
+  );
   return {
     document,
     page,
