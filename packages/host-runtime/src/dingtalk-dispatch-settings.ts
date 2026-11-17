@@ -101,6 +101,7 @@ function pruneSettings(
  */
 export class DingTalkDispatchSettingsStore {
   readonly #directory: string;
+  readonly #listeners = new Set<(settings: DingTalkDispatchSettings) => void>();
 
   constructor(options: DingTalkDispatchSettingsStoreOptions = {}) {
     this.#directory =
@@ -146,6 +147,12 @@ export class DingTalkDispatchSettingsStore {
     return migrated;
   }
 
+  /** The dispatcher reloads on every save; the settings page stays the source. */
+  subscribe(listener: (settings: DingTalkDispatchSettings) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
   async write(settings: DingTalkDispatchSettings): Promise<DingTalkDispatchSettings> {
     const parsed = dingtalkDispatchSettingsSchema.safeParse(settings);
     if (!parsed.success) {
@@ -171,6 +178,13 @@ export class DingTalkDispatchSettingsStore {
     } catch (error) {
       if (error instanceof CodexAgentError) throw error;
       throw new CodexAgentError("io_failed", "Could not save DingTalk dispatch settings");
+    }
+    for (const listener of this.#listeners) {
+      try {
+        listener(parsed.data);
+      } catch {
+        /* A listener must not fail the save. */
+      }
     }
     return parsed.data;
   }
