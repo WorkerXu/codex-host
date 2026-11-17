@@ -12,6 +12,12 @@ interface ScopedDraftModelBinding {
   creationModes?: readonly Draft[];
 }
 
+/** Reviewed Model hook memo layouts: cell count → position offset. */
+const MODEL_HOOK_OFFSETS = new Map<number, number>([
+  [24, 0],
+  [25, 1],
+]);
+
 /** Desktop 26.1021 memo tuples bind the client Thread identity, draft setter
  * and current Model settings mode. Never use the official default Model setter.
  */
@@ -63,28 +69,31 @@ export function findScopedDraftModelBinding(
   // The 26.1021 Model hook pairs its current settings mode with this exact
   // draft setter. A stored draft's mode can belong to an earlier Account.
   for (const row of rows) {
+    // Desktop 26.1021 uses 24 cells; the 2026-11 build inserts one cell before
+    // index 7, shifting every reviewed position by one.
+    const o = MODEL_HOOK_OFFSETS.get(row.length);
     if (
-      row.length !== 24 ||
-      row[7] !== null ||
-      row[10] !== true ||
-      !updates.has(row[13] as UpdateDraft)
+      o === undefined ||
+      row[7 + o] !== null ||
+      row[10 + o] !== true ||
+      !updates.has(row[13 + o] as UpdateDraft)
     )
       continue;
-    const context = row[12] as Draft | null;
-    const result = row[23] as Draft | null;
+    const context = row[12 + o] as Draft | null;
+    const result = row[23 + o] as Draft | null;
     if (
       context &&
-      context === row[21] &&
+      context === row[21 + o] &&
       typeof context.usesAccountPreferences === "boolean" &&
       result?.usesAccountPreferences === context.usesAccountPreferences &&
-      typeof row[14] === "function" &&
-      row[14] === row[20] &&
-      result.setModelAndReasoningEffort === row[14]
+      typeof row[14 + o] === "function" &&
+      row[14 + o] === row[20 + o] &&
+      result.setModelAndReasoningEffort === row[14 + o]
     ) {
       // Each native hook can create its own setter for the same draft atom.
       // Bind through its reviewed draft identity and Model context, not through
       // function identity shared by every hook in the Composer.
-      update ??= row[13] as UpdateDraft;
+      update ??= row[13 + o] as UpdateDraft;
       modes.add(context.usesAccountPreferences);
       // Background creation receives a new client Thread id. The reviewed
       // collaboration-mode memo retains the originating draft's Model hook.

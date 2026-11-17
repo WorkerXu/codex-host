@@ -313,3 +313,45 @@ it("keeps concurrent native creations' folder requests separate across asynchron
   ]);
   policy?.dispose();
 });
+
+it("binds the 2026-11 Desktop model hook layout with one inserted cell", () => {
+  const update = vi.fn();
+  const draft = { modelSettings: null, isManuallyChanged: false };
+  const row = Array<unknown>(14).fill(null);
+  Object.assign(row, {
+    6: "client-new-thread:b",
+    7: "client-new-thread:b",
+    9: update,
+    10: draft,
+    11: true,
+    12: update,
+    13: { draftSettings: draft, isNewThreadDraft: true, updateDraftSettings: update },
+  });
+  const context = { usesAccountPreferences: false };
+  const setModel = vi.fn();
+  // Shape read from the real Desktop on 2026-11-17: 25 cells, positions +1.
+  const modelRow = Array<unknown>(25).fill(null);
+  Object.assign(modelRow, {
+    7: null,
+    8: null,
+    11: true,
+    13: context,
+    14: update,
+    15: setModel,
+    18: context,
+    21: setModel,
+    22: context,
+    24: { ...context, setModelAndReasoningEffort: setModel },
+  });
+  const element = {
+    parentElement: null,
+    __reactFiber$test: { updateQueue: { memoCache: { data: [modelRow, row] } } },
+  };
+  expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toEqual({
+    update,
+    usesAccountPreferences: false,
+  });
+  // A 25-cell row that does not carry the reviewed positions is still rejected.
+  modelRow[22] = { usesAccountPreferences: false };
+  expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toBeNull();
+});
