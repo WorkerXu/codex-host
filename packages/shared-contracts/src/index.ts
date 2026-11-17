@@ -622,3 +622,5 @@ export {
   type DingTalkReplyScope,
   type DingTalkDispatchSettings,
 } from "./dingtalk-dispatch.js";
+export * from "./thread-folders.js";
+export * from "./delegation-projects.js";

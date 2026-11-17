@@ -44,3 +44,4 @@ export const packageMetadata = {
   name: "@codexhost/mapping-store",
   contractVersion: WORKSPACE_CONTRACT_VERSION,
 } as const;
+export { ThreadFoldersStore } from "./thread-folders.js";
