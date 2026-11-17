@@ -83,6 +83,8 @@ export interface InspectHarnessInput {
 export type HarnessExecutionPolicy = "default" | "unattended-full-access";
 
 export interface CreateSessionInput {
+  /** Native extra writable/accessible directories, when supported by the Adapter. */
+  additionalDirectories?: readonly string[];
   kind: "create";
   cwd: string;
   environment?: Record<string, string | undefined>;
@@ -93,6 +95,7 @@ export interface CreateSessionInput {
 }
 
 export interface ResumeSessionInput {
+  additionalDirectories?: readonly string[];
   /** Persisted configuration hints, not new user commands. The Adapter owns restoration:
    * initialize lazy configuration, restore a saved mode, or retain authoritative native state.
    * Host never replays configuration commands after open; publish the confirmed state.
@@ -650,6 +653,8 @@ export interface HarnessSessionImportCapability {
 }
 
 export interface HarnessAdapter {
+  /** The Adapter forwards additionalDirectories through its native interface. */
+  readonly additionalDirectories?: boolean;
   /** Native CLI version checks and explicit updates. Never updates the Host plugin,
    * starts a model Turn, or restarts existing Sessions. Commands are Adapter-owned.
    */
