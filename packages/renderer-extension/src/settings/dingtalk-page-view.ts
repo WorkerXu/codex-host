@@ -2,6 +2,7 @@ import createElement from "lucide/dist/esm/createElement.mjs";
 import type { IconNode } from "lucide";
 import BellOffIcon from "lucide/dist/esm/icons/bell-off.mjs";
 import BotIcon from "lucide/dist/esm/icons/bot.mjs";
+import MessagesSquareIcon from "lucide/dist/esm/icons/messages-square.mjs";
 
 import type {
   DingTalkConversation,
@@ -670,6 +671,13 @@ export function createOlderMessagesSkeleton(document: Document): HTMLElement {
     skeleton.append(row);
   }
   return skeleton;
+}
+
+export function createConversationEmpty(document: Document, message: string): HTMLElement {
+  const empty = createListEmpty(document, message);
+  empty.classList.add("dingtalk-conversation-empty");
+  empty.prepend(createIcon(document, MessagesSquareIcon, 48, "dingtalk-conversation-empty-icon"));
+  return empty;
 }
 
 export function createListEmpty(

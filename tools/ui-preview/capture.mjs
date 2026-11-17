@@ -711,6 +711,11 @@ for (const scenario of scenarios) {
           "at-picker-all-row",
           queryAll(".dingtalk-mention-option").some((row) => row.textContent?.includes("所有人")),
         );
+        const allAvatar = query(".dingtalk-mention-option .dingtalk-mention-avatar");
+        check(
+          "at-picker-all-icon",
+          Boolean(allAvatar?.querySelector("svg")) && !allAvatar.textContent,
+        );
         const active = queryAll(".dingtalk-mention-option").findIndex((row) =>
           row.classList.contains("dingtalk-mention-option--active"),
         );
@@ -762,7 +767,7 @@ for (const scenario of scenarios) {
         check(`${menuSelector}-top-layer`, menu.matches(":popover-open"));
       }
       if (document.body.dataset.scenario.startsWith("dingtalk-empty-menu")) {
-        check("menu-with-right-pane-hidden", Boolean(query(".dingtalk-main")?.hidden));
+        check("menu-with-empty-right-pane", visible(query(".dingtalk-conversation-empty")));
         check("sidebar-menu-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
         check(
           "empty-menu-no-conversations",
@@ -986,11 +991,27 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario === "dingtalk-empty") {
         const main = query(".dingtalk-main");
+        const empty = query(".dingtalk-conversation-empty");
+        const mainRect = main?.getBoundingClientRect();
+        const emptyRect = empty?.getBoundingClientRect();
         check(
-          "empty-hides-right-pane",
-          Boolean(main) && getComputedStyle(main).display === "none",
-          main ? getComputedStyle(main).display : "missing",
+          "empty-shows-right-pane",
+          visible(main) && visible(empty) && Boolean(empty?.querySelector("svg")),
         );
+        check(
+          "empty-centered",
+          mainRect &&
+            emptyRect &&
+            Math.abs(emptyRect.x + emptyRect.width / 2 - mainRect.x - mainRect.width / 2) <= 1 &&
+            Math.abs(emptyRect.y + emptyRect.height / 2 - mainRect.y - mainRect.height / 2) <= 1,
+        );
+        check(
+          "empty-unread-hint-once",
+          empty?.textContent === "最近 48 小时没有未读消息" &&
+            !query(".dingtalk-conversation-list")?.textContent.includes("最近 48 小时没有未读消息"),
+        );
+        check("empty-no-composer", !visible(query(".dingtalk-composer-area")));
+        check("empty-no-header-actions", !visible(query(".dingtalk-main-head")));
       }
       if (
         document.body.dataset.scenario === "agents-cards" ||

@@ -15,6 +15,7 @@ import {
   createElementNode,
   createIcon,
   createIconButton,
+  createConversationEmpty,
   createListEmpty,
   createListSkeleton,
   createMessageSkeleton,
@@ -282,20 +283,11 @@ export function createDingTalkSettingsPage(
         state.search?.conversations.find((row) => row.conversationId === conversationId) ??
         null;
 
-      const syncMainVisibility = (): void => {
-        main.hidden =
-          state.searchQuery.length === 0 &&
-          state.conversations.length === 0 &&
-          !state.listLoading &&
-          !state.listError &&
-          state.selectedId === null;
-      };
-
       const syncColumnMode = (): void => {
         const searching = state.searchQuery.length > 0;
         conversationList.hidden = searching;
         searchPanel.element.hidden = !searching;
-        syncMainVisibility();
+        if (state.selectedId === null) renderMessages();
       };
 
       const applySearchCursor = (): void => {
@@ -387,9 +379,6 @@ export function createDingTalkSettingsPage(
           if (!conversation.preview && previewObserver) previewObserver.observe(row);
           else if (!conversation.preview) requestPreview(conversation.conversationId);
         }
-        if (state.conversations.length === 0) {
-          conversationList.append(createListEmpty(document, text.noUnreadConversations));
-        }
         syncColumnMode();
       };
 
@@ -416,6 +405,7 @@ export function createDingTalkSettingsPage(
       const updateHeader = (): void => {
         const conversation = state.currentConversation;
         mainHead.setConversation(conversation);
+        mainHead.element.hidden = conversation === null;
         composer.element.hidden = conversation === null;
         composer.setPlaceholder(conversation?.title || "");
       };
@@ -444,7 +434,17 @@ export function createDingTalkSettingsPage(
       const renderMessages = (behavior?: { scroll?: "bottom"; distance?: number }): void => {
         if (state.selectedId === null) {
           messageListView.clear();
-          renderMainState(createListEmpty(document, text.emptyMessages));
+          const noUnread =
+            state.searchQuery.length === 0 &&
+            state.conversations.length === 0 &&
+            !state.listLoading &&
+            !state.listError;
+          renderMainState(
+            createConversationEmpty(
+              document,
+              noUnread ? text.noUnreadConversations : text.emptyMessages,
+            ),
+          );
           renderPill();
           return;
         }

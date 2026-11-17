@@ -1096,6 +1096,11 @@
   text-align: center;
 }
 
+.dingtalk-conversation-empty {
+  gap: 16px;
+  color: var(--color-token-text-tertiary);
+}
+
 .dingtalk-empty-text,
 .dingtalk-message-empty {
   color: var(--color-token-text-tertiary);
@@ -1280,8 +1285,8 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--color-token-on-accent, #fff);
-  background: var(--color-token-charts-blue, #0285ff);
+  color: var(--color-avatar-foreground);
+  background: var(--color-avatar-blue);
   border-radius: 8px;
   font-size: var(--font-text-xs-size);
 }

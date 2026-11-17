@@ -1,6 +1,7 @@
 import type { DingTalkMember } from "@codexhost/shared-contracts";
+import AtSignIcon from "lucide/dist/esm/icons/at-sign.mjs";
 
-import { createAvatar, createElementNode } from "./dingtalk-page-view.js";
+import { createAvatar, createElementNode, createIcon } from "./dingtalk-page-view.js";
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 
 export interface DingTalkMentionChoice {
@@ -72,7 +73,7 @@ export function createDingTalkMentionPicker(
       row.setAttribute("role", "option");
       if (choice.all) {
         const avatar = createElementNode(document, "span", "dingtalk-mention-avatar");
-        avatar.textContent = "所";
+        avatar.append(createIcon(document, AtSignIcon, 18));
         row.append(
           avatar,
           createElementNode(document, "span", "dingtalk-mention-name", text.mentionAll),
