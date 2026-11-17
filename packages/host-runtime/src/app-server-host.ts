@@ -1521,6 +1521,7 @@ export class AppServerHost {
           const { threadId, harnessId: draftHarness } = threadFoldersGetParamsSchema.parse(
             request.params,
           );
+          await this.#waitForPlugins();
           const location = threadId ? await this.#locateExternalThread(threadId) : null;
           const harnessId =
             location?.kind === "external" ? location.record.harnessId : (draftHarness ?? "codex");
