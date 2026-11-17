@@ -32,8 +32,11 @@ import {
 
 import {
   createDingTalkCli,
+  type DingTalkCardInput,
+  type DingTalkCardResult,
   type DingTalkCli,
   type DingTalkGroupMeta,
+  type DingTalkPendingApproval,
   type DingTalkPerson,
   type DwsEventRecord,
   type DwsSpawn,
@@ -162,6 +165,7 @@ export class DingTalkService {
   readonly #events: DingTalkEventListener;
   #notifyTimer: ReturnType<typeof setTimeout> | null = null;
   #pendingNotify = new Set<string | null>();
+  readonly #eventListeners = new Set<(record: DwsEventRecord) => void>();
   #disposed = false;
 
   constructor(options: DingTalkServiceOptions) {
@@ -184,12 +188,13 @@ export class DingTalkService {
       createDingTalkCli({
         environment: this.#environment,
         runImpl: (args, timeoutMs) => this.#transport.run(args, timeoutMs),
+        openEventsImpl: (input) => this.#transport.openEvents(input),
         ...(options.spawnImpl ? { spawnImpl: options.spawnImpl } : {}),
       });
     this.#onChange = options.onChange;
     this.#events = new DingTalkEventListener({
       cli: this.#cli,
-      local: () => this.#transport.local,
+      local: () => this.#transport.canListen,
       authenticate: async () => {
         const auth = this.#lastAuth ?? (await this.#cli.authStatus().catch(() => null));
         this.#lastAuth = auth;
@@ -202,6 +207,27 @@ export class DingTalkService {
 
   get isLocalHost(): boolean {
     return this.#isLocalHost;
+  }
+
+  /** Keeps the dws stream alive while at least one agent listens. */
+  setListeningHold(enabled: boolean): void {
+    this.#events.setHold(enabled);
+    if (enabled)
+      void this.#ensure()
+        .then(() => this.#events.touch())
+        .catch(() => undefined);
+  }
+
+  /** Opens (or reopens) the event stream without waiting for a page read. */
+  async startListening(): Promise<void> {
+    await this.#ensure();
+    this.#events.touch();
+  }
+
+  /** Dispatch runs on the Desktop Host; every raw IM event is delivered there. */
+  subscribeEvents(listener: (record: DwsEventRecord) => void): () => void {
+    this.#eventListeners.add(listener);
+    return () => this.#eventListeners.delete(listener);
   }
 
   #ensure(): Promise<void> {
@@ -419,6 +445,53 @@ export class DingTalkService {
       sentAt: this.#now(),
       errorCode: result.errorCode,
     });
+  }
+
+  async sendDirect(
+    openDingTalkId: string,
+    text: string,
+    options: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean } = {},
+  ): Promise<DingTalkSendResult> {
+    await this.#ensure();
+    const result = await this.#cli.sendDirect(openDingTalkId, text, options);
+    return dingtalkSendResultSchema.parse({
+      ok: result.ok,
+      messageId: null,
+      sentAt: this.#now(),
+      errorCode: result.errorCode,
+    });
+  }
+
+  async sendCard(input: DingTalkCardInput): Promise<DingTalkCardResult> {
+    await this.#ensure();
+    return await this.#cli.sendCard(input);
+  }
+
+  async updateCard(input: {
+    bizId: string;
+    content: string;
+    flowStatus: 1 | 2 | 3 | 4 | 5;
+  }): Promise<{ ok: boolean; errorCode: string | null }> {
+    await this.#ensure();
+    return await this.#cli.updateCard(input);
+  }
+
+  async pendingApprovals(limit = 20): Promise<{
+    approvals: DingTalkPendingApproval[];
+    errorCode: string | null;
+  }> {
+    await this.#ensure();
+    return await this.#cli.pendingApprovals(limit);
+  }
+
+  /** Resolve the logged-in user by stable userId, never by name alone. */
+  async selfOpenDingTalkId(): Promise<string | null> {
+    await this.#ensure();
+    const auth = this.#lastAuth ?? (await this.#cli.authStatus());
+    if (!auth.userId || !auth.userName) return null;
+    const result = await this.#cli.searchPeople(auth.userName);
+    const matches = result.people.filter((person) => person.userId === auth.userId);
+    return matches.length === 1 ? (matches[0]?.openDingTalkId ?? null) : null;
   }
 
   async markViewed(
@@ -877,6 +950,23 @@ export class DingTalkService {
 
   #onEvent(record: DwsEventRecord): void {
     if (this.#disposed) return;
+    const selfName = this.#lastAuth?.userName?.trim();
+    const atMe =
+      record.atMe ||
+      (record.kind === "group" &&
+        Boolean(selfName) &&
+        new RegExp(
+          `@${selfName?.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=[\\s（(：:,，。！？!?]|$)`,
+          "u",
+        ).test(record.text));
+    const event = atMe === record.atMe ? record : { ...record, atMe };
+    for (const listener of this.#eventListeners) {
+      try {
+        listener(event);
+      } catch {
+        /* Dispatch listeners are isolated from the workbench. */
+      }
+    }
     const list = this.#list;
     if (list?.source === "unread") {
       const previous = list.rows.find(
@@ -896,7 +986,7 @@ export class DingTalkService {
       const updated: DingTalkConversation = {
         ...known,
         unreadCount: active ? 0 : known.unreadCount + 1,
-        atMe: active ? false : known.atMe,
+        atMe: active ? false : known.atMe || event.atMe,
         lastMessageAt: Math.max(known.lastMessageAt ?? 0, record.createdAt),
         preview: previewOf(record.text),
       };
@@ -962,6 +1052,7 @@ export class DingTalkService {
     this.#disposed = true;
     this.#notifiers.clear();
     this.#pendingNotify.clear();
+    this.#eventListeners.clear();
     this.#events.dispose();
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);
     if (this.#viewedWriteTimer) clearTimeout(this.#viewedWriteTimer);

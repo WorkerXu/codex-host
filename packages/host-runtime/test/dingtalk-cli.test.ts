@@ -289,6 +289,9 @@ describe("dws CLI output", () => {
       senderId: "open-1",
       text: "hi",
       createdAt: parseDwsTime("2026-11-13 15:30:00"),
+      kind: "group",
+      atMe: false,
+      atAll: false,
     });
     expect(parseDwsEventLine("[event] ready")).toBeNull();
     expect(parseDwsEventLine('{"type":"reaction"}')).toBeNull();
@@ -312,7 +315,9 @@ describe("dws process invocation", () => {
 
   it("passes an argument array and returns parsed JSON", async () => {
     const spawnImpl = vi.fn(() =>
-      childWith(JSON.stringify({ success: true, authenticated: true, user_id: "u1" })),
+      childWith(
+        JSON.stringify({ success: true, errorCode: 0, authenticated: true, user_id: "u1" }),
+      ),
     );
     const result = await runDwsJson(["auth", "status", "--readonly"], {
       executable: "/fake/dws",
@@ -433,9 +438,82 @@ describe("dws process invocation", () => {
       "cidA==",
       "--content",
       "<@open-1> <@all> 请看",
+      "--yes",
       "--at-open-dingtalk-ids",
       "open-1",
       "--at-all",
     ]);
   });
+});
+
+it("normalizes a real flattened direct schema and a transport envelope", () => {
+  const payload = {
+    type: "user_im_message_receive_o2o_all",
+    message_id: "m-direct",
+    conversation_id: "cid-direct",
+    sender: "林晓",
+    sender_open_dingtalk_id: "open-lin",
+    content: "接口如何实现？",
+    event_time: 2000,
+  };
+  const expected = {
+    messageId: "m-direct",
+    conversationId: "cid-direct",
+    senderName: "林晓",
+    senderId: "open-lin",
+    text: "接口如何实现？",
+    createdAt: 2000,
+    kind: "direct",
+    atMe: false,
+    atAll: false,
+  };
+  expect(parseDwsEventLine(JSON.stringify(payload))).toEqual(expected);
+  expect(
+    parseDwsEventLine(
+      JSON.stringify({ type: "event", event_type: payload.type, data: JSON.stringify(payload) }),
+    ),
+  ).toEqual(expected);
+  expect(
+    parseDwsEventLine(JSON.stringify({ ...payload, type: "user_im_reaction_added" })),
+  ).toBeNull();
+});
+
+it("accepts the real OA success envelope with numeric errorCode 0", async () => {
+  const calls: readonly string[][] = [];
+  const runImpl = vi.fn(async (args: readonly string[]) => {
+    (calls as string[][]).push([...args]);
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      truncated: false,
+      errorCode: null,
+      errorMessage: null,
+      value: {
+        success: true,
+        errorCode: 0,
+        result: {
+          values: [
+            {
+              taskId: "task-1",
+              processInstanceId: "p-1",
+              title: "采购",
+              originatorName: "林晓",
+              originatorId: "u-1",
+              processCreateTime: "2026-11-17 10:00:00",
+              formMassage: "服务器",
+              url: "https://example.test/approval",
+            },
+          ],
+        },
+      },
+    };
+  });
+  const cli = createDingTalkCli({ runImpl });
+  expect((await cli.pendingApprovals(20)).approvals[0]).toMatchObject({
+    taskId: "task-1",
+    formMessage: "服务器",
+  });
+  expect(calls).toEqual([["oa", "approval", "list-pending", "--limit", "20", "--page", "1"]]);
 });

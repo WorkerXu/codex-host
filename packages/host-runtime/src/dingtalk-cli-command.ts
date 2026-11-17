@@ -59,6 +59,8 @@ const READ_ONLY_PREFIXES: readonly (readonly string[])[] = [
   ["contact", "user", "list"],
   ["event", "schema"],
   ["event", "status"],
+  ["oa", "approval", "list-pending"],
+  ["oa", "approval", "detail"],
 ];
 
 function startsWith(args: readonly string[], prefix: readonly string[]): boolean {
