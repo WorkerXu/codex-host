@@ -45,7 +45,7 @@ await build({
   target: "es2024",
   sourcemap: true,
   outfile: path.join(previewRoot, "dist/preview.js"),
-  loader: { ".png": "dataurl", ".svg": "dataurl", ".css": "text" },
+  loader: { ".png": "dataurl", ".svg": "dataurl", ".css": "text", ".html": "text" },
   plugins: [contractsPlugin, tailwindEsbuildPlugin()],
   logLevel: "info",
 });
