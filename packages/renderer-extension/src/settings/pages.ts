@@ -1,3 +1,5 @@
+import { createMcpAdminPage, type HubAdminPageOptions } from "./mcp-admin-page.js";
+import { createMemoryAdminPage } from "./memory-admin-page.js";
 import {
   createUsageStatisticsPage,
   type RendererUsageStatisticsHostsProvider,
@@ -98,6 +100,8 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "jarvis",
   "dingtalk",
   "codex-agents",
+  "mcp-servers",
+  "memory",
   "appearance",
   "updates",
   "about",
@@ -688,6 +692,7 @@ export function createDefaultRendererSettingsPages(
   jarvis?: RendererJarvisSettingsOptions,
   dingtalk?: RendererDingTalkPageOptions,
   codexAgents?: RendererCodexAgentsSettingsOptions,
+  hubAdmin?: HubAdminPageOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -716,6 +721,11 @@ export function createDefaultRendererSettingsPages(
       },
     ),
     createCodexAgentsSettingsPage(messages, codexAgents ?? { createClient: () => null }),
+    createMcpAdminPage(
+      hubAdmin ?? { createClient: () => null },
+      messages.pageLabels["mcp-servers"],
+    ),
+    createMemoryAdminPage(hubAdmin ?? { createClient: () => null }, messages.pageLabels.memory),
     createAppearanceSettingsPage(messages, getLoadedSessionsClient),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),

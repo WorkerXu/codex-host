@@ -84,6 +84,8 @@ describe("Renderer settings localization", () => {
       "Jarvis",
       "钉钉",
       "智能体",
+      "MCP 服务器",
+      "记忆",
       "通用",
       "更新",
       "关于",
