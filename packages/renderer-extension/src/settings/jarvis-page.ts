@@ -45,7 +45,7 @@ export function createJarvisSettingsPage(
   return Object.freeze({
     id: "jarvis",
     label: messages.pageLabels.jarvis,
-    icon: "settings",
+    icon: "search",
     mount(context: RendererSettingsPageMountContext) {
       const document = context.content.ownerDocument;
       const client = options.createClient() ?? createRendererJarvisClient({ forHost: () => null });

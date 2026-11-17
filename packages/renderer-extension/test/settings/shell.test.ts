@@ -38,7 +38,7 @@ describe("Renderer settings foundation", () => {
       "gateway",
       "accounts",
       "dashboard",
-      "settings",
+      "search",
       "routes",
       "agents",
       "settings",

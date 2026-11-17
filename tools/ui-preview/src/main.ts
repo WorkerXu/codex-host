@@ -933,7 +933,7 @@ async function mountUnreadScenario(): Promise<void> {
 }
 
 async function mountModelSettings(
-  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover",
+  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add" | "menu",
 ) {
   let settings: ModelServiceSettings = {
     provider: "openai",
@@ -980,20 +980,25 @@ async function mountModelSettings(
   const shell = installRendererSettingsShell(definitions, messages);
   shell.openSettings(undefined, "appearance");
   const shadow = shell.root.shadowRoot!;
-  const input = await waitFor(() =>
-    shadow.querySelector<HTMLInputElement>("#model-service-openai:not(:disabled)"),
+  await waitFor(() =>
+    shadow.querySelector<HTMLButtonElement>("#model-service-edit-openai:not(:disabled)"),
   );
   const queryButton = (provider: string, text: string) =>
     [...shadow.querySelectorAll<HTMLButtonElement>(`[data-provider="${provider}"] button`)].find(
       (button) => button.textContent === text,
     )!;
-  if (state !== "empty" && state !== "focus") {
+  if (state !== "empty" && state !== "add") {
     for (const provider of ["openai", "gemini"]) {
+      await previewClick(queryButton(provider, "添加"));
       const keyInput = shadow.querySelector<HTMLInputElement>(`#model-service-${provider}`)!;
       await previewClick(keyInput);
       await previewType(keyInput, `fake-preview-${provider}-1234`);
       await previewClick(queryButton(provider, "保存"));
-      await waitFor(() => !keyInput.disabled && !keyInput.value);
+      await waitFor(
+        () =>
+          !keyInput.value &&
+          shadow.querySelector<HTMLElement>(`#model-service-editor-${provider}`)?.hidden,
+      );
     }
   }
   if (state === "testing" || state === "error" || state === "configured") {
@@ -1004,16 +1009,21 @@ async function mountModelSettings(
           ? "正在测试…"
           : state === "error"
             ? "OpenAI 额度不足"
-            : "连接成功 · 123 毫秒",
+            : "连接成功 123 毫秒",
       ),
     );
   }
-  if (state === "focus") {
-    await previewClick(input);
-    await previewKey(input, "Tab");
-    await previewKey(shadow.querySelector<HTMLInputElement>("#model-service-gemini")!, "Shift+Tab");
+  if (state === "edit" || state === "add") {
+    await previewClick(queryButton("openai", state === "add" ? "添加" : "更换"));
+    const input = shadow.querySelector<HTMLInputElement>("#model-service-openai")!;
+    await previewType(input, "fake-preview-replacement-5678");
   }
-  if (state === "hover") await previewHover(queryButton("openai", "测试"));
+  if (state === "focus") {
+    await previewKey(queryButton("openai", "测试"), "Tab");
+  }
+  if (state === "hover") await previewHover(queryButton("openai", "更换"));
+  if (state === "menu")
+    await previewClick(shadow.querySelector<HTMLButtonElement>("#model-service-provider")!);
   document.body.dataset.modelServiceState = state;
   await delay(120);
 }
@@ -1594,6 +1604,15 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
   async "model-service-hover"() {
     await mountModelSettings("hover");
+  },
+  async "model-service-edit"() {
+    await mountModelSettings("edit");
+  },
+  async "model-service-add"() {
+    await mountModelSettings("add");
+  },
+  async "model-service-menu"() {
+    await mountModelSettings("menu");
   },
   async "jarvis-mode-openai-missing-key"() {
     await mountJarvisSearch(

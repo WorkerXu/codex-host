@@ -73,6 +73,9 @@ const allScenarios = [
   "model-service-error",
   "model-service-focus",
   "model-service-hover",
+  "model-service-edit",
+  "model-service-add",
+  "model-service-menu",
   "jarvis-mode-openai-missing-key",
   "jarvis-mode-openai-quota",
   "jarvis-mode-openai-timeout",
@@ -1498,13 +1501,36 @@ for (const scenario of scenarios) {
       }
       if (document.body.dataset.scenario?.startsWith("model-service-")) {
         const section = query(".settings-model-service");
+        const state = document.body.dataset.modelServiceState;
+        const editing = state === "edit" || state === "add";
         const inputs = queryAll(".settings-model-service input");
-        check("model-section", Boolean(section));
+        const visible = (element) => element.getBoundingClientRect().height > 0;
+        const visibleInputs = inputs.filter(visible);
+        check(
+          "model-card-three-rows",
+          section?.querySelector(".settings-model-service__card")?.children.length === 3,
+        );
         check(
           "masked-keys",
-          inputs.length === 2 && inputs.every((input) => input.type === "password" && !input.value),
+          inputs.length === 2 && inputs.every((input) => input.type === "password"),
         );
-        check("model-default-openai", query("#model-service-provider")?.value === "openai");
+        check("inputs-only-while-editing", visibleInputs.length === (editing ? 1 : 0));
+        check(
+          "save-only-while-editing",
+          queryAll(".settings-model-service button").filter(
+            (button) => button.textContent === "保存" && visible(button),
+          ).length === (editing ? 1 : 0),
+        );
+        check(
+          "no-stale-saved-or-subtitle",
+          !section?.textContent?.includes("已保存") && !query(".settings-page-description"),
+        );
+        check(
+          "model-native-menu-trigger",
+          !section?.querySelector("select") &&
+            query("#model-service-provider")?.getAttribute("aria-haspopup") === "menu",
+        );
+        check("model-default-openai", query("#model-service-provider")?.dataset.value === "openai");
         check(
           "no-removed-nav-or-routes",
           !query('[data-page-id="session-import"]') &&
@@ -1519,21 +1545,75 @@ for (const scenario of scenarios) {
             .getPropertyValue("--app-color-background-surface")
             .trim() !== "",
         );
-        const state = document.body.dataset.modelServiceState;
-        if (state === "configured" || state === "hover" || state === "testing" || state === "error")
+        const headings = queryAll(".settings-page h3").slice(0, 3);
+        check(
+          "section-titles-align",
+          headings.length === 3 &&
+            headings.every(
+              (heading) =>
+                Math.abs(
+                  heading.getBoundingClientRect().left - headings[0].getBoundingClientRect().left,
+                ) < 1,
+            ),
+        );
+        if (state !== "empty" && state !== "add")
           check(
-            "configured-suffix-only",
-            inputs.every((input) => input.placeholder === "已配置 ····1234"),
+            "configured-state-in-row",
+            query('[data-provider="gemini"] .settings-model-service__status')?.textContent ===
+              "已配置 ···1234",
+          );
+        if (state === "configured")
+          check(
+            "connection-success-in-state",
+            query('[data-provider="openai"] .settings-model-service__status')?.textContent ===
+              "已配置 ···1234 · 连接成功 123 毫秒",
+          );
+        if (state === "empty")
+          check(
+            "empty-state-in-row",
+            query('[data-provider="openai"] .settings-model-service__status')?.textContent ===
+              "未配置",
           );
         if (state === "testing")
           check("testing-status", section?.textContent?.includes("正在测试…") === true);
         if (state === "error")
-          check("chinese-quota-error", section?.textContent?.includes("OpenAI 额度不足") === true);
+          check(
+            "chinese-quota-error",
+            query('[data-provider="openai"] .settings-model-service__status')?.textContent ===
+              "OpenAI 额度不足",
+          );
         if (state === "focus")
           check(
-            "input-keyboard-focus",
-            query("#model-service-openai")?.matches(":focus-visible") === true,
+            "action-keyboard-focus",
+            query("#model-service-edit-openai")?.matches(":focus-visible") === true,
           );
+        if (editing)
+          check(
+            "edit-controls-and-focus",
+            query("#model-service-openai")?.value === "fake-preview-replacement-5678" &&
+              query("#model-service-openai")?.matches(":focus") === true,
+          );
+        if (state === "hover")
+          check("change-hover", query("#model-service-edit-openai")?.matches(":hover") === true);
+        if (state === "menu") {
+          const menu = query("#model-service-model-menu");
+          const rect = menu?.getBoundingClientRect();
+          check("model-menu-visible", Boolean(menu && visible(menu)));
+          check(
+            "model-menu-selected",
+            menu?.querySelector('[data-value="openai"]')?.getAttribute("aria-checked") === "true",
+          );
+          check(
+            "model-menu-in-viewport",
+            Boolean(
+              rect &&
+              rect.left >= 0 &&
+              rect.right <= window.innerWidth &&
+              rect.top >= 0 &&
+              rect.bottom <= window.innerHeight,
+            ),
+          );
+        }
       }
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(

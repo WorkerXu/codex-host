@@ -33,10 +33,6 @@ export function createAppearanceSettingsPage(
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.appearance;
 
-      const description = document.createElement("p");
-      description.className = "settings-page-description";
-      description.textContent = messages.appearanceDescription;
-
       const { group, card } = createPreferenceGroup(document, messages.appearanceGroup);
       const softWrapId = preferenceId("reasoning-soft-wrap");
       const row = createPreferenceItem(document, {
@@ -58,7 +54,7 @@ export function createAppearanceSettingsPage(
 
       context.content.append(heading);
       mountModelServiceSection(context, modelService);
-      context.content.append(description, group);
+      context.content.append(group);
       const disposeIdleRelease = mountIdleReleaseControls(
         context,
         messages,
