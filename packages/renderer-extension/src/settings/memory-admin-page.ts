@@ -27,6 +27,7 @@ export function createMemoryAdminPage(
       let summary: HubResult<"overview"> | null = null;
       let searchGeneration = 0;
       const results = hubElement(document, "div", "hub-memory-results");
+      const heading = hubElement(document, "h3", "hub-section-head", "最近更新");
       const openMemory = async (memory: HubMemory) => {
         const host = ui.hosts.value;
         const revision = ui.revision();
@@ -81,6 +82,8 @@ export function createMemoryAdminPage(
             ...(windowId ? { windowId } : {}),
           });
           if (!ui.valid(host, revision) || generation !== searchGeneration) return;
+          heading.textContent =
+            query.trim() || source ? `搜索结果 · ${value.total} 条` : "最近更新";
           offset = value.offset;
           windowId = value.windowId ?? undefined;
           results.replaceChildren();
@@ -128,17 +131,12 @@ export function createMemoryAdminPage(
           const card = hubElement(document, "div", "hub-overview-card");
           card.append(
             hubElement(document, "span", "hub-muted", label),
-            hubElement(
-              document,
-              "strong",
-              label === "记忆总数" ? "hub-stat-number" : "hub-stat-value",
-              value,
-            ),
+            hubElement(document, "strong", "hub-stat-value", value),
           );
           overview.append(card);
         }
         ui.body.append(overview);
-        const heading = hubElement(document, "h3", "hub-section-head", "最近更新");
+        heading.textContent = "最近更新";
         ui.body.append(heading);
         const form = hubElement(document, "form", "hub-row hub-memory-search");
         const input = hubElement(document, "input");

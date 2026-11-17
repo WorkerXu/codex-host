@@ -1,3 +1,4 @@
+import { createRendererSettingsIcon } from "./icons.js";
 import { hubButton, hubElement, hubIconButton } from "./hub-admin-ui.js";
 
 export function validateHubHeaders(rows: readonly (readonly [string, string])[]): {
@@ -46,15 +47,13 @@ export function createHubHeaderEditor(document: Document) {
     });
     rows.append(row);
   };
-  root.append(
-    rows,
-    hubButton(document, "添加一行", () => {
-      add();
-      touched = true;
-      rows.lastElementChild?.querySelector("input")?.focus();
-    }),
-    error,
-  );
+  const addButton = hubButton(document, "添加一行", () => {
+    add();
+    touched = true;
+    rows.lastElementChild?.querySelector("input")?.focus();
+  });
+  addButton.prepend(createRendererSettingsIcon("add", 16));
+  root.append(rows, addButton, error);
   add();
   return {
     root,

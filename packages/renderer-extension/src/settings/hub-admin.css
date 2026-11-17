@@ -280,11 +280,20 @@
 .hub-server-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 6px;
   margin: 8px 0;
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 20px;
+}
+.hub-server-meta > span + span::before {
+  content: "·";
+  margin-right: 6px;
+}
+.hub-server[data-disabled="true"] .hub-server-title,
+.hub-server[data-disabled="true"] .hub-server-meta,
+.hub-server[data-disabled="true"] .hub-server-counts {
+  opacity: 0.5;
 }
 .hub-status-dot {
   display: inline-flex;
@@ -440,6 +449,7 @@
 }
 .hub-header-editor > button {
   align-self: flex-start;
+  padding-inline: 0;
   border-color: transparent;
 }
 .hub-server-choices {
@@ -470,19 +480,13 @@
   flex-direction: column;
   gap: 8px;
 }
-.hub-overview-card strong.hub-stat-number {
-  font-size: 32px;
-  line-height: 36px;
-  font-weight: 600;
-  letter-spacing: -0.8px;
-}
 .hub-stat-value {
   display: flex;
   align-items: center;
   min-height: 36px;
-  font-size: 18px;
-  line-height: 24px;
-  font-weight: 500;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
 }
 .hub-memory-search {
   margin-bottom: 8px;

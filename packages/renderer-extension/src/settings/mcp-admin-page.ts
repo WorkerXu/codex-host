@@ -95,6 +95,7 @@ export function createMcpAdminPage(
         );
         for (const server of visible) {
           const card = hubElement(document, "article", "hub-server");
+          card.dataset.disabled = String(server.status === "disabled");
           const top = hubElement(document, "div", "hub-server-top");
           const title = hubButton(document, server.name, () => {
             void dialogs.tools(server);
