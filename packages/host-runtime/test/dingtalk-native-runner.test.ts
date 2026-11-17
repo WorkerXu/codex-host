@@ -72,6 +72,9 @@ describe("native DingTalk Threads", () => {
         approvalPolicy: "never",
         model: "gpt-test",
         ephemeral: false,
+        config: {
+          "shell_environment_policy.set.CODEXHOST_DINGTALK_DISPATCH": "1",
+        },
       }),
     );
     expect(f.notify).toHaveBeenCalledOnce();
@@ -132,6 +135,7 @@ describe("native DingTalk Threads", () => {
       expect.objectContaining({
         config: expect.objectContaining({
           "features.shell_tool": false,
+          "shell_environment_policy.set.CODEXHOST_DINGTALK_DISPATCH": "1",
           "features.unified_exec": false,
           "features.multi_agent": false,
           "features.plugins": false,

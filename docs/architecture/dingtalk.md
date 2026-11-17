@@ -26,7 +26,7 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 
 `turn/start`、`turn/steer` 和外部 steering 都会经过 Host 的 `dingtalk-mention-rewrite.ts`。会话引用取最近 30 条消息；所选消息取这些消息及其前后各 3 条同会话上下文。输出一段 `[codexhost DingTalk]` 上下文块，包含会话标题、类型、cid、发送人、时间和正文；失败只写一行说明，不阻断 Turn。解析同时接受 Desktop 在标签与 URL 之间换行、或把二者拆成相邻 text item 的形态；`conversationInfo` 与消息列表并行，单聊不额外查询职位。
 
-上下文块同时告诉 Agent：更多记录用 `codexhost dingtalk dws -- <dws 参数>` 读取；发送、撤回、审批等写操作必须先征得用户同意，并在命令中加 `--yes`。
+上下文块同时告诉 Agent：更多记录用 `codexhost dingtalk dws -- <dws 参数>` 读取；发送、撤回、建群等写操作必须先征得用户同意，并在命令中加 `--yes`。审批状态只能由你本人在钉钉里处理，CLI 一律拒绝审批写操作；派发对话中的智能体只能读取，回复由派发器负责。
 
 ## 默认 Host 与跨机路由
 
@@ -36,7 +36,7 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 - 工作台不提供「钉钉登录 / 默认机器」下拉。⋯ 菜单只显示一行连接状态：已连接时显示 `已连接 · <userName>（<corpName>）`，未登录显示「钉钉未登录」，tencent 不可达显示「无法连接钉钉服务」；后两种状态附「重试」。
 - 读取请求通过 `peer-exec` 的 `/v1/dingtalk/dws` 路由转发同一组参数数组；对端 Host 执行本机 `dws` 并原样返回 stdout、stderr 与退出码。目标机器上设置自动解析为本机，因此同一份默认值在 Mac 和 tencent 上都指向 tencent 的登录。
 - 图片下载通过同级的 `/v1/dingtalk/media` 路由在登录机器上执行，只接受会话、消息和资源 id；返回 base64、MIME 和大小。缓存目录按运行时隔离，不读取 `~/.codexhost/runtime/`。
-- CLI 透传 `codexhost dingtalk dws [--host <peer|Host ID>] [--yes] -- <dws args>`：只读命令白名单直接执行；其余命令（包括未知的新命令）视为写操作，缺少 `--yes` 时在启动任何进程前拒绝。
+- CLI 透传 `codexhost dingtalk dws [--host <peer|Host ID>] [--yes] -- <dws args>`：只读命令白名单直接执行；其余命令（包括未知的新命令）视为写操作。OA 仅放行明确列出的审批查询，所有其他 OA 命令（含同意、拒绝、撤销、转交、加签、评论及未知命令）始终拒绝，无论调用者或是否提供 `--yes`，错误提示「审批状态只能由你本人在钉钉里处理」。派发环境中所有写命令都拒绝。其余场景的非 OA 写命令仍需 `--yes`。限制均在解析 Host、启动进程或跨机请求前执行；无法识别的命令前置选项也拒绝，防止选项值混淆命令路径。
 
 ## 性能与缓存
 
@@ -83,6 +83,8 @@ Host 忽略本人、机器人、早于本次启用监听起点的消息以及已
 每条候选事件只发起一次本机 Gemini Decisions 请求，按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。Gemini key 复用 Jarvis 设置，只留在 Mac。没有 key 时不创建对话、不回复占位卡，状态显示「未配置 Gemini，未派发」；服务失败或低于阈值也记录跳过原因。
 
 每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。普通消息的 Turn 使用只读文件系统沙箱并允许网络查询，供智能体读取知识库；审批汇总关闭网络。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
+
+所有派发 Thread（普通消息和审批汇总）通过原生 Thread 配置 `shell_environment_policy.set.CODEXHOST_DINGTALK_DISPATCH = "1"` 为 shell 设置环境标记，后续 Turn 继承该设置。`codexhost dingtalk dws` 在此环境中拒绝所有写命令，即使提供 `--yes`；智能体只能查询，派发器在自己的 Host 环境中发送进度和结果。该限制作用于 codexhost CLI 包装层，环境标记不是操作系统级网络或凭据隔离。
 
 回复目标完全由 Host 决定：群消息选择「私聊」时，回复给事件的发送人开放 ID；选择「群内」时在原群 @ 发送人。单聊始终回到与该发送人的私聊，忽略「回复位置」选择。开始工作前创建 `chat +messages-send-card` 流式文本卡片，启动 Codex 后更新进度，完成后将最终回答写入同一 bizId；创建或更新失败时用原目标的 Markdown 文本消息降级。长结果分段发送，不截断正文。自动回复是启用监听授权的行为，固定目标写命令带 `--yes`，无需逐次确认。智能体卡片和编辑面板每 10 秒更新最近派发时间及已回复、失败或跳过原因。
 

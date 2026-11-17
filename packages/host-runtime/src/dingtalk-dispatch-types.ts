@@ -1,3 +1,6 @@
+/** Shell commands in native dispatch Threads may only read DingTalk data. */
+export const DINGTALK_DISPATCH_ENV = "CODEXHOST_DINGTALK_DISPATCH";
+
 /** Native Codex conversation started for one dispatched DingTalk event. */
 export interface DingTalkDispatchThreadInput {
   cwd: string;

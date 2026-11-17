@@ -2,6 +2,7 @@ import type { Writable } from "node:stream";
 
 import { DelegationControlError } from "./delegation-types.js";
 import { createDingTalkCli, runDwsRaw } from "./dingtalk-cli.js";
+import { DINGTALK_DISPATCH_ENV } from "./dingtalk-dispatch-types.js";
 import { createDingTalkTransport, DINGTALK_DWS_PEER_ROUTE } from "./dingtalk-transport.js";
 import { DingTalkSettingsStore, resolveDingTalkHost } from "./dingtalk-settings.js";
 import { readPeerConfig, resolvePeerTarget, type ResolvedPeer } from "./peer-config.js";
@@ -11,6 +12,7 @@ export const DINGTALK_CLI_HELP = `codexhost dingtalk
 
 Run official DingTalk Workspace CLI (dws) commands on the configured DingTalk Host.
 Read-only commands run directly; commands that change anything require --yes.
+OA approval writes are always forbidden. Dispatch Threads may only read.
 
 Usage:
   codexhost dingtalk dws [--host <peer|Host ID>] [--yes] -- <dws args...>
@@ -19,7 +21,7 @@ Usage:
 
 Options:
   --host <name>   Peer name or Desktop Host ID; defaults to the DingTalk setting.
-  --yes           Confirm a write command (send, recall, approve, reject, create, ...).
+  --yes           Confirm a non-OA write command (send, recall, create, ...).
   --format json|compact  Output format for status.
 
 Examples:
@@ -61,17 +63,82 @@ const READ_ONLY_PREFIXES: readonly (readonly string[])[] = [
   ["event", "status"],
   ["oa", "approval", "list-pending"],
   ["oa", "approval", "detail"],
+  ...[
+    "ding-info",
+    "forecast-process",
+    "form-schema",
+    "list-by-admin",
+    "list-cc",
+    "list-executed",
+    "list-forms",
+    "list-initiated",
+    "list-submitted",
+    "records",
+    "revert-activities",
+    "search-forms",
+    "tasks",
+  ].map((command) => ["oa", "approval", command]),
 ];
 
-function startsWith(args: readonly string[], prefix: readonly string[]): boolean {
-  return prefix.every((token, index) => args[index] === token);
+const DWS_GLOBAL_VALUE_OPTIONS = new Set([
+  "--client-id",
+  "--client-secret",
+  "--fields",
+  "--jq",
+  "--profile",
+  "--timeout",
+  "--format",
+  "-f",
+]);
+const DWS_GLOBAL_FLAGS = new Set([
+  "--debug",
+  "--dry-run",
+  "--mock",
+  "--verbose",
+  "-v",
+  "--yes",
+  "-y",
+  "--help",
+  "-h",
+]);
+
+/** Stop at the command leaf: option values and query text are never command words. */
+function classifyDwsCommand(args: readonly string[]): { write: boolean; oa: boolean } {
+  const words: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) continue;
+    if (arg.startsWith("-")) {
+      const option = arg.split("=", 1)[0] ?? arg;
+      if (DWS_GLOBAL_VALUE_OPTIONS.has(option)) {
+        if (!arg.includes("=")) {
+          const value = args[++index];
+          if (!value || value.startsWith("-"))
+            throw new DelegationControlError("INVALID_ARGUMENT", `${option} requires a value`);
+        }
+      } else if (!DWS_GLOBAL_FLAGS.has(arg) && !(arg.startsWith("-f") && arg.length > 2)) {
+        // Ambiguous options cannot hide an OA command behind --yes.
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `Unsupported dws command option '${arg}'`,
+        );
+      }
+      continue;
+    }
+    words.push(arg);
+    const prefixes = READ_ONLY_PREFIXES.filter((prefix) =>
+      words.every((word, offset) => prefix[offset] === word),
+    );
+    if (prefixes.some((prefix) => prefix.length === words.length))
+      return { write: false, oa: words[0] === "oa" };
+    if (prefixes.length === 0) break;
+  }
+  return { write: true, oa: words[0] === "oa" || words[0] === "approval" };
 }
 
 /** Unknown commands are treated as writes so a new dws command cannot bypass consent. */
 export function isDwsWriteCommand(args: readonly string[]): boolean {
-  const meaningful = args.filter((arg) => !arg.startsWith("-"));
-  if (meaningful.length === 0) return false;
-  return !READ_ONLY_PREFIXES.some((prefix) => startsWith(meaningful, prefix));
+  return classifyDwsCommand(args).write;
 }
 
 export interface DingTalkCliArguments {
@@ -193,7 +260,16 @@ export async function runDingTalkCli(input: RunDingTalkCliInput): Promise<number
     output.write(DINGTALK_CLI_HELP);
     return 0;
   }
-  const write = isDwsWriteCommand(parsed.dws);
+  const { write, oa } = classifyDwsCommand(parsed.dws);
+  if (write && oa) {
+    throw new DelegationControlError("INVALID_ARGUMENT", "审批状态只能由你本人在钉钉里处理");
+  }
+  if (write && environment[DINGTALK_DISPATCH_ENV] === "1") {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "派发对话只能读取钉钉数据；回复只能由派发器发送到原会话，智能体不能执行 dws 写命令",
+    );
+  }
   if (write && !parsed.yes) {
     throw new DelegationControlError(
       "INVALID_ARGUMENT",

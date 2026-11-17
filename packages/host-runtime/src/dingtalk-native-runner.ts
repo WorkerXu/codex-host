@@ -9,6 +9,7 @@ import type {
   DingTalkDispatchRunResult,
   DingTalkDispatchThreadInput,
 } from "./dingtalk-dispatch-types.js";
+import { DINGTALK_DISPATCH_ENV } from "./dingtalk-dispatch-types.js";
 const isRecord = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -41,11 +42,14 @@ export class DingTalkNativeRunner {
   async start(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
     if (this.#closed) throw new Error("Host connection closed");
     await this.#prepareDingTalkProject(input.cwd);
-    const config = input.readOnlySummary ? await this.#dingTalkSummaryConfig(input.cwd) : undefined;
+    const config: JsonObject = {
+      ...(input.readOnlySummary ? await this.#dingTalkSummaryConfig(input.cwd) : {}),
+      [`shell_environment_policy.set.${DINGTALK_DISPATCH_ENV}`]: "1",
+    };
     if (this.#closed) throw new Error("Host connection closed");
     const started = await this.#request("thread/start", {
       cwd: input.cwd,
-      ...(config ? { config } : {}),
+      config,
       ...(input.model ? { model: input.model } : {}),
       developerInstructions: input.developerInstructions,
       approvalPolicy: "never",
