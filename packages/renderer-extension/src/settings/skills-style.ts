@@ -26,12 +26,13 @@ const classes: Record<string, string> = {
   "skills-offline": "skills-offline size-1.5 shrink-0 rounded-full bg-settings-subtle",
   "skills-agent-scroll": "skills-agent-scroll overflow-x-auto",
   "skills-agent-row":
-    "skills-agent-row grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(160px,1.4fr)_100px_184px] items-center gap-4 border-b border-settings-divider px-4 py-3 last:border-b-0",
+    "skills-agent-row grid min-w-[608px] grid-cols-[160px_200px_minmax(180px,1fr)] items-center gap-4 border-b border-settings-divider px-4 py-3 last:border-b-0",
   "skills-agent-excluded":
-    "skills-agent-row grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(160px,1.4fr)_100px_184px] items-center gap-4 border-b border-settings-divider px-4 py-3 text-settings-subtle last:border-b-0",
+    "skills-agent-row grid min-w-[608px] grid-cols-[160px_200px_minmax(180px,1fr)] items-center gap-4 border-b border-settings-divider px-4 py-3 text-settings-subtle last:border-b-0",
   "skills-path": "skills-path min-w-0 truncate text-xs text-settings-muted",
   "skills-agent-progress":
     "skills-agent-progress flex items-center gap-2 whitespace-nowrap text-xs text-settings-muted",
+  "skills-agent-linked": "skills-agent-linked inline-flex items-center gap-2 text-settings-success",
   "skills-conflict-badge":
     "skills-conflict-badge inline-flex items-center gap-1 rounded-md bg-settings-warning/10 px-2 py-0.5 text-xs text-settings-warning",
   "skills-exclusions":

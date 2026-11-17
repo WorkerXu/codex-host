@@ -516,6 +516,21 @@ for (const scenario of scenarios) {
             queryAll(".skills-description")[2]?.textContent,
         );
         const rows = queryAll(".skills-agent-row");
+        check(
+          "skills-single-agent-status",
+          rows.every((row) => row.children.length === 3) &&
+            !query(".skills-machines")?.textContent.includes("需链接") &&
+            !query(".skills-machines")?.textContent.includes("直接读取中央库"),
+        );
+        check(
+          "skills-native-agent-status",
+          query('[data-agent="codex"] .skills-agent-progress')?.textContent === "原生支持",
+        );
+        check(
+          "skills-fully-linked",
+          query('[data-agent="codebuddy"] .skills-agent-linked')?.textContent === "已链接" &&
+            Boolean(query('[data-agent="codebuddy"] .skills-agent-linked svg')),
+        );
         const columnPositions = rows.map((row) =>
           [...row.children].map((cell) => Math.round(cell.getBoundingClientRect().x)),
         );

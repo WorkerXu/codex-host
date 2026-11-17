@@ -1,6 +1,7 @@
 import type { SkillMachine } from "@codexhost/shared-contracts";
 import { skillsErrorText } from "../renderer-skills-client.js";
 import { skillButton, skillNode } from "./skills-dialog.js";
+import { createRendererSettingsIcon } from "./icons.js";
 import { skillDirectory, skillStatus } from "./skills-presentation.js";
 export function renderSkillsInventory(options: {
   matrix: HTMLElement;
@@ -111,30 +112,22 @@ export function renderSkillsInventory(options: {
         name.title = agent.evidence;
         const directory = node("span", skillDirectory(agent.skillsDir), "skills-path");
         directory.title = skillDirectory(agent.skillsDir);
-        const support = node(
-          "span",
-          agent.excluded
-            ? "已排除"
-            : agent.native === true
-              ? "原生支持"
-              : agent.native === false
-                ? "需链接"
-                : "待核实",
-          "skills-muted",
-        );
         const progress = node("span", "", "skills-agent-progress");
-        if (!agent.excluded) {
-          progress.append(
-            document.createTextNode(
-              agent.native
-                ? "直接读取中央库"
-                : `已链接 ${agent.linked}/${agent.linked + agent.missing + agent.conflicts}`,
-            ),
-          );
-          if (agent.conflicts && !agent.native)
+        if (agent.excluded) progress.textContent = "已排除";
+        else if (agent.native === true) progress.textContent = "原生支持";
+        else {
+          const total = agent.linked + agent.missing + agent.conflicts;
+          if (total > 0 && agent.linked === total) {
+            const linked = node("span", "", "skills-agent-linked");
+            const check = createRendererSettingsIcon("check", 14);
+            check.setAttribute("aria-hidden", "true");
+            linked.append(check, document.createTextNode("已链接"));
+            progress.append(linked);
+          } else progress.append(document.createTextNode(`已链接 ${agent.linked}/${total}`));
+          if (agent.conflicts)
             progress.append(node("span", `${agent.conflicts} 个冲突`, "skills-conflict-badge"));
         }
-        for (const cell of [name, directory, support, progress]) {
+        for (const cell of [name, directory, progress]) {
           cell.setAttribute("role", "cell");
           row.append(cell);
         }
