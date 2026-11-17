@@ -16,9 +16,11 @@ export function dingtalkA2uiCreate(
   content: string,
   mentions: readonly string[] = [],
   atAll = false,
+  names: Readonly<Record<string, string>> = {},
 ): string {
+  const label = (id: string) => names[id]?.replace(/[<>&"]/gu, "").trim() || "成员";
   const tags = [
-    ...mentions.map((id) => `<a atId="${id.replace(/["<>&]/gu, "")}">成员</a>`),
+    ...mentions.map((id) => `<a atId="${id.replace(/["<>&]/gu, "")}">${label(id)}</a>`),
     ...(atAll ? ['<a atId="all">所有人</a>'] : []),
   ];
   return encode([

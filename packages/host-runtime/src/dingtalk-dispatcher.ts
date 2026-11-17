@@ -403,7 +403,14 @@ export class DingTalkDispatcher {
     if (
       !(await card.create({
         target: cardTarget,
-        ...(!direct ? { atOpenDingTalkIds: [senderId] } : {}),
+        ...(!direct
+          ? {
+              atOpenDingTalkIds: [senderId],
+              ...(event.senderName.trim()
+                ? { atNames: { [senderId]: event.senderName.trim() } }
+                : {}),
+            }
+          : {}),
       }))
     ) {
       this.#cards.delete(card);

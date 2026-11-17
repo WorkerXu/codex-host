@@ -32,7 +32,11 @@ describe("official A2UI lifecycle with fake dws", () => {
     vi.useFakeTimers();
     const { calls, card } = fixture();
     expect(
-      await card.create({ target: { group: "group" }, atOpenDingTalkIds: ["open-member"] }),
+      await card.create({
+        target: { group: "group" },
+        atOpenDingTalkIds: ["open-member"],
+        atNames: { "open-member": "徐涛" },
+      }),
     ).toBe(true);
     expect(calls[0]).toEqual(
       expect.arrayContaining([
@@ -53,7 +57,7 @@ describe("official A2UI lifecycle with fake dws", () => {
     expect(
       created[1].updateComponents.components.find((c: { id: string }) => c.id === "mentions")
         .content,
-    ).toContain('<a atId="open-member">');
+    ).toContain('<a atId="open-member">徐涛</a>');
     card.progress("已读取资料");
     await vi.advanceTimersByTimeAsync(4_999);
     expect(calls).toHaveLength(1);

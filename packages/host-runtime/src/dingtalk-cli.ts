@@ -718,6 +718,8 @@ export interface DingTalkCardInput {
   target: DingTalkCardTarget;
   content: string;
   atOpenDingTalkIds?: readonly string[];
+  /** Display names for `atOpenDingTalkIds`, shown in the card's mention line. */
+  atNames?: Readonly<Record<string, string>>;
   atAll?: boolean;
 }
 
@@ -1195,6 +1197,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           input.content,
           "group" in input.target ? input.atOpenDingTalkIds : [],
           "group" in input.target && input.atAll === true,
+          input.atNames,
         ),
         "--yes",
       );
