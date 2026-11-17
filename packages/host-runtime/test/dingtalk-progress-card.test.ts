@@ -76,3 +76,65 @@ describe("official A2UI lifecycle with fake dws", () => {
     card.dispose();
   });
 });
+
+it.each(["missing-id", "timeout", "rejected"])("stops after unknown creation: %s", async (mode) => {
+  const sendCard = vi.fn(async () => {
+    if (mode === "rejected") throw new Error("response lost");
+    return { ok: mode === "missing-id", bizId: null, errorCode: mode };
+  });
+  const updateCard = vi.fn();
+  const card = new DingTalkProgressCard({ sendCard, updateCard });
+  expect(await card.create({ target: { openDingTalkId: "sender" } })).toBe(false);
+  card.progress("正在读取");
+  expect(await card.finish("完成", true)).toBe(false);
+  expect(sendCard).toHaveBeenCalledOnce();
+  expect(updateCard).not.toHaveBeenCalled();
+});
+
+it("waits for each update and stops writes after a response is lost", async () => {
+  vi.useFakeTimers();
+  const pending = Promise.withResolvers<{ ok: boolean }>();
+  const updateCard = vi.fn(() => pending.promise);
+  const card = new DingTalkProgressCard({
+    sendCard: async () => ({ ok: true, bizId: "real-id", errorCode: null }),
+    updateCard,
+  });
+  await card.create({ target: { group: "group" } });
+  card.progress("第一阶段");
+  await vi.advanceTimersByTimeAsync(5_000);
+  card.progress("第二阶段");
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(updateCard).toHaveBeenCalledOnce();
+  const finished = card.finish("最终答案", true);
+  pending.reject(new Error("unknown update result"));
+  expect(await finished).toBe(false);
+  expect(updateCard).toHaveBeenCalledOnce();
+});
+
+it("keeps at least five seconds between progress writes even after a slow response", async () => {
+  vi.useFakeTimers();
+  const pending = Promise.withResolvers<{ ok: boolean }>();
+  const updateCard = vi
+    .fn()
+    .mockImplementationOnce(() => pending.promise)
+    .mockResolvedValue({ ok: true });
+  const card = new DingTalkProgressCard({
+    sendCard: async () => ({ ok: true, bizId: "real-id", errorCode: null }),
+    updateCard,
+  });
+  await card.create({ target: { group: "group" } });
+  card.progress("第一阶段");
+  await vi.advanceTimersByTimeAsync(5_000);
+  card.progress("第二阶段");
+  await vi.advanceTimersByTimeAsync(10_000);
+  pending.resolve({ ok: true });
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(updateCard).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(updateCard).toHaveBeenCalledTimes(2);
+  await card.finish("处理失败：无法启动", false);
+  expect(updateCard.mock.calls.at(-1)?.[0]).toMatchObject({
+    flowStatus: "FINISH",
+    content: "第一阶段\n\n第二阶段\n\n处理失败：无法启动",
+  });
+});

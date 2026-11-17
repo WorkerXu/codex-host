@@ -13,7 +13,12 @@ afterEach(async () => {
   );
 });
 async function fixture(
-  options: { fast?: boolean; approval?: boolean; missingConfig?: boolean } = {},
+  options: {
+    fast?: boolean;
+    approval?: boolean;
+    missingConfig?: boolean;
+    onProgress?: (text: string) => void;
+  } = {},
 ) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "codexhost-native-dispatch-"));
   directories.push(cwd);
@@ -55,6 +60,7 @@ async function fixture(
       model: "gpt-test",
       reasoningEffort: "high",
       prompt: "接口如何实现？",
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.approval ? { readOnlySummary: true } : {}),
     });
   return { runner, request, notify, run };
@@ -186,5 +192,30 @@ it("interrupts a timed out native Turn and ignores completions for a different T
     threadId: "native-thread",
     turnId: "native-turn",
   });
+  f.runner.dispose();
+});
+
+it("reports only complete public commentary and public plan steps", async () => {
+  const onProgress = vi.fn();
+  const f = await fixture({ onProgress });
+  await f.run();
+  for (const item of [
+    { type: "reasoning", text: "内部推理" },
+    { type: "commandExecution", text: "工具原始输出" },
+    { type: "agentMessage", phase: "commentary", text: "正在核对资料" },
+  ])
+    f.runner.observe({
+      method: "item/completed",
+      params: { threadId: "native-thread", turnId: "native-turn", item },
+    });
+  f.runner.observe({
+    method: "turn/plan/updated",
+    params: {
+      threadId: "native-thread",
+      turnId: "native-turn",
+      plan: [{ step: "整理可公开的结论", status: "in_progress" }],
+    },
+  });
+  expect(onProgress.mock.calls).toEqual([["正在核对资料"], ["整理可公开的结论"]]);
   f.runner.dispose();
 });

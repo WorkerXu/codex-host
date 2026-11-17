@@ -14,6 +14,7 @@ export class DingTalkProgressCard {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #lastWrite = Date.now();
   #steps: string[] = [];
+  #writing = false;
   constructor(readonly service: CardService) {}
 
   async create(input: Omit<DingTalkCardInput, "content">): Promise<boolean> {
@@ -32,11 +33,22 @@ export class DingTalkProgressCard {
     const step = text.trim().slice(0, 300);
     if (this.#steps.at(-1) === step) return;
     this.#steps.push(step);
-    if (this.#timer) return;
+    this.#schedule();
+  }
+
+  #schedule(): void {
+    if (this.#timer || this.#writing || this.#finished || this.#stopped) return;
     this.#timer = setTimeout(
       () => {
         this.#timer = null;
-        this.#enqueue("INPUTTING", () => this.#steps.join("\n\n"));
+        this.#writing = true;
+        const count = this.#steps.length;
+        const content = this.#steps.join("\n\n");
+        this.#enqueue("INPUTTING", () => content);
+        void this.#queue.then(() => {
+          this.#writing = false;
+          if (this.#steps.length > count) this.#schedule();
+        });
       },
       Math.max(0, 5_000 - (Date.now() - this.#lastWrite)),
     );
