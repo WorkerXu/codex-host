@@ -4,7 +4,7 @@ interface FolderPickerServices {
   fileAttachments: {
     pickFiles(input: {
       kind: "directory";
-      allowMultiple: true;
+      allowMultiple: boolean;
       pickerTitle: string;
     }): Promise<unknown>;
   };
@@ -26,6 +26,7 @@ function isFolderPickerServices(value: unknown): value is FolderPickerServices {
 export async function pickDesktopFolders(
   ownerWindow: Window,
   importModule?: (url: string) => Promise<Record<string, unknown>>,
+  options: { allowMultiple?: boolean; title?: string } = {},
 ): Promise<string[] | null> {
   try {
     const services = await loadCodexNativeServices(
@@ -36,8 +37,8 @@ export async function pickDesktopFolders(
     if (!services) return null;
     const picked = await services.fileAttachments.pickFiles({
       kind: "directory",
-      allowMultiple: true,
-      pickerTitle: "选择工作文件夹",
+      allowMultiple: options.allowMultiple ?? true,
+      pickerTitle: options.title ?? "选择工作文件夹",
     });
     if (!Array.isArray(picked)) return null;
     const paths: string[] = [];
