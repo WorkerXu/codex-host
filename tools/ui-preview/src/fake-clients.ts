@@ -270,7 +270,6 @@ export function createFakeDingTalkClient(
               lastMessageAt: null,
               muted: false,
             }),
-            subtitle: row.title,
           };
         });
       const merged = [...people, ...local, ...groups].filter(

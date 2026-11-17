@@ -203,7 +203,7 @@ describe("dws CLI output", () => {
           },
         ],
       }),
-    ).toEqual([{ name: "林晓", title: "产品经理", userId: "u1", openDingTalkId: "open-1" }]);
+    ).toEqual([{ name: "林晓", userId: "u1", openDingTalkId: "open-1" }]);
   });
 
   it("parses and de-duplicates group members", () => {
@@ -222,8 +222,8 @@ describe("dws CLI output", () => {
         bots: [],
       }),
     ).toEqual([
-      { openDingTalkId: "open-1", name: "王鹏远", title: "普通成员" },
-      { openDingTalkId: "open-2", name: "李书月", title: "群主" },
+      { openDingTalkId: "open-1", name: "王鹏远" },
+      { openDingTalkId: "open-2", name: "李书月" },
     ]);
   });
 

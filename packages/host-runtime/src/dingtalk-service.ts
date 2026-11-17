@@ -722,7 +722,6 @@ export class DingTalkService {
       ...info,
       title: info.title || person.name,
       singleChat: true,
-      subtitle: person.title || null,
       memberCount: info.memberCount ?? 2,
     };
     this.#conversations.set(row.conversationId, row);
@@ -734,28 +733,12 @@ export class DingTalkService {
       this.#conversations.get(conversationId) ??
       this.#list?.rows.find((conversation) => conversation.conversationId === conversationId) ??
       null;
-    // A group row is complete once it carries a member count; a direct chat
-    // also needs the person's job title for the header subtitle.
-    if (
-      cached &&
-      (cached.singleChat ? cached.subtitle !== undefined : cached.memberCount !== undefined)
-    ) {
-      return cached;
-    }
+    if (cached) return cached;
     const info = await this.#cli.conversationInfo(conversationId);
     if (!info) return cached;
     const meta = this.#groupMeta?.get(conversationId);
     const enriched: DingTalkConversation = {
       ...info,
-      ...(cached
-        ? {
-            unreadCount: cached.unreadCount,
-            lastMessageAt: cached.lastMessageAt ?? info.lastMessageAt,
-            muted: cached.muted,
-            ...(cached.preview ? { preview: cached.preview } : {}),
-            ...(cached.atMe ? { atMe: true } : {}),
-          }
-        : {}),
       ...(meta
         ? {
             groupType: info.groupType ?? meta.groupType,
@@ -763,9 +746,6 @@ export class DingTalkService {
           }
         : {}),
     };
-    if (enriched.singleChat) {
-      enriched.subtitle = await this.#personSubtitle(enriched.title);
-    }
     this.#conversations.set(conversationId, enriched);
     return enriched;
   }
@@ -783,13 +763,6 @@ export class DingTalkService {
     const info = await this.#cli.conversationInfo(conversationId).catch(() => null);
     if (info) this.#conversations.set(conversationId, info);
     return info;
-  }
-
-  async #personSubtitle(name: string): Promise<string | null> {
-    if (!name) return null;
-    const result = await this.#cli.searchPeople(name).catch(() => null);
-    const person = result?.people.find((row) => row.name === name) ?? result?.people[0];
-    return person?.title || null;
   }
 
   #dedupe<T>(key: string, run: () => Promise<T>): Promise<T> {
@@ -940,12 +913,10 @@ export class DingTalkService {
 
   #withMeta(conversation: DingTalkConversation): DingTalkConversation {
     const meta = this.#groupMeta?.get(conversation.conversationId);
-    const known = this.#conversations.get(conversation.conversationId);
     const atMeAt = this.#atMe.get(conversation.conversationId);
     const viewedAt = this.#viewedAt.get(conversation.conversationId) ?? 0;
     return {
       ...conversation,
-      ...(known?.subtitle !== undefined ? { subtitle: known.subtitle } : {}),
       ...(meta
         ? {
             groupType: conversation.groupType ?? meta.groupType,

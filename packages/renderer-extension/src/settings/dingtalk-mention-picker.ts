@@ -130,10 +130,7 @@ export function createDingTalkMentionPicker(
       const people = members
         .filter((member) => {
           if (!needle) return true;
-          return (
-            member.name.toLowerCase().includes(needle) ||
-            (member.title ?? "").toLowerCase().includes(needle)
-          );
+          return member.name.toLowerCase().includes(needle);
         })
         .slice(0, allMatches ? MAX_ROWS - 1 : MAX_ROWS)
         .map((member) => ({

@@ -34,7 +34,7 @@ interface FakeState {
   messageCalls: number;
   previewCalls: number;
   memberCalls: number;
-  members: { openDingTalkId: string; name: string; title?: string }[];
+  members: { openDingTalkId: string; name: string }[];
   info: Record<string, DingTalkConversation>;
   onRecord?: (record: {
     messageId: string;
@@ -409,7 +409,7 @@ describe("DingTalk conversation views", () => {
   it("reads members once for simultaneous picker requests", async () => {
     const env = await environment();
     const fake = state({
-      members: [{ openDingTalkId: "open-1", name: "王鹏远", title: "普通成员" }],
+      members: [{ openDingTalkId: "open-1", name: "王鹏远" }],
     });
     const service = new DingTalkService({
       environment: env,
@@ -571,7 +571,7 @@ describe("DingTalk keyword search", () => {
       groupType: "INTERNAL_GROUP",
       memberCount: 15,
     });
-    expect(result.conversations[0]?.subtitle).toBe("产品经理");
+    expect(result.conversations[0]).not.toHaveProperty("subtitle");
     expect(result.messages).toHaveLength(1);
     service.dispose();
   });

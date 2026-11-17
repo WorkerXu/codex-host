@@ -165,8 +165,6 @@ export const dingtalkConversationSchema = z
     /** `INTERNAL_GROUP` marks an internal group in list rows and the header. */
     groupType: z.string().max(64).nullable().optional(),
     memberCount: z.number().int().nonnegative().nullable().optional(),
-    /** Direct-chat job title or department shown under the header title. */
-    subtitle: z.string().max(512).nullable().optional(),
     /** A recent message in this conversation mentions me. */
     atMe: z.boolean().optional(),
   })
@@ -352,8 +350,6 @@ export const dingtalkMemberSchema = z
   .object({
     openDingTalkId: z.string().trim().min(1).max(512),
     name: z.string().trim().min(1).max(256),
-    /** Job title or group role, when dws provides one. */
-    title: z.string().max(256).nullable().optional(),
   })
   .strict();
 export type DingTalkMember = z.infer<typeof dingtalkMemberSchema>;

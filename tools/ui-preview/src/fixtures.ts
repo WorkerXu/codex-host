@@ -69,7 +69,6 @@ export const conversations: DingTalkConversation[] = [
     "明天上午的评审还需要你确认一下。",
     false,
     {
-      subtitle: "产品经理",
       memberCount: 2,
     },
   ),

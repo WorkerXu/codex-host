@@ -232,11 +232,6 @@ export function createSearchConversationRow(
       ),
     );
   }
-  if (conversation.singleChat && conversation.subtitle) {
-    meta.append(
-      createElementNode(document, "span", "dingtalk-search-meta-text", conversation.subtitle),
-    );
-  }
   const timeText = formatDingTalkTime(conversation.lastMessageAt);
   if (timeText) {
     meta.append(createElementNode(document, "span", "dingtalk-search-meta-text", timeText));

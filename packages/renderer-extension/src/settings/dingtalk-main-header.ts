@@ -82,7 +82,7 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
         conversation === null
           ? ""
           : conversation.singleChat
-            ? (conversation.subtitle ?? "")
+            ? ""
             : typeof conversation.memberCount === "number" && conversation.memberCount > 0
               ? `${conversation.memberCount} 人`
               : "";

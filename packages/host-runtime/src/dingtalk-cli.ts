@@ -314,7 +314,6 @@ export function parseGroupSearch(value: unknown): DingTalkConversation[] {
 
 export interface DingTalkPerson {
   name: string;
-  title: string;
   userId: string;
   openDingTalkId: string;
 }
@@ -333,7 +332,6 @@ export function parsePersonSearch(value: unknown): DingTalkPerson[] {
     seen.add(openDingTalkId);
     people.push({
       name,
-      title: string(row.title),
       userId: string(row.userId),
       openDingTalkId,
     });
@@ -360,11 +358,9 @@ export function parseMembers(value: unknown): DingTalkMember[] {
       string(row.memberEmpName) || string(row.name) || string(row.memberNick) || string(row.nick);
     if (!openDingTalkId || !name || seen.has(openDingTalkId)) continue;
     seen.add(openDingTalkId);
-    const title = string(row.memberRoleDesc) || string(row.role) || string(row.title);
     members.push({
       openDingTalkId,
       name,
-      ...(title ? { title } : {}),
     });
   }
   return members;
