@@ -254,6 +254,7 @@ describe("clone plans, refusal and transfer", () => {
         expect(options?.env?.CODEXHOST_GITLAB_TOKEN).toBeUndefined();
         if (!options?.inputFile) return "absent\n";
         archive = options.inputFile;
+        expect(args.at(-1)).toContain("--no-same-owner");
         expect(await readFile(archive, "utf8")).toBe("archive");
         return "";
       }

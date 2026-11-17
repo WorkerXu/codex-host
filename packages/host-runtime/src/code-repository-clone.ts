@@ -37,7 +37,7 @@ try: os.mkdir(p)
 except FileExistsError: sys.stderr.write('TARGET_EXISTS');sys.exit(1)
 ok=False
 try:
- r=subprocess.run(['tar','-xzf','-','-C',p],stdin=sys.stdin.buffer,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ r=subprocess.run(['tar','--no-same-owner','-xzf','-','-C',p],stdin=sys.stdin.buffer,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  if r.returncode: sys.exit(1)
  ok=True
 finally:
