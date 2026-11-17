@@ -54,7 +54,7 @@ Host 回答目录能力前等待安装的 Harness 插件加载完成，避免远
 
 Host 的环境和目录列表是执行层事实。当前没有已核验的 `thread-writable-roots` / applied workspace cwd 写接口，因此不直接改写这些 Desktop 私有持久化 atom。Desktop 的文件浏览器、diff 面板可能暂时保留旧根目录；重新打开对话后的根目录显示需要在真实 Desktop 验证。
 
-跨机委派的项目归属通过 Renderer 的 `threadProjectAssignments.assign({hostId, threadId, project})` 服务绑定登记。服务不可用或调用失败时，Host 上的委派归属记录保留，Renderer 后续刷新重试；不改写全局状态文件。这个私有服务的实际导出和签名需要在目标 Mac Desktop 核验，预览页面不证明绑定存在。
+同主机与跨主机委派均保留来源 Thread 和显式项目选择，由 Mac Renderer 调用 Desktop 的 `appServices.threadProjectAssignments.readMemberships()` 读取父归属，再调用 `setMembership({hostId, threadId, assignment, projectless})` 登记子归属。`hostId` 是子对话执行主机；`assignment` 保留父分配中的 `projectKind`、`projectId`、远程项目的 `hostId` 和可选 `projectOrigin`。这些字段与调用形状已通过 Mac Desktop 的只读 CDP 数据和已加载原生调用点核对。服务不可用、写入失败或父分配尚未加载时保留记录并重试；显式无项目使用 `assignment:null, projectless:true`，已有人工归属（包括无项目）不被覆盖。不直接改写全局状态文件。真实委派后侧栏显示仍须在目标 Desktop 验收。
 
 ## 相关验证
 

@@ -316,7 +316,10 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
 } from "./delegation-types.js";
-import { HarnessDelegationCoordinator } from "./harness-delegation-coordinator.js";
+import {
+  HarnessDelegationCoordinator,
+  type OfficialDelegationStartInput,
+} from "./harness-delegation-coordinator.js";
 import { loadHarnessPlugins } from "./harness-plugin-loader.js";
 import type { HarnessPluginRegistry } from "./harness-plugin-registry.js";
 import {
@@ -3044,7 +3047,7 @@ export class AppServerHost {
   }
 
   async #startOfficialDelegation(
-    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
+    input: OfficialDelegationStartInput,
   ): Promise<DelegationStartResult> {
     let requestedModel: HarnessModelRef | undefined;
     try {
@@ -3186,18 +3189,9 @@ export class AppServerHost {
         status: pendingTerminal ?? "running",
         ...(input.requestId ? { requestId: input.requestId } : {}),
         taskDigest: digest,
-        ...(input.origin
-          ? {
-              desktopProject: {
-                sourceHostId: input.origin.hostId,
-                ...(input.origin.threadId ? { sourceThreadId: input.origin.threadId } : {}),
-                ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-              },
-            }
-          : {}),
+        desktopProject: input.desktopProject,
       });
-      if (input.origin)
-        await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
+      await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
       return {
         delegationId,
         threadId,

@@ -4,26 +4,33 @@ import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
   delegationProjectsResultSchema,
   desktopProjectsCatalogSchema,
-  type DesktopSelectedProject,
+  type ThreadProjectAssignment,
 } from "@codexhost/shared-contracts";
 import { loadCodexNativeServices } from "./codex-native-services.js";
 
 export interface AssignmentServices {
   threadProjectAssignments: {
-    assign(input: {
+    readMemberships(): Promise<{
+      assignments: Record<string, ThreadProjectAssignment>;
+      projectlessThreadIds: string[];
+    }>;
+    setMembership(input: {
       hostId: string;
       threadId: string;
-      project: DesktopSelectedProject | null;
+      assignment: ThreadProjectAssignment | null;
+      projectless: boolean;
     }): Promise<void>;
   };
 }
 const record = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object";
-function isAssignmentServices(value: unknown): value is AssignmentServices {
+  value !== null && (typeof value === "object" || typeof value === "function");
+export function isAssignmentServices(value: unknown): value is AssignmentServices {
   return (
     record(value) &&
+    Object.hasOwn(value, "threadProjectAssignments") &&
     record(value.threadProjectAssignments) &&
-    typeof value.threadProjectAssignments.assign === "function"
+    typeof value.threadProjectAssignments.readMemberships === "function" &&
+    typeof value.threadProjectAssignments.setMembership === "function"
   );
 }
 
@@ -37,7 +44,7 @@ declare global {
   }
 }
 
-/** Peer project IDs belong to Desktop, not the peer's app-server project catalog. */
+/** Project membership belongs to Desktop, including children on the parent's remote Host. */
 export function installRendererDelegationProjects(
   owner: Window = window,
   readServices: (owner: Window) => Promise<AssignmentServices | null> = (value) =>
@@ -46,11 +53,12 @@ export function installRendererDelegationProjects(
   owner.__codexhostDelegationProjectsV1?.dispose();
   let disposed = false;
   let inFlight = false;
+  let refreshRequested = false;
   let nextRefresh = 0;
   let lastError: string | null = null;
   let pending = 0;
   const subscriptions = new Map<unknown, () => void>();
-  const storageKey = "codexhost.delegation-projects.applied.v1";
+  const storageKey = "codexhost.delegation-projects.applied.v2";
   const applied = new Set<string>();
   try {
     const stored: unknown = JSON.parse(owner.localStorage.getItem(storageKey) ?? "[]");
@@ -60,7 +68,12 @@ export function installRendererDelegationProjects(
     /* Unavailable storage leaves native assignments as the durable source. */
   }
   const refresh = async () => {
-    if (disposed || inFlight || Date.now() < nextRefresh) return;
+    if (disposed) return;
+    if (inFlight) {
+      refreshRequested = true;
+      return;
+    }
+    if (Date.now() < nextRefresh) return;
     inFlight = true;
     nextRefresh = Date.now() + 5000;
     try {
@@ -73,6 +86,9 @@ export function installRendererDelegationProjects(
       pending = 0;
       lastError = null;
       let services: AssignmentServices | null | undefined;
+      let memberships:
+        | Awaited<ReturnType<AssignmentServices["threadProjectAssignments"]["readMemberships"]>>
+        | undefined;
       for (const hostId of routing?.knownHostIds?.() ?? []) {
         const route = routing?.forHost(hostId);
         if (!route) continue;
@@ -93,41 +109,69 @@ export function installRendererDelegationProjects(
         for (const assignment of response?.assignments ?? []) {
           const key = `${hostId}\0${assignment.threadId}`;
           if (applied.has(key)) continue;
-          const existing = catalog.threadProjectAssignments[assignment.threadId];
+          services ??= await readServices(owner);
+          if (!services) {
+            pending += 1;
+            lastError = "Desktop threadProjectAssignments.setMembership service is unavailable";
+            continue;
+          }
+          memberships ??= await services.threadProjectAssignments.readMemberships();
+          const existing = memberships.assignments[assignment.threadId];
           // A user may have already assigned this child before the companion connected.
-          if (existing) {
+          if (existing || memberships.projectlessThreadIds.includes(assignment.threadId)) {
             applied.add(key);
             continue;
           }
-          let project: DesktopSelectedProject | null;
+          let project: ThreadProjectAssignment | null;
           if (assignment.projectId === null) project = null;
           else if (assignment.projectId !== undefined) {
+            const remote = catalog.remoteProjects.find(
+              (entry) => entry.id === assignment.projectId,
+            );
             if (catalog.localProjects[assignment.projectId])
-              project = { type: "local", projectId: assignment.projectId };
-            else if (catalog.remoteProjects.some((entry) => entry.id === assignment.projectId))
-              project = { type: "remote", projectId: assignment.projectId };
-            else {
+              project = { projectKind: "local", projectId: assignment.projectId };
+            else if (remote) {
+              project = { projectKind: "remote", projectId: remote.id, hostId: remote.hostId };
+            } else {
               pending += 1;
               continue;
             }
           } else {
             const parent = assignment.sourceThreadId
-              ? catalog.threadProjectAssignments[assignment.sourceThreadId]
+              ? memberships.assignments[assignment.sourceThreadId]
               : null;
-            project = parent ? { type: parent.projectKind, projectId: parent.projectId } : null;
-          }
-          services ??= await readServices(owner);
-          if (!services) {
-            pending += 1;
-            lastError = "Desktop threadProjectAssignments.assign service is unavailable";
-            continue;
+            if (parent) {
+              project = { ...parent };
+              if (project.projectKind === "remote" && !project.hostId) {
+                const remote = catalog.remoteProjects.find(
+                  (entry) => entry.id === parent.projectId,
+                );
+                if (!remote) {
+                  pending += 1;
+                  continue;
+                }
+                project.hostId = remote.hostId;
+              }
+            } else if (
+              !assignment.sourceThreadId ||
+              memberships.projectlessThreadIds.includes(assignment.sourceThreadId)
+            ) {
+              project = null;
+            } else {
+              // An absent parent assignment may still be loading; never persist that as projectless.
+              pending += 1;
+              continue;
+            }
           }
           if (disposed) return;
-          await services.threadProjectAssignments.assign({
+          await services.threadProjectAssignments.setMembership({
             hostId,
             threadId: assignment.threadId,
-            project,
+            assignment: project,
+            projectless: project === null,
           });
+          if (project) memberships.assignments[assignment.threadId] = project;
+          else memberships.projectlessThreadIds.push(assignment.threadId);
           applied.add(key);
         }
       }
@@ -141,6 +185,11 @@ export function installRendererDelegationProjects(
       lastError = error instanceof Error ? error.message : String(error);
     } finally {
       inFlight = false;
+      if (refreshRequested) {
+        refreshRequested = false;
+        nextRefresh = 0;
+        void refresh();
+      }
     }
   };
   const retry = owner.setInterval(() => {

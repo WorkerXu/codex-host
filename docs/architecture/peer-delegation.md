@@ -231,6 +231,8 @@ ssh \
 
 `delegate start` 默认继承发起对话的项目，与子对话 `--cwd` 无关。未显式指定 `--cwd` 时，使用父会话当前主工作文件夹。`--project <projectId>` 显式指定项目，`--project none` 创建无项目子对话；显式选择优先于继承。同机原生 Codex 在 `thread/start` 携带 `projectId`，外部 Harness 把它保存在 Thread metadata。
 
-跨机的项目 ID 属于 Desktop，不能当作目标机器 app-server 的项目 ID。Host 将来源 Host、来源 Thread 和显式项目选择保存在委派记录中，Renderer 通过 Desktop 的 Thread 项目分配服务登记；服务未就绪时保留记录并重试。已有人工作出的子对话归属不被覆盖。
+跨机的项目 ID 属于 Desktop，不能当作目标机器 app-server 的项目 ID。同主机与跨主机派发都会保存待登记的 Desktop 项目意图：来源 Thread、跨机时的来源 Host 和显式项目选择。未指定项目时始终让 Mac Renderer 根据 Desktop 中父 Thread 的实时 membership 解析继承，远程 Host 读不到 Mac catalog 不会被当作显式无项目。外部父对话保留自身 metadata 的项目作为执行层回退；它不替代 Desktop 的实时归属。
+
+Renderer 使用 `appServices.threadProjectAssignments.readMemberships()` 和 `setMembership({hostId, threadId, assignment, projectless})` 登记，远程 assignment 包含项目所属的 `hostId`。服务未就绪、调用失败、父分配尚未加载时保留记录并重试；成功后去重，刷新期间收到的归属通知会触发再次读取。已有人工作出的子对话归属（包括无项目）不被覆盖。
 
 工作文件夹、持久化与真实 Desktop 绑定限制见 [对话工作文件夹](thread-folders.md)。

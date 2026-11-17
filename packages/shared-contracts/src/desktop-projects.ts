@@ -38,6 +38,8 @@ export const threadProjectAssignmentSchema = z
   .object({
     projectKind: projectKindSchema,
     projectId: projectIdSchema,
+    hostId: z.string().min(1).optional(),
+    projectOrigin: z.literal("chatgpt").optional(),
   })
   .passthrough();
 
