@@ -67,6 +67,8 @@ export interface DelegationPeerOrigin {
 }
 
 export interface DelegationStartInput {
+  /** Omitted inherits the caller project; null explicitly clears it. */
+  projectId?: string | null;
   harnessId: RoutedHarnessId;
   task: string;
   /** Short display name; the full task remains the initial message. */

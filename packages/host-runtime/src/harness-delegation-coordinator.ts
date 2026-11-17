@@ -109,7 +109,7 @@ async function forEachConcurrent<T>(
   await Promise.all(workers);
 }
 
-type ParentMetadata = { cwd?: string; title?: string };
+type ParentMetadata = { cwd?: string; title?: string; projectId?: string | null };
 
 function truncateTitle(value: string, length: number): string {
   return value.slice(0, length).replace(/[\uD800-\uDBFF]$/u, "");
@@ -155,13 +155,16 @@ function terminal(status: DelegationThreadSnapshot["status"]): boolean {
 }
 
 function taskDigest(
-  input: Pick<DelegationStartInput, "task" | "model" | "thinkingOptionId"> & { cwd: string },
+  input: Pick<DelegationStartInput, "task" | "model" | "thinkingOptionId" | "projectId"> & {
+    cwd: string;
+  },
 ): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
         task: input.task,
         cwd: path.resolve(input.cwd),
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         modelId: input.model?.id ?? null,
         thinkingOptionId: input.thinkingOptionId ?? null,
       }),
@@ -192,6 +195,14 @@ function validateStart(input: DelegationStartInput): void {
       "Task name must contain 1 to 120 characters",
     );
   }
+  if (
+    input.projectId !== undefined &&
+    input.projectId !== null &&
+    (typeof input.projectId !== "string" ||
+      !input.projectId.trim() ||
+      input.projectId.length > 1024)
+  )
+    throw new DelegationControlError("INVALID_ARGUMENT", "projectId must be a project ID or null");
   if (input.cwd !== undefined && (typeof input.cwd !== "string" || !input.cwd.trim()))
     throw new DelegationControlError("INVALID_ARGUMENT", "cwd must not be empty");
   if (
@@ -266,6 +277,8 @@ export class HarnessDelegationCoordinator {
   ) => Promise<DelegationStartResult>;
   readonly #listOfficial: (input: ThreadListInput) => Promise<DelegationThreadListResult>;
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
+  readonly #projectForThread:
+    ((threadId: string) => Promise<string | null | undefined>) | undefined;
   readonly #activeOfficialParents: () => string[];
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
   readonly #pluginRoots: readonly string[];
@@ -298,6 +311,7 @@ export class HarnessDelegationCoordinator {
     ): Promise<DelegationStartResult>;
     listOfficial(input: ThreadListInput): Promise<DelegationThreadListResult>;
     officialThreadMetadata(threadId: string): Promise<ParentMetadata>;
+    projectForThread?(threadId: string): Promise<string | null | undefined>;
     activeOfficialParents(): string[];
     externalThreadBusy(thread: ExternalThread): boolean;
     pluginRoots?: readonly string[];
@@ -319,6 +333,7 @@ export class HarnessDelegationCoordinator {
     this.#listOfficial = input.listOfficial;
     this.#officialThreadMetadata = input.officialThreadMetadata;
     this.#activeOfficialParents = input.activeOfficialParents;
+    this.#projectForThread = input.projectForThread;
     this.#externalThreadBusy = input.externalThreadBusy;
   }
 
@@ -447,6 +462,13 @@ export class HarnessDelegationCoordinator {
     const parent = origin
       ? { harnessId: "codex" as RoutedHarnessId }
       : await this.#parentMetadata(parentThreadId);
+    const projectId =
+      input.projectId !== undefined
+        ? input.projectId
+        : origin
+          ? undefined
+          : ((await this.#projectForThread?.(parentThreadId)) ?? parent.projectId);
+    input = { ...input, ...(projectId !== undefined ? { projectId } : {}) };
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
     const title = delegationTitle(parent.title, input, origin !== undefined);
     if (input.harnessId === "codex") {
@@ -536,6 +558,8 @@ export class HarnessDelegationCoordinator {
     let session: HarnessSession | null = null;
     return this.#externalRuntime.idleRelease.runOperation(childThreadId, async () => {
       try {
+        if (!origin && projectId)
+          record = await this.#repository.updateMetadata(childThreadId, { projectId });
         delegation = await this.#repository.createDelegation({
           delegationId,
           parentHostThreadId: hostThreadIdSchema.parse(parentThreadId),
@@ -545,6 +569,15 @@ export class HarnessDelegationCoordinator {
           status: "creating",
           ...(input.requestId ? { requestId: input.requestId } : {}),
           taskDigest: digest,
+          ...(origin
+            ? {
+                desktopProject: {
+                  sourceHostId: origin.hostId,
+                  ...(origin.threadId ? { sourceThreadId: origin.threadId } : {}),
+                  ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+                },
+              }
+            : {}),
         });
         const opened = await adapter.open({
           kind: "create",
@@ -820,6 +853,7 @@ export class HarnessDelegationCoordinator {
           ? {
               cwd: record.cwd,
               title: record.title,
+              ...(record.projectId ? { projectId: record.projectId } : {}),
               createdAt: record.createdAt,
               updatedAt: record.updatedAt,
             }
