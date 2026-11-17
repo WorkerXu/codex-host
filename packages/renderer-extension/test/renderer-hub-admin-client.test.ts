@@ -23,3 +23,25 @@ it("localizes stable codes and hides raw errors", () => {
   expect(hubErrorText(new Error("timeout"))).toBe("连接超时");
   expect(hubErrorText(new Error("secret in upstream error"))).toBe("连接失败");
 });
+it("sends a candidate only to the selected Host and rejects credential-bearing responses", async () => {
+  const key = "mcphub_fake_candidate_1234";
+  const sendRequest = vi.fn(async () => ({ configured: true, last4: "1234" }));
+  const forHost = vi.fn(() => ({ manager: { sendRequest } }));
+  const client = createRendererHubAdminClient({ forHost, listHosts: async () => [] });
+  expect(await client.request("india", { op: "mcpConnect", key })).toEqual({
+    configured: true,
+    last4: "1234",
+  });
+  expect(forHost).toHaveBeenCalledWith("india");
+  expect(sendRequest).toHaveBeenCalledWith(
+    HUB_ADMIN_METHOD,
+    { op: "mcpConnect", key },
+    expect.anything(),
+  );
+  sendRequest.mockResolvedValueOnce({ configured: true, last4: "1234", key } as {
+    configured: boolean;
+    last4: string;
+  });
+  await expect(client.request("india", { op: "mcpConnection" })).rejects.toThrow();
+  expect(hubErrorText(new Error("mcp-auth"))).toBe("密钥无效或权限不足");
+});

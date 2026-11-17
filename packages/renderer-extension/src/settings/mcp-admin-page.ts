@@ -10,6 +10,7 @@ import {
   hubSwitch,
 } from "./hub-admin-ui.js";
 import { openAgentMenu, type AgentMenuHandle, type AgentMenuItem } from "./agent-card-menu.js";
+import { createMcpConnectionUi } from "./mcp-connection-ui.js";
 import { mcpDialogs } from "./mcp-admin-dialogs.js";
 
 export interface HubAdminPageOptions {
@@ -73,16 +74,24 @@ export function createMcpAdminPage(
         const revision = ui.revision();
         if (!host) return;
         await ui.load(async () => {
-          const [serverResult, keyResult] = await Promise.all([
-            client.request(host, { op: "servers" }),
-            client.request(host, { op: "keys" }),
-          ]);
-          if (!ui.valid(host, revision)) return;
-          servers = serverResult.servers;
-          keys = keyResult;
-          render();
+          if (!(await connection.ready())) return;
+          try {
+            const [serverResult, keyResult] = await Promise.all([
+              client.request(host, { op: "servers" }),
+              client.request(host, { op: "keys" }),
+            ]);
+            if (!ui.valid(host, revision)) return;
+            servers = serverResult.servers;
+            keys = keyResult;
+            render();
+          } catch (error) {
+            if (!ui.valid(host, revision)) return;
+            if (error instanceof Error && error.message === "mcp-auth") connection.authFailed();
+            else throw error;
+          }
         });
       };
+      const connection = createMcpConnectionUi(ui, client, refresh, actions);
       const dialogs = mcpDialogs(ui, client, refresh, () => servers);
       const list = hubElement(document, "div", "hub-server-list");
       const renderServers = () => {

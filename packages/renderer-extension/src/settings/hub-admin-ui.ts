@@ -107,7 +107,9 @@ export function createHubPage(
   const header = hubElement(document, "header", "agents-page-head");
   header.append(hubElement(document, "h2", "agents-page-title", title));
   const hosts = hubSelect(document, "主机", [["", "选择主机"]]);
-  header.append(hosts);
+  const headerControls = hubElement(document, "div", "hub-header-controls");
+  headerControls.append(hosts);
+  header.append(headerControls);
   const status = hubElement(document, "p", "hub-status", "正在连接…");
   status.setAttribute("role", "status");
   const body = hubElement(document, "div", "hub-body");
@@ -231,6 +233,7 @@ export function createHubPage(
   return {
     document,
     page,
+    headerControls,
     body,
     status,
     hosts,
