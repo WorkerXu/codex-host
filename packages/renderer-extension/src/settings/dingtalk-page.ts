@@ -1049,11 +1049,9 @@ export function createDingTalkSettingsPage(
       const unsubscribe =
         client?.subscribe(() => {
           if (disposed) return;
-          void loadConversations().then(() => {
-            // A coalesced notification carries one id, but the list refresh is
-            // global; refresh whatever transcript is open now.
-            if (state.selectedId) void refreshLatest(state.selectedId);
-          });
+          void loadConversations();
+          // The open transcript must not wait for an independent unread-list read.
+          if (state.selectedId && !state.loadingMessages) void refreshLatest(state.selectedId);
         }) ?? (() => undefined);
 
       const poll = startDingTalkPoll({

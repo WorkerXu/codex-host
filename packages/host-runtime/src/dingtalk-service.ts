@@ -61,6 +61,7 @@ const NOTIFY_DELAY_MS = 250;
 const UNREAD_LIMIT = 50;
 const UNREAD_WINDOW_MS = 48 * 60 * 60_000;
 const SEARCH_WINDOW_DAYS = 30;
+const ENRICHMENT_IDLE_MS = 5_000;
 
 export class DingTalkServiceError extends Error {
   constructor(
@@ -162,6 +163,10 @@ export class DingTalkService {
   #atMe = new Map<string, number>();
   #ready: Promise<void> | null = null;
   #lastAuth: Awaited<ReturnType<DingTalkCli["authStatus"]>> | null = null;
+  #lastAuthAt = 0;
+  #enrichmentTimer: ReturnType<typeof setTimeout> | null = null;
+  #enriching = false;
+  #messageReads = 0;
   readonly #events: DingTalkEventListener;
   #notifyTimer: ReturnType<typeof setTimeout> | null = null;
   #pendingNotify = new Set<string | null>();
@@ -254,6 +259,7 @@ export class DingTalkService {
     await this.#ensure();
     const auth = await this.#cli.authStatus();
     this.#lastAuth = auth;
+    this.#lastAuthAt = this.#now();
     const resolved = await resolveDingTalkHost(this.#environment, await this.#settings.read());
     return dingtalkStatusSchema.parse({
       installed: auth.installed,
@@ -342,19 +348,25 @@ export class DingTalkService {
     return await this.#dedupe(
       `messages:${conversationId}:${params.before ?? "latest"}:${limit}`,
       async () => {
-        const [page, conversation] = await Promise.all([
-          this.#readMessages(conversationId, limit, params.before),
-          this.#conversationFor(conversationId),
-        ]);
-        return dingtalkMessagesResultSchema.parse({
-          available: page.errorCode === null,
-          conversation,
-          messages: page.messages,
-          hasMore: page.hasMore,
-          nextCursor: page.nextCursor,
-          cachedAt: null,
-          errorCode: page.errorCode,
-        });
+        this.#messageReads += 1;
+        try {
+          const [page, conversation] = await Promise.all([
+            this.#readMessages(conversationId, limit, params.before),
+            this.#conversationSnapshot(conversationId),
+          ]);
+          return dingtalkMessagesResultSchema.parse({
+            available: page.errorCode === null,
+            conversation,
+            messages: page.messages,
+            hasMore: page.hasMore,
+            nextCursor: page.nextCursor,
+            cachedAt: null,
+            errorCode: page.errorCode,
+          });
+        } finally {
+          this.#messageReads -= 1;
+          this.#scheduleEnrichment();
+        }
       },
     );
   }
@@ -628,7 +640,7 @@ export class DingTalkService {
     await this.#ensure();
     this.#events.touch();
     const [conversation, latestPage] = await Promise.all([
-      this.#conversationForMention(mention.conversationId),
+      this.#conversationSnapshot(mention.conversationId),
       this.#readMessages(mention.conversationId, 30),
     ]);
     let available = latestPage.errorCode === null;
@@ -762,10 +774,10 @@ export class DingTalkService {
   }
 
   /**
-   * Mention context only needs a title; a direct chat's job title costs one
-   * extra directory round trip, so submission-time expansion skips it.
+   * Messages and mention context need a title, not another directory lookup.
+   * Optional metadata is enriched after foreground reads have settled.
    */
-  async #conversationForMention(conversationId: string): Promise<DingTalkConversation | null> {
+  async #conversationSnapshot(conversationId: string): Promise<DingTalkConversation | null> {
     const cached =
       this.#conversations.get(conversationId) ??
       this.#list?.rows.find((conversation) => conversation.conversationId === conversationId) ??
@@ -814,14 +826,17 @@ export class DingTalkService {
 
   async #runRefresh(): Promise<void> {
     try {
-      // Auth, the unread list and @me hits are independent; the slow group
-      // directory must never delay the first list.
+      // Only authentication and unread rows gate the first list.
+      const reuseAuth =
+        this.#lastAuth !== null && this.#now() - this.#lastAuthAt < ENRICHMENT_IDLE_MS;
       const [auth, unread] = await Promise.all([
-        this.#cli.authStatus().catch(() => null),
+        reuseAuth ? Promise.resolve(this.#lastAuth) : this.#cli.authStatus().catch(() => null),
         this.#cli.unreadConversations(UNREAD_LIMIT),
-        this.#loadAtMe(),
       ]);
-      if (auth) this.#lastAuth = auth;
+      if (auth) {
+        this.#lastAuth = auth;
+        if (!reuseAuth) this.#lastAuthAt = this.#now();
+      }
       if (!auth?.installed || !auth.authenticated) {
         this.#list = {
           source: "empty",
@@ -887,7 +902,7 @@ export class DingTalkService {
         fetchedAt: this.#now(),
         errorCode: null,
       };
-      this.#startGroupMeta();
+      this.#scheduleEnrichment();
     } catch {
       this.#list = {
         source: this.#list?.source ?? "empty",
@@ -898,21 +913,42 @@ export class DingTalkService {
     }
   }
 
-  /** Group badges fill in later and ask the page for one light re-read. */
-  #startGroupMeta(): void {
-    void this.#loadGroupMeta().then((loaded) => {
-      if (!loaded || this.#disposed) return;
-      if (this.#list) this.#list.rows = this.#list.rows.map((row) => this.#withMeta(row));
-      this.#notify(null);
-    });
+  /** Directory and @me queries share the CLI's resources; keep them off the first-read path. */
+  #scheduleEnrichment(): void {
+    if (this.#disposed || this.#enriching) return;
+    if (this.#enrichmentTimer) clearTimeout(this.#enrichmentTimer);
+    this.#enrichmentTimer = setTimeout(() => {
+      this.#enrichmentTimer = null;
+      if (this.#messageReads > 0) {
+        this.#scheduleEnrichment();
+        return;
+      }
+      this.#enriching = true;
+      void (async () => {
+        const changes = await Promise.all([this.#loadGroupMeta(), this.#loadAtMe()]);
+        const changed = changes.some(Boolean);
+        if (this.#disposed) return;
+        if (changed && !this.#disposed && this.#list) {
+          this.#list.rows = this.#list.rows.map((row) => this.#withMeta(row));
+          this.#notify(null);
+        }
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          this.#enriching = false;
+        });
+    }, ENRICHMENT_IDLE_MS);
+    this.#enrichmentTimer.unref?.();
   }
 
   #withMeta(conversation: DingTalkConversation): DingTalkConversation {
     const meta = this.#groupMeta?.get(conversation.conversationId);
+    const known = this.#conversations.get(conversation.conversationId);
     const atMeAt = this.#atMe.get(conversation.conversationId);
     const viewedAt = this.#viewedAt.get(conversation.conversationId) ?? 0;
     return {
       ...conversation,
+      ...(known?.subtitle !== undefined ? { subtitle: known.subtitle } : {}),
       ...(meta
         ? {
             groupType: conversation.groupType ?? meta.groupType,
@@ -926,21 +962,24 @@ export class DingTalkService {
   async #loadGroupMeta(): Promise<boolean> {
     if (this.#groupMeta && this.#now() - this.#groupMetaAt < GROUP_META_TTL_MS) return false;
     const result = await this.#cli.groupDirectory().catch(() => null);
-    if (!result?.directory) return false;
+    if (!result?.directory || this.#disposed) return false;
     this.#groupMeta = result.directory;
     this.#groupMetaAt = this.#now();
     return true;
   }
 
-  async #loadAtMe(): Promise<void> {
-    const result = await this.#cli.atMeHits(7, 50).catch(() => null);
-    if (!result || result.errorCode !== null) return;
+  async #loadAtMe(): Promise<boolean> {
+    const result = await this.#cli.atMeHits(2, 50).catch(() => null);
+    if (!result || result.errorCode !== null || this.#disposed) return false;
     const next = new Map<string, number>();
     for (const hit of result?.hits ?? []) {
       if (hit.createdAt === null) continue;
       next.set(hit.conversationId, Math.max(next.get(hit.conversationId) ?? 0, hit.createdAt));
     }
+    const changed =
+      next.size !== this.#atMe.size || [...next].some(([id, at]) => this.#atMe.get(id) !== at);
     this.#atMe = next;
+    return changed;
   }
 
   #onEvent(record: DwsEventRecord): void {
@@ -1057,6 +1096,7 @@ export class DingTalkService {
     this.#eventListeners.clear();
     this.#seenEvents.clear();
     this.#events.dispose();
+    if (this.#enrichmentTimer) clearTimeout(this.#enrichmentTimer);
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);
     if (this.#viewedWriteTimer) clearTimeout(this.#viewedWriteTimer);
     void this.#viewed.write(this.#viewedAt).catch(() => undefined);

@@ -306,15 +306,15 @@ export function createFakeDingTalkClient(
       };
     },
     async markViewed(conversationId, _lastMessageAt, isActive) {
-      if (!options.liveUnread) return;
       const open = isActive !== false;
-      options.onViewed?.(conversationId, open);
       if (open) {
         active.add(conversationId);
       } else {
         active.delete(conversationId);
         viewed.add(conversationId);
       }
+      if (!options.liveUnread) return;
+      options.onViewed?.(conversationId, open);
       for (const callback of listeners) callback(conversationId);
     },
     subscribe(listener) {

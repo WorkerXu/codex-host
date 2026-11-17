@@ -170,15 +170,22 @@ describe("DingTalk conversation views", () => {
       errorCode: null,
     });
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
-    const result = await service.conversations();
-    expect(result.source).toBe("unread");
-    expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a", "b"]);
-    expect(result.conversations[0]).toMatchObject({
-      groupType: "INTERNAL_GROUP",
-      memberCount: 18,
-    });
-    expect(result.refreshing).toBe(false);
-    service.dispose();
+    vi.useFakeTimers();
+    try {
+      const result = await service.conversations();
+      expect(result.source).toBe("unread");
+      expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a", "b"]);
+      expect(result.conversations[0]?.groupType).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect((await service.conversations()).conversations[0]).toMatchObject({
+        groupType: "INTERNAL_GROUP",
+        memberCount: 18,
+      });
+      expect(result.refreshing).toBe(false);
+    } finally {
+      service.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it("only lists unread conversations from the last 48 hours", async () => {
@@ -215,7 +222,7 @@ describe("DingTalk conversation views", () => {
     service.dispose();
   });
 
-  it("loads auth, unread and @me concurrently", async () => {
+  it("loads auth and unread concurrently without waiting for @me", async () => {
     const env = await environment();
     const fake = state({ unread: [conversation("a", 100)] });
     const cli = fakeCli(fake);
@@ -227,7 +234,7 @@ describe("DingTalk conversation views", () => {
       release = resolve;
     });
     const arrive = (): void => {
-      if (authStarted && unreadStarted && atMeStarted) release?.();
+      if (authStarted && unreadStarted) release?.();
     };
     cli.authStatus = async () => {
       authStarted = true;
@@ -263,7 +270,7 @@ describe("DingTalk conversation views", () => {
     ]);
     expect(authStarted).toBe(true);
     expect(unreadStarted).toBe(true);
-    expect(atMeStarted).toBe(true);
+    expect(atMeStarted).toBe(false);
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
     service.dispose();
   });
@@ -281,6 +288,42 @@ describe("DingTalk conversation views", () => {
       ),
     ]);
     expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
+    service.dispose();
+  });
+
+  it("returns messages before optional direct-chat metadata or directory enrichment", async () => {
+    const env = await environment();
+    const direct = { ...conversation("direct", 100), title: "潘建开", singleChat: true };
+    const fake = state({
+      unread: [direct],
+      messages: [
+        {
+          messageId: "m1",
+          conversationId: "direct",
+          senderName: "潘建开",
+          createdAt: RECENT_BASE,
+          text: "hi",
+          unsupported: false,
+          mine: false,
+        },
+      ],
+    });
+    const cli = fakeCli(fake);
+    const info = vi
+      .spyOn(cli, "conversationInfo")
+      .mockImplementation(async () => new Promise(() => {}));
+    const people = vi
+      .spyOn(cli, "searchPeople")
+      .mockImplementation(async () => new Promise(() => {}));
+    cli.atMeHits = async () => new Promise(() => {});
+    cli.groupDirectory = async () => new Promise(() => {});
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    await service.conversations();
+    const result = await service.messages({ conversationId: "direct", limit: 30 });
+    expect(result.messages).toHaveLength(1);
+    expect(result.conversation?.title).toBe("潘建开");
+    expect(info).not.toHaveBeenCalled();
+    expect(people).not.toHaveBeenCalled();
     service.dispose();
   });
 

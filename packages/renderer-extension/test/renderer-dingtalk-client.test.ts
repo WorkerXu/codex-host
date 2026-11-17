@@ -5,6 +5,7 @@ import {
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_MEMBERS_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_PREVIEW_METHOD,
   DINGTALK_STATUS_METHOD,
   DINGTALK_VIEWED_METHOD,
   type DingTalkStatus,
@@ -85,6 +86,22 @@ function route(hostId: string, target: RendererDingTalkManager): RendererDingTal
 }
 
 describe("DingTalk renderer routing", () => {
+  it("prioritizes the open transcript over list previews", async () => {
+    const priorities: [string, string | undefined][] = [];
+    const target = manager([], { status: status({ defaultHost: "local", defaultHostId: null }) });
+    const original = target.sendRequest.bind(target);
+    target.sendRequest = async (method, params, options) => {
+      priorities.push([method, options?.priority]);
+      if (method === DINGTALK_PREVIEW_METHOD)
+        return { available: true, preview: null, cachedAt: null, errorCode: null };
+      return original(method, params, options);
+    };
+    const client = createRendererDingTalkClient({ forHost: () => route("local", target) });
+    await client.messages({ conversationId: "cid" });
+    await client.preview("cid");
+    expect(priorities).toContainEqual([DINGTALK_MESSAGES_METHOD, "interactive"]);
+    expect(priorities).toContainEqual([DINGTALK_PREVIEW_METHOD, "background"]);
+  });
   it("sends data requests to the Host that owns the DingTalk login", async () => {
     const localCalls: string[] = [];
     const remoteCalls: string[] = [];

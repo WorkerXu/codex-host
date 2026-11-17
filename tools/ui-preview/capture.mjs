@@ -563,6 +563,10 @@ for (const scenario of scenarios) {
         check("send-echo-once", echoes.length === 1);
         check("send-echo-on-right", echoes[0]?.classList.contains("dingtalk-message--mine"));
         check("send-echo-no-local-placeholder", !query('[data-message-id^="local-"]'));
+        check(
+          "send-open-row-no-unread",
+          !query('.dingtalk-conversation[aria-selected="true"] .dingtalk-unread-badge'),
+        );
       }
       if (document.body.dataset.scenario === "dingtalk-deduplicated") {
         const ids = queryAll(".dingtalk-message").map((row) => row.dataset.messageId);

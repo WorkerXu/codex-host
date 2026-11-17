@@ -82,6 +82,7 @@ describe("dws CLI output", () => {
         };
       },
     });
+    await cli.authStatus();
     const [page] = await Promise.all([
       cli.messages({ conversationId: "cid", limit: 30 }),
       cli.messages({ conversationId: "cid", limit: 1 }),
@@ -91,6 +92,7 @@ describe("dws CLI output", () => {
       ["other", false],
     ]);
     expect(calls.filter((command) => command === "contact user get-self")).toHaveLength(1);
+    expect(calls.filter((command) => command === "auth status --readonly")).toHaveLength(1);
     expect(
       parseMessagesPage(
         {

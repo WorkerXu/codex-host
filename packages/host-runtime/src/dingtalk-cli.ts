@@ -864,6 +864,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
   const external = options.runImpl;
   let cachedUser: SelfUser | null = null;
   let identityPromise: Promise<SelfUser | null> | null = null;
+  let authRead: Promise<DwsResult> | null = null;
 
   const run = (args: readonly string[], requestTimeoutMs = timeoutMs): Promise<DwsResult> =>
     external
@@ -874,12 +875,22 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           timeoutMs: requestTimeoutMs,
         });
 
+  const readAuth = (): Promise<DwsResult> => {
+    authRead ??= run(["auth", "status", "--readonly"], 12_000).finally(() => {
+      authRead = null;
+    });
+    return authRead;
+  };
+
   const self = (): Promise<SelfUser | null> => {
     if (cachedUser?.openId) return Promise.resolve(cachedUser);
     identityPromise ??= (async () => {
-      const data = dataObject(await run(["auth", "status", "--readonly"], 10_000));
-      if (data?.authenticated !== true || !string(data.user_id)) return null;
-      const user = { id: string(data.user_id), name: string(data.user_name) };
+      let user = cachedUser;
+      if (!user) {
+        const data = dataObject(await readAuth());
+        if (data?.authenticated !== true || !string(data.user_id)) return null;
+        user = { id: string(data.user_id), name: string(data.user_name) };
+      }
       const profile = await run(["contact", "user", "get-self"], 10_000).catch(() => null);
       const rows = profile?.value?.result;
       const org = (Array.isArray(rows) ? rows : [])
@@ -887,6 +898,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         .map((row) => row.orgEmployeeModel)
         .find((row) => record(row) && row.userId === user.id);
       const openId = record(org) ? string(org.openDingTalkId) : "";
+      if (cachedUser && cachedUser.id !== user.id) return null;
       cachedUser = { ...user, ...(openId ? { openId } : {}) };
       return cachedUser;
     })().finally(() => {
@@ -965,7 +977,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           errorCode: "not_installed",
         };
       }
-      const result = await run(["auth", "status", "--readonly"], 12_000);
+      const result = await readAuth();
       const data = dataObject(result);
       if ((result.errorCode !== null && result.exitCode !== 0) || !data) {
         return {
@@ -977,6 +989,11 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           errorCode: result.errorCode ?? "auth_failed",
         };
       }
+      const id = string(data.user_id);
+      cachedUser =
+        data.authenticated === true && id
+          ? { ...(cachedUser?.id === id ? cachedUser : {}), id, name: string(data.user_name) }
+          : null;
       return {
         installed: true,
         authenticated: data.authenticated === true,

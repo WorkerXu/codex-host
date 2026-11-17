@@ -266,10 +266,15 @@ export function createRendererDingTalkClient(
     return resolving;
   };
 
-  const request = async (method: string, params: unknown, timeoutMs = 45_000): Promise<unknown> => {
+  const request = async (
+    method: string,
+    params: unknown,
+    timeoutMs = 45_000,
+    priority: "interactive" | "background" = "interactive",
+  ): Promise<unknown> => {
     const current = await dataRoute();
     if (!current) throw new Error("peer_unavailable: Host Runtime is unavailable");
-    return await current.manager.sendRequest(method, params, { timeoutMs });
+    return await current.manager.sendRequest(method, params, { timeoutMs, priority });
   };
 
   return {
@@ -294,7 +299,7 @@ export function createRendererDingTalkClient(
     },
     async preview(conversationId) {
       return dingtalkPreviewResultSchema.parse(
-        await request(DINGTALK_PREVIEW_METHOD, { conversationId }, 30_000),
+        await request(DINGTALK_PREVIEW_METHOD, { conversationId }, 30_000, "background"),
       );
     },
     async messages(params) {
