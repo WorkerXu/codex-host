@@ -67,6 +67,8 @@ const allScenarios = [
   "jarvis-mode-many",
   "jarvis-mode-empty",
   "jarvis-mode-error",
+  "jarvis-mode-gemini-quota",
+  "jarvis-mode-gemini-timeout",
   "jarvis-mode-slow",
   "jarvis-mode-conditions",
   "jarvis-mode-chip-removed",
@@ -186,7 +188,7 @@ async function runPreviewInputs(page) {
     const y = box.y + box.height / 2;
     if (request.action === "type") {
       await page.evaluate((id) => window.__codexhostPreviewElement(id)?.focus(), request.id);
-      await page.keyboard.insertText(request.options?.text ?? "");
+      await page.keyboard.type(request.options?.text ?? "");
     } else if (request.action === "key") {
       await page.evaluate((id) => window.__codexhostPreviewElement(id)?.focus(), request.id);
       await page.keyboard.press(request.options?.key ?? "");
@@ -1267,6 +1269,8 @@ for (const scenario of scenarios) {
         document.body.dataset.scenario === "jarvis-mode-prefilled" ||
         document.body.dataset.scenario === "jarvis-mode-empty" ||
         document.body.dataset.scenario === "jarvis-mode-error" ||
+        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
+        document.body.dataset.scenario === "jarvis-mode-gemini-timeout" ||
         document.body.dataset.scenario === "jarvis-mode-slow" ||
         document.body.dataset.scenario === "jarvis-mode-conditions" ||
         document.body.dataset.scenario === "jarvis-mode-single" ||
@@ -1443,6 +1447,43 @@ for (const scenario of scenarios) {
           query("[data-jarvis-summary]")?.textContent ?? "",
         );
         check("error-settings-link", Boolean(query("[data-jarvis-settings]")));
+      }
+      if (
+        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
+        document.body.dataset.scenario === "jarvis-mode-gemini-timeout"
+      ) {
+        const mode = query("[data-codexhost-jarvis-mode]");
+        const expected =
+          document.body.dataset.scenario === "jarvis-mode-gemini-quota"
+            ? "Gemini 额度不足"
+            : "请求超时";
+        const results = mode?.querySelector('[data-jarvis-results="true"]');
+        check(
+          "gemini-query-typed",
+          mode?.querySelector("input")?.value === "我还没处理的标题有发货的",
+        );
+        check(
+          "gemini-query-searched",
+          document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的",
+        );
+        check(
+          "gemini-chinese-reason-and-settings-only",
+          results?.textContent?.trim() === `${expected}去设置`,
+          results?.textContent ?? "",
+        );
+        check("gemini-no-results", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+        check("gemini-no-chips", queryAll("[data-jarvis-chip]").length === 0);
+        check("gemini-no-count", (query("[data-jarvis-summary]")?.textContent ?? "missing") === "");
+        check(
+          "gemini-no-english-error",
+          !/prepayment|credits|depleted|timed?\s*out|timeout|Error|failed/iu.test(
+            results?.textContent ?? "",
+          ),
+        );
+        check(
+          "gemini-settings-link",
+          mode?.querySelector("[data-jarvis-settings]")?.textContent === "去设置",
+        );
       }
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(

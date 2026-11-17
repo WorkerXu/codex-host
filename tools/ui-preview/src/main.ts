@@ -846,6 +846,7 @@ async function mountJarvisSearch(
       document.body.dataset.jarvisSettingsOpened = "true";
     },
     search: async (_hostId, params) => {
+      document.body.dataset.jarvisLastQuery = params.query;
       previewWindow.__jarvisPreviewSearchCalls =
         (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
       const result = {
@@ -1484,6 +1485,31 @@ const scenarios: Record<string, () => Promise<void>> = {
       "我还没处理完的bug",
       true,
       (mode) => mode.textContent?.includes("Jarvis 未安装或未登录") === true,
+    );
+  },
+
+  async "jarvis-mode-gemini-quota"() {
+    await mountJarvisSearch(
+      {
+        result: { ...jarvisPreviewError, source: "gemini", errorCode: "quota_exhausted" },
+        delayMs: 80,
+      },
+      "我还没处理的标题有发货的",
+      true,
+      (mode) =>
+        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
+        mode.textContent?.includes("Gemini 额度不足") === true,
+    );
+  },
+
+  async "jarvis-mode-gemini-timeout"() {
+    await mountJarvisSearch(
+      { result: { ...jarvisPreviewError, source: "gemini", errorCode: "timeout" }, delayMs: 80 },
+      "我还没处理的标题有发货的",
+      true,
+      (mode) =>
+        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
+        mode.textContent?.includes("请求超时") === true,
     );
   },
 
