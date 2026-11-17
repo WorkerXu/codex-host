@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { SkillInventoryEntry, SkillSource } from "@codexhost/shared-contracts";
-
 export const MAX_SKILL_BYTES = 64 * 1024 * 1024;
 const IGNORED = new Set([".DS_Store", ".git", ".hg", ".svn"]);
 export interface SkillFile {
@@ -93,7 +92,7 @@ export function frontmatter(text: string): Record<string, string> {
     let value = field[2]?.trim() ?? "";
     if (/^[>|][-+]?$/u.test(value)) {
       const block: string[] = [];
-      while (/^\s+\S/u.test(lines[index + 1] ?? "")) block.push(lines[++index]!.trim());
+      while (/^\s+\S/u.test(lines[index + 1] ?? "")) block.push(required(lines[++index]).trim());
       value = block.join(" ");
     }
     result[field[1]] = value.replace(/^(["'])(.*)\1$/u, "$2");
@@ -105,7 +104,7 @@ export function inventoryEntry(
   files: SkillFile[],
   source: SkillSource | null,
 ): SkillInventoryEntry {
-  const skillMd = files.find((file) => file.path === "SKILL.md")!.data.toString("utf8");
+  const skillMd = required(files.find((file) => file.path === "SKILL.md")).data.toString("utf8");
   if (Buffer.byteLength(skillMd) > 64 * 1024) fail("skill_md_too_large");
   const meta = frontmatter(skillMd);
   return {
@@ -127,4 +126,8 @@ export function inventoryEntry(
 }
 export async function canonicalHome(home: string): Promise<string> {
   return realpath(home);
+}
+export function required<T>(value: T | null | undefined): T {
+  if (value === undefined || value === null) fail("invalid_skill_state");
+  return value;
 }

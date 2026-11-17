@@ -1,3 +1,4 @@
+import { required } from "./files.js";
 import { setSource, sourceOverrides } from "./provenance.js";
 import type { SkillSource } from "@codexhost/shared-contracts";
 import { randomUUID } from "node:crypto";
@@ -21,10 +22,12 @@ import {
 import { exists, fail, fingerprint, inside, readSkillFiles, safePath } from "./files.js";
 import { inventory, library, type SkillPaths } from "./inventory.js";
 import { isManagedSkill } from "./agents.js";
-
 export async function planLinks(
   paths: SkillPaths,
-  adopt: { agentId: string; skill: string }[] = [],
+  adopt: {
+    agentId: string;
+    skill: string;
+  }[] = [],
 ): Promise<SkillLinkPlan> {
   const current = await inventory(paths);
   const actions: SkillLinkAction[] = [];
@@ -110,7 +113,10 @@ export async function saveManifest(paths: SkillPaths, manifest: Manifest): Promi
 export async function applyLinks(
   paths: SkillPaths,
   plan: SkillLinkPlan,
-): Promise<{ id: string; changed: number }> {
+): Promise<{
+  id: string;
+  changed: number;
+}> {
   const actions = plan.actions.filter((action) => action.kind !== "conflict");
   const current = await inventory(paths);
   const manifest: Manifest = { id: plan.id, kind: "links", undone: false, changes: [] };
@@ -163,7 +169,10 @@ export async function applyLinks(
 export async function undoChanges(
   paths: SkillPaths,
   id: string,
-): Promise<{ id: string; changed: number }> {
+): Promise<{
+  id: string;
+  changed: number;
+}> {
   const manifest = JSON.parse(
     await readFile(path.join(paths.state, `${id}.json`), "utf8"),
   ) as Manifest;
@@ -207,7 +216,7 @@ export async function undoChanges(
       if (change.stage === "done")
         await rename(a.path, path.join(paths.state, `${id}.undone-skill`));
       if (change.backup) await rename(change.backup, a.path);
-    } else if (a.kind === "remove-dangling") await symlink(a.previousLink!, a.path, "dir");
+    } else if (a.kind === "remove-dangling") await symlink(required(a.previousLink), a.path, "dir");
     else {
       if (change.stage === "done") await unlink(a.path);
       if (a.kind === "adopt") {

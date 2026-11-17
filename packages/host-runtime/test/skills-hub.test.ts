@@ -1,3 +1,4 @@
+import { required } from "../src/skills-hub/files.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   chmod,
@@ -22,12 +23,14 @@ import { fingerprint, frontmatter, readSkillFiles } from "../src/skills-hub/file
 import { inventory, type SkillPaths } from "../src/skills-hub/inventory.js";
 import { LocalSkillsHub } from "../src/skills-hub/local.js";
 import { packSkill, unpackSkill } from "../src/skills-hub/archive.js";
-
 const temporary: string[] = [];
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((file) => rm(file, { recursive: true, force: true })));
 });
-async function fixture(): Promise<{ paths: SkillPaths; hub: LocalSkillsHub }> {
+async function fixture(): Promise<{
+  paths: SkillPaths;
+  hub: LocalSkillsHub;
+}> {
   const home = await mkdtemp(path.join(tmpdir(), "skills-hub-"));
   temporary.push(home);
   const paths = { home, state: path.join(home, ".codexhost/skills-hub"), searchPath: "" };
@@ -75,9 +78,13 @@ describe("skills inventory and discovery", () => {
     await mkdir(path.join(dir, ".git"));
     await writeFile(path.join(dir, ".git/config"), "ignored");
     await writeFile(path.join(dir, ".DS_Store"), "ignored");
-    expect((await inventory(paths)).skills[0]!.fingerprint).toBe(before.skills[0]!.fingerprint);
+    expect(required((await inventory(paths)).skills[0]).fingerprint).toBe(
+      required(before.skills[0]).fingerprint,
+    );
     await writeFile(path.join(dir, "run.sh"), "echo hello");
-    expect((await inventory(paths)).skills[0]!.fingerprint).not.toBe(before.skills[0]!.fingerprint);
+    expect(required((await inventory(paths)).skills[0]).fingerprint).not.toBe(
+      required(before.skills[0]).fingerprint,
+    );
     expect(await lstat(paths.state).catch(() => null)).toBeNull();
     expect(frontmatter("---\nname: 'foo'\n---\n").name).toBe("foo");
   });
@@ -198,7 +205,9 @@ describe("bounded tar transport", () => {
     await writeFile(path.join(dir, "run"), "hello", { mode: 0o755 });
     const files = await readSkillFiles(dir);
     expect(fingerprint(unpackSkill(packSkill(files)))).toBe(fingerprint(files));
-    const entry = skillInventorySchema.parse(await hub.request("inventory", {})).skills[0]!;
+    const entry = required(
+      skillInventorySchema.parse(await hub.request("inventory", {})).skills[0],
+    );
     const bundle = skillBundleSchema.parse(
       await hub.request("export", { skill: entry.key, expected: entry.fingerprint }),
     );
@@ -208,8 +217,10 @@ describe("bounded tar transport", () => {
     const { paths } = await fixture();
     const files = await readSkillFiles(await skill(paths.home));
     for (const name of ["../escape", "/absolute", "a/../../outside", "C:/outside", "a\\b"])
-      expect(() => unpackSkill(packSkill([{ ...files[0]!, path: name }]))).toThrow();
-    expect(() => unpackSkill(packSkill([files[0]!, files[0]!]))).toThrow("invalid_archive_path");
+      expect(() => unpackSkill(packSkill([{ ...required(files[0]), path: name }]))).toThrow();
+    expect(() => unpackSkill(packSkill([required(files[0]), required(files[0])]))).toThrow(
+      "invalid_archive_path",
+    );
     expect(() => unpackSkill("bad payload")).toThrow();
   });
 });

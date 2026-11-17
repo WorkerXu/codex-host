@@ -1,3 +1,4 @@
+import { required } from "./files.js";
 import { setSource } from "./provenance.js";
 import { SkillTransfers } from "./transfers.js";
 import { randomUUID } from "node:crypto";
@@ -15,7 +16,6 @@ import { inventory, library, type SkillPaths } from "./inventory.js";
 import { applyLinks, planLinks, saveManifest, undoChanges } from "./links.js";
 import { packSkill, unpackSkill } from "./archive.js";
 import { reinstallSource } from "./source.js";
-
 export const SKILL_PEER_OPERATIONS = [
   "export-chunk",
   "import-begin",
@@ -40,9 +40,15 @@ const adoptionInput = z
       .optional(),
   })
   .strict();
-
 export class LocalSkillsHub {
-  readonly plans = new Map<string, { plan: SkillLinkPlan; snapshot: string; created: number }>();
+  readonly plans = new Map<
+    string,
+    {
+      plan: SkillLinkPlan;
+      snapshot: string;
+      created: number;
+    }
+  >();
   readonly #transfers = new SkillTransfers();
   #tail: Promise<unknown> = Promise.resolve();
   constructor(readonly paths: SkillPaths) {}
@@ -67,7 +73,7 @@ export class LocalSkillsHub {
       // Fingerprints, exclusions, and every agent path participate in preview freshness.
       const snapshot = await this.#snapshot(plan);
       for (const [id, value] of this.plans)
-        if (Date.now() - value.created > 600_000) this.plans.delete(id);
+        if (Date.now() - value.created > 600000) this.plans.delete(id);
       if (this.plans.size >= 100) fail("too_many_plans");
       this.plans.set(plan.id, { plan, snapshot, created: Date.now() });
       return plan;
@@ -76,7 +82,7 @@ export class LocalSkillsHub {
       const { id } = idInput.parse(body),
         stored = this.plans.get(id);
       this.plans.delete(id);
-      if (!stored || Date.now() - stored.created > 600_000) fail("expired_plan");
+      if (!stored || Date.now() - stored.created > 600000) fail("expired_plan");
       const adopt = stored.plan.actions
         .filter((a) => a.kind === "adopt")
         .map((a) => ({ agentId: a.agentId, skill: a.skill }));
@@ -132,10 +138,10 @@ export class LocalSkillsHub {
     await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
     await rename(temporary, file);
   }
-  async #import({
-    bundle,
-    expected,
-  }: z.infer<typeof skillImportSchema>): Promise<{ id: string; changed: number }> {
+  async #import({ bundle, expected }: z.infer<typeof skillImportSchema>): Promise<{
+    id: string;
+    changed: number;
+  }> {
     // Even the source-reinstall path validates the tarball and its exact fingerprint first.
     const archived = unpackSkill(bundle.data);
     if (fingerprint(archived) !== bundle.fingerprint) fail("fingerprint_mismatch");
@@ -194,19 +200,19 @@ export class LocalSkillsHub {
       await saveManifest(this.paths, manifest);
       if (backup) {
         await rename(destination, backup);
-        manifest.changes[0]!.stage = "backed-up";
+        required(manifest.changes[0]).stage = "backed-up";
         await saveManifest(this.paths, manifest);
       }
       try {
         await rename(staged, destination);
       } catch (error) {
         if (backup) await rename(backup, destination);
-        manifest.changes[0]!.stage = "pending";
+        required(manifest.changes[0]).stage = "pending";
         await saveManifest(this.paths, manifest);
         throw error;
       }
       await setSource(this.paths, bundle.skill, bundle.source);
-      manifest.changes[0]!.stage = "done";
+      required(manifest.changes[0]).stage = "done";
       await saveManifest(this.paths, manifest);
       return { id, changed: 1 };
     } finally {

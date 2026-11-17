@@ -1,3 +1,4 @@
+import { required } from "../src/skills-hub/files.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import type { SkillBundle } from "@codexhost/shared-contracts";
@@ -33,7 +34,7 @@ describe("immutable source reinstall", () => {
     vi.stubGlobal("fetch", fetcher);
     const result = await reinstallSource(bundle());
     expect(result).not.toBeNull();
-    expect(fingerprint(result!)).toBe(bundle().fingerprint);
+    expect(fingerprint(required(result))).toBe(bundle().fingerprint);
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       `https://raw.githubusercontent.com/owner/repo/${"a".repeat(40)}/skills/example/SKILL.md`,
     );
@@ -43,7 +44,7 @@ describe("immutable source reinstall", () => {
     vi.stubGlobal("fetch", fetcher);
     expect(await reinstallSource(bundle())).toBeNull();
     const mutable = bundle();
-    delete mutable.source!.commit;
+    delete required(mutable.source).commit;
     expect(await reinstallSource(mutable)).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(1);
     vi.stubGlobal(
