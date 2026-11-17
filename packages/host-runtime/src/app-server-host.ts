@@ -1,3 +1,6 @@
+import { HUB_ADMIN_METHOD } from "@codexhost/shared-contracts";
+import { HubAdminService } from "./hub-admin-service.js";
+import { HubAdminError } from "./hub-admin-http.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -469,6 +472,7 @@ export interface AppServerHostOptions {
   /** Local-only registry of remote projects created for local source projects. */
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
+  hubAdmin?: HubAdminService;
   jarvis?: JarvisService;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
@@ -1497,6 +1501,24 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (request.method === HUB_ADMIN_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service = this.#options.hubAdmin ?? new HubAdminService();
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(request, -32096, error instanceof HubAdminError ? error.code : "failed"),
+          );
+        }
+      });
+      return;
+    }
+    if (request.method.startsWith("codexhost/hub-admin/")) {
+      await this.#writer.json(rpcError(request, -32601, "invalid"));
       return;
     }
     if (request.method.startsWith("codexhost/jarvis/")) {

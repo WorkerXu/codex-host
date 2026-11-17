@@ -293,6 +293,7 @@ export function createFixture(
     projectGroups?: ProjectGroupsService;
     externalOnly?: boolean;
     delegationPeers?: AppServerHostOptions["delegationPeers"];
+    hubAdmin?: AppServerHostOptions["hubAdmin"];
     jarvis?: AppServerHostOptions["jarvis"];
     dingtalk?: AppServerHostOptions["dingtalk"];
     codexAgents?: AppServerHostOptions["codexAgents"];
@@ -362,6 +363,7 @@ export function createFixture(
           },
         }
       : {}),
+    ...(options.hubAdmin ? { hubAdmin: options.hubAdmin } : {}),
     ...(options.jarvis ? { jarvis: options.jarvis } : {}),
     ...(options.dingtalk ? { dingtalk: options.dingtalk } : {}),
     ...(options.codexAgents ? { codexAgents: options.codexAgents } : {}),

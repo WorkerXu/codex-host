@@ -622,3 +622,5 @@ export {
   type DingTalkReplyScope,
   type DingTalkDispatchSettings,
 } from "./dingtalk-dispatch.js";
+
+export * from "./hub-admin.js";
