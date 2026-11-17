@@ -1,3 +1,5 @@
+import { mountCodeRepositoriesSection } from "./code-repositories-section.js";
+import type { CodeRepositoriesClient } from "../code-repositories-client.js";
 import { mountModelServiceSection } from "./model-service-section.js";
 import type { RendererModelServiceClient } from "../model-service-client.js";
 import {
@@ -20,6 +22,7 @@ export function createAppearanceSettingsPage(
   messages: RendererSettingsMessages,
   getLoadedSessionsClient: () => LoadedSessionsClient | null = () => null,
   modelService: RendererModelServiceClient | null = null,
+  codeRepositories: CodeRepositoriesClient | null = null,
 ): RendererSettingsPageDefinition {
   return Object.freeze({
     id: "appearance",
@@ -54,6 +57,7 @@ export function createAppearanceSettingsPage(
 
       context.content.append(heading);
       mountModelServiceSection(context, modelService);
+      mountCodeRepositoriesSection(context, codeRepositories);
       context.content.append(group);
       const disposeIdleRelease = mountIdleReleaseControls(
         context,
