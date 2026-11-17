@@ -1,14 +1,11 @@
-import type { ModelProvider, ModelServiceSettings } from "@codexhost/shared-contracts";
+import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import { modelServiceErrorText, type RendererModelServiceClient } from "../model-service-client.js";
 import type { RendererSettingsPageMountContext } from "./core.js";
 import { agentMenuFocusIndex, agentMenuPlacement } from "./agent-card-menu.js";
 import { createRendererSettingsIcon } from "./icons.js";
 import { createPreferenceGroup, createPreferenceItem } from "./preference-ui.js";
 
-const MODELS = [
-  { value: "openai", label: "OpenAI · gpt-4.1-mini" },
-  { value: "gemini", label: "Gemini · gemini-3.5-flash-lite" },
-] as const;
+const MODELS = [{ value: "openai", label: "OpenAI · gpt-4.1-mini" }] as const;
 
 function button(document: Document, text: string): HTMLButtonElement {
   const element = document.createElement("button");
@@ -255,7 +252,7 @@ export function mountModelServiceSection(
     menu.style.left = `${placement.left}px`;
     choices.find((choice) => choice.dataset.value === settings?.provider)?.focus();
   };
-  const choose = async (provider: ModelProvider) => {
+  const choose = async (provider: "openai") => {
     if (!client || choosing || settings?.provider === provider) return;
     choosing = true;
     modelRow.description.textContent = "";

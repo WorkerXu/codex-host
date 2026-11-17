@@ -2,8 +2,8 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import os from "node:os";
 import path from "node:path";
 import {
-  modelProviderSchema,
   modelServiceSetSchema,
+  modelServiceSettingsSchema,
   type ModelProvider,
   type ModelServiceSet,
   type ModelServiceSettings,
@@ -28,9 +28,9 @@ export class ModelServiceSettingsStore {
       return null;
     }
   }
-  async provider(): Promise<ModelProvider> {
+  async provider(): Promise<"openai"> {
     try {
-      return modelProviderSchema.parse(
+      return modelServiceSettingsSchema.shape.provider.parse(
         JSON.parse(await readFile(path.join(this.#directory, "model-service.json"), "utf8"))
           .provider,
       );

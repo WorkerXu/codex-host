@@ -23,7 +23,7 @@ describe("shared renderer model service", () => {
     );
     const client = createRendererModelServiceClient(() => ({ sendRequest }));
     expect(await client.read()).toEqual(snapshot);
-    expect(await client.update({ provider: "gemini" })).toEqual(snapshot);
+    expect(await client.update({ provider: "openai" })).toEqual(snapshot);
     expect(await client.test("gemini")).toEqual({ ok: true, latencyMs: 123, errorCode: null });
     expect(sendRequest.mock.calls.map(([method]) => method)).toEqual([
       MODEL_SERVICE_GET_METHOD,

@@ -9,11 +9,11 @@ import {
 } from "../src/jarvis-query-parser.js";
 import { JarvisService } from "../src/jarvis-service.js";
 import { ModelServiceSettingsStore } from "../src/model-service-settings.js";
-const JARVIS_QUERY_MODEL = "gemini-3.5-flash-lite";
-const JARVIS_QUERY_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${JARVIS_QUERY_MODEL}:generateContent`;
-const createJarvisGeminiQuery = (
+const JARVIS_QUERY_MODEL = "gpt-4.1-mini";
+const JARVIS_QUERY_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const createJarvisOpenAIQuery = (
   options: Omit<Parameters<typeof createJarvisProviderQuery>[0], "provider">,
-) => createJarvisProviderQuery({ ...options, provider: "gemini" });
+) => createJarvisProviderQuery({ ...options, provider: "openai" });
 
 const NOW = Date.parse("2026-11-16T01:30:00+08:00");
 const QUERY: JarvisBugQuery = {
@@ -30,49 +30,36 @@ const QUERY: JarvisBugQuery = {
 
 function response(value: unknown = QUERY): Response {
   return Response.json({
-    candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(value) }] } }],
+    choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }],
   });
 }
 
 afterEach(() => vi.useRealTimers());
 
-describe("Jarvis Gemini structured query", () => {
-  it("posts the whole query to Flash-Lite generateContent with JSON responseSchema", async () => {
+describe("Jarvis OpenAI structured query", () => {
+  it("posts the whole query to OpenAI with a strict JSON schema", async () => {
     const fetchImpl = vi.fn(async () => response());
-    const client = createJarvisGeminiQuery({ readApiKey: async () => "test-key", fetchImpl });
+    const client = createJarvisOpenAIQuery({ readApiKey: async () => "test-key", fetchImpl });
     expect(await client.interpret("我还没处理的标题有发货的", NOW)).toEqual(QUERY);
-    expect(JARVIS_QUERY_MODEL).toBe("gemini-3.5-flash-lite");
+    expect(JARVIS_QUERY_MODEL).toBe("gpt-4.1-mini");
     expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
       JARVIS_QUERY_ENDPOINT,
       expect.objectContaining({
         method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": "test-key" },
+        headers: { "content-type": "application/json", authorization: "Bearer test-key" },
       }),
     );
     const request = JSON.parse(
       (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
     );
-    expect(request.systemInstruction.parts[0].text).toBe(
+    expect(request.messages[0].content).toBe(
       buildJarvisQueryRequest("我还没处理的标题有发货的", NOW).instructions,
     );
-    expect(request.generationConfig).toMatchObject({
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        required: [
-          "scope",
-          "statuses",
-          "priorities",
-          "severities",
-          "order",
-          "timeWindow",
-          "titleKeywords",
-          "projectNames",
-          "unrecognized",
-        ],
-      },
+    expect(request.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: { name: "jarvis_bug_query", strict: true },
     });
-    expect(JSON.parse(request.contents[0]?.parts[0]?.text ?? "{}")).toMatchObject({
+    expect(JSON.parse(request.messages[1]?.content ?? "{}")).toMatchObject({
       query: "我还没处理的标题有发货的",
       nowMs: NOW,
       now: new Date(NOW).toISOString(),
@@ -100,7 +87,7 @@ describe("Jarvis Gemini structured query", () => {
         timeWindow: window,
       }),
     );
-    const result = await createJarvisGeminiQuery({
+    const result = await createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl,
     }).interpret("上周我提的跟登录有关的严重问题", NOW);
@@ -131,7 +118,7 @@ describe("Jarvis Gemini structured query", () => {
     null,
   ])("rejects invalid conditions without accepting partial fields: %j", async (value) => {
     expect(jarvisBugQuerySchema.safeParse(value).success).toBe(false);
-    const client = createJarvisGeminiQuery({
+    const client = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () => response(value),
     });
@@ -143,11 +130,11 @@ describe("Jarvis Gemini structured query", () => {
   it.each([
     null,
     {},
-    { candidates: [{ finishReason: "MAX_TOKENS" }] },
-    { candidates: [{ finishReason: "STOP", content: { parts: [null] } }] },
-    { candidates: [{ finishReason: "STOP", content: { parts: [{ text: "not json" }] } }] },
+    { choices: [{ finish_reason: "length" }] },
+    { choices: [{ finish_reason: "stop", message: null }] },
+    { choices: [{ finish_reason: "stop", message: { content: "not json" } }] },
   ])("rejects malformed, blocked or truncated API responses: %j", async (value) => {
-    const client = createJarvisGeminiQuery({
+    const client = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () => Response.json(value),
     });
@@ -155,7 +142,7 @@ describe("Jarvis Gemini structured query", () => {
   });
 
   it("keeps project names separate from title keywords", async () => {
-    const client = createJarvisGeminiQuery({
+    const client = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () =>
         response({ ...QUERY, titleKeywords: ["登录"], projectNames: ["安心买"] }),
@@ -168,7 +155,7 @@ describe("Jarvis Gemini structured query", () => {
 
   it("reports missing key without making an API request", async () => {
     const fetchImpl = vi.fn();
-    const client = createJarvisGeminiQuery({ readApiKey: async () => null, fetchImpl });
+    const client = createJarvisOpenAIQuery({ readApiKey: async () => null, fetchImpl });
     await expect(client.interpret("我还没处理完成的bug", NOW)).rejects.toMatchObject({
       code: "missing_key",
     });
@@ -183,7 +170,7 @@ describe("Jarvis Gemini structured query", () => {
     [429, "rate_limited"],
     [500, "provider_failed"],
   ])("reports HTTP %i", async (status, code) => {
-    const client = createJarvisGeminiQuery({
+    const client = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () => new Response(null, { status: Number(status) }),
     });
@@ -191,14 +178,14 @@ describe("Jarvis Gemini structured query", () => {
   });
 
   it("reports fetch and JSON decoding failures", async () => {
-    const network = createJarvisGeminiQuery({
+    const network = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () => {
         throw new Error("network");
       },
     });
     await expect(network.interpret("bug", NOW)).rejects.toMatchObject({ code: "network" });
-    const invalid = createJarvisGeminiQuery({
+    const invalid = createJarvisOpenAIQuery({
       readApiKey: async () => "key",
       fetchImpl: async () => new Response("invalid JSON"),
     });
@@ -213,7 +200,7 @@ describe("Jarvis Gemini structured query", () => {
       const fetchImpl = vi.fn(async () =>
         stage === "fetch" ? stalled() : ({ ok: true, json: stalled } as unknown as Response),
       );
-      const client = createJarvisGeminiQuery({
+      const client = createJarvisOpenAIQuery({
         readApiKey: () => (stage === "key" ? stalled() : Promise.resolve("key")),
         fetchImpl,
       });
@@ -233,7 +220,7 @@ describe("Jarvis Gemini structured query", () => {
       .mockResolvedValue("local-test-key");
     const provider = vi
       .spyOn(ModelServiceSettingsStore.prototype, "provider")
-      .mockResolvedValue("gemini");
+      .mockResolvedValue("openai");
     const fetchImpl = vi.fn(async () => response());
     const service = new JarvisService({ fetchImpl, isLocalHost: true, now: () => NOW });
     expect(await service.testSettings()).toEqual({ ok: true, latencyMs: 0, errorCode: null });
@@ -241,7 +228,7 @@ describe("Jarvis Gemini structured query", () => {
     expect(fetchImpl).toHaveBeenCalledWith(
       JARVIS_QUERY_ENDPOINT,
       expect.objectContaining({
-        headers: expect.objectContaining({ "x-goog-api-key": "local-test-key" }),
+        headers: expect.objectContaining({ authorization: "Bearer local-test-key" }),
       }),
     );
     const remote = new JarvisService({ fetchImpl, isLocalHost: false });

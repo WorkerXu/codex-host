@@ -107,21 +107,21 @@ test("Escape cancels edits and closes the model menu before the settings shell",
   await picker.press("ArrowDown");
   const menu = page.getByRole("menu", { name: "解析模型", exact: true });
   await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitemradio")).toHaveCount(1);
+  await expect(menu).not.toContainText("Gemini");
   await expect(
     menu.getByRole("menuitemradio", { name: "OpenAI · gpt-4.1-mini", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await expect(picker).toHaveText("Gemini · gemini-3.5-flash-lite");
+  await expect(picker).toHaveText("OpenAI · gpt-4.1-mini");
   await expect(menu).toBeHidden();
   await picker.click();
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
   await expect(picker).toBeVisible();
   await expect(picker).toBeFocused();
-  expect(await page.evaluate(() => Reflect.get(globalThis, "modelFixture").calls)).toEqual([
-    { provider: "gemini" },
-  ]);
+  expect(await page.evaluate(() => Reflect.get(globalThis, "modelFixture").calls)).toEqual([]);
 });
 
 test("save failures remain editable with Chinese copy and clear on cancel", async ({ page }) => {

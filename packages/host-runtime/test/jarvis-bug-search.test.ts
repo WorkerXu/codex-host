@@ -105,7 +105,7 @@ function searcher(cli: JarvisBugSearchCli, values: Partial<JarvisBugQuery> = {})
   return { api, interpret };
 }
 
-describe("Jarvis Gemini bug search", () => {
+describe("Jarvis structured bug search", () => {
   it.each([
     [402, "quota_exhausted"],
     [401, "unauthorized"],
@@ -114,7 +114,7 @@ describe("Jarvis Gemini bug search", () => {
   ])("returns an error without querying Jarvis after HTTP %i", async (status, code) => {
     const cli = fakeCli([bug({ id: 80, projectId: 9002, bugTitle: "发货失败" })]);
     const interpreter = createJarvisProviderQuery({
-      provider: "gemini",
+      provider: "openai",
       readApiKey: async () => "test-key",
       fetchImpl: async () =>
         Response.json(
@@ -127,7 +127,7 @@ describe("Jarvis Gemini bug search", () => {
     });
     expect(result).toEqual({
       available: false,
-      source: "gemini",
+      source: "openai",
       errorCode: code,
       conditions: [],
       bugs: [],
@@ -154,7 +154,7 @@ describe("Jarvis Gemini bug search", () => {
         });
       });
       const interpreter = createJarvisProviderQuery({
-        provider: "gemini",
+        provider: "openai",
         readApiKey: async () => (code === "missing_key" ? null : "key"),
         fetchImpl,
       });
@@ -168,7 +168,7 @@ describe("Jarvis Gemini bug search", () => {
       }
       expect(await pending).toEqual({
         available: false,
-        source: "gemini",
+        source: "openai",
         errorCode: code,
         conditions: [],
         bugs: [],

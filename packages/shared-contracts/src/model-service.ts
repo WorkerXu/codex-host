@@ -10,14 +10,14 @@ const keyState = z.strictObject({
   lastFour: z.string().max(4).nullable(),
 });
 export const modelServiceSettingsSchema = z.strictObject({
-  provider: modelProviderSchema,
+  provider: z.literal("openai"),
   openai: keyState,
   gemini: keyState,
 });
 export type ModelServiceSettings = z.infer<typeof modelServiceSettingsSchema>;
 export const modelServiceSetSchema = z
   .strictObject({
-    provider: modelProviderSchema.optional(),
+    provider: z.literal("openai").optional(),
     key: z
       .strictObject({
         provider: modelProviderSchema,

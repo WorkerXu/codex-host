@@ -45,6 +45,19 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 describe("OpenAI structured parser", () => {
+  it("rejects a removed parser provider before reading credentials or sending a request", async () => {
+    const readApiKey = vi.fn();
+    const fetchImpl = vi.fn();
+    const parser = createJarvisProviderQuery({
+      provider: "gemini",
+      readApiKey,
+      fetchImpl,
+    } as never);
+    await expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "provider_failed" });
+    expect(readApiKey).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("accepts a proxy response after 5.8 seconds and aborts at exactly ten seconds", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => {
@@ -268,31 +281,50 @@ describe("shared model settings", () => {
     ).rejects.toThrow();
     expect((await settings.read()).openai.configured).toBe(false);
   });
-  it("uses the explicitly selected provider and never falls back to another provider", async () => {
+  it("normalizes legacy Gemini parser selection to OpenAI and keeps both keys independent", async () => {
     const settings = await store();
     await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
-    const fetchImpl = vi.fn(async () =>
-      Response.json({
-        candidates: [
-          { finishReason: "STOP", content: { parts: [{ text: JSON.stringify(QUERY) }] } },
-        ],
-      }),
+    await writeFile(
+      path.join(path.dirname(settings.keyPath("gemini")), "model-service.json"),
+      JSON.stringify({ provider: "gemini" }),
     );
+    expect((await settings.read()).provider).toBe("openai");
+    const fetchImpl = vi.fn(async () => openaiResponse());
     const parser = createJarvisQueryParser({ settings, isLocalHost: true, fetchImpl });
     await expect(parser.interpret("bug", 0)).rejects.toMatchObject({
       code: "missing_key",
       provider: "openai",
     });
     expect(fetchImpl).not.toHaveBeenCalled();
-    await settings.update({ provider: "gemini" });
+    await settings.update({ key: { provider: "openai", value: "fake-openai-key" } });
     expect(await parser.interpret("bug", 0)).toEqual(QUERY);
-    expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toContain(
-      "gemini-3.5-flash-lite:generateContent",
+    expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toBe(
+      "https://api.openai.com/v1/chat/completions",
     );
+    expect(await settings.readKey("gemini")).toBe("fake-gemini-key");
+    await expect(settings.update({ provider: "gemini" } as never)).rejects.toThrow();
     const remote = createJarvisQueryParser({ settings, isLocalHost: false, fetchImpl });
     const key = vi.spyOn(settings, "readKey");
     await expect(remote.interpret("bug", 0)).rejects.toMatchObject({ code: "missing_key" });
     expect(key).not.toHaveBeenCalled();
+  });
+  it("tests the Gemini key using the same Decisions endpoint and model as DingTalk", async () => {
+    const settings = await store();
+    await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ answers: { mentions_project: { noul: 0.9 } } }),
+    );
+    const result = await new ModelService(settings, fetchImpl).request(MODEL_SERVICE_TEST_METHOD, {
+      provider: "gemini",
+    });
+    expect(result).toMatchObject({ ok: true, errorCode: null });
+    const [endpoint, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(endpoint).toBe("https://generativelanguage.googleapis.com/v1beta/decisions");
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      model: "gemini-decision-1",
+      questions: { mentions_project: { type: "noul" } },
+    });
+    expect(init.headers).toMatchObject({ "x-goog-api-key": "fake-gemini-key" });
   });
   it("tests each provider independently and reports latency or stable errors only", async () => {
     const settings = await store();
@@ -308,6 +340,24 @@ describe("shared model settings", () => {
       ok: false,
       latencyMs: null,
       errorCode: "missing_key",
+    });
+  });
+  it.each([
+    [402, "quota_exhausted"],
+    [401, "unauthorized"],
+    [403, "unauthorized"],
+    [429, "rate_limited"],
+    [500, "provider_failed"],
+  ])("maps Decisions HTTP %i for the Gemini key test", async (status, errorCode) => {
+    const settings = await store();
+    await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    const service = new ModelService(settings, async () =>
+      Response.json({ error: { message: "raw English error" } }, { status: Number(status) }),
+    );
+    expect(await service.request(MODEL_SERVICE_TEST_METHOD, { provider: "gemini" })).toEqual({
+      ok: false,
+      latencyMs: null,
+      errorCode,
     });
   });
 });

@@ -1,7 +1,7 @@
 /**
  * Structured Jarvis bug search behind the `@` entry.
  *
- * Gemini interprets the full query; only its project names are resolved.
+ * OpenAI interprets the full query; only its project names are resolved.
  * Interpretation failures are returned to the UI without running a search.
  * The search returns the matching set up to the documented cap.
  */
