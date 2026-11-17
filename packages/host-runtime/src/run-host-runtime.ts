@@ -1,3 +1,6 @@
+import { createDingTalkDispatchMatcher } from "./dingtalk-dispatch-matcher.js";
+import { ModelService } from "./model-service.js";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -346,6 +349,9 @@ export async function runHostRuntime(input: {
           accountControl: official.accountControl,
         };
         if (!remoteControlPlan) {
+          const modelSettings = new ModelServiceSettingsStore({
+            environment: delegationEnvironment,
+          });
           const jarvis = createJarvisService({
             environment: delegationEnvironment,
             isLocalHost: true,
@@ -367,7 +373,7 @@ export async function runHostRuntime(input: {
             settings: dingTalkDispatch,
             agents: codexAgents,
             state: dingTalkState,
-            matcher: jarvis,
+            matcher: createDingTalkDispatchMatcher({ settings: modelSettings }),
             startThread: (input) => {
               if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
               return host.startDingTalkAgentRun(input);
@@ -382,6 +388,7 @@ export async function runHostRuntime(input: {
               modelPrices,
               usageStatistics,
               jarvis,
+              modelService: new ModelService(modelSettings),
               dingtalk,
               codexAgents,
               dingTalkDispatch,
@@ -454,6 +461,9 @@ export async function runHostRuntime(input: {
             stockCodexPath,
             environment: delegationEnvironment,
             jarvis,
+            modelService: new ModelService(
+              new ModelServiceSettingsStore({ environment: delegationEnvironment }),
+            ),
             dingtalk,
             codexAgents,
             dingTalkDispatch,

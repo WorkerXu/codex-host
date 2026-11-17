@@ -26,7 +26,6 @@ import {
   renderJarvisEmpty,
   renderJarvisLoading,
 } from "./renderer-jarvis-bug-view.js";
-import { jarvisErrorText } from "./renderer-jarvis-client.js";
 import {
   ensureWorkbenchSection,
   findNativeSuggestionList,
@@ -400,35 +399,18 @@ export function installRendererJarvisMention(
   const renderEmpty = (state: ModeState, result: JarvisBugSearchResult): void => {
     state.entries = [];
     state.selected = -1;
-    let message: string;
-    if (!result.available) {
-      message =
-        result.errorCode === "not_logged_in"
-          ? state.locale === "zh-CN"
-            ? "Jarvis 未安装或未登录"
-            : "Jarvis is not installed or signed in"
-          : jarvisErrorText(result.errorCode, state.locale);
-    } else if (result.errorCode) {
-      message = jarvisErrorText(result.errorCode, state.locale);
-    } else {
-      message =
-        state.locale === "zh-CN"
-          ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
-          : "No matching bugs. Try removing a condition or rephrasing.";
-    }
-    const action =
-      !result.available &&
-      (result.errorCode === "not_installed" || result.errorCode === "not_logged_in") &&
+    renderJarvisEmpty(
+      ownerDocument,
+      state.results,
+      result,
+      state.locale,
       options.openSettings
-        ? {
-            label: state.locale === "zh-CN" ? "去设置" : "Open settings",
-            onSelect: (opener: HTMLElement) => {
-              options.openSettings?.(opener);
-              exitMode(false);
-            },
+        ? (opener) => {
+            options.openSettings?.(opener);
+            exitMode(false);
           }
-        : undefined;
-    renderJarvisEmpty(ownerDocument, state.results, message, action);
+        : undefined,
+    );
   };
 
   const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
@@ -436,7 +418,7 @@ export function installRendererJarvisMention(
     stopSlowTimer(state);
     state.section.removeAttribute("aria-busy");
     state.lastQuery = state.input.value.trim();
-    renderChips(state, result.conditions);
+    renderChips(state, !result.available || result.errorCode ? [] : result.conditions);
     if (!result.available || result.errorCode) {
       state.summary.textContent = "";
     } else if (result.capped) {
@@ -448,7 +430,7 @@ export function installRendererJarvisMention(
       state.summary.textContent =
         state.locale === "zh-CN" ? `${result.total} 条` : `${result.total} bugs`;
     }
-    if (result.bugs.length === 0) {
+    if (!result.available || result.errorCode || result.bugs.length === 0) {
       renderEmpty(state, result);
     } else {
       renderRows(state, result.bugs);

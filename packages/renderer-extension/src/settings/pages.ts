@@ -1,3 +1,4 @@
+import type { RendererModelServiceClient } from "../model-service-client.js";
 import {
   createUsageStatisticsPage,
   type RendererUsageStatisticsHostsProvider,
@@ -30,7 +31,6 @@ import {
   type RendererConnectionDiagnostics,
 } from "./connections-page.js";
 import {
-  createSessionImportSettingsPage,
   type RendererSessionImportClient,
   type RendererImportedThreadOpener,
 } from "./session-import-page.js";
@@ -38,10 +38,7 @@ import { createAppearanceSettingsPage } from "./appearance-page.js";
 import type { LoadedSessionsClient } from "./loaded-sessions-table.js";
 import { createReleaseNotesElement } from "./release-notes.js";
 import { createAccountsSettingsPage, type RendererCodexAccountClient } from "./accounts-page.js";
-import {
-  createHarnessSchedulesPage,
-  type HarnessSchedulesPageOptions,
-} from "./harness-schedules-page.js";
+import type { HarnessSchedulesPageOptions } from "./harness-schedules-page.js";
 import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 import { createDingTalkSettingsPage, type RendererDingTalkPageOptions } from "./dingtalk-page.js";
 import {
@@ -93,7 +90,6 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "connections",
   "remote-connections",
   "accounts",
-  "session-import",
   "usage-statistics",
   "jarvis",
   "dingtalk",
@@ -676,30 +672,23 @@ export function createDefaultRendererSettingsPages(
   getUpdateClient: () => RendererUpdateClient | null = () => null,
   getDiagnostics: () => RendererConnectionDiagnostics | null = () => null,
   getAccountClient: () => RendererCodexAccountClient | null = () => null,
-  getSessionImportClient: (hostId?: string) => RendererSessionImportClient | null = () => null,
-  openImportedThread: RendererImportedThreadOpener | null = () =>
-    Promise.reject(new Error("Imported Thread navigation is unavailable")),
+  _getSessionImportClient?: (hostId?: string) => RendererSessionImportClient | null,
+  _openImportedThread?: RendererImportedThreadOpener | null,
   getLoadedSessionsClient: () => LoadedSessionsClient | null = () => null,
   getRemoteConnections: () => RemoteConnectionsControl | null = () => null,
   requestUsageStatistics: RendererUsageStatisticsRequest = () =>
     Promise.reject(new Error("Local Host connection is unavailable")),
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
-  harnessSchedules?: HarnessSchedulesPageOptions,
+  _harnessSchedules?: HarnessSchedulesPageOptions,
   jarvis?: RendererJarvisSettingsOptions,
   dingtalk?: RendererDingTalkPageOptions,
   codexAgents?: RendererCodexAgentsSettingsOptions,
+  modelService: RendererModelServiceClient | null = null,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
     createRemoteConnectionsPage(messages, getRemoteConnections),
     createAccountsSettingsPage(messages, getAccountClient, getDiagnostics, getRemoteConnections),
-    ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
-    createSessionImportSettingsPage(
-      messages,
-      getSessionImportClient,
-      openImportedThread,
-      getDiagnostics,
-    ),
     createUsageStatisticsPage(
       consoleMessages(messages.locale),
       requestUsageStatistics,
@@ -716,7 +705,7 @@ export function createDefaultRendererSettingsPages(
       },
     ),
     createCodexAgentsSettingsPage(messages, codexAgents ?? { createClient: () => null }),
-    createAppearanceSettingsPage(messages, getLoadedSessionsClient),
+    createAppearanceSettingsPage(messages, getLoadedSessionsClient, modelService),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
   ]);

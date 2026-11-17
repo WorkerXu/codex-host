@@ -126,4 +126,15 @@ export const packageMetadata = {
     updateManager.name,
   ],
 } as const;
+
+export { ModelServiceSettingsStore } from "./model-service-settings.js";
+export {
+  createStructuredQueryClient,
+  StructuredQueryError,
+  MODEL_SERVICE_MODELS,
+} from "./structured-query-client.js";
+export type {
+  StructuredQueryClientOptions,
+  StructuredQueryRequest,
+} from "./structured-query-client.js";
 export { probeRemoteThreadFolders } from "./thread-folders-probe.js";

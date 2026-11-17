@@ -131,7 +131,10 @@ class FakeElement {
     for (const node of nodes) this.appendChild(node);
   }
 
-  insertBefore(node: FakeElement | FakeFragment, reference: FakeElement | FakeText | null): void {
+  insertBefore(
+    node: FakeElement | FakeText | FakeFragment,
+    reference: FakeElement | FakeText | null,
+  ): void {
     if (node instanceof FakeFragment) {
       for (const child of [...node.children]) this.insertBefore(child, reference);
       return;
@@ -355,7 +358,7 @@ describe("DingTalk message render guard", () => {
       dingtalkPageStrings("zh-CN"),
       { continuation: false, attachImage: () => {} },
     );
-    expect(hasClass(row, "dingtalk-message-bubble--image")).toBe(true);
+    expect(hasClass(row as unknown as FakeElement, "dingtalk-message-bubble--image")).toBe(true);
   });
 
   it("uses a regular bubble for an unavailable image", () => {
@@ -370,8 +373,10 @@ describe("DingTalk message render guard", () => {
       { continuation: false },
     );
     expect(row.textContent).toContain("[图片] 在手机上查看");
-    expect(hasClass(row, "dingtalk-message-image--unavailable")).toBe(true);
-    expect(hasClass(row, "dingtalk-message-bubble--image")).toBe(false);
+    expect(hasClass(row as unknown as FakeElement, "dingtalk-message-image--unavailable")).toBe(
+      true,
+    );
+    expect(hasClass(row as unknown as FakeElement, "dingtalk-message-bubble--image")).toBe(false);
   });
 
   it("no longer renders a per-message checkbox", () => {
@@ -388,9 +393,11 @@ describe("DingTalk message render guard", () => {
         .filter((child): child is FakeElement => child instanceof FakeElement)
         .flatMap(walk),
     ];
-    expect(walk(row)).toEqual([]);
+    expect(walk(row as unknown as FakeElement)).toEqual([]);
     expect(
-      row.children.some((child) => child instanceof FakeElement && child.tagName === "input"),
+      (row as unknown as FakeElement).children.some(
+        (child) => child instanceof FakeElement && child.tagName === "input",
+      ),
     ).toBe(false);
   });
 });

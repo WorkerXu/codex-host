@@ -78,9 +78,9 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 
 每个智能体独立选择 `@我`、`@所有人`、`待我审批`、`私聊消息` 和回复位置。新智能体默认选择全部四类，既有配置保留原有选择。扁平事件有消息/会话 ID、事件类型、发送人展示名和 `sender_open_dingtalk_id`、正文和时间；不提供组织内 userId 或结构化 @ 列表时不编造这些字段。`@我` 按已登录用户展示名的完整提及识别（包括 dws 的 `@姓名(姓名)` 形式），`@所有人` 支持文本和 `<@all>` 标记；单聊无需 @。发送人和机器人身份还会用原会话消息元数据核对。
 
-Host 忽略本人、机器人、早于本次启用监听起点的消息以及已处理消息。同一事件命中多个类型时，每个智能体最多成为一次候选。`~/.codexhost/dingtalk-dispatch-state.json` 持久化最近 4000 个消息/审批任务 ID 和最多 64 个智能体的最后结果；不保存原文或 Gemini key。Host 重启或重新启用监听会刷新时间起点，已处理 ID 仍保留。
+Host 忽略本人、机器人、早于本次启用监听起点的消息以及已处理消息。同一事件命中多个类型时，每个智能体最多成为一次候选。`~/.codexhost/dingtalk-dispatch-state.json` 持久化最近 4000 个消息/审批任务 ID 和最多 64 个智能体的最后结果；不保存原文或模型 Key。Host 重启或重新启用监听会刷新时间起点，已处理 ID 仍保留。
 
-每条候选事件只发起一次本机 Gemini Decisions 请求，按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。Gemini key 复用 Jarvis 设置，只留在 Mac。没有 key 时不创建对话、不回复占位卡，状态显示「未配置 Gemini，未派发」；服务失败或低于阈值也记录跳过原因。
+每条候选事件只发起一次 Gemini Decisions 请求（`https://generativelanguage.googleapis.com/v1beta/decisions`，模型 `gemini-decision-1`），按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。`dingtalk-dispatch-matcher.ts` 复用原 Decisions 客户端、请求、分数处理和超时行为，只通过 `ModelServiceSettingsStore.readKey("gemini")` 读取通用页「模型服务」保存的 Gemini API Key；密钥仅在本地 Host 内使用。不读取通用页「解析模型」选择，也不调用 OpenAI、Jarvis 查询解析或其他模型作兜底。没有 Gemini Key 时不创建对话、不回复占位卡，记录「未配置 Gemini Key，未派发」，智能体卡片与编辑器的派发状态行显示该原因；服务失败或低于阈值也记录跳过原因。
 
 每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。普通消息的 Turn 使用只读文件系统沙箱并允许网络查询，供智能体读取知识库；审批汇总关闭网络。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
 
@@ -88,6 +88,6 @@ Host 忽略本人、机器人、早于本次启用监听起点的消息以及已
 
 回复目标完全由 Host 决定：群消息选择「私聊」时，回复给事件的发送人开放 ID；选择「群内」时在原群 @ 发送人。单聊始终回到与该发送人的私聊，忽略「回复位置」选择。开始工作前创建 `chat +messages-send-card` 流式文本卡片，启动 Codex 后更新进度，完成后将最终回答写入同一 bizId；创建或更新失败时用原目标的 Markdown 文本消息降级。长结果分段发送，不截断正文。自动回复是启用监听授权的行为，固定目标写命令带 `--yes`，无需逐次确认。智能体卡片和编辑面板每 10 秒更新最近派发时间及已回复、失败或跳过原因。
 
-审批每分钟通过 `oa approval list-pending` 只读查询，以 taskId 去重，也通过同一 Gemini 阈值筛选。审批内容只用于汇总，进度和结果私聊给本人（按本人稳定 userId 精确解析开放 ID）；无法确定本人目标时不派发。审批 Thread 使用只读沙箱，并关闭 shell、执行、补丁、子智能体、App、插件、Hook、浏览器及全部配置的 MCP 服务器，不依赖提示词防止写入。派发运行时只构造 OA 的查询命令，绝不构造同意、拒绝、撤销或评论命令；无法读取配置以限制工具时直接失败。
+审批每分钟通过 `oa approval list-pending` 只读查询，以 taskId 去重，也通过同一 Gemini Decisions 模型和阈值筛选。审批内容只用于汇总，进度和结果私聊给本人（按本人稳定 userId 精确解析开放 ID）；无法确定本人目标时不派发。审批 Thread 使用只读沙箱，并关闭 shell、执行、补丁、子智能体、App、插件、Hook、浏览器及全部配置的 MCP 服务器，不依赖提示词防止写入。派发运行时只构造 OA 的查询命令，绝不构造同意、拒绝、撤销或评论命令；无法读取配置以限制工具时直接失败。
 
 开发验证仅使用假事件、假 dws 和假原生 Thread。真实 dws 只读核对 `event schema … --flatten`、`event +listen-im --help`、卡片帮助、`chat +at-me` 和 `oa approval list-pending` 的字段；不启动真实订阅或发送测试消息。Desktop 验收需另一个账号在测试群 @ 已登录用户，以及向用户发送私聊消息，核对项目、对话、卡片生命周期与目标；本人发送的消息应被忽略。

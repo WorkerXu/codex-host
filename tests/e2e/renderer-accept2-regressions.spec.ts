@@ -95,7 +95,7 @@ if (!browserBundle) throw new Error("Accept2 regression bundle was not generated
 
 async function load(page: Page): Promise<void> {
   await page.setContent("<!doctype html><body style='margin:0'></body>");
-  await page.addScriptTag({ content: browserBundle });
+  await page.addScriptTag({ content: browserBundle as string });
 }
 
 async function realClick(page: Page, selector: string): Promise<void> {

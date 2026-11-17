@@ -1,12 +1,9 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import path from "node:path";
 
-import {
-  DEFAULT_JARVIS_THRESHOLD,
-  JARVIS_KEY_MAX_LENGTH,
-  type JarvisSettingsResult,
-} from "@codexhost/shared-contracts";
+import { DEFAULT_JARVIS_THRESHOLD, type JarvisSettingsResult } from "@codexhost/shared-contracts";
 
 export const JARVIS_GEMINI_KEY_FILE = "gemini-api-key";
 export const JARVIS_SETTINGS_FILE = "jarvis-settings.json";
@@ -28,8 +25,7 @@ function settingsFileValue(value: unknown): { threshold?: number } {
 }
 
 /**
- * The Gemini key is local to the Desktop Host: it is written 0600 and never
- * transported over a Host connection or included in a result.
+ * Legacy Jarvis settings API. Credentials use the shared model-service store.
  */
 export class JarvisSettingsStore {
   readonly #directory: string;
@@ -48,17 +44,13 @@ export class JarvisSettingsStore {
   }
 
   async readKey(): Promise<string | null> {
-    try {
-      const value = (await readFile(this.keyPath, "utf8")).trim();
-      if (!value || value.length > JARVIS_KEY_MAX_LENGTH || /\s/u.test(value)) return null;
-      return value;
-    } catch {
-      return null;
-    }
+    return new ModelServiceSettingsStore({ configDirectory: this.#directory }).readKey("gemini");
   }
 
   async writeKey(value: string | null): Promise<void> {
-    await this.#writeFile(this.keyPath, value === null ? null : `${value.trim()}\n`);
+    await new ModelServiceSettingsStore({ configDirectory: this.#directory }).update({
+      key: { provider: "gemini", value: value?.trim() ?? null },
+    });
   }
 
   async readThreshold(): Promise<number> {

@@ -64,7 +64,7 @@ Codex 从 `$CODEX_HOME/agents/<file>.toml` 读取个人自定义智能体；`COD
 
 ## 钉钉分发设置
 
-契约位于 `packages/shared-contracts/src/dingtalk-dispatch.ts`，Host 持久化在 `~/.codexhost/dingtalk-dispatch.json`（0600，原子写入）。页面通过 `codexhost/dingtalk-dispatch/get|set` 读写设置，`status` 读取最近派发结果。监听、Gemini 匹配、原生对话和卡片回复见 [钉钉工作台](dingtalk.md#智能体监听与派发)。
+契约位于 `packages/shared-contracts/src/dingtalk-dispatch.ts`，Host 持久化在 `~/.codexhost/dingtalk-dispatch.json`（0600，原子写入）。页面通过 `codexhost/dingtalk-dispatch/get|set` 读写设置，`status` 读取最近派发结果。监听、Gemini Decisions 匹配、原生对话和卡片回复见 [钉钉工作台](dingtalk.md#智能体监听与派发)。
 
 设置字段：
 

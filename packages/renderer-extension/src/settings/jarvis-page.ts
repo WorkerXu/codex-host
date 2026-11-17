@@ -45,7 +45,7 @@ export function createJarvisSettingsPage(
   return Object.freeze({
     id: "jarvis",
     label: messages.pageLabels.jarvis,
-    icon: "settings",
+    icon: "search",
     mount(context: RendererSettingsPageMountContext) {
       const document = context.content.ownerDocument;
       const client = options.createClient() ?? createRendererJarvisClient({ forHost: () => null });
@@ -53,24 +53,6 @@ export function createJarvisSettingsPage(
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.jarvis;
       context.content.append(heading);
-
-      const geminiSection = section(document, text.geminiSection);
-      const keyStatus = document.createElement("p");
-      keyStatus.className = "settings-jarvis-status";
-      keyStatus.setAttribute("role", "status");
-      keyStatus.hidden = true;
-      const keyInput = document.createElement("input");
-      keyInput.type = "password";
-      keyInput.className = "settings-jarvis-input";
-      keyInput.autocomplete = "off";
-      keyInput.spellcheck = false;
-      const saveKey = button(document, text.geminiSave);
-      const clearKey = button(document, text.geminiClear, "secondary");
-      const testKey = button(document, text.geminiTest, "secondary");
-      const keyActions = document.createElement("div");
-      keyActions.className = "settings-jarvis-actions";
-      keyActions.append(keyInput, saveKey, clearKey, testKey);
-      geminiSection.body.append(keyActions, keyStatus);
 
       const machinesSection = section(document, text.machinesSection);
       const refreshMachines = button(document, text.refresh, "secondary");
@@ -81,28 +63,15 @@ export function createJarvisSettingsPage(
       machineStatus.className = "settings-jarvis-status";
       machineStatus.setAttribute("role", "status");
       machinesSection.body.append(machineList, machineStatus);
-      context.content.append(geminiSection.root, machinesSection.root);
+      context.content.append(machinesSection.root);
 
       const rows = new Map<string, MachineRowState>();
-      let hasKey = false;
       let disposed = false;
 
       const setStatus = (element: HTMLElement, value: string, failed = false): void => {
         element.textContent = value;
         element.hidden = value.length === 0;
         element.classList.toggle("settings-jarvis-status--error", failed);
-      };
-
-      const renderKeyState = (): void => {
-        keyInput.placeholder = hasKey ? text.geminiKeyConfigured : text.geminiKeyPlaceholder;
-        clearKey.hidden = !hasKey;
-        testKey.disabled = !hasKey && keyInput.value.trim().length === 0;
-      };
-
-      const loadSettings = async (): Promise<void> => {
-        const settings = await client.settings();
-        hasKey = settings.hasKey;
-        renderKeyState();
       };
 
       const renderMachines = (): void => {
@@ -272,92 +241,6 @@ export function createJarvisSettingsPage(
         }
       };
 
-      saveKey.addEventListener("click", () => {
-        const value = keyInput.value.trim();
-        if (!value) return;
-        saveKey.disabled = true;
-        setStatus(keyStatus, text.geminiSaving);
-        void client
-          .updateSettings({ geminiApiKey: value })
-          .then((result) => {
-            hasKey = result.hasKey;
-            keyInput.value = "";
-            renderKeyState();
-            setStatus(keyStatus, text.geminiSaved);
-          })
-          .catch((error: unknown) => {
-            setStatus(
-              keyStatus,
-              text.actionFailed.replace(
-                "{reason}",
-                jarvisErrorText(errorText(error), messages.locale),
-              ),
-              true,
-            );
-          })
-          .finally(() => {
-            saveKey.disabled = false;
-          });
-      });
-      clearKey.addEventListener("click", () => {
-        void client
-          .updateSettings({ geminiApiKey: null })
-          .then((result) => {
-            hasKey = result.hasKey;
-            keyInput.value = "";
-            renderKeyState();
-            setStatus(keyStatus, text.geminiCleared);
-          })
-          .catch((error: unknown) => {
-            setStatus(
-              keyStatus,
-              text.actionFailed.replace(
-                "{reason}",
-                jarvisErrorText(errorText(error), messages.locale),
-              ),
-              true,
-            );
-          });
-      });
-      testKey.addEventListener("click", () => {
-        testKey.disabled = true;
-        setStatus(keyStatus, text.geminiTesting);
-        const pending = keyInput.value.trim();
-        const saved = pending
-          ? client.updateSettings({ geminiApiKey: pending }).then((result) => {
-              hasKey = result.hasKey;
-              keyInput.value = "";
-              renderKeyState();
-            })
-          : Promise.resolve();
-        void saved
-          .then(() => client.testSettings())
-          .then((result) => {
-            setStatus(
-              keyStatus,
-              result.ok
-                ? text.geminiTestOk.replace("{latency}", String(result.latencyMs ?? 0))
-                : text.geminiTestFailed.replace(
-                    "{reason}",
-                    jarvisErrorText(result.errorCode, messages.locale),
-                  ),
-              !result.ok,
-            );
-          })
-          .catch((error: unknown) => {
-            setStatus(
-              keyStatus,
-              text.geminiTestFailed.replace(
-                "{reason}",
-                jarvisErrorText(errorText(error), messages.locale),
-              ),
-              true,
-            );
-          })
-          .finally(() => {
-            testKey.disabled = false;
-          });
-      });
       refreshMachines.addEventListener("click", () => {
         refreshMachines.disabled = true;
         void loadMachines().finally(() => {
@@ -367,7 +250,6 @@ export function createJarvisSettingsPage(
 
       void context.runLatest(
         async () => {
-          await loadSettings();
           await loadMachines();
           return true;
         },
@@ -375,7 +257,7 @@ export function createJarvisSettingsPage(
           success: () => undefined,
           failure: (error) => {
             setStatus(
-              keyStatus,
+              machineStatus,
               text.actionFailed.replace(
                 "{reason}",
                 jarvisErrorText(errorText(error), messages.locale),
@@ -385,7 +267,6 @@ export function createJarvisSettingsPage(
           },
         },
       );
-      renderKeyState();
 
       return () => {
         disposed = true;

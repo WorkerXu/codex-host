@@ -8,7 +8,13 @@ import {
   type DingTalkDispatchSettings,
 } from "@codexhost/shared-contracts";
 import { createDingTalkCli, parseDwsEventLine, type DwsEventRecord } from "../src/dingtalk-cli.js";
-import { DingTalkDispatcher, type DingTalkDispatchService } from "../src/dingtalk-dispatcher.js";
+import { createDingTalkDispatchMatcher } from "../src/dingtalk-dispatch-matcher.js";
+import { ModelServiceSettingsStore } from "../src/model-service-settings.js";
+import {
+  DingTalkDispatcher,
+  type DingTalkDispatchService,
+  type DingTalkDispatchMatcher,
+} from "../src/dingtalk-dispatcher.js";
 import { DingTalkDispatchSettingsStore } from "../src/dingtalk-dispatch-settings.js";
 import { DingTalkDispatchStateStore } from "../src/dingtalk-dispatch-state.js";
 import type { DingTalkDispatchThreadInput } from "../src/dingtalk-dispatch-types.js";
@@ -47,6 +53,7 @@ async function setup(
   options: {
     settings?: DingTalkDispatchSettings;
     missingKey?: boolean;
+    matcher?: DingTalkDispatchMatcher;
     cardFails?: boolean;
     updateFails?: boolean;
     runFails?: boolean;
@@ -167,7 +174,7 @@ async function setup(
     settings,
     state,
     agents: { read: async (file) => agent(file) },
-    matcher,
+    matcher: options.matcher ?? matcher,
     startThread,
     projectDirectory: path.join(directory, "钉钉智能体"),
     now: () => 1000,
@@ -325,11 +332,35 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     const f = await setup({ missingKey: true });
     f.emit();
     await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.detail).toBe("未配置 Gemini，未派发"),
+      expect((await f.state.status())["qa.toml"]?.detail).toBe("未配置 Gemini Key，未派发"),
     );
     expect(f.startThread).not.toHaveBeenCalled();
     expect(f.commands).toEqual([]);
   });
+
+  it.each([false, true])(
+    "records the General settings Gemini missing-key state for messages/approvals (%s)",
+    async (approvals) => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-missing-model-"));
+      directories.push(directory);
+      const fetchImpl = vi.fn();
+      const matcher = createDingTalkDispatchMatcher({
+        settings: new ModelServiceSettingsStore({ configDirectory: directory }),
+        fetchImpl,
+      });
+      const f = await setup({ matcher, approvals });
+      if (!approvals) f.emit();
+      await vi.waitFor(async () =>
+        expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
+          result: "skipped",
+          detail: "未配置 Gemini Key，未派发",
+        }),
+      );
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(f.startThread).not.toHaveBeenCalled();
+      expect(f.commands).toEqual([]);
+    },
+  );
 
   it.each([{ cardFails: true }, { updateFails: true }])(
     "falls back to markdown if cards fail: %o",

@@ -21,15 +21,14 @@ Codex Composer 的原生 `@` 菜单提供「工作台」分组，里面有一行
 
 ## 搜索流水线
 
-Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis；只有本地未安装、未登录或不可达时才回退到 Composer Thread 所在的 Host。本地 Host 的 Gemini key 与登录状态因此对所有 Thread 生效。
+Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis。Gemini key 使用本地 `~/.config/codexhost/gemini-api-key`，不传给 Renderer 或远程 Host。远程 Host 不读取 key、不执行查询理解，搜索返回 `local_only` 错误。
 
-1. **规则优先**：在 Host 本地解析作用域（我的/指派给我、我创建/我提的、两者）、状态（未解决/已解决/已关闭）、优先级、严重程度、时间词（今天、昨天、本周、上周、最近 N 天）和排序词（最新/最早）。规则能确定的字段不再询问模型。
-2. **Gemini Decisions 只处理规则未覆盖的条件字段**：一次请求里只包含未确定的 `choice` / `noul` 问题。没有 key、超时或低于阈值时保留规则默认值。key 只保存在本地 Host；远程 Host 只用规则，不读取 key。
-3. **按需解析项目**：先去掉条件词，剩余文本按短语从长到短处理；先匹配 `project list` 返回的「本人 Bug 关联项目」，再调用 `project list --scope visible --name <短语>`。命中的项目全部作为过滤条件，支持同名迭代项目；未命中的剩余文本作为 `bug list --title` 关键词。项目名搜索与 `auth status`、`project list` 并行启动；项目是否命中只由项目列表和项目搜索决定，Gemini 不能把已命中的项目改写成标题关键词。项目搜索结果短暂缓存，搜索过程中不预加载全部项目。
-4. **精确取数**：有项目条件时只查这些项目；没有时并行查询 `project list` 返回的每个项目（并发 8）。作用域为「两者」时分别查询指派给我和我创建的，按 `projectId + bugId` 去重。每页 100 条，最多 200 条；超过上限时在 UI 标注「仅显示前 N 条」。
-5. **本地过滤与排序**：状态、优先级、严重程度、时间窗口在本地再校验；按请求的时间字段排序，默认按 `updateTime` 最新优先。
-6. **可选语义排序**：只有仍留有自由描述文本且结果较多、用户没有指定顺序时，才用既有 score question 重排；重排不删除任何结果。
-7. 解析后的条件与结果一起返回。每个 chip 有稳定的 key，删除 chip 会把该 key 作为 `omit` 传给 Host，Host 按同一查询重新解析并去掉对应条件。
+1. **整句理解**：本地 Host 默认把完整查询交给 OpenAI `gpt-4.1-mini`，通过 Chat Completions 的 `response_format: json_schema`、`strict: true` 返回固定字段：`scope`、`statuses`、`priorities`、`severities`、`order`、`timeWindow`、`titleKeywords`、`projectNames`、`unrecognized`。空数组表示不限对应条件，时间范围为空时为 `null`。时间区间使用 Unix 毫秒，包含 `since`、不包含 `until`，`field` 区分创建和更新时间。
+2. **上海时区与校验**：请求带上当前时刻、`Asia/Shanghai` 时区、当天日期和今天、昨天、本周、上周、本月的边界，模型据此换算相对时间。“最近的”只表示排序，不自动添加时间范围。JSON Schema 的对象禁止额外属性、所有属性必填、可空字段使用类型联合；返回 JSON 必须通过共享契约的 Zod schema 校验，不接受部分字段或不合法的时间区间。
+3. **失败直接显示错误**：从读取模型选择、key 到响应读取、校验共用 3 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，页面显示错误；不执行规则解析、不继续查询 Bug、不回退远程 Host。错误区只显示中文原因和“去设置”入口：402、`insufficient_quota` 或额度类 429 为“OpenAI 额度不足”，401/403 为“OpenAI Key 无效”；普通 429 显示请求过于频繁，并区分未配密钥、超时、网络失败和输出非法，不展示 API 错误原文，也不保留上次查询的结果或条件。失败结果以 `source=openai|gemini` 标记模型服务，成功结果以 `source=model` 标记结构化解析。“去设置”打开通用页顶部的模型服务区。
+4. **按模型点名解析项目**：只有 `projectNames` 参与 `project list --scope visible --name <项目名>` 搜索，并与 `project list` 返回的本人 Bug 关联项目合并去重。项目名不会被缩短成其他搜索词，也不会改作标题关键词；同名迭代项目可以一起命中。用户点名的项目未命中时保留项目条件并返回空结果；没有项目条件时查询本人 Bug 关联项目。项目搜索结果短暂缓存，不预加载全部可见项目。
+5. **精确取数与标题查询**：`titleKeywords` 逐个通过 `bug list --title` 查询，多个关键词按 OR 合并；项目与标题条件可以同时生效。作用域为“两者”时分别查询指派给我和我创建的，最终按 `projectId + bugId` 去重。并发 8，每次 CLI 查询每页 100 条、最多 200 条，最多查询 40 个项目，最多显示 200 条；达到限制时在 UI 标记截断。多个关键词或作用域可能重叠，截断时不把各查询的服务端总数直接相加。
+6. **本地过滤与排序**：状态、优先级、严重程度、标题关键词和时间窗口在本地再校验；Jarvis 无时区的时间戳按上海时间解读。按模型返回的顺序和时间字段排序；无时间字段时最新按更新时间、最早按创建时间。解析后的条件仍使用现有 chip 和稳定 key，删除 chip 会把该 key 作为 `omit` 传给 Host，并去掉对应条件。
 
 ## 引用载体
 
@@ -48,16 +47,28 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 ## 机器管理
 
-设置页「Jarvis」只列标题，不加页面或区块副标题：一栏是可选的 Gemini API Key，一栏是已安装的机器。机器列表包含本地 Host 和 Desktop 已配置的 SSH 连接，由顶部唯一的「刷新」按钮整批更新，每行不再单独提供刷新：
+设置页「Jarvis」只显示已安装的机器，不加页面或区块副标题。机器列表包含本地 Host 和 Desktop 已配置的 SSH 连接，由顶部唯一的「刷新」按钮整批更新，每行不再单独提供刷新：
 
 - **安装**：目标 Host 先通过公开 release API 自动下载。3 秒探测低于约 128 KB/s 时返回 `relay-required`；本地 Host 下载并校验后，由 Renderer 以 512 KB 分片经 Host RPC 推送到目标，目标完成 SHA256/大小校验后原子替换 `~/.local/bin/jarvis` 并运行 `version --json`。
 - **登录**：目标 Host 运行 `jarvis login --no-browser` 并返回授权 URL。本地目标直接打开浏览器；远程目标由本地 Host 用 `peers.json` 的 SSH 别名建立 `127.0.0.1:<port>` 本地转发（优先复用原端口，否则改写回调端口），Renderer 轮询目标 Host 的 `auth status` 直到成功，然后关闭转发。
 - 未安装或未登录的 Host 不返回搜索结果；`@` 入口仍可打开，模式内显示「Jarvis 未安装或未登录」一类提示。
-- 机器行的平台字段转成用户能读的名字（例如 `darwin-arm64` 显示为「macOS（Apple 芯片）」）。Gemini 判定阈值仍保存在设置里，默认 0.5，但设置页不再提供输入控件。
+- 机器行的平台字段转成用户能读的名字（例如 `darwin-arm64` 显示为「macOS（Apple 芯片）」）。阈值配置保留读写兼容性，默认 0.5；整句结构化理解不使用阈值，设置页不提供阈值输入控件。
 
 ## 边界
 
 - `shared-contracts` 只放路径、Bug/条件数据类型和 RPC schema，保持浏览器安全。
 - `renderer-extension` 只做 DOM、防抖、过期响应丢弃、条件 chip 和 chip 插入，不直接调用 CLI 或网络。
-- CLI、Gemini、下载、SHA256 和 SSH 转发全部在 `host-runtime`，远程机器只执行本机只读查询。
+- CLI、模型服务、下载、SHA256 和 SSH 转发全部在 `host-runtime`，远程机器只执行本机只读查询。
 - Jarvis 命令只允许 `list`、`detail`、`context`、`project list`；搜索路径不执行任何写操作。
+
+## 共享模型服务
+
+通用页的「模型服务」管理 OpenAI 和 Gemini 的 API Key、保存/清除、测试和解析模型。该区复用通用页的卡片行布局，Key 行平时只显示配置后缀、连接状态与测试/更换/清除操作；添加或更换时展开掩码输入、保存和取消，保存成功直接更新状态。解析模型位于卡片第三行，使用带选中标记、方向键与 Esc 支持的菜单。默认 `OpenAI · gpt-4.1-mini`，可显式选择 `Gemini · gemini-3.5-flash-lite`（`generateContent` + JSON `responseSchema`）。一个 Provider 出错不会自动尝试另一个 Provider。测试只验证所选服务的结构化响应能力，并返回耗时或稳定错误码。
+
+`model-service-settings.ts` 的 `ModelServiceSettingsStore` 在 Desktop 本地 Host 读取 `~/.config/codexhost`：复用 `gemini-api-key`，新增 `openai-api-key`，模型选择写入 `model-service.json`；原子写入，文件权限 0600。`readKey(provider)` 只供 Host 内部使用；公开 `read()/update()` 与 `codexhost/model-service/get|set|test` 只返回 `configured` 和末四位，不回传密钥。Renderer 不持久化密钥，保存成功后清空密码输入框。远程 Host 不注册这些共享设置 RPC。
+
+`structured-query-client.ts` 公开 `createStructuredQueryClient({provider, readApiKey, fetchImpl?})`。调用 `query({instructions, input, schema, name}, validator)` 提交业务提示词和严格 JSON Schema，再通过业务校验器返回结果；模型选择函数、读 key、网络、响应体均在同一个 3 秒截止时间内。客户端只抛 `StructuredQueryError` 的稳定错误码，原始服务错误不进入 UI。`jarvis-query-parser.ts` 负责 Jarvis 提示词和上海时间上下文。
+
+钉钉 dispatcher 只复用该设置 Store 的 Gemini Key 存储，不复用 Jarvis 查询解析或结构化客户端。匹配继续使用独立的 Gemini Decisions API 与 `gemini-decision-1` 模型，不受通用页「解析模型」选择影响；详见[钉钉派发](dingtalk.md#智能体监听与派发)。
+
+设置菜单不注册「会话导入」或「定时任务」页面。会话导入的 Host 服务、CLI、独立页面工厂，以及官方定时任务能力保留；这些页面工厂没有默认设置路由。

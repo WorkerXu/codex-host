@@ -1,3 +1,4 @@
+import { createRendererModelServiceClient } from "./model-service-client.js";
 import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-project.js";
 import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
 import { mountRendererThreadFolders } from "./renderer-thread-folders.js";
@@ -956,6 +957,9 @@ export function installRendererBindingProbe(
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     jarvis: { createClient: () => jarvisClient },
+    modelService: createRendererModelServiceClient(
+      () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+    ),
     dingtalk: {
       createClient: () => dingtalkClient,
       readLocale: () => settingsLifecycle.locale,
@@ -3686,7 +3690,7 @@ export function installRendererBindingProbe(
           };
         }
       ).__codexhostSettingsShellV1;
-      shell?.openSettings(opener, "jarvis");
+      shell?.openSettings(opener, "appearance");
     },
   });
   dingtalkMention = installRendererDingTalkEntry(document, {

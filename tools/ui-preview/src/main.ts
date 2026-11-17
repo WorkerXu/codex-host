@@ -1,3 +1,6 @@
+import { createDefaultRendererSettingsPages } from "../../../packages/renderer-extension/src/settings/pages.js";
+import type { ModelServiceSettings } from "@codexhost/shared-contracts";
+import type { RendererModelServiceClient } from "../../../packages/renderer-extension/src/model-service-client.js";
 import { mountThreadFoldersPreview } from "./thread-folders.js";
 import previewCss from "./preview.css";
 import { applyDesktopTheme } from "./desktop-theme.js";
@@ -153,7 +156,9 @@ function prepareSettings(
               result: scenarioName.includes("missing-key")
                 ? ("skipped" as const)
                 : ("replied" as const),
-              ...(scenarioName.includes("missing-key") ? { detail: "未配置 Gemini，未派发" } : {}),
+              ...(scenarioName.includes("missing-key")
+                ? { detail: "未配置 Gemini Key，未派发" }
+                : {}),
             },
             "writer.toml": {
               lastDispatchAt: Date.now() - 120_000,
@@ -586,6 +591,7 @@ async function mountJarvisSearch(
       document.body.dataset.jarvisSettingsOpened = "true";
     },
     search: async (_hostId, params) => {
+      document.body.dataset.jarvisLastQuery = params.query;
       previewWindow.__jarvisPreviewSearchCalls =
         (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
       const result = {
@@ -666,6 +672,102 @@ async function mountUnreadScenario(): Promise<void> {
   );
   document.body.dataset.badgeTitle =
     withBadge?.querySelector(".dingtalk-conversation-title")?.textContent ?? "";
+}
+
+async function mountModelSettings(
+  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add" | "menu",
+) {
+  let settings: ModelServiceSettings = {
+    provider: "openai",
+    openai: { configured: false, lastFour: null },
+    gemini: { configured: false, lastFour: null },
+  };
+  const client: RendererModelServiceClient = {
+    async read() {
+      return structuredClone(settings);
+    },
+    async update(value) {
+      if (value.provider) settings.provider = value.provider;
+      if (value.key)
+        settings[value.key.provider] = {
+          configured: value.key.value !== null,
+          lastFour: value.key.value?.slice(-4) ?? null,
+        };
+      return structuredClone(settings);
+    },
+    async test() {
+      if (state === "testing") return new Promise(() => {});
+      return state === "error"
+        ? { ok: false, latencyMs: null, errorCode: "quota_exhausted" }
+        : { ok: true, latencyMs: 123, errorCode: null };
+    },
+  };
+  const definitions = createDefaultRendererSettingsPages(
+    messages,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    client,
+  );
+  const shell = installRendererSettingsShell(definitions, messages);
+  shell.openSettings(undefined, "appearance");
+  const shadow = shell.root.shadowRoot!;
+  await waitFor(() =>
+    shadow.querySelector<HTMLButtonElement>("#model-service-edit-openai:not(:disabled)"),
+  );
+  const queryButton = (provider: string, text: string) =>
+    [...shadow.querySelectorAll<HTMLButtonElement>(`[data-provider="${provider}"] button`)].find(
+      (button) => button.textContent === text,
+    )!;
+  if (state !== "empty" && state !== "add") {
+    for (const provider of ["openai", "gemini"]) {
+      await previewClick(queryButton(provider, "添加"));
+      const keyInput = shadow.querySelector<HTMLInputElement>(`#model-service-${provider}`)!;
+      await previewClick(keyInput);
+      await previewType(keyInput, `fake-preview-${provider}-1234`);
+      await previewClick(queryButton(provider, "保存"));
+      await waitFor(
+        () =>
+          !keyInput.value &&
+          shadow.querySelector<HTMLElement>(`#model-service-editor-${provider}`)?.hidden,
+      );
+    }
+  }
+  if (state === "testing" || state === "error" || state === "configured") {
+    await previewClick(queryButton("openai", "测试"));
+    await waitFor(() =>
+      shadow.textContent?.includes(
+        state === "testing"
+          ? "正在测试…"
+          : state === "error"
+            ? "OpenAI 额度不足"
+            : "连接成功 123 毫秒",
+      ),
+    );
+  }
+  if (state === "edit" || state === "add") {
+    await previewClick(queryButton("openai", state === "add" ? "添加" : "更换"));
+    const input = shadow.querySelector<HTMLInputElement>("#model-service-openai")!;
+    await previewType(input, "fake-preview-replacement-5678");
+  }
+  if (state === "focus") {
+    await previewKey(queryButton("openai", "测试"), "Tab");
+  }
+  if (state === "hover") await previewHover(queryButton("openai", "更换"));
+  if (state === "menu")
+    await previewClick(shadow.querySelector<HTMLButtonElement>("#model-service-provider")!);
+  document.body.dataset.modelServiceState = state;
+  await delay(120);
 }
 
 const scenarios: Record<string, () => Promise<void>> = {
@@ -1247,6 +1349,71 @@ const scenarios: Record<string, () => Promise<void>> = {
       "我还没处理完的bug",
       true,
       (mode) => mode.textContent?.includes("Jarvis 未安装或未登录") === true,
+    );
+  },
+
+  async "model-service-empty"() {
+    await mountModelSettings("empty");
+  },
+  async "model-service-configured"() {
+    await mountModelSettings("configured");
+  },
+  async "model-service-testing"() {
+    await mountModelSettings("testing");
+  },
+  async "model-service-error"() {
+    await mountModelSettings("error");
+  },
+  async "model-service-focus"() {
+    await mountModelSettings("focus");
+  },
+  async "model-service-hover"() {
+    await mountModelSettings("hover");
+  },
+  async "model-service-edit"() {
+    await mountModelSettings("edit");
+  },
+  async "model-service-add"() {
+    await mountModelSettings("add");
+  },
+  async "model-service-menu"() {
+    await mountModelSettings("menu");
+  },
+  async "jarvis-mode-openai-missing-key"() {
+    await mountJarvisSearch(
+      {
+        result: { ...jarvisPreviewError, source: "openai", errorCode: "missing_key" },
+        delayMs: 80,
+      },
+      "我还没处理的标题有发货的",
+      true,
+      (mode) =>
+        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
+        mode.textContent?.includes("未配置 OpenAI Key") === true,
+    );
+  },
+  async "jarvis-mode-openai-quota"() {
+    await mountJarvisSearch(
+      {
+        result: { ...jarvisPreviewError, source: "openai", errorCode: "quota_exhausted" },
+        delayMs: 80,
+      },
+      "我还没处理的标题有发货的",
+      true,
+      (mode) =>
+        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
+        mode.textContent?.includes("OpenAI 额度不足") === true,
+    );
+  },
+
+  async "jarvis-mode-openai-timeout"() {
+    await mountJarvisSearch(
+      { result: { ...jarvisPreviewError, source: "openai", errorCode: "timeout" }, delayMs: 80 },
+      "我还没处理的标题有发货的",
+      true,
+      (mode) =>
+        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
+        mode.textContent?.includes("解析超时") === true,
     );
   },
 

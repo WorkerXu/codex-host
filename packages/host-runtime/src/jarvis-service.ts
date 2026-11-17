@@ -25,11 +25,7 @@ import {
 
 import { JarvisBugSearcher } from "./jarvis-bug-search.js";
 import { createJarvisCli, type JarvisCli } from "./jarvis-cli.js";
-import {
-  createJarvisDecisions,
-  JarvisDecisionError,
-  type JarvisDecisions,
-} from "./jarvis-decisions.js";
+import { createJarvisQueryParser, type JarvisQueryInterpreter } from "./jarvis-query-parser.js";
 import {
   createJarvisArtifactPath,
   detectJarvisPlatform,
@@ -42,6 +38,7 @@ import {
 } from "./jarvis-install.js";
 import { JarvisLoginError, JarvisLoginForwarder, JarvisLoginManager } from "./jarvis-login.js";
 import { expandJarvisMentions } from "./jarvis-mention-rewrite.js";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import { JarvisSettingsStore } from "./jarvis-settings.js";
 
 const DOWNLOAD_TTL_MS = 10 * 60_000;
@@ -59,11 +56,11 @@ export class JarvisServiceError extends Error {
 
 export interface JarvisServiceOptions {
   environment?: NodeJS.ProcessEnv;
-  /** Desktop-local Host owns the Gemini key and login callback forwarding. */
+  /** Desktop-local Host owns model credentials and login callback forwarding. */
   isLocalHost: boolean;
   cli?: JarvisCli;
   settings?: JarvisSettingsStore;
-  decisions?: JarvisDecisions;
+  interpreter?: JarvisQueryInterpreter;
   searcher?: Pick<JarvisBugSearcher, "search">;
   login?: JarvisLoginManager;
   forwarder?: JarvisLoginForwarder;
@@ -92,7 +89,7 @@ export class JarvisService {
   readonly #isLocalHost: boolean;
   readonly #cli: JarvisCli;
   readonly #settings: JarvisSettingsStore;
-  readonly #decisions: JarvisDecisions;
+  readonly #interpreter: JarvisQueryInterpreter;
   readonly #searcher: Pick<JarvisBugSearcher, "search">;
   readonly #login: JarvisLoginManager;
   readonly #forwarder: JarvisLoginForwarder;
@@ -108,13 +105,19 @@ export class JarvisService {
     this.#cli = options.cli ?? createJarvisCli({ environment: this.#environment });
     this.#settings =
       options.settings ?? new JarvisSettingsStore({ environment: this.#environment });
-    this.#decisions =
-      options.decisions ?? createJarvisDecisions({ readApiKey: () => this.#settings.readKey() });
+    this.#interpreter =
+      options.interpreter ??
+      createJarvisQueryParser({
+        settings: new ModelServiceSettingsStore({ configDirectory: this.#settings.directory }),
+        isLocalHost: this.#isLocalHost,
+        fetchImpl: options.fetchImpl ?? fetch,
+        now: this.#now,
+      });
     this.#searcher =
       options.searcher ??
       new JarvisBugSearcher({
         cli: this.#cli,
-        decisions: this.#decisions,
+        interpreter: this.#interpreter,
         isLocalHost: this.#isLocalHost,
         now: this.#now,
       });
@@ -138,28 +141,7 @@ export class JarvisService {
   }
 
   async searchBugs(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
-    const threshold = await this.#settings.readThreshold();
-    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params, threshold));
-  }
-
-  /** Scores a DingTalk message for the dispatch runtime; the key stays local. */
-  async scoreDingTalkCandidates(
-    text: string,
-    candidates: readonly { fileName: string; name: string; description: string }[],
-  ): Promise<{ available: boolean; scores: Record<string, number>; errorCode: string | null }> {
-    try {
-      return {
-        available: true,
-        scores: await this.#decisions.scoreCandidates(text, candidates),
-        errorCode: null,
-      };
-    } catch (error) {
-      return {
-        available: false,
-        scores: {},
-        errorCode: error instanceof JarvisDecisionError ? error.code : "failed",
-      };
-    }
+    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params));
   }
 
   async settings(): Promise<JarvisSettingsResult> {
@@ -175,7 +157,6 @@ export class JarvisService {
         throw new JarvisServiceError("invalid_key", "Gemini API key is invalid");
       }
       await this.#settings.writeKey(key);
-      this.#decisions.clear();
     }
     if (params.threshold !== undefined) await this.#settings.writeThreshold(params.threshold);
     return jarvisSettingsResultSchema.parse(await this.#settings.read());
@@ -183,7 +164,7 @@ export class JarvisService {
 
   async testSettings(): Promise<JarvisSettingsTestResult> {
     this.#requireLocal();
-    return jarvisSettingsTestResultSchema.parse(await this.#decisions.test());
+    return jarvisSettingsTestResultSchema.parse(await this.#interpreter.test());
   }
 
   async install(): Promise<JarvisInstallResult> {

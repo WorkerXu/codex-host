@@ -9,13 +9,18 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Bug from "lucide/dist/esm/icons/bug.mjs";
 
-import type { JarvisBug, JarvisBugCondition } from "@codexhost/shared-contracts";
+import type {
+  JarvisBug,
+  JarvisBugCondition,
+  JarvisBugSearchResult,
+} from "@codexhost/shared-contracts";
 
 import {
   createWorkbenchRow,
   createWorkbenchSection,
   keepEditorFocusOnPress,
 } from "./renderer-native-at-menu.js";
+import { jarvisErrorText } from "./renderer-jarvis-client.js";
 import { createJarvisMark } from "./settings/jarvis-icon.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
@@ -591,17 +596,23 @@ export function renderJarvisBugRows(
   return entries;
 }
 
-export interface JarvisEmptyAction {
-  label: string;
-  onSelect(opener: HTMLElement): void;
-}
-
 export function renderJarvisEmpty(
   document: Document,
   results: HTMLElement,
-  message: string,
-  action?: JarvisEmptyAction,
+  result: JarvisBugSearchResult,
+  locale: RendererSettingsLocale,
+  onSettings?: (opener: HTMLElement) => void,
 ): void {
+  const failed = !result.available || result.errorCode !== null;
+  const message = failed
+    ? result.errorCode === "not_logged_in"
+      ? locale === "zh-CN"
+        ? "Jarvis 未安装或未登录"
+        : "Jarvis is not installed or signed in"
+      : jarvisErrorText(result.errorCode, locale, result.source)
+    : locale === "zh-CN"
+      ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
+      : "No matching bugs. Try removing a condition or rephrasing.";
   const scroller = jarvisResultsScroller(results);
   scroller.replaceChildren();
   scroller.scrollTop = 0;
@@ -615,11 +626,11 @@ export function renderJarvisEmpty(
   const messageText = document.createElement("span");
   messageText.textContent = message;
   empty.append(messageText);
-  if (action) {
+  if (failed && onSettings) {
     const link = document.createElement("button");
     link.type = "button";
     link.setAttribute("data-jarvis-settings", "true");
-    link.textContent = action.label;
+    link.textContent = locale === "zh-CN" ? "去设置" : "Open settings";
     link.style.cssText =
       "margin-left:4px;border:0;background:transparent;color:" +
       TEXT_PRIMARY +
@@ -628,7 +639,7 @@ export function renderJarvisEmpty(
     link.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      action.onSelect(link);
+      onSettings(link);
     });
     empty.append(link);
   }

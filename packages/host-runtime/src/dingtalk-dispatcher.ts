@@ -277,7 +277,7 @@ export class DingTalkDispatcher {
     );
     if (!match.available) {
       const detail =
-        match.errorCode === "missing_key" ? "未配置 Gemini，未派发" : "Gemini 匹配失败，未派发";
+        match.errorCode === "missing_key" ? "未配置 Gemini Key，未派发" : "Gemini 匹配失败，未派发";
       for (const {
         agent: { fileName },
       } of agents) {
@@ -628,7 +628,7 @@ export class DingTalkDispatcher {
     );
     if (!match.available) {
       const detail =
-        match.errorCode === "missing_key" ? "未配置 Gemini，未派发" : "Gemini 匹配失败，未派发";
+        match.errorCode === "missing_key" ? "未配置 Gemini Key，未派发" : "Gemini 匹配失败，未派发";
       for (const { agent } of agents) await this.#setStatus(agent.fileName, "skipped", detail);
       return;
     }

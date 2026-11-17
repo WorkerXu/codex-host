@@ -1,3 +1,4 @@
+import { modelServiceErrorText } from "./model-service-client.js";
 import {
   JARVIS_BUG_SEARCH_METHOD,
   JARVIS_DOWNLOAD_CHUNK_METHOD,
@@ -102,9 +103,13 @@ const KNOWN_ERROR_CODES = new Set([
   "auth_failed",
   "invalid_key",
   "missing_key",
+  "quota_exhausted",
   "unauthorized",
   "timeout",
   "network",
+  "invalid_response",
+  "gemini_failed",
+  "unrecognized_query",
   "local_only",
   "peer_unavailable",
   "forward_failed",
@@ -132,15 +137,34 @@ function base64ByteLength(value: string): number {
 export function jarvisErrorText(
   code: string | null | undefined,
   locale: RendererSettingsLocale,
+  provider: string = "openai",
 ): string {
+  if (
+    [
+      "missing_key",
+      "quota_exhausted",
+      "unauthorized",
+      "invalid_key",
+      "timeout",
+      "network",
+      "invalid_response",
+      "provider_failed",
+      "rate_limited",
+    ].includes(code ?? "")
+  )
+    return modelServiceErrorText(code, provider);
   const zh: Record<string, string> = {
     not_installed: "未安装 jarvis CLI",
     auth_failed: "jarvis CLI 未登录",
-    invalid_key: "Gemini API Key 无效",
-    missing_key: "尚未配置 Gemini API Key",
-    unauthorized: "Gemini API Key 被拒绝",
+    invalid_key: "Gemini 密钥无效",
+    missing_key: "未配置 Gemini 密钥",
+    quota_exhausted: "Gemini 额度不足",
+    unauthorized: "Gemini 密钥无效",
     timeout: "请求超时",
-    network: "网络不可用",
+    network: "网络连接失败",
+    invalid_response: "Gemini 查询理解结果无效，请重试",
+    gemini_failed: "Gemini 查询理解失败，请重试",
+    unrecognized_query: "无法理解部分查询，请换个说法",
     local_only: "该操作只能在本地 Host 执行",
     peer_unavailable: "找不到该机器的 SSH 配置，无法转发登录回调",
     forward_failed: "无法建立登录回调转发",
@@ -162,9 +186,13 @@ export function jarvisErrorText(
     auth_failed: "jarvis CLI is not signed in",
     invalid_key: "Gemini API key is invalid",
     missing_key: "Gemini API key is not configured",
+    quota_exhausted: "Gemini credits are depleted",
     unauthorized: "Gemini API key was rejected",
     timeout: "Request timed out",
     network: "Network is unavailable",
+    invalid_response: "Gemini returned invalid query conditions; try again",
+    gemini_failed: "Gemini could not interpret the query; try again",
+    unrecognized_query: "Part of the query was not understood; please rephrase it",
     local_only: "This action is available on the local Host only",
     peer_unavailable:
       "No SSH configuration matches that machine, so the login callback cannot be forwarded",

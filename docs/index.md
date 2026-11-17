@@ -28,7 +28,7 @@
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/peer-delegation.md`](architecture/peer-delegation.md) | 通过 SSH 别名跨机器调用 Host Runtime 控制 API 的 peer 配置、控制文件、传输、`#` 选择器与跨机 watch；修改跨机委派时阅读。 |
-| [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、规则优先的结构化查询、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
+| [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、OpenAI/Gemini 整句结构化查询、共享模型服务与错误处理、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
 | [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、智能体监听派发和卡片回复、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
 | [`architecture/codex-agents.md`](architecture/codex-agents.md) | 工作台「智能体」页的 `$CODEX_HOME/agents` 读写、TOML 未知键保留、模型目录、钉钉分发设置与审批边界；修改自定义 Agent 或钉钉设置时阅读。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
@@ -133,7 +133,7 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
-| [`product/harness-schedules.md`](product/harness-schedules.md) | 设置侧栏直达官方任务页，原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
+| [`product/harness-schedules.md`](product/harness-schedules.md) | 官方任务页的原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
 | [`architecture/thread-folders.md`](architecture/thread-folders.md) | 每个对话独立工作文件夹、多目录环境、Host 持久化、Harness 降级与 Desktop 根目录显示边界。 |
 | [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | 跨机同名项目：只填名字项目识别、远程同名目录与项目创建、Agent 菜单「其他机器」入口、Harness 预选与自动分组；修改跨机项目入口时阅读。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |

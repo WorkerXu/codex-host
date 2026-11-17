@@ -383,6 +383,7 @@ export {
   stripJarvisMentions,
   jarvisBugSchema,
   jarvisBugConditionSchema,
+  jarvisBugQuerySchema,
   jarvisBugSearchParamsSchema,
   jarvisBugSearchResultSchema,
   jarvisUserSchema,
@@ -408,6 +409,7 @@ export {
   type JarvisMentionRewrite,
   type JarvisBug,
   type JarvisBugCondition,
+  type JarvisBugQuery,
   type JarvisBugSearchParams,
   type JarvisBugSearchResult,
   type JarvisUser,
@@ -633,5 +635,7 @@ export {
   type DingTalkDispatchStatus,
   type DingTalkDispatchAgentStatus,
 } from "./dingtalk-dispatch.js";
+
+export * from "./model-service.js";
 export * from "./thread-folders.js";
 export * from "./delegation-projects.js";

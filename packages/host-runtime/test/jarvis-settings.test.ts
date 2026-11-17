@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -41,7 +41,7 @@ describe("Jarvis settings", () => {
 
   it("clears the key and clamps the threshold", async () => {
     const store = new JarvisSettingsStore({ configDirectory: await directory() });
-    await store.writeKey("key");
+    await store.writeKey("fake-key-value");
     await store.writeThreshold(2);
     expect(await store.readThreshold()).toBe(1);
     await store.writeThreshold(-1);
@@ -53,9 +53,9 @@ describe("Jarvis settings", () => {
   it("rejects a multi-line or oversized stored value on read", async () => {
     const configDirectory = await directory();
     const store = new JarvisSettingsStore({ configDirectory });
-    await store.writeKey("key");
+    await store.writeKey("fake-key-value");
     await chmod(store.keyPath, 0o600);
-    await store.writeKey("two\nlines");
+    await writeFile(store.keyPath, "two\nlines");
     expect(await store.readKey()).toBeNull();
   });
 

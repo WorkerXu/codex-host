@@ -44,7 +44,7 @@ function conversationsResult() {
 function manager(
   calls: string[],
   options: { status?: DingTalkStatus | (() => DingTalkStatus) } = {},
-): RendererDingTalkManager & { listener?: (value: unknown) => void } {
+): RendererDingTalkManager & { listener?: ((value: unknown) => void) | undefined } {
   const readStatus = (): DingTalkStatus =>
     typeof options.status === "function" ? options.status() : (options.status ?? status());
   const value = {

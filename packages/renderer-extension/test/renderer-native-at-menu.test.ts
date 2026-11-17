@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createJarvisConditionChip,
   createJarvisModeChrome,
+  renderJarvisEmpty,
 } from "../src/renderer-jarvis-bug-view.js";
 import {
   createWorkbenchRow,
@@ -23,7 +24,7 @@ class FakeElement {
   className = "";
   textContent = "";
   type = "";
-  style: Record<string, string> & { setProperty(name: string, value: string): void } = {
+  style: Record<string, unknown> & { setProperty(name: string, value: string): void } = {
     setProperty(name: string, value: string) {
       this[name] = value;
     },
@@ -95,6 +96,11 @@ class FakeElement {
 
   remove(): void {
     this.parentElement?.removeChild(this);
+  }
+
+  replaceChildren(...nodes: FakeElement[]): void {
+    for (const child of [...this.children]) this.removeChild(child);
+    this.append(...nodes);
   }
 
   setAttribute(name: string, value: string): void {
@@ -411,6 +417,45 @@ describe("focus-safe press", () => {
     chip.dispatch("mousedown", chipEvent);
     expect(chipEvent.preventDefault).toHaveBeenCalled();
     expect(chipEvent.stopPropagation).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["quota_exhausted", "OpenAI 额度不足"],
+    ["unauthorized", "OpenAI Key 无效"],
+    ["missing_key", "未配置 OpenAI Key"],
+    ["timeout", "解析超时"],
+    ["network", "网络连接失败"],
+    ["invalid_response", "解析结果无效，请重试"],
+  ])("shows only the Chinese reason and settings action for %s", (errorCode, reason) => {
+    const { document } = documentWithView();
+    const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
+    const onSettings = vi.fn();
+    renderJarvisEmpty(
+      document as unknown as Document,
+      chrome.results,
+      { available: false, errorCode, conditions: [], bugs: [], total: 0, capped: false },
+      "zh-CN",
+      onSettings,
+    );
+    expect(chrome.results.querySelector("span")?.textContent).toBe(reason);
+    const button = chrome.results.querySelector("[data-jarvis-settings]") as unknown as FakeElement;
+    expect(button.textContent).toBe("去设置");
+    const event = press();
+    button.dispatch("click", event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(button);
+    expect(chrome.results.querySelectorAll("button")).toHaveLength(1);
+    expect(chrome.results.querySelectorAll("span")).toHaveLength(1);
+    renderJarvisEmpty(
+      document as unknown as Document,
+      chrome.results,
+      { available: true, errorCode: null, conditions: [], bugs: [], total: 0, capped: false },
+      "zh-CN",
+      onSettings,
+    );
+    expect(chrome.results.querySelector("[data-jarvis-settings]")).toBeNull();
+    expect(chrome.results.querySelector("span")?.textContent).toContain("没有符合条件的 Bug");
   });
 });
 
