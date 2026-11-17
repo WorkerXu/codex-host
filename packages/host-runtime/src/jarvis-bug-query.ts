@@ -21,6 +21,7 @@ export interface JarvisBugRuleMatch {
   since: number | null;
   until: number | null;
   timeLabel: string | null;
+  title: string | null;
   leftover: string;
   /** Fields without an explicit rule match; the model may settle them. */
   unresolved: {
@@ -174,12 +175,39 @@ const FILLER_PATTERNS = [
   /(?:jarvis|贾维斯)/giu,
   /\bbug\b/giu,
   /(?:问题|缺陷|单子|单据|条目|记录)/gu,
+  /(?:标题|题目|名称|内容|描述)(?:里面?|中)?\s*(?:包含|关于|有|含|带|是|叫)?/gu,
   /(?:项目|project)(?:里|中|下|里面)?/giu,
   /(?:所有|全部|相关|有关|关于|里面|其中)/gu,
   /(?:一下|下)(?=\s|$)/gu,
 ];
 
-function cleanLeftover(value: string): string {
+const PROJECT_STOP_WORD =
+  /^(?:标题|题目|名称|内容|描述|bug|问题|缺陷|包含|关于|有|含|带|是|叫|在|里|里面|中|的)$/iu;
+
+function extractTitle(text: string): { text: string; title: string | null } {
+  const keywords: string[] = [];
+  const collect = (_match: string, keyword: string): string => {
+    const cleaned = keyword
+      .trim()
+      .replace(/["'“”‘’]/gu, "")
+      .replace(/(?:(?:的|\bbug\b|问题)\s*)+$/giu, "")
+      .trim();
+    if (cleaned) keywords.push(cleaned);
+    return " ";
+  };
+  const remaining = text
+    .replace(
+      /(?:标题|题目|名称)(?:里面?|中)?\s*(?:包含|关于|有|含|带|是|叫)\s*([^,，;；。！？!?]+)/gu,
+      collect,
+    )
+    .replace(
+      /([^的,，;；。！？!?]+?(?:的\s*(?:bug\b|问题)?)?)\s*在\s*(?:标题|题目|名称)(?:里面?|中)/giu,
+      collect,
+    );
+  return { text: remaining, title: keywords.join(" ") || null };
+}
+
+function stripLeadingRequest(value: string): string {
   let text = value.trim();
   // Remove several stacked request words, e.g. 「帮我查一下」.
   for (;;) {
@@ -187,6 +215,11 @@ function cleanLeftover(value: string): string {
     if (next === text) break;
     text = next;
   }
+  return text;
+}
+
+function cleanLeftover(value: string): string {
+  let text = stripLeadingRequest(value);
   for (const pattern of FILLER_PATTERNS) {
     text = text.replace(pattern, " ");
   }
@@ -206,7 +239,8 @@ function cleanLeftover(value: string): string {
 }
 
 export function parseJarvisBugRules(query: string, now = Date.now()): JarvisBugRuleMatch {
-  let text = `${query.trim()} `;
+  const title = extractTitle(`${stripLeadingRequest(query)} `);
+  let text = title.text;
 
   // Time windows run first so 「最近 3 天」 is not read as an ordering word.
   let timeLabel: string | null = null;
@@ -368,6 +402,7 @@ export function parseJarvisBugRules(query: string, now = Date.now()): JarvisBugR
     since,
     until,
     timeLabel,
+    title: title.title,
     leftover,
     unresolved: {
       scope: scopeKinds.length === 0,
@@ -386,7 +421,7 @@ export function jarvisProjectPhrases(leftover: string): string[] {
     leftover
       .split(/[\s,，、;；/|]+/u)
       .map((value) => value.trim())
-      .filter((value) => [...value].length >= 2),
+      .filter((value) => [...value].length >= 2 && !PROJECT_STOP_WORD.test(value)),
   ).sort((left, right) => [...right].length - [...left].length);
 }
 

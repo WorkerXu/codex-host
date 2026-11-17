@@ -10,6 +10,54 @@ const NOW = Date.parse("2026-11-16T10:00:00+08:00");
 const DAY = 86_400_000;
 
 describe("Jarvis bug rule parser", () => {
+  it.each(
+    ["标题", "题目", "名称"].flatMap((field) =>
+      ["有", "含", "包含", "带", "是", "叫", "关于"].map((connector) => [
+        `${field}${connector}发货的bug`,
+        "发货",
+      ]),
+    ),
+  )("extracts an explicit title from %s", (query, title) => {
+    expect(parseJarvisBugRules(query, NOW)).toMatchObject({ title, leftover: "" });
+  });
+
+  it.each([
+    ["我还没处理的标题有发货的", "发货", ""],
+    ["标题包含支付", "支付", ""],
+    ["安心买的标题含登录", "登录", "安心买"],
+    ["安心买的标题含登录的bug", "登录", "安心买"],
+    ["发货在标题里", "发货", ""],
+    ["发货的问题在标题里", "发货", ""],
+    ["安心买的登录的bug在标题里", "登录", "安心买"],
+    ["帮我查一下发货在标题里", "发货", ""],
+    ["安心买的login failed 在标题里", "login failed", "安心买"],
+    ["我还没处理的发货在标题里", "发货", ""],
+    ["发货 在标题里面的问题", "发货", ""],
+    ["标题里有发货", "发货", ""],
+    ["标题里面有发货的问题", "发货", ""],
+    ["安心买的登录在标题里", "登录", "安心买"],
+    ["标题是“登录”的 bug", "登录", ""],
+  ])("separates the title and project remainder for %s", (query, title, leftover) => {
+    expect(parseJarvisBugRules(query, NOW)).toMatchObject({ title, leftover });
+  });
+
+  it("preserves condition words inside an explicit title", () => {
+    expect(parseJarvisBugRules("标题包含最近未解决的严重支付故障", NOW)).toMatchObject({
+      title: "最近未解决的严重支付故障",
+      statuses: null,
+      severities: null,
+      orderExplicit: false,
+      leftover: "",
+    });
+  });
+
+  it("excludes field names and connectors from project candidates", () => {
+    expect(
+      jarvisProjectPhrases("标题 题目 名称 内容 描述 bug 问题 缺陷 包含 关于 有 含 带 是 叫"),
+    ).toEqual([]);
+    expect(parseJarvisBugRules("内容含登录 描述包含支付", NOW).leftover).toBe("登录 支付");
+  });
+
   it("parses the assigned, unresolved example without a model", () => {
     const parsed = parseJarvisBugRules("我还没处理完成的bug", NOW);
     expect(parsed).toMatchObject({
@@ -26,13 +74,13 @@ describe("Jarvis bug rule parser", () => {
   });
 
   it("keeps the project phrase and the explicit recency order", () => {
-    const parsed = parseJarvisBugRules("示例买的最近的bug", NOW);
+    const parsed = parseJarvisBugRules("安心买的最近的bug", NOW);
     expect(parsed).toMatchObject({
       scope: "assigned",
       statuses: null,
       order: "newest",
       orderExplicit: true,
-      leftover: "示例买",
+      leftover: "安心买",
     });
     expect(parsed.unresolved.scope).toBe(true);
     expect(parsed.unresolved.status).toBe(true);

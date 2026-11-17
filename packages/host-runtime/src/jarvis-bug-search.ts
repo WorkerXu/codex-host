@@ -41,6 +41,7 @@ const PAGE_SIZE = 100;
 const MAX_PAGES_PER_QUERY = 2;
 const PROJECT_SEARCH_TTL_MS = 5 * 60_000;
 const MAX_PROJECT_SEARCH_CACHE = 64;
+const MAX_AMBIGUOUS_PROJECT_MATCHES = 3;
 
 export interface JarvisBugSearchCli {
   user(): Promise<{ id: number; name: string } | null>;
@@ -125,6 +126,15 @@ function containsMatch(name: string, phrase: string): boolean {
   const normalizedName = name.toLocaleLowerCase();
   const normalizedPhrase = phrase.toLocaleLowerCase();
   return normalizedName.includes(normalizedPhrase) || normalizedPhrase.includes(normalizedName);
+}
+
+function isBroadProjectMatch(phrase: string, projects: readonly JarvisProjectRow[]): boolean {
+  return (
+    uniqById(projects).length > MAX_AMBIGUOUS_PROJECT_MATCHES &&
+    !projects.some((project) =>
+      phrase.toLocaleLowerCase().includes(project.name.toLocaleLowerCase()),
+    )
+  );
 }
 
 /**
@@ -327,7 +337,9 @@ export class JarvisBugSearcher {
       since: timeOmitted ? null : rules.since,
       until: timeOmitted ? null : rules.until,
       timeLabel: timeOmitted ? null : rules.timeLabel,
-      title: omit.has("title") ? null : resolution.keyword,
+      title: omit.has("title")
+        ? null
+        : [rules.title, resolution.keyword].filter(Boolean).join(" ") || null,
       scopeOmitted,
       timeOmitted,
       orderOmitted,
@@ -368,6 +380,11 @@ export class JarvisBugSearcher {
     for (const phrase of jarvisProjectPhrases(leftover)) {
       if (omit.has(`project:${phrase}`)) continue;
       const knownMatch = matchKnownProjects(phrase, known);
+      const direct = prefetched.get(phrase) ?? (await this.#searchProjects(phrase));
+      if (isBroadProjectMatch(phrase, [...knownMatch.projects, ...direct])) {
+        remainders.push(phrase);
+        continue;
+      }
       if (knownMatch.projects.length > 0) {
         const matched = uniqById(knownMatch.projects);
         tokens.push({ token: phrase, projects: matched });
@@ -377,15 +394,17 @@ export class JarvisBugSearcher {
       }
       let matched: JarvisProjectRow[] = [];
       let consumed = phrase;
-      const direct = prefetched.get(phrase) ?? (await this.#searchProjects(phrase));
       if (direct.length > 0) {
         matched = direct;
       } else if (searchBudget > 0) {
-        for (const variant of searchVariants(phrase)) {
+        for (const variant of searchVariants(phrase).filter(
+          (value) => jarvisProjectPhrases(value).length > 0,
+        )) {
           if (searchBudget <= 0) break;
           searchBudget -= 1;
           const result = await this.#searchProjects(variant);
           if (result.length > 0) {
+            if (isBroadProjectMatch(variant, result)) break;
             if (omit.has(`project:${variant}`)) break;
             matched = result;
             consumed = variant;
