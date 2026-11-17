@@ -13,6 +13,7 @@ import type {
   DingTalkSendResult,
   DingTalkStatus,
   DingTalkDispatchSettings,
+  DingTalkDispatchStatus,
   JarvisStatus,
 } from "@codexhost/shared-contracts";
 
@@ -326,7 +327,7 @@ export function createFakeDingTalkClient(
 }
 
 export function createFakeCodexAgentsClient(
-  options: { withAgents?: boolean } = {},
+  options: { withAgents?: boolean; dispatchStatus?: DingTalkDispatchStatus } = {},
 ): RendererCodexAgentsClient {
   const records: CodexAgentRecord[] =
     options.withAgents === false ? [] : agents.map((row) => ({ ...row }));
@@ -375,6 +376,10 @@ export function createFakeCodexAgentsClient(
     },
     async catalog(): Promise<CodexAgentCatalogResult> {
       return agentCatalog;
+    },
+    async dispatchStatus() {
+      await sleep(30);
+      return options.dispatchStatus ?? {};
     },
     async dispatchSettings() {
       await sleep(60);

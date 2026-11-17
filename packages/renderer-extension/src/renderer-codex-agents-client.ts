@@ -7,17 +7,20 @@ import {
   CODEX_AGENT_SAVE_METHOD,
   DINGTALK_DISPATCH_GET_METHOD,
   DINGTALK_DISPATCH_SET_METHOD,
+  DINGTALK_DISPATCH_STATUS_METHOD,
   codexAgentCatalogResultSchema,
   codexAgentDeleteResultSchema,
   codexAgentListResultSchema,
   codexAgentRecordSchema,
   dingtalkDispatchSettingsSchema,
+  dingtalkDispatchStatusSchema,
   type CodexAgentCatalogResult,
   type CodexAgentErrorCode,
   type CodexAgentListResult,
   type CodexAgentRecord,
   type CodexAgentSaveParams,
   type DingTalkDispatchSettings,
+  type DingTalkDispatchStatus,
 } from "@codexhost/shared-contracts";
 
 export interface RendererCodexAgentsRequestOptions {
@@ -51,6 +54,7 @@ export interface RendererCodexAgentsClient {
   catalog(): Promise<CodexAgentCatalogResult>;
   dispatchSettings(): Promise<DingTalkDispatchSettings>;
   saveDispatchSettings(settings: DingTalkDispatchSettings): Promise<DingTalkDispatchSettings>;
+  dispatchStatus(): Promise<DingTalkDispatchStatus>;
 }
 
 const LOCAL_HOST = "local";
@@ -122,5 +126,7 @@ export function createRendererCodexAgentsClient(
       request(DINGTALK_DISPATCH_GET_METHOD, {}, dingtalkDispatchSettingsSchema, 10_000),
     saveDispatchSettings: (settings) =>
       request(DINGTALK_DISPATCH_SET_METHOD, settings, dingtalkDispatchSettingsSchema, 10_000),
+    dispatchStatus: () =>
+      request(DINGTALK_DISPATCH_STATUS_METHOD, {}, dingtalkDispatchStatusSchema, 10_000),
   };
 }

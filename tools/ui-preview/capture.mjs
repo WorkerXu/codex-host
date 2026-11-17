@@ -37,6 +37,8 @@ const allScenarios = [
   "dingtalk-empty",
   "dingtalk-error",
   "agents-cards",
+  "agents-dispatch-status",
+  "agents-dispatch-missing-key",
   "agents-cards-narrow",
   "agents-empty",
   "agents-menu",
@@ -160,6 +162,14 @@ for (const scenario of scenarios) {
       waitUntil: "load",
     });
     await page.waitForSelector('body[data-ready="true"]', { timeout: 20_000 });
+    if (scenario.startsWith("agents-dispatch-")) {
+      await realClick(page, ".agent-card[data-agent-file]", 0);
+      await page.waitForSelector(".agent-editor:not([hidden])");
+      const point = await pointAt(page, ".agent-editor-body");
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.wheel(0, 1600);
+      await page.waitForTimeout(200);
+    }
     if (scenario === "agents-cards") {
       await page.hover(".agent-card[data-agent-name]");
     }
@@ -472,7 +482,31 @@ for (const scenario of scenarios) {
         const overlay = query(".dingtalk-lightbox");
         const image = query(".dingtalk-lightbox-image");
         const rect = image?.getBoundingClientRect();
-        check("lightbox-open", Boolean(overlay) && !overlay.hidden);
+        check("lightbox-open", Boolean(overlay) && !overlay.hidden && overlay.matches(":modal"));
+        const overlayRect = overlay?.getBoundingClientRect();
+        check(
+          "lightbox-covers-page",
+          Boolean(overlayRect) &&
+            overlayRect.x === 0 &&
+            overlayRect.y === 0 &&
+            Math.abs(overlayRect.width - window.innerWidth) < 1 &&
+            Math.abs(overlayRect.height - window.innerHeight) < 1,
+        );
+        const close = query(".dingtalk-lightbox-close");
+        const closeRect = close?.getBoundingClientRect();
+        check(
+          "lightbox-close-top-right",
+          Boolean(closeRect) && closeRect.top < 40 && window.innerWidth - closeRect.right < 40,
+        );
+        const headerClose = query(".settings-header-actions button");
+        const headerRect = headerClose?.getBoundingClientRect();
+        if (headerRect) {
+          const hit = shell.elementFromPoint(
+            headerRect.x + headerRect.width / 2,
+            headerRect.y + headerRect.height / 2,
+          );
+          check("page-close-covered", hit !== headerClose && Boolean(overlay?.contains(hit)));
+        }
         check(
           "lightbox-overlay-dark",
           Boolean(overlay) && getComputedStyle(overlay).backgroundColor.startsWith("rgba(0, 0, 0"),

@@ -1,6 +1,6 @@
 # DingTalk 工作台
 
-Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，把一个 Host 上的钉钉登录变成所有机器可用的只读工作台。它和 Jarvis `@` 引用共用同一套做法：Renderer 追加原生菜单行，Host 在提交时展开引用，CLI 与网络访问只发生在 Host。
+Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，把一个 Host 上的钉钉登录变成所有机器可用的工作台和本机智能体监听入口。它和 Jarvis `@` 引用共用同一套做法：Renderer 追加原生菜单行，Host 在提交时展开引用，CLI 与网络访问只发生在 Host。
 
 ## 入口与页面
 
@@ -9,7 +9,7 @@ Codex Desktop 的「钉钉」入口复用官方 DingTalk Workspace CLI `dws`，�
 - 页面左侧只有一个未读列表：来自 `chat message list-unread-conversations`，只显示最近 48 小时内仍有未读、且最后一条消息晚于本机已读时间的会话。右侧显示所选会话的消息，并以当前用户身份发送消息。
 - 打开会话时，列表行立即去掉未读角标和 @ 提醒，但在页面离开该会话前仍保留在未读列表中；切走后该行按已读状态移除。Host 记录已读时间，页面用 `active` 区分「仍打开」和「已离开」。
 - 群聊输入框支持原生 `@` 选择器：`@` 触发，按姓名/职位过滤，方向键移动，回车/点击选择；已选成员显示为 chip，可逐个移除，`@所有人` 作为首项。发送时 chip 生成 `<@openDingTalkId>` / `<@all>` 占位符，并通过 `chat message send --at-open-dingtalk-ids` / `--at-all` 传给 dws。
-- 消息中的图片使用缩略图；点击后用真实尺寸在深色遮罩中打开，支持左右方向键切换同会话图片、Esc 或点击遮罩关闭，关闭时释放 object URL，不保留全尺寸缓存。
+- 消息中的图片使用缩略图；点击后在覆盖全页的顶层模态遮罩中打开，关闭按钮位于右上角，页面自身的关闭按钮被遮挡且不可交互；支持左右方向键切换同会话图片、Esc 或点击遮罩关闭，关闭时释放 object URL，不保留全尺寸缓存。
 - 钉钉页占用工作台内容区全宽；打开时隐藏设置导航，顶部关闭按钮仍可返回。
 - 消息按 dws 字段渲染：`quotedMessage` 引用块、`reactions` / `emotionReplyList` 表情计数、`resourceRefs` 图片和文件、`sendType: bot` 机器人标签、Markdown 卡片标题与正文。`<imageContent>`、`mediaId=`、`fileId:` 等原始标记一律不显示。
 - 图片由 DingTalk Host 用 `chat +messages-resource-download` 下载，以 data URL 经 RPC 返回；Renderer 只在图片进入可视区时下载并转成 object URL 缩略图（最大 240 px），行离开 DOM、切换会话或关闭页面时立即 revoke。
@@ -46,7 +46,7 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 - 提交时展开会话引用只读取最近 100 条消息并跳过单聊职位补全，`conversationInfo` 与消息列表并行执行，避免一条引用串行等待多次 dws。
 - 会话列表只为可见行懒加载最近一条消息摘要，最多 3 个并发；拿不到摘要时第二行留空。
 - 最近消息每次按会话实时读取；滚动加载更早消息走同一 `chat message list` 游标，不阻塞首屏。Renderer 只保留当前会话最近 200 条消息和对应 DOM，首屏 30 条。
-- 只有 DingTalk Host 本机、且 `dws` 已登录时才启动一条长连接事件流（`event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期）。事件用于增加未读数、更新最近消息和向 Renderer 推送 `codexhost/dingtalk/changed`，不轮询。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求或轮询再启动。退出用 SIGTERM，让 CLI 自行退订。
+- 只有 `dws` 已登录时才在 DingTalk Host 启动长连接事件流；本机工作台直接消费，桌面派发可通过 SSH 消费。订阅使用 `event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期。事件用于增加未读数、更新最近消息和向 Renderer 推送 `codexhost/dingtalk/changed`，不轮询。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求或轮询再启动。退出用 SIGTERM，让 CLI 自行退订。
 - `dws` 以参数数组启动，无 shell；单次输出和总时长都有上限。
 
 ## 已读状态
@@ -70,4 +70,22 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 - `shared-contracts` 只放 carrier、数据类型和 RPC schema，保持浏览器安全。
 - `renderer-extension` 只做 DOM、缓存展示、搜索编排和 chip 插入；不读取 key、不直接调用 CLI 或 SSH。
 - `host-runtime` 负责 CLI 发现、参数校验、缓存、事件流、搜索合并、媒体缓存、peer 路由和提交时展开。
-- 发送消息是唯一由页面直接触发的写操作，必须由用户点击发送或按 Enter 明确触发；测试和开发环境不应对真实账号执行任何写命令。
+- 工作台页面发送消息由用户点击或 Enter 触发；启用智能体监听后，派发运行时按固定目标自动回复进度和结果。测试和开发环境不对真实账号发送消息或执行审批写操作。
+
+## 智能体监听与派发
+
+派发由桌面本机 Host 管理，和工作台页面的开关无关。只要至少一个智能体启用了监听，Host 就保持 tencent 上的 dws IM 事件流；Mac 通过 SSH 接收扁平 NDJSON。全部单聊和群聊使用 `user_im_message_receive_o2o_all` / `user_im_message_receive_group_all`；SSH 只启动远端 `~/.local/bin/dws event consume … --flatten -f ndjson`，不转发 Mac 的 Runtime token。关闭全部监听后恢复工作台原有的五分钟空闲释放策略，连接失败按 5–60 秒退避重连。
+
+每个智能体独立选择 `@我`、`@所有人`、`待我审批`、`私聊消息` 和回复位置。新智能体默认选择全部四类，既有配置保留原有选择。扁平事件有消息/会话 ID、事件类型、发送人展示名和 `sender_open_dingtalk_id`、正文和时间；不提供组织内 userId 或结构化 @ 列表时不编造这些字段。`@我` 按已登录用户展示名的完整提及识别（包括 dws 的 `@姓名(姓名)` 形式），`@所有人` 支持文本和 `<@all>` 标记；单聊无需 @。发送人和机器人身份还会用原会话消息元数据核对。
+
+Host 忽略本人、机器人、早于本次启用监听起点的消息以及已处理消息。同一事件命中多个类型时，每个智能体最多成为一次候选。`~/.codexhost/dingtalk-dispatch-state.json` 持久化最近 4000 个消息/审批任务 ID 和最多 64 个智能体的最后结果；不保存原文或 Gemini key。Host 重启或重新启用监听会刷新时间起点，已处理 ID 仍保留。
+
+每条候选事件只发起一次本机 Gemini Decisions 请求，按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。Gemini key 复用 Jarvis 设置，只留在 Mac。没有 key 时不创建对话、不回复占位卡，状态显示「未配置 Gemini，未派发」；服务失败或低于阈值也记录跳过原因。
+
+每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
+
+回复目标完全由 Host 决定：群消息选择「私聊」时，回复给事件的发送人开放 ID；选择「群内」时在原群 @ 发送人。单聊始终回到与该发送人的私聊，忽略「回复位置」选择。开始工作前创建 `chat +messages-send-card` 流式文本卡片，启动 Codex 后更新进度，完成后将最终回答写入同一 bizId；创建或更新失败时用原目标的 Markdown 文本消息降级。长结果分段发送，不截断正文。自动回复是启用监听授权的行为，固定目标写命令带 `--yes`，无需逐次确认。智能体卡片和编辑面板每 10 秒更新最近派发时间及已回复、失败或跳过原因。
+
+审批每分钟通过 `oa approval list-pending` 只读查询，以 taskId 去重，也通过同一 Gemini 阈值筛选。审批内容只用于汇总，进度和结果私聊给本人（按本人稳定 userId 精确解析开放 ID）；无法确定本人目标时不派发。审批 Thread 使用只读沙箱，并关闭 shell、执行、补丁、子智能体、App、插件、Hook、浏览器及全部配置的 MCP 服务器，不依赖提示词防止写入。派发运行时只构造 OA 的查询命令，绝不构造同意、拒绝、撤销或评论命令；无法读取配置以限制工具时直接失败。
+
+开发验证仅使用假事件、假 dws 和假原生 Thread。真实 dws 只读核对 `event schema … --flatten`、`event +listen-im --help`、卡片帮助、`chat +at-me` 和 `oa approval list-pending` 的字段；不启动真实订阅或发送测试消息。Desktop 验收需另一个账号在测试群 @ 已登录用户，以及向用户发送私聊消息，核对项目、对话、卡片生命周期与目标；本人发送的消息应被忽略。
