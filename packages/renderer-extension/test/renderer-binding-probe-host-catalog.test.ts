@@ -36,6 +36,13 @@ const testState = vi.hoisted(() => ({
   animationFrames: [] as FrameRequestCallback[],
 }));
 
+vi.mock("../src/renderer-thread-folders.js", () => ({
+  mountRendererThreadFolders: () => ({ refresh: vi.fn(), dispose: vi.fn() }),
+}));
+vi.mock("../src/renderer-delegation-projects.js", () => ({
+  installRendererDelegationProjects: () => ({ refresh: vi.fn(), dispose: vi.fn() }),
+}));
+
 vi.mock("../src/renderer-composer-dom.js", async (importOriginal) => {
   const original = await importOriginal<typeof RendererComposerDom>();
   return {

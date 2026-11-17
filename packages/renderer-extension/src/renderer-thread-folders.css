@@ -1,0 +1,184 @@
+[data-codexhost-thread-folders] {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+}
+.codexhost-folders-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm, 7px);
+  background: transparent;
+  color: var(--color-token-text-secondary, #666);
+  font:
+    var(--font-text-xs-size, 12px)/var(--font-text-xs-line-height, 18px) system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.codexhost-folders-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-chip:hover,
+.codexhost-folders-chip[aria-expanded="true"] {
+  background: var(--color-token-list-hover-background, #eee);
+  color: var(--color-token-text-primary, #222);
+}
+.codexhost-folders-chip svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+.codexhost-folders-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: min(410px, calc(100vw - 24px));
+  max-height: min(580px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--color-token-border-default, #dedede);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow:
+    0 12px 40px #0002,
+    0 2px 6px #0001;
+  background: var(
+    --color-token-dropdown-background,
+    var(--color-token-main-surface-primary, white)
+  );
+  color: var(--color-token-text-primary, #222);
+  font:
+    var(--font-text-sm-size, 13px)/var(--font-text-sm-line-height, 20px) system-ui,
+    sans-serif;
+}
+.codexhost-folders-popover::backdrop {
+  background: transparent;
+}
+.codexhost-folders-popover h3 {
+  margin: 4px 8px 0;
+  font-size: var(--font-text-sm-size, 13px);
+  font-weight: 600;
+}
+.codexhost-folders-hint,
+.codexhost-folders-heading {
+  color: var(--color-token-text-tertiary, #777);
+  font-size: var(--font-text-xs-size, 12px);
+  padding: 3px 8px;
+}
+.codexhost-folders-heading {
+  padding-top: 10px;
+}
+.codexhost-folders-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm, 7px);
+}
+.codexhost-folders-row:hover {
+  background: var(--color-token-list-hover-background, #f1f1f1);
+}
+.codexhost-folders-row label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.codexhost-folders-row label span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+}
+.codexhost-folders-row input {
+  accent-color: var(--color-token-text-primary, #222);
+  flex: none;
+}
+.codexhost-folders-main {
+  flex: none;
+  color: var(--color-token-text-tertiary, #777);
+  font-size: var(--font-text-xs-size, 12px);
+}
+.codexhost-folders-popover button {
+  font: inherit;
+  cursor: pointer;
+}
+.codexhost-folders-action {
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  padding: 4px 8px;
+  color: inherit;
+  background: transparent;
+}
+.codexhost-folders-action:hover {
+  background: var(--color-token-list-hover-background, #e9e9e9);
+}
+.codexhost-folders-row .codexhost-folders-action {
+  font-size: var(--font-text-xs-size, 12px);
+  opacity: 0;
+}
+.codexhost-folders-row:hover .codexhost-folders-action,
+.codexhost-folders-row:focus-within .codexhost-folders-action {
+  opacity: 1;
+}
+.codexhost-folders-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 2px;
+  margin-top: 8px;
+  border-top: 1px solid var(--color-token-border-default, #e5e5e5);
+}
+.codexhost-folders-apply {
+  background: var(--color-token-text-primary, #222);
+  color: var(--color-token-main-surface-primary, white);
+  border: 0;
+  border-radius: var(--radius-sm, 7px);
+  padding: 5px 14px;
+}
+.codexhost-folders-apply:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.codexhost-folders-path {
+  display: flex;
+  gap: 6px;
+  margin: 6px 4px;
+}
+.codexhost-folders-path input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--color-token-border-default, #ddd);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: inherit;
+  padding: 6px 8px;
+  font: inherit;
+}
+.codexhost-folders-error {
+  padding: 4px 8px;
+  color: var(--color-token-text-error, #c33);
+  font-size: var(--font-text-xs-size, 12px);
+}
+.codexhost-folders-note {
+  margin: 10px 8px;
+  color: var(--color-token-text-secondary, #888);
+  font:
+    var(--font-text-xs-size, 12px)/var(--font-text-xs-line-height, 20px) system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+.codexhost-folders-popover :focus-visible,
+.codexhost-folders-chip:focus-visible {
+  outline: 2px solid var(--color-token-text-primary, #555);
+  outline-offset: 2px;
+}
