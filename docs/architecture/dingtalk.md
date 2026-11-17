@@ -95,3 +95,7 @@ Host 忽略本人、机器人、早于本次启用监听起点的消息以及已
 审批每分钟通过 `oa approval list-pending` 只读查询，以 taskId 去重，也通过同一 Gemini Decisions 模型和阈值筛选。审批内容只用于汇总，进度和结果私聊给本人（按本人稳定 userId 精确解析开放 ID）；无法确定本人目标时不派发。审批 Thread 使用只读沙箱，并关闭 shell、执行、补丁、子智能体、App、插件、Hook、浏览器及全部配置的 MCP 服务器，不依赖提示词防止写入。派发运行时只构造 OA 的查询命令，绝不构造同意、拒绝、撤销或评论命令；无法读取配置以限制工具时直接失败。
 
 开发验证仅使用假事件、假 dws 和假原生 Thread。真实 dws 只读核对 `event schema … --flatten`、`event +listen-im --help`、卡片帮助、`chat +at-me` 和 `oa approval list-pending` 的字段；不启动真实订阅或发送测试消息。Desktop 验收需另一个账号在测试群 @ 已登录用户，以及向用户发送私聊消息，核对项目、对话、卡片生命周期与目标；本人发送的消息应被忽略。
+
+### A2UI 参数核对
+
+在 DingTalk Host 上分别读取 `dws schema --cli-path "chat message send-a2ui-card" --compact -f json` 和 `update-a2ui-card` 的同名 schema。创建目标使用群 `--conversation-id` 或个人 `--open-dingtalk-id`，群通知另带 `--at-open-dingtalk-ids`；`--content` 为 JSON 字符串数组。校验使用从只读结果取得的真实目标 ID，并在每条写命令中加入 `--dry-run`，核对 `dry_run: true`、`executed: false`。覆盖群创建、单聊创建、`INPUTTING` 和携带 `--a2ui-annotations` 的 `FINISH`。dry-run 只能确认命令参数与请求结构；桌面和手机的真实展示、通知及摘要需要用户自行验收。
