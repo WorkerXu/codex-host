@@ -15,11 +15,8 @@ import {
   REMOTE_UPDATE_METHOD,
   remoteUpdateParamsSchema,
   DESKTOP_PROJECTS_CATALOG_METHOD,
-  PROJECT_GROUPS_LIST_METHOD,
-  PROJECT_GROUPS_REPLACE_METHOD,
   PROJECT_MIRROR_LIST_METHOD,
   PROJECT_MIRROR_UPSERT_METHOD,
-  projectGroupsReplaceParamsSchema,
   projectMirrorUpsertParamsSchema,
   JARVIS_STATUS_METHOD,
   JARVIS_BUG_SEARCH_METHOD,
@@ -80,11 +77,8 @@ import {
   dingtalkDispatchSettingsSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
+import type { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
-import {
-  ProjectGroupRevisionConflictError,
-  type ProjectGroupsService,
-} from "./project-groups-service.js";
 import {
   ProjectMirrorRevisionConflictError,
   type ProjectMirrorService,
@@ -464,8 +458,8 @@ export interface AppServerHostOptions {
   runtimeMaintenance?: RuntimeMaintenance;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
-  /** Local-only project-group configuration and Desktop project catalog reads. */
-  projectGroups?: ProjectGroupsService;
+  /** Local-only read access to the Desktop project catalog. */
+  desktopProjects?: DesktopProjectCatalogReader;
   /** Local-only registry of remote projects created for local source projects. */
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
@@ -1515,18 +1509,18 @@ export class AppServerHost {
       this.#dispatchDesktopReply(request, () => this.#handleDingTalkRequest(request));
       return;
     }
-    if (
-      request.method === PROJECT_GROUPS_LIST_METHOD ||
-      request.method === PROJECT_GROUPS_REPLACE_METHOD ||
-      request.method === DESKTOP_PROJECTS_CATALOG_METHOD
-    ) {
-      if (this.#options.externalOnly || !this.#options.projectGroups) {
+    if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
+      const catalog = this.#options.desktopProjects;
+      if (this.#options.externalOnly || !catalog) {
         await this.#writer.json(
-          rpcError(request, -32601, "Project groups are available on the local Host only"),
+          rpcError(request, -32601, "Desktop projects require the local Host"),
         );
-        return;
+      } else {
+        this.#dispatchDesktopReply(request, async () => {
+          const result = await catalog.read();
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        });
       }
-      this.#dispatchDesktopReply(request, () => this.#handleProjectGroupsRequest(request));
       return;
     }
     if (
@@ -3879,42 +3873,6 @@ export class AppServerHost {
       }));
     } catch {
       return null;
-    }
-  }
-
-  async #handleProjectGroupsRequest(request: JsonRpcRequest): Promise<void> {
-    const service = this.#options.projectGroups;
-    if (!service) {
-      await this.#writer.json(
-        rpcError(request, -32601, "Project groups are available on the local Host only"),
-      );
-      return;
-    }
-    try {
-      if (request.method === PROJECT_GROUPS_LIST_METHOD) {
-        const result = await service.list();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-        return;
-      }
-      if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
-        const result = await service.readDesktopCatalog();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-        return;
-      }
-      const parsed = projectGroupsReplaceParamsSchema.safeParse(request.params);
-      if (!parsed.success) {
-        await this.#writer.json(rpcError(request, -32602, "Invalid project group configuration"));
-        return;
-      }
-      const result = await service.replace(parsed.data);
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-    } catch (error) {
-      if (error instanceof ProjectGroupRevisionConflictError) {
-        await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
-        return;
-      }
-      await this.#writer.json(rpcError(request, -32083, "Project groups request failed"));
-      this.#diagnose(error);
     }
   }
 

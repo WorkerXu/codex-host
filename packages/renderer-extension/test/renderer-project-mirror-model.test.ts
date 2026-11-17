@@ -1,30 +1,14 @@
-import type { ProjectGroup } from "@codexhost/shared-contracts";
 import { describe, expect, it } from "vitest";
-
-import { appendMirrorToGroup } from "../src/renderer-project-mirror-model.js";
 
 import {
   chooseMirrorDestination,
   isNameOnlyProject,
   mirrorDirectoryCandidates,
-  planMirrorGroup,
   readComposerProject,
   sanitizeMirrorDirectoryName,
 } from "../src/renderer-project-mirror-model.js";
 
 const parent = "/Users/test/Documents/ChatGPT";
-
-function group(name: string, members: ProjectGroup["members"]): ProjectGroup {
-  return {
-    id: `group-${name}`,
-    name,
-    order: 0,
-    collapsed: false,
-    members,
-    createdAt: "2026-11-12T03:00:00.000Z",
-    updatedAt: "2026-11-12T03:00:00.000Z",
-  };
-}
 
 describe("name-only project classification", () => {
   it("accepts one root directly under the default parent", () => {
@@ -94,65 +78,6 @@ describe("composer project context", () => {
   });
 });
 
-describe("project group planning", () => {
-  const source = {
-    projectKind: "local" as const,
-    projectId: "local-alpha",
-    rootPaths: [`${parent}/alpha`],
-    label: "alpha",
-  };
-  const mirror = {
-    projectKind: "remote" as const,
-    projectId: "remote-alpha",
-    hostId: "remote-ssh-discovered:colab",
-    remotePath: "/root/Documents/ChatGPT/alpha",
-    label: "alpha",
-  };
-
-  it("creates a group named after the project", () => {
-    const plan = planMirrorGroup({
-      groups: [],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "new-group",
-      now: "2026-11-12T03:00:00.000Z",
-    });
-    expect(plan.action).toBe("created");
-    expect(plan.groups[0]).toMatchObject({
-      id: "new-group",
-      name: "alpha",
-      members: [source, mirror],
-    });
-  });
-
-  it("appends only missing members to an existing same-name group", () => {
-    const plan = planMirrorGroup({
-      groups: [group("alpha", [source])],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "unused",
-      now: "2026-11-12T03:00:00.000Z",
-    });
-    expect(plan.action).toBe("appended");
-    expect(plan.groups[0]?.members).toEqual([source, mirror]);
-  });
-
-  it("skips when either project already belongs to another group", () => {
-    const plan = planMirrorGroup({
-      groups: [group("other", [mirror])],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "unused",
-      now: "2026-11-12T03:00:00.000Z",
-    });
-    expect(plan.action).toBe("skipped-other-group");
-    expect(plan.groups).toHaveLength(1);
-  });
-});
-
 describe("mirror destination choice", () => {
   const directoryState =
     (states: Record<string, "directory" | "missing" | "other">) =>
@@ -217,82 +142,5 @@ describe("mirror destination choice", () => {
         directoryState: directoryState({ [`${parent}/alpha`]: "other" }),
       }),
     ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
-  });
-});
-
-describe("appendMirrorToGroup", () => {
-  const local = {
-    projectKind: "local" as const,
-    projectId: "local-a",
-    rootPaths: ["/Users/me/Documents/ChatGPT/a"],
-    label: "a",
-  };
-  const mirror = {
-    projectKind: "remote" as const,
-    projectId: "remote-p",
-    hostId: "host-b",
-    remotePath: "/root/Documents/ChatGPT/a",
-    label: "a",
-  };
-  const groups = [
-    {
-      id: "g1",
-      name: "a",
-      order: 0,
-      collapsed: false,
-      members: [local],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    },
-    {
-      id: "g2",
-      name: "b",
-      order: 1,
-      collapsed: false,
-      members: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    },
-  ];
-
-  it("appends a mirror to the named group", () => {
-    const plan = appendMirrorToGroup({
-      groups,
-      groupId: "g1",
-      mirror,
-      now: "2026-02-01T00:00:00.000Z",
-    });
-    expect(plan.action).toBe("appended");
-    expect(plan.groups[0]?.members).toHaveLength(2);
-    expect(plan.groups[0]?.updatedAt).toBe("2026-02-01T00:00:00.000Z");
-  });
-
-  it("does not duplicate an existing member", () => {
-    const first = groups[0] as (typeof groups)[number];
-    const second = groups[1] as (typeof groups)[number];
-    const plan = appendMirrorToGroup({
-      groups: [{ ...first, members: [local, mirror] }, second],
-      groupId: "g1",
-      mirror,
-      now: "2026-02-01T00:00:00.000Z",
-    });
-    expect(plan.action).toBe("already-member");
-    expect(plan.changed).toBe(false);
-  });
-
-  it("reports a missing group and a cross-group conflict", () => {
-    expect(appendMirrorToGroup({ groups, groupId: "missing", mirror, now: "x" }).action).toBe(
-      "missing-group",
-    );
-    const first = groups[0] as (typeof groups)[number];
-    const second = groups[1] as (typeof groups)[number];
-    expect(
-      appendMirrorToGroup({
-        groups: [first, { ...second, members: [mirror] }],
-        groupId: "g1",
-        mirror,
-        now: "x",
-      }).action,
-    ).toBe("conflict");
   });
 });

@@ -27,15 +27,6 @@ export type {
 } from "./records.js";
 export { storedSectionPlacementV1Schema } from "./section-placements.js";
 export {
-  ProjectGroupRevisionConflictError,
-  ProjectGroupStore,
-  ProjectGroupStoreError,
-  emptyProjectGroupsFile,
-  projectGroupsFilePath,
-  readProjectGroupsFile,
-  writeProjectGroupsFile,
-} from "./project-groups.js";
-export {
   ProjectMirrorRevisionConflictError,
   ProjectMirrorStore,
   ProjectMirrorStoreError,

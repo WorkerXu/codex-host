@@ -51,7 +51,7 @@ import { consoleEntrypoint, createHostConsoleOpener } from "./console-opener.js"
 import { createHostUpdateCoordinator, type HostUpdateCoordinator } from "./update-coordinator.js";
 import { ModelPriceCatalog, defaultModelPriceDirectory } from "./model-prices.js";
 import { UsageStatistics } from "./usage-statistics.js";
-import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-groups-service.js";
+import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-mirror-service.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { createJarvisService } from "./jarvis-service.js";
@@ -378,8 +378,7 @@ export async function runHostRuntime(input: {
               stockCodexPath,
               arguments: input.arguments,
               environment: delegationEnvironment,
-              projectGroups: new ProjectGroupsService({
-                directory: defaultProjectGroupsDirectory(delegationEnvironment),
+              desktopProjects: new DesktopProjectCatalogReader({
                 environment: delegationEnvironment,
               }),
               projectMirror: new ProjectMirrorService({
@@ -430,8 +429,7 @@ export async function runHostRuntime(input: {
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
             closeMappingStoreOnExit: false,
-            projectGroups: new ProjectGroupsService({
-              directory: defaultProjectGroupsDirectory(delegationEnvironment),
+            desktopProjects: new DesktopProjectCatalogReader({
               environment: delegationEnvironment,
             }),
             projectMirror: new ProjectMirrorService({

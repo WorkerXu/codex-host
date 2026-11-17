@@ -553,7 +553,7 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
-export * from "./project-groups.js";
+export * from "./desktop-projects.js";
 export * from "./project-mirror.js";
 
 export {

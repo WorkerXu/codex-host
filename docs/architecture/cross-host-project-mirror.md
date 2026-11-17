@@ -1,6 +1,6 @@
 # 跨机同名项目（Cross-host Project Mirror）
 
-本功能让本机「只填名字」创建的原生项目，在 Agent/Harness 选择器里提供「其他机器」入口：选中某台远程机器的 Harness 后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该 Harness（模型使用其默认值），最后尝试把两端项目加入同名项目组。
+本功能让本机「只填名字」创建的原生项目，在 Agent/Harness 选择器里提供「其他机器」入口：选中某台远程机器的 Harness 后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该 Harness（模型使用其默认值）。
 
 对应 A 阶段调研与拍板见 [`docs/proposals/cross-host-project-mirror.md`](../proposals/cross-host-project-mirror.md)。本文只描述当前行为。
 
@@ -11,7 +11,6 @@
 - 不迁移草稿、附件、引用；不自动发送。
 - 目标机必须是已连接的 SSH Host；离线时机器置灰。
 - 不写 `.codex-global-state.json`；项目创建走 Desktop 自己的 renderer 服务。
-- 项目组只通过 `codexhost/project-groups/*` RPC 联动，不依赖 renderer 组显示实现。
 
 ## 入口
 
@@ -60,13 +59,6 @@
   - 其他 Harness：等待目标 Host 的 availability 变为 `ready`（按需刷新，最多约 2.5 秒），再执行 `switchComposerAgent`；模型与推理强度由 `inspectHarness` 的 catalog 默认值/新对话偏好自动应用。
 - 切换失败时保留默认 Codex 对话，不阻塞项目打开；之后再次渲染会按 800ms 间隔重试，直到 60 秒 TTL。
 
-## 项目组
-
-- 组名等于源项目名。
-- 源项目与镜像项目加入同名组；组不存在则创建。
-- 一个项目只能属于一个组；任一项目已在其他组时跳过本次自动分组，并 toast 一次。
-- `replace` 使用当前 revision；冲突时重新读取并重试一次。
-
 ## 存储
 
 ```text
@@ -107,7 +99,6 @@ Host 只提供本地 RPC：
 | 原生新对话按钮不存在/禁用 | toast，项目保留 |
 | Harness 切换失败/超时 | 新对话保留默认 Codex，不阻塞 |
 | `project/create` 失败 | 仅日志，继续 |
-| 自动分组失败/冲突 | toast，项目与对话不受影响 |
 
 ## 诊断
 

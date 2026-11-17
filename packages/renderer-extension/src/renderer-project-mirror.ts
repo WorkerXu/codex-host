@@ -3,7 +3,6 @@ import {
   desktopProjectsCatalogSchema,
   type DesktopLocalProject,
   type DesktopProjectsCatalog,
-  type ProjectGroupMember,
 } from "@codexhost/shared-contracts";
 
 import type { RendererAgentPickerControl } from "./renderer-agent-picker.js";
@@ -17,19 +16,15 @@ import {
   type CrossHostAgentSelection,
 } from "./renderer-cross-host-agent-section.js";
 import {
-  appendMirrorToGroup,
   chooseMirrorDestination,
   isNameOnlyProject,
   mirrorDirectoryCandidates,
-  planMirrorGroup,
   readComposerProject,
 } from "./renderer-project-mirror-model.js";
 import { confirmProjectMirror, showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
 import {
-  createProjectGroupRpc,
   createProjectMirrorRpc,
   localProjectMirrorManager,
-  type ProjectGroupRpc,
   type ProjectMirrorRpc,
 } from "./renderer-project-mirror-rpc.js";
 import {
@@ -77,16 +72,6 @@ interface PendingHarness {
 
 export interface RendererProjectMirrorApi {
   openForAgentPicker(input: { composer: Element; picker: RendererAgentPickerControl }): void;
-  /** Ready peers and Harnesses for the project-group add-machine section. */
-  machineCatalog(): Promise<CrossHostHarnessCatalog>;
-  /** Creates the mirror and appends it to an existing group. */
-  addToGroup(input: {
-    groupId: string;
-    hostId: string;
-    harnessId: string;
-    machineLabel: string;
-    harnessLabel: string;
-  }): Promise<{ ok: boolean; message: string | null }>;
   consumePending(input: {
     composer: Element;
     hostId: string;
@@ -324,93 +309,12 @@ function newChatButton(row: HTMLElement): HTMLButtonElement | null {
   return buttons.length === 1 ? (buttons[0] ?? null) : null;
 }
 
-function sourceMember(source: DesktopLocalProject): ProjectGroupMember {
-  return {
-    projectKind: "local",
-    projectId: source.id,
-    rootPaths: [...source.rootPaths],
-    label: source.name,
-  };
-}
-
-function mirrorMember(input: {
-  projectId: string;
-  hostId: string;
-  remotePath: string;
-  label: string;
-}): ProjectGroupMember {
-  return {
-    projectKind: "remote",
-    projectId: input.projectId,
-    hostId: input.hostId,
-    remotePath: input.remotePath,
-    label: input.label,
-  };
-}
-
-async function joinMirrorGroup(
-  groups: ProjectGroupRpc,
-  input: {
-    source: DesktopLocalProject;
-    mirror: { projectId: string; hostId: string; remotePath: string; label: string };
-  },
-): Promise<"joined" | "skipped"> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const current = await groups.list();
-    const plan = planMirrorGroup({
-      groups: current.groups,
-      name: input.source.name,
-      source: sourceMember(input.source),
-      mirror: mirrorMember(input.mirror),
-      createId: () => crypto.randomUUID(),
-      now: new Date().toISOString(),
-    });
-    if (plan.action === "skipped-other-group") return "skipped";
-    if (!plan.changed) return "joined";
-    try {
-      await groups.replace({ revision: current.revision, groups: plan.groups });
-      return "joined";
-    } catch (error) {
-      if (attempt === 1) throw error;
-    }
-  }
-  return "joined";
-}
-
-async function appendGroupMirror(
-  groups: ProjectGroupRpc,
-  input: {
-    groupId: string;
-    mirror: { projectId: string; hostId: string; remotePath: string; label: string };
-  },
-): Promise<"appended" | "already-member" | "conflict" | "missing-group"> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const current = await groups.list();
-    const plan = appendMirrorToGroup({
-      groups: current.groups,
-      groupId: input.groupId,
-      mirror: mirrorMember(input.mirror),
-      now: new Date().toISOString(),
-    });
-    if (plan.action !== "appended") return plan.action;
-    if (!plan.changed) return "already-member";
-    try {
-      await groups.replace({ revision: current.revision, groups: plan.groups });
-      return "appended";
-    } catch (error) {
-      if (attempt === 1) throw error;
-    }
-  }
-  return "appended";
-}
-
 export function installRendererProjectMirror(): RendererProjectMirrorApi {
   const existing = window.__codexhostProjectMirrorV1;
   if (existing) return existing;
 
   const pending = new Map<string, PendingHarness>();
   const inFlight = new Set<string>();
-  const announcedConflicts = new Set<string>();
   const status: ProjectMirrorStatus = {
     pickerDetected: false,
     projectEligible: false,
@@ -442,7 +346,6 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     selection: CrossHostAgentSelection,
     services: ProjectMirrorDesktopServices,
     rpc: ProjectMirrorRpc,
-    options: { groupId?: string } = {},
   ): Promise<{ ok: boolean; message: string | null }> => {
     const fail = (message: string): { ok: false; message: string } => {
       showProjectMirrorNotice(document, message, "error");
@@ -542,44 +445,6 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       if (!button || button.disabled) return fail("该项目当前不可用，可能已离线");
       pending.set(hostId, { agentId: selection.harness.id, createdAt: Date.now() });
       button.click();
-
-      const manager = localManager();
-      if (manager) {
-        try {
-          const result = options.groupId
-            ? await appendGroupMirror(createProjectGroupRpc(manager), {
-                groupId: options.groupId,
-                mirror: {
-                  projectId,
-                  hostId,
-                  remotePath: chosenPath,
-                  label: name,
-                },
-              })
-            : await joinMirrorGroup(createProjectGroupRpc(manager), {
-                source: context.source,
-                mirror: {
-                  projectId,
-                  hostId,
-                  remotePath: chosenPath,
-                  label: name,
-                },
-              });
-          if (result === "skipped") {
-            const key = `${sourceId}\u0000${hostId}\u0000${projectId}`;
-            if (!announcedConflicts.has(key)) {
-              announcedConflicts.add(key);
-              showProjectMirrorNotice(document, "该项目已在其他项目组，已跳过自动分组");
-            }
-          } else if (result === "conflict") {
-            return fail("该项目已在其他项目组，未加入当前分组");
-          } else if (result === "missing-group") {
-            return fail("目标项目组已不存在");
-          }
-        } catch {
-          return fail("项目已创建，但加入项目组失败");
-        }
-      }
     } catch (error) {
       status.lastError = errorMessage(error);
       return { ok: false, message: "添加机器失败，请稍后重试。" };
@@ -667,60 +532,6 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
 
   const api: RendererProjectMirrorApi = {
     openForAgentPicker,
-    async machineCatalog() {
-      if (disposed) return { machines: [], loadedPeers: 0 };
-      const manager = localManager();
-      if (!manager) return { machines: [], loadedPeers: 0 };
-      try {
-        const value = await manager.sendRequest(DESKTOP_PROJECTS_CATALOG_METHOD, {});
-        return await loadHarnessCatalog(desktopProjectsCatalogSchema.parse(value));
-      } catch {
-        return { machines: [], loadedPeers: 0 };
-      }
-    },
-    async addToGroup(input) {
-      if (disposed) return { ok: false, message: "跨机对话服务不可用。" };
-      const manager = localManager();
-      if (!manager) return { ok: false, message: "跨机对话服务不可用。" };
-      try {
-        const [config, catalogValue, services] = await Promise.all([
-          createProjectGroupRpc(manager).list(),
-          manager.sendRequest(DESKTOP_PROJECTS_CATALOG_METHOD, {}),
-          loadProjectMirrorDesktopServices(window),
-        ]);
-        const catalog = desktopProjectsCatalogSchema.parse(catalogValue);
-        const group = config.groups.find((candidate) => candidate.id === input.groupId);
-        const member = group?.members.find((candidate) => candidate.projectKind === "local");
-        if (!member) return { ok: false, message: "该分组没有本机项目，无法添加其他机器。" };
-        const source =
-          catalog.localProjects[member.projectId] ??
-          Object.values(catalog.localProjects).find(
-            (project) =>
-              project.rootPaths.length === member.rootPaths.length &&
-              project.rootPaths.every((path, index) => path === member.rootPaths[index]),
-          );
-        if (!source) return { ok: false, message: "找不到分组对应的本机项目。" };
-        if (!services) return { ok: false, message: "本机项目服务暂不可用。" };
-        return await runMirror(
-          { catalog, source, acknowledged: true, revision: config.revision },
-          {
-            machine: {
-              hostId: input.hostId,
-              label: input.machineLabel,
-              state: "ready",
-              harnesses: [{ id: input.harnessId, label: input.harnessLabel }],
-            },
-            harness: { id: input.harnessId, label: input.harnessLabel },
-          },
-          services,
-          createProjectMirrorRpc(manager),
-          { groupId: input.groupId },
-        );
-      } catch (error) {
-        status.lastError = errorMessage(error);
-        return { ok: false, message: "添加机器失败，请稍后重试。" };
-      }
-    },
     consumePending(input) {
       if (disposed) return false;
       const entry = pending.get(input.hostId);

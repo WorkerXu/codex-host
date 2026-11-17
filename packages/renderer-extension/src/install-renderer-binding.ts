@@ -3,7 +3,6 @@ import {
   installRendererBindingProbe,
   type RendererBindingProbeApi,
 } from "./renderer-binding-probe.js";
-import { installRendererProjectGroups } from "./renderer-project-groups.js";
 import { installCurrentRendererAdapter } from "./versioned-renderer-adapter.js";
 import { installRendererProjectMirror } from "./renderer-project-mirror.js";
 
@@ -34,14 +33,6 @@ export function installRendererBinding(
       modelUpdates: 0,
       hook: null,
     });
-  }
-  try {
-    installRendererProjectGroups();
-  } catch (error) {
-    console.error(
-      "codexhost project groups installation failed",
-      error instanceof Error ? error.name : "UnknownError",
-    );
   }
   return binding;
 }
