@@ -115,7 +115,7 @@ export async function runSkillsCli(input: {
       let plan = skillSyncPlanSchema.parse(await request(parameters));
       const confirmed = preview(plan);
       if (dryRun || (!ask && !confirmed)) return 0;
-      const choices: Record<string, string> = {};
+      const choices = Object.create(null) as Record<string, string>;
       for (const selection of options.get("--choose")?.split(",") ?? []) {
         const [skill, winner] = selection.split("=");
         if (!skill || !winner) throw new Error("invalid_arguments");

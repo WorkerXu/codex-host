@@ -349,7 +349,10 @@ export function createSkillsSettingsPage(
       function showSync(plan: SkillSyncPlan, input: SyncRequest): void {
         if (plan.conflicts.length) {
           const dialog = skillsDialog(root, "选择保留的版本");
-          const choices: Record<string, string> = { ...input.choices };
+          const choices = Object.assign(
+            Object.create(null) as Record<string, string>,
+            input.choices,
+          );
           let continueButton: HTMLButtonElement | null = null;
           for (const conflict of plan.conflicts) {
             dialog.body.append(node("h3", conflict.skill));

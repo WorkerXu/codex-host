@@ -79,6 +79,31 @@ async function setup() {
   return { a, b, service, server };
 }
 describe("skills sync planning", () => {
+  it("treats Object prototype names as ordinary skill keys requiring conflict choices", async () => {
+    const a = await machine(),
+      b = await machine();
+    await install(a.home, "constructor", "A");
+    await install(b.home, "constructor", "B");
+    const machines: SkillMachine[] = await Promise.all(
+      [a, b].map(async (m, index) => ({
+        hostId: String(index),
+        name: String(index),
+        inventory: await inventory(m.paths),
+        error: null,
+      })),
+    );
+    expect(machines[0]?.inventory?.skills[0]?.source).toBeNull();
+    const plan = planSync(machines, {
+      skill: "constructor",
+      mode: "sync",
+      sourceHost: "0",
+      to: ["1"],
+      choices: {},
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.conflicts).toHaveLength(1);
+  });
+
   it("fills only missing skills and asks for every ambiguous source", async () => {
     const a = await machine(),
       b = await machine(),

@@ -32,7 +32,7 @@ export async function exclusions(paths: SkillPaths): Promise<string[]> {
   }
 }
 async function sources(paths: SkillPaths): Promise<Record<string, SkillSource | null>> {
-  const result: Record<string, SkillSource | null> = {};
+  const result = Object.create(null) as Record<string, SkillSource | null>;
   // npx skills stores global provenance in ~/.agents/.skill-lock.json (v3).
   for (const file of [
     path.join(paths.home, ".agents/.skill-lock.json"),

@@ -34,11 +34,11 @@ export function planSync(machines: SkillMachine[], input: SyncInput): SkillSyncP
       return entry ? [{ hostId: machine.hostId, name: machine.name, entry }] : [];
     });
     if (versions.length === 0) fail("skill_missing");
+    const chosen =
+      input.choices && Object.hasOwn(input.choices, skill) ? input.choices[skill] : undefined;
     let source =
-      versions.find((v) => v.hostId === (input.choices?.[skill] ?? input.sourceHost)) ??
-      required(versions[0]);
-    if (input.choices?.[skill] && !versions.some((v) => v.hostId === input.choices?.[skill]))
-      fail("invalid_choice");
+      versions.find((v) => v.hostId === (chosen ?? input.sourceHost)) ?? required(versions[0]);
+    if (chosen && !versions.some((v) => v.hostId === chosen)) fail("invalid_choice");
     if (input.sourceHost && !versions.some((v) => v.hostId === input.sourceHost))
       fail("skill_missing");
     const targets = input.to.filter((target) => {
@@ -49,16 +49,11 @@ export function planSync(machines: SkillMachine[], input: SyncInput): SkillSyncP
       input.mode === "fill"
         ? versions
         : versions.filter((v) => targets.includes(v.hostId) || v.hostId === source.hostId);
-    if (
-      targets.length &&
-      new Set(relevant.map((v) => v.entry.fingerprint)).size > 1 &&
-      !input.choices?.[skill]
-    ) {
+    if (targets.length && new Set(relevant.map((v) => v.entry.fingerprint)).size > 1 && !chosen) {
       plan.conflicts.push({ skill, versions: relevant, diff: shortDiff(relevant) });
       continue;
     }
-    if (input.choices?.[skill])
-      source = required(versions.find((v) => v.hostId === input.choices?.[skill]));
+    if (chosen) source = required(versions.find((v) => v.hostId === chosen));
     for (const targetHost of targets) {
       const expected = versions.find((v) => v.hostId === targetHost)?.entry.fingerprint ?? null;
       if (expected === source.entry.fingerprint) continue;
