@@ -83,10 +83,10 @@ export async function runMcpAdmin(request: McpRequest, params: HubAdminParams): 
         // Preserve native options and secrets the renderer never receives.
         config = { ...original, ...input };
         if (input.type !== original.type) {
-          for (const field of input.type === "stdio"
-            ? ["url", "headers"]
-            : ["command", "args", "env"])
-            delete config[field];
+          const removed = input.type === "stdio" ? ["url", "headers"] : ["command", "args", "env"];
+          config = Object.fromEntries(
+            Object.entries(config).filter(([field]) => !removed.includes(field)),
+          );
         }
       }
       if (input.type === "stdio" ? !String(config.command ?? "").trim() : !config.url)

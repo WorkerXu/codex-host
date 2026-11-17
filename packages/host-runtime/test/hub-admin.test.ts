@@ -21,6 +21,8 @@ function service(handler: (url: string, init?: RequestInit) => Response | Promis
 }
 describe("Hub admin boundary", () => {
   it.each([
+    { op: "serverDelete", name: "..", confirmed: true },
+    { op: "keyDelete", id: ".", confirmed: true },
     { op: "proxy", url: "http://evil.test" },
     { op: "servers", url: "http://evil.test" },
     { op: "serverDelete", name: "x" },
@@ -232,12 +234,12 @@ describe("Host-local credentials", () => {
         : JSON.stringify(settings),
     );
     const headers = await mcphubCredentials(read);
-    const token = headers["x-auth-token"]!;
+    const token = String(headers["x-auth-token"]);
     const [header, body, signature] = token.split(".");
     expect(signature).toBe(
       createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url"),
     );
-    const payload = JSON.parse(Buffer.from(body!, "base64url").toString());
+    const payload = JSON.parse(Buffer.from(String(body), "base64url").toString());
     expect(payload.exp - payload.iat).toBe(60);
     expect(payload.user.sessionVersion).toMatch(/^[a-f0-9]{64}$/u);
     expect(token).not.toContain(secret);

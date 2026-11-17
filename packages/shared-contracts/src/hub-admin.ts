@@ -11,8 +11,17 @@ export const HUB_ERROR_MESSAGES = {
   missing: "内容不存在",
   conflict: "配置已变化，请刷新后重试",
 } as const;
-const name = z.string().trim().min(1).max(200);
-const id = z.string().min(1).max(512);
+const name = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((value) => value !== "." && value !== "..");
+const id = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((value) => value !== "." && value !== "..");
 const pairs = z.record(z.string().min(1).max(200), z.string().max(16000));
 export const hubServerInputSchema = z.strictObject({
   name,
