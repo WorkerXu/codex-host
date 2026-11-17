@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { desktopThemeCss } from "./desktop-theme.mjs";
 /**
  * Static preview server. It only listens on the loopback interface and serves
  * the preview bundle plus the Desktop shadow-root context exported by the
@@ -41,6 +42,9 @@ function readShadowContext() {
 
 function shadowContextCss() {
   const context = readShadowContext();
+  if (desktopCssPath) {
+    return `${desktopThemeCss(readFileSync(desktopCssPath, "utf8"))}\n:root {font-family: ${context.fontFamily ?? "system-ui, sans-serif"};} html,body {font-family:inherit;}`;
+  }
   const declarations = Object.entries(context.vars ?? {})
     .map(([name, value]) => `  ${name}: ${value};`)
     .join("\n");
@@ -53,8 +57,8 @@ function shadowContextMetadata() {
     path: shadowContextPath,
     varCount: Object.keys(context.vars ?? {}).length,
     colorScheme: context.colorScheme ?? "light",
-    // The export carries light values; dark captures stay approximate.
-    darkApproximate: (context.colorScheme ?? "light") !== "dark",
+    themeSource: desktopCssPath || shadowContextPath,
+    darkApproximate: !desktopCssPath && (context.colorScheme ?? "light") !== "dark",
   };
 }
 

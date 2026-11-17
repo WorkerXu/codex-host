@@ -187,28 +187,6 @@ body {
   flex-direction: column;
 }
 
-/*
- * The exported shadow context only carries light token values. These preview
- * approximations keep dark captures legible; they are marked approximate in
- * report.json and never ship in the workbench CSS.
- */
-html[data-theme="dark"] {
-  --color-token-main-surface-primary: #202020;
-  --color-token-text-primary: #ececec;
-  --color-token-text-secondary: #b4b4b4;
-  --color-token-text-tertiary: #8a8a8a;
-  --color-token-border-default: rgb(255 255 255 / 12%);
-  --color-token-border-light: rgb(255 255 255 / 8%);
-  --color-token-list-hover-background: rgb(255 255 255 / 7%);
-  --color-token-text-link-foreground: #66aaf9;
-  --color-token-interactive-bg-secondary-hover: rgb(255 255 255 / 10%);
-  --color-token-bg-primary: #191919;
-  --color-token-dropdown-background: #232323;
-  --color-token-on-accent: #ffffff;
-  --color-background-danger-solid: #f87171;
-  --shadow-card: 0 4px 14px rgb(0 0 0 / 30%);
-}
-
 /* Native-shaped project sidebar used by the empty-machine scenarios. */
 .preview-native-section-body {
   display: flex;

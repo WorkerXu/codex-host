@@ -67,8 +67,15 @@ const allScenarios = [
   "jarvis-mode-many",
   "jarvis-mode-empty",
   "jarvis-mode-error",
-  "jarvis-mode-gemini-quota",
-  "jarvis-mode-gemini-timeout",
+  "model-service-empty",
+  "model-service-configured",
+  "model-service-testing",
+  "model-service-error",
+  "model-service-focus",
+  "model-service-hover",
+  "jarvis-mode-openai-missing-key",
+  "jarvis-mode-openai-quota",
+  "jarvis-mode-openai-timeout",
   "jarvis-mode-slow",
   "jarvis-mode-conditions",
   "jarvis-mode-chip-removed",
@@ -1269,8 +1276,9 @@ for (const scenario of scenarios) {
         document.body.dataset.scenario === "jarvis-mode-prefilled" ||
         document.body.dataset.scenario === "jarvis-mode-empty" ||
         document.body.dataset.scenario === "jarvis-mode-error" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-timeout" ||
+        document.body.dataset.scenario === "jarvis-mode-openai-missing-key" ||
+        document.body.dataset.scenario === "jarvis-mode-openai-quota" ||
+        document.body.dataset.scenario === "jarvis-mode-openai-timeout" ||
         document.body.dataset.scenario === "jarvis-mode-slow" ||
         document.body.dataset.scenario === "jarvis-mode-conditions" ||
         document.body.dataset.scenario === "jarvis-mode-single" ||
@@ -1449,41 +1457,83 @@ for (const scenario of scenarios) {
         check("error-settings-link", Boolean(query("[data-jarvis-settings]")));
       }
       if (
-        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-timeout"
+        document.body.dataset.scenario === "jarvis-mode-openai-missing-key" ||
+        document.body.dataset.scenario === "jarvis-mode-openai-quota" ||
+        document.body.dataset.scenario === "jarvis-mode-openai-timeout"
       ) {
         const mode = query("[data-codexhost-jarvis-mode]");
         const expected =
-          document.body.dataset.scenario === "jarvis-mode-gemini-quota"
-            ? "Gemini 额度不足"
-            : "请求超时";
+          document.body.dataset.scenario === "jarvis-mode-openai-quota"
+            ? "OpenAI 额度不足"
+            : document.body.dataset.scenario === "jarvis-mode-openai-missing-key"
+              ? "未配置 OpenAI Key"
+              : "解析超时";
         const results = mode?.querySelector('[data-jarvis-results="true"]');
         check(
-          "gemini-query-typed",
+          "model-query-typed",
           mode?.querySelector("input")?.value === "我还没处理的标题有发货的",
         );
         check(
-          "gemini-query-searched",
+          "model-query-searched",
           document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的",
         );
         check(
-          "gemini-chinese-reason-and-settings-only",
+          "model-chinese-reason-and-settings-only",
           results?.textContent?.trim() === `${expected}去设置`,
           results?.textContent ?? "",
         );
-        check("gemini-no-results", queryAll("[data-codexhost-jarvis-bug]").length === 0);
-        check("gemini-no-chips", queryAll("[data-jarvis-chip]").length === 0);
-        check("gemini-no-count", (query("[data-jarvis-summary]")?.textContent ?? "missing") === "");
+        check("model-no-results", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+        check("model-no-chips", queryAll("[data-jarvis-chip]").length === 0);
+        check("model-no-count", (query("[data-jarvis-summary]")?.textContent ?? "missing") === "");
         check(
-          "gemini-no-english-error",
+          "model-no-english-error",
           !/prepayment|credits|depleted|timed?\s*out|timeout|Error|failed/iu.test(
             results?.textContent ?? "",
           ),
         );
         check(
-          "gemini-settings-link",
+          "model-settings-link",
           mode?.querySelector("[data-jarvis-settings]")?.textContent === "去设置",
         );
+      }
+      if (document.body.dataset.scenario?.startsWith("model-service-")) {
+        const section = query(".settings-model-service");
+        const inputs = queryAll(".settings-model-service input");
+        check("model-section", Boolean(section));
+        check(
+          "masked-keys",
+          inputs.length === 2 && inputs.every((input) => input.type === "password" && !input.value),
+        );
+        check("model-default-openai", query("#model-service-provider")?.value === "openai");
+        check(
+          "no-removed-nav-or-routes",
+          !query('[data-page-id="session-import"]') &&
+            !query('[data-page-id="harness-schedules"]') &&
+            !window.__codexhostSettingsShellV1.registry.getPage("session-import") &&
+            !window.__codexhostSettingsShellV1.registry.getPage("harness-schedules"),
+        );
+        check("no-secret-in-copy", !section?.textContent?.includes("fake-preview"));
+        check(
+          "real-theme",
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--app-color-background-surface")
+            .trim() !== "",
+        );
+        const state = document.body.dataset.modelServiceState;
+        if (state === "configured" || state === "hover" || state === "testing" || state === "error")
+          check(
+            "configured-suffix-only",
+            inputs.every((input) => input.placeholder === "已配置 ····1234"),
+          );
+        if (state === "testing")
+          check("testing-status", section?.textContent?.includes("正在测试…") === true);
+        if (state === "error")
+          check("chinese-quota-error", section?.textContent?.includes("OpenAI 额度不足") === true);
+        if (state === "focus")
+          check(
+            "input-keyboard-focus",
+            query("#model-service-openai")?.matches(":focus-visible") === true,
+          );
       }
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(
