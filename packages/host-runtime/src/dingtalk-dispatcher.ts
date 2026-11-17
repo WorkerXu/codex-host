@@ -1,3 +1,4 @@
+import { dingtalkMatchError, dingtalkRunError } from "./dingtalk-dispatch-errors.js";
 import { DingTalkProgressCard } from "./dingtalk-progress-card.js";
 import type { DingTalkCardInput, DingTalkCardResult, DingTalkCardUpdate } from "./dingtalk-cli.js";
 import os from "node:os";
@@ -195,13 +196,22 @@ export class DingTalkDispatcher {
   }
 
   status(): Promise<DingTalkDispatchStatus> {
-    return this.#options.state
-      .status()
-      .then((status) =>
-        Object.fromEntries(
-          Object.entries(status).filter(([fileName]) => this.#settings.agents[fileName]),
-        ),
-      );
+    return this.#options.state.status().then((status) =>
+      Object.fromEntries(
+        Object.entries(status)
+          .filter(([fileName]) => this.#settings.agents[fileName])
+          .map(([fileName, value]) => [
+            fileName,
+            {
+              ...value,
+              ...(value.detail &&
+              /[a-z]{3,}/iu.test(value.detail.replace(/Gemini|Desktop|Key|openDingTalkId/gu, ""))
+                ? { detail: dingtalkRunError(value.detail) }
+                : {}),
+            },
+          ]),
+      ),
+    );
   }
 
   dispose(): void {
@@ -270,8 +280,7 @@ export class DingTalkDispatcher {
       candidates,
     );
     if (!match.available) {
-      const detail =
-        match.errorCode === "missing_key" ? "未配置 Gemini Key，未派发" : "Gemini 匹配失败，未派发";
+      const detail = dingtalkMatchError(match.errorCode);
       for (const {
         agent: { fileName },
       } of agents) {
@@ -398,7 +407,8 @@ export class DingTalkDispatcher {
           : this.#prompt(agent, event, context),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      this.#diagnose(error);
+      const message = dingtalkRunError(error);
       await this.#finish(agent.fileName, card, `处理失败：${message}`, false);
       return;
     }
@@ -414,7 +424,7 @@ export class DingTalkDispatcher {
       await this.#finish(
         agent.fileName,
         card,
-        `处理失败：${completed.errorMessage ?? completed.status}`,
+        `处理失败：${dingtalkRunError(completed.errorMessage ?? completed.status)}`,
         false,
       );
       return;
@@ -536,8 +546,7 @@ export class DingTalkDispatcher {
       })),
     );
     if (!match.available) {
-      const detail =
-        match.errorCode === "missing_key" ? "未配置 Gemini Key，未派发" : "Gemini 匹配失败，未派发";
+      const detail = dingtalkMatchError(match.errorCode);
       for (const { agent } of agents) await this.#setStatus(agent.fileName, "skipped", detail);
       return;
     }

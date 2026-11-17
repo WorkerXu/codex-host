@@ -84,7 +84,7 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 
 Host 忽略本人、机器人、早于本次启用监听起点的消息以及已处理消息。同一事件命中多个类型时，每个智能体最多成为一次候选。`~/.codexhost/dingtalk-dispatch-state.json` 持久化最近 4000 个消息/审批任务 ID 和最多 64 个智能体的最后结果；不保存原文或模型 Key。Host 重启或重新启用监听会刷新时间起点，已处理 ID 仍保留。
 
-每条候选事件只发起一次 Gemini Decisions 请求（`https://generativelanguage.googleapis.com/v1beta/decisions`，模型 `gemini-decision-1`），按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。`dingtalk-dispatch-matcher.ts` 复用原 Decisions 客户端、请求、分数处理和超时行为，只通过 `ModelServiceSettingsStore.readKey("gemini")` 读取通用页「模型服务」保存的 Gemini API Key；密钥仅在本地 Host 内使用。不读取通用页「解析模型」选择，也不调用 OpenAI、Jarvis 查询解析或其他模型作兜底。没有 Gemini Key 时不创建对话、不回复占位卡，记录「未配置 Gemini Key，未派发」，智能体卡片与编辑器的派发状态行显示该原因；服务失败或低于阈值也记录跳过原因。
+每条候选事件只发起一次 Gemini Decisions 请求（`https://generativelanguage.googleapis.com/v1beta/decisions`，模型 `gemini-decision-1`），按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。`dingtalk-dispatch-matcher.ts` 复用原 Decisions 客户端、请求、分数处理和超时行为，只通过 `ModelServiceSettingsStore.readKey("gemini")` 读取通用页「模型服务」保存的 Gemini API Key；密钥仅在本地 Host 内使用。智能体页面按原因显示中文：402/429 为「Gemini 额度不足，未派发」，401/403 为「Gemini Key 无效，未派发」，超时为「Gemini 匹配超时，未派发」。Desktop 项目确认失败显示「需要在 Desktop 确认「钉钉智能体」文件夹，未派发」；未知原始错误不直接展示。不读取通用页「解析模型」选择，也不调用 OpenAI、Jarvis 查询解析或其他模型作兜底。没有 Gemini Key 时不创建对话、不回复占位卡，记录「未配置 Gemini Key，未派发」，智能体卡片与编辑器的派发状态行显示该原因；服务失败或低于阈值也记录跳过原因。
 
 每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。普通消息的 Turn 使用只读文件系统沙箱并允许网络查询，供智能体读取知识库；审批汇总关闭网络。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
 
