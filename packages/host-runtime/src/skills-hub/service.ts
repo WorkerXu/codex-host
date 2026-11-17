@@ -55,6 +55,7 @@ export function skillsError(error: unknown): string {
 export class SkillsHubService {
   readonly local: LocalSkillsHub;
   readonly #transport: SkillTransport;
+  readonly #canonicalHost: (hostId: string) => Promise<string>;
   readonly #hosts: () => Promise<
     {
       hostId: string;
@@ -67,6 +68,7 @@ export class SkillsHubService {
       plan: SkillSyncPlan;
       created: number;
       snapshot: SkillMachine[];
+      scope: string;
     }
   >();
   constructor(
@@ -89,6 +91,12 @@ export class SkillsHubService {
         state: path.join(codexhostUserDirectory(environment), "skills-hub"),
         searchPath: environment.PATH ?? "",
       });
+    this.#canonicalHost = async (hostId) => {
+      if (hostId === "local" || options.hosts) return hostId;
+      const target = resolvePeerTarget(await readPeerConfig(environment), hostId);
+      if (!target) fail("connection_failed");
+      return target === "local" ? "local" : target.name;
+    };
     this.#transport =
       options.transport ??
       (async (hostId, op, body) => {
@@ -141,10 +149,24 @@ export class SkillsHubService {
     const input = skillsHubRequestSchema.parse(value);
     if (input.op === "status") return this.status(input.hostId);
     if (input.op === "sync-plan") {
+      if (input.sourceHost) input.sourceHost = await this.#canonicalHost(input.sourceHost);
+      input.to = [
+        ...new Set(await Promise.all(input.to.map((hostId) => this.#canonicalHost(hostId)))),
+      ];
+      if (input.choices)
+        for (const key of Object.keys(input.choices))
+          input.choices[key] = await this.#canonicalHost(required(input.choices[key]));
+      const scope = JSON.stringify([
+        input.skill,
+        input.mode,
+        input.sourceHost ?? null,
+        [...input.to].sort(),
+      ]);
       const { machines } = await this.status();
       if (input.choices && Object.keys(input.choices).length) {
         const previous = input.basedOn ? this.#plans.get(input.basedOn) : undefined;
         if (!previous || Date.now() - previous.created > 600000) fail("expired_plan");
+        if (previous.scope !== scope) fail("stale_plan");
         for (const [skill, winner] of Object.entries(input.choices)) {
           const conflict = previous.plan.conflicts.find((entry) => entry.skill === skill);
           if (!conflict || !conflict.versions.some((version) => version.hostId === winner))
@@ -167,7 +189,7 @@ export class SkillsHubService {
       for (const [id, stored] of this.#plans)
         if (Date.now() - stored.created > 600000) this.#plans.delete(id);
       if (this.#plans.size >= 100) fail("too_many_plans");
-      this.#plans.set(plan.id, { plan, created: Date.now(), snapshot: machines });
+      this.#plans.set(plan.id, { plan, created: Date.now(), snapshot: machines, scope });
       return plan;
     }
     if (input.op === "sync-apply") {

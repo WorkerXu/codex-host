@@ -161,6 +161,14 @@ describe("two fake hosts through authenticated skills routes", () => {
     await expect(service.request({ ...input, choices: { example: "local" } })).rejects.toThrow(
       "expired_plan",
     );
+    await expect(
+      service.request({
+        ...input,
+        to: ["peer", "local"],
+        choices: { example: "local" },
+        basedOn: again.id,
+      }),
+    ).rejects.toThrow("stale_plan");
     const resolved = skillSyncPlanSchema.parse(
       await service.request({ ...input, choices: { example: "local" }, basedOn: again.id }),
     );
