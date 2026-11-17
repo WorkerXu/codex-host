@@ -35,6 +35,7 @@ export class DingTalkNativeRunner {
     {
       resolve(result: DingTalkDispatchRunResult): void;
       timer: ReturnType<typeof setTimeout>;
+      reminder: ReturnType<typeof setInterval>;
       texts: Map<string, string>;
       turnId?: string;
       onProgress?: (text: string) => void;
@@ -148,27 +149,29 @@ export class DingTalkNativeRunner {
     onProgress?: (text: string) => void,
   ): Promise<DingTalkDispatchRunResult> {
     return new Promise((resolve) => {
+      const startedAt = Date.now();
       const timer = setTimeout(() => {
-        const waiter = this.#dingTalkTurnWaiters.get(threadId);
-        if (waiter?.turnId)
-          void this.#request("turn/interrupt", { threadId, turnId: waiter.turnId }).catch(
-            () => undefined,
-          );
-        this.#dingTalkTurnWaiters.delete(threadId);
-        resolve({
+        this.#dingTalkTurnWaiters.get(threadId)?.resolve({
           answer: "",
           status: "failed",
-          errorMessage: "Codex Turn timed out",
+          errorMessage: "处理时间过长，已停止",
         });
+      }, 60 * 60_000);
+      const reminder = setInterval(() => {
+        const minutes = Math.floor((Date.now() - startedAt) / 60_000);
+        onProgress?.(`仍在处理，已用时 ${minutes} 分钟`);
       }, 10 * 60_000);
+      reminder.unref?.();
       timer.unref?.();
       this.#dingTalkTurnWaiters.set(threadId, {
         resolve: (result) => {
           clearTimeout(timer);
+          clearInterval(reminder);
           this.#dingTalkTurnWaiters.delete(threadId);
           resolve(result);
         },
         timer,
+        reminder,
         texts: new Map(),
         ...(onProgress ? { onProgress } : {}),
       });

@@ -172,10 +172,13 @@ describe("native DingTalk Threads", () => {
   });
 });
 
-it("interrupts a timed out native Turn and ignores completions for a different Turn", async () => {
-  const f = await fixture();
+it("keeps long Turns running, reports elapsed progress and stops card tracking at sixty minutes", async () => {
+  const onProgress = vi.fn();
+  const f = await fixture({ onProgress });
   vi.useFakeTimers();
   const active = await f.run();
+  const complete = vi.fn();
+  void active.completed.then(complete);
   f.runner.observe({
     method: "turn/completed",
     params: {
@@ -184,14 +187,30 @@ it("interrupts a timed out native Turn and ignores completions for a different T
     },
   });
   await vi.advanceTimersByTimeAsync(10 * 60_000);
+  expect(complete).not.toHaveBeenCalled();
+  expect(onProgress).toHaveBeenLastCalledWith("仍在处理，已用时 10 分钟");
+  await vi.advanceTimersByTimeAsync(40 * 60_000);
+  expect(onProgress).toHaveBeenLastCalledWith("仍在处理，已用时 50 分钟");
+  expect(complete).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(await active.completed).toMatchObject({
     status: "failed",
-    errorMessage: "Codex Turn timed out",
+    errorMessage: "处理时间过长，已停止",
   });
-  expect(f.request).toHaveBeenCalledWith("turn/interrupt", {
-    threadId: "native-thread",
-    turnId: "native-turn",
-  });
+  expect(f.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(false);
+  expect(vi.getTimerCount()).toBe(0);
+  f.runner.dispose();
+});
+
+it("cleans elapsed reminders after completion", async () => {
+  const onProgress = vi.fn();
+  const f = await fixture({ fast: true, onProgress });
+  vi.useFakeTimers();
+  const active = await f.run();
+  await active.completed;
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  expect(onProgress).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
   f.runner.dispose();
 });
 
