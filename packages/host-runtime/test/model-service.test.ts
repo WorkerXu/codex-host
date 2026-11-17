@@ -45,6 +45,70 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 describe("OpenAI structured parser", () => {
+  it("rejects a removed parser provider before reading credentials or sending a request", async () => {
+    const readApiKey = vi.fn();
+    const fetchImpl = vi.fn();
+    const parser = createJarvisProviderQuery({
+      provider: "gemini",
+      readApiKey,
+      fetchImpl,
+    } as never);
+    await expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "provider_failed" });
+    expect(readApiKey).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("accepts a proxy response after 5.8 seconds and aborts at exactly ten seconds", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_800));
+      return openaiResponse();
+    });
+    const result = client(fetchImpl).interpret("我还没处理的，标题有发货的", 0);
+    await vi.advanceTimersByTimeAsync(5_800);
+    expect(await result).toEqual(QUERY);
+    const signals: AbortSignal[] = [];
+    const stalled = client(async (_url, init) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise(() => {});
+    });
+    const assertion = expect(stalled.interpret("bug", 0)).rejects.toMatchObject({
+      code: "timeout",
+    });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(signals[0]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await assertion;
+    expect(signals[0]?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["key", "fetch", "body"])(
+    "cancels stalled %s immediately and aborts the HTTP signal",
+    async (stage) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      let signal: AbortSignal | null | undefined;
+      const stalled = () => new Promise<never>(() => {});
+      const parser = client(
+        async (_url, init) => {
+          signal = init?.signal;
+          return stage === "fetch"
+            ? stalled()
+            : ({ ok: true, json: stalled } as unknown as Response);
+        },
+        stage === "key" ? stalled : async () => "fake-key",
+      );
+      const result = parser.interpret("旧查询", 0, controller.signal);
+      const assertion = expect(result).rejects.toMatchObject({ code: "cancelled" });
+      await vi.advanceTimersByTimeAsync(1);
+      controller.abort();
+      await assertion;
+      if (stage !== "key") expect(signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it("posts the original instructions, whole query and Shanghai boundaries with a strict schema", async () => {
     const fetchImpl = vi.fn(async () => openaiResponse());
     const now = Date.parse("2026-11-16T01:30:00+08:00");
@@ -150,7 +214,7 @@ describe("OpenAI structured parser", () => {
       client(async () => openaiResponse({ ...QUERY, extra: true })).interpret("bug", 0),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
-  it.each(["key", "fetch", "body"])("bounds stalled %s to three seconds", async (stage) => {
+  it.each(["key", "fetch", "body"])("bounds stalled %s to ten seconds", async (stage) => {
     vi.useFakeTimers();
     const stalled = () => new Promise<never>(() => {});
     const parser = client(
@@ -162,18 +226,18 @@ describe("OpenAI structured parser", () => {
       code: "timeout",
       provider: "openai",
     });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(10000);
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("includes stalled provider selection in the three-second deadline", async () => {
+  it("includes stalled provider selection in the ten-second deadline", async () => {
     vi.useFakeTimers();
     const settings = await store();
     vi.spyOn(settings, "provider").mockImplementation(() => new Promise(() => {}));
     const readKey = vi.spyOn(settings, "readKey");
     const parser = createJarvisQueryParser({ settings, isLocalHost: true });
     const assertion = expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(10000);
     await assertion;
     expect(readKey).not.toHaveBeenCalled();
   });
@@ -217,31 +281,50 @@ describe("shared model settings", () => {
     ).rejects.toThrow();
     expect((await settings.read()).openai.configured).toBe(false);
   });
-  it("uses the explicitly selected provider and never falls back to another provider", async () => {
+  it("normalizes legacy Gemini parser selection to OpenAI and keeps both keys independent", async () => {
     const settings = await store();
     await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
-    const fetchImpl = vi.fn(async () =>
-      Response.json({
-        candidates: [
-          { finishReason: "STOP", content: { parts: [{ text: JSON.stringify(QUERY) }] } },
-        ],
-      }),
+    await writeFile(
+      path.join(path.dirname(settings.keyPath("gemini")), "model-service.json"),
+      JSON.stringify({ provider: "gemini" }),
     );
+    expect((await settings.read()).provider).toBe("openai");
+    const fetchImpl = vi.fn(async () => openaiResponse());
     const parser = createJarvisQueryParser({ settings, isLocalHost: true, fetchImpl });
     await expect(parser.interpret("bug", 0)).rejects.toMatchObject({
       code: "missing_key",
       provider: "openai",
     });
     expect(fetchImpl).not.toHaveBeenCalled();
-    await settings.update({ provider: "gemini" });
+    await settings.update({ key: { provider: "openai", value: "fake-openai-key" } });
     expect(await parser.interpret("bug", 0)).toEqual(QUERY);
-    expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toContain(
-      "gemini-3.5-flash-lite:generateContent",
+    expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toBe(
+      "https://api.openai.com/v1/chat/completions",
     );
+    expect(await settings.readKey("gemini")).toBe("fake-gemini-key");
+    await expect(settings.update({ provider: "gemini" } as never)).rejects.toThrow();
     const remote = createJarvisQueryParser({ settings, isLocalHost: false, fetchImpl });
     const key = vi.spyOn(settings, "readKey");
     await expect(remote.interpret("bug", 0)).rejects.toMatchObject({ code: "missing_key" });
     expect(key).not.toHaveBeenCalled();
+  });
+  it("tests the Gemini key using the same Decisions endpoint and model as DingTalk", async () => {
+    const settings = await store();
+    await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ answers: { mentions_project: { noul: 0.9 } } }),
+    );
+    const result = await new ModelService(settings, fetchImpl).request(MODEL_SERVICE_TEST_METHOD, {
+      provider: "gemini",
+    });
+    expect(result).toMatchObject({ ok: true, errorCode: null });
+    const [endpoint, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(endpoint).toBe("https://generativelanguage.googleapis.com/v1beta/decisions");
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      model: "gemini-decision-1",
+      questions: { mentions_project: { type: "noul" } },
+    });
+    expect(init.headers).toMatchObject({ "x-goog-api-key": "fake-gemini-key" });
   });
   it("tests each provider independently and reports latency or stable errors only", async () => {
     const settings = await store();
@@ -257,6 +340,24 @@ describe("shared model settings", () => {
       ok: false,
       latencyMs: null,
       errorCode: "missing_key",
+    });
+  });
+  it.each([
+    [402, "quota_exhausted"],
+    [401, "unauthorized"],
+    [403, "unauthorized"],
+    [429, "rate_limited"],
+    [500, "provider_failed"],
+  ])("maps Decisions HTTP %i for the Gemini key test", async (status, errorCode) => {
+    const settings = await store();
+    await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    const service = new ModelService(settings, async () =>
+      Response.json({ error: { message: "raw English error" } }, { status: Number(status) }),
+    );
+    expect(await service.request(MODEL_SERVICE_TEST_METHOD, { provider: "gemini" })).toEqual({
+      ok: false,
+      latencyMs: null,
+      errorCode,
     });
   });
 });

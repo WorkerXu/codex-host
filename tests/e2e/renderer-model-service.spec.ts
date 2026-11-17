@@ -96,32 +96,21 @@ test("keys use collapsed rows, save directly updates state, cancellation drops e
   ]);
 });
 
-test("Escape cancels edits and closes the model menu before the settings shell", async ({
-  page,
-}) => {
+test("Escape cancels key editing and the parser model is static text", async ({ page }) => {
   await setup(page);
   await openai(page).getByRole("button", { name: "添加 OpenAI API Key", exact: true }).click();
   await openai(page).getByRole("textbox", { name: "OpenAI API Key", exact: true }).press("Escape");
   await expect(openai(page).locator("input")).toBeHidden();
-  const picker = page.getByRole("button", { name: "解析模型", exact: true });
-  await picker.press("ArrowDown");
-  const menu = page.getByRole("menu", { name: "解析模型", exact: true });
-  await expect(menu).toBeVisible();
-  await expect(
-    menu.getByRole("menuitemradio", { name: "OpenAI · gpt-4.1-mini", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  await expect(picker).toHaveText("Gemini · gemini-3.5-flash-lite");
-  await expect(menu).toBeHidden();
-  await picker.click();
-  await page.keyboard.press("Escape");
-  await expect(menu).toBeHidden();
-  await expect(picker).toBeVisible();
-  await expect(picker).toBeFocused();
-  expect(await page.evaluate(() => Reflect.get(globalThis, "modelFixture").calls)).toEqual([
-    { provider: "gemini" },
-  ]);
+  const model = page.locator("#model-service-provider");
+  await expect(model).toHaveText("OpenAI · gpt-4.1-mini");
+  await expect(model).toHaveClass(/text-settings-muted/u);
+  expect(await model.evaluate((element) => element.tagName)).toBe("SPAN");
+  await expect(model.locator("svg")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "解析模型", exact: true })).toHaveCount(0);
+  await model.click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  expect(await model.evaluate((element) => element.matches(":focus"))).toBe(false);
+  expect(await page.evaluate(() => Reflect.get(globalThis, "modelFixture").calls)).toEqual([]);
 });
 
 test("save failures remain editable with Chinese copy and clear on cancel", async ({ page }) => {

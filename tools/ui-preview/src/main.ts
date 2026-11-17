@@ -1,3 +1,4 @@
+import { nativeAtMenu } from "./native-at-menu.js";
 import { createDefaultRendererSettingsPages } from "../../../packages/renderer-extension/src/settings/pages.js";
 import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import type { RendererModelServiceClient } from "../../../packages/renderer-extension/src/model-service-client.js";
@@ -261,22 +262,6 @@ function mountStage(html: string): HTMLElement {
   stage.innerHTML = html;
   root!.append(stage);
   return stage;
-}
-
-function nativeAtMenu(): HTMLElement {
-  const panel = document.createElement("div");
-  panel.className = "preview-at-menu suggestionMenu-Preview";
-  const scroll = document.createElement("div");
-  scroll.className = "vertical-scroll-fade-mask flex w-full flex-1 flex-col overflow-y-auto";
-  scroll.setAttribute("data-mention-list-scroll-area", "");
-  scroll.append(
-    nativeSection("context-actions", "添加", [nativeRow("文件和文件夹"), nativeRow("图片")], true),
-    nativeSection("agents", "智能体", [
-      nativeRow("Codex", { description: "默认编码智能体", active: true }),
-    ]),
-  );
-  panel.append(scroll);
-  return panel;
 }
 
 async function mountNativeAtMenu(open: boolean): Promise<void> {
@@ -591,7 +576,7 @@ async function mountJarvisSearch(
     openSettings: () => {
       document.body.dataset.jarvisSettingsOpened = "true";
     },
-    search: async (_hostId, params) => {
+    search: async (_hostId, params, signal) => {
       document.body.dataset.jarvisLastQuery = params.query;
       previewWindow.__jarvisPreviewSearchCalls =
         (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
@@ -601,6 +586,15 @@ async function mountJarvisSearch(
           (condition) => !params.omit?.includes(condition.key),
         ),
       };
+      signal?.addEventListener(
+        "abort",
+        () => {
+          document.body.dataset.jarvisCancelled = String(
+            Number(document.body.dataset.jarvisCancelled ?? 0) + 1,
+          );
+        },
+        { once: true },
+      );
       if (preview.pending) return new Promise(() => undefined);
       return await new Promise((resolve) => {
         setTimeout(() => resolve(result), preview.delayMs ?? 80);
@@ -676,7 +670,7 @@ async function mountUnreadScenario(): Promise<void> {
 }
 
 async function mountModelSettings(
-  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add" | "menu",
+  state: "empty" | "configured" | "testing" | "error" | "focus" | "hover" | "edit" | "add",
 ) {
   let settings: ModelServiceSettings = {
     provider: "openai",
@@ -765,8 +759,6 @@ async function mountModelSettings(
     await previewKey(queryButton("openai", "测试"), "Tab");
   }
   if (state === "hover") await previewHover(queryButton("openai", "更换"));
-  if (state === "menu")
-    await previewClick(shadow.querySelector<HTMLButtonElement>("#model-service-provider")!);
   document.body.dataset.modelServiceState = state;
   await delay(120);
 }
@@ -1405,7 +1397,10 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "jarvis-mode-loading"() {
-    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "示例买的最近的bug");
+    await mountJarvisSearch(
+      { result: jarvisPreviewResults, pending: true },
+      "我还没处理的，标题有发货的",
+    );
   },
 
   async "jarvis-mode-results"() {
@@ -1453,9 +1448,6 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
   async "model-service-add"() {
     await mountModelSettings("add");
-  },
-  async "model-service-menu"() {
-    await mountModelSettings("menu");
   },
   async "jarvis-mode-openai-missing-key"() {
     await mountJarvisSearch(

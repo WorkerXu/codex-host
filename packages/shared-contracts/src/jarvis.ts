@@ -160,6 +160,7 @@ export const JARVIS_LOGIN_STOP_METHOD = "codexhost/jarvis/login/stop";
 /** Methods every Host can serve from its own machine. */
 export const JARVIS_STATUS_METHOD = "codexhost/jarvis/status";
 export const JARVIS_BUG_SEARCH_METHOD = "codexhost/jarvis/bug/search";
+export const JARVIS_BUG_SEARCH_CANCEL_METHOD = "codexhost/jarvis/bug/search/cancel";
 export const JARVIS_INSTALL_METHOD = "codexhost/jarvis/install";
 export const JARVIS_DOWNLOAD_START_METHOD = "codexhost/jarvis/download/start";
 export const JARVIS_DOWNLOAD_CHUNK_METHOD = "codexhost/jarvis/download/chunk";
@@ -175,9 +176,11 @@ export const jarvisBugSearchParamsSchema = z
   .object({
     query: z.string().trim().max(200),
     omit: z.array(z.string().min(1).max(64)).max(24).optional(),
+    requestId: z.string().uuid().optional(),
   })
   .strict();
 export type JarvisBugSearchParams = z.infer<typeof jarvisBugSearchParamsSchema>;
+export const jarvisBugSearchCancelParamsSchema = z.strictObject({ requestId: z.string().uuid() });
 
 /** Model query conditions; timestamps are Unix milliseconds in Asia/Shanghai. */
 export const jarvisBugQuerySchema = z

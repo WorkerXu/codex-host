@@ -1,7 +1,7 @@
 /**
  * Structured Jarvis bug search behind the `@` entry.
  *
- * Gemini interprets the full query; only its project names are resolved.
+ * OpenAI interprets the full query; only its project names are resolved.
  * Interpretation failures are returned to the UI without running a search.
  * The search returns the matching set up to the documented cap.
  */
@@ -164,11 +164,16 @@ export class JarvisBugSearcher {
     this.#projectSearchTtlMs = options.projectSearchTtlMs ?? PROJECT_SEARCH_TTL_MS;
   }
 
-  async search(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
+  async search(
+    params: JarvisBugSearchParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult> {
     if (!this.#isLocalHost) return failedSearch("local_only");
     let query: JarvisBugQuery;
     try {
-      query = await this.#interpreter.interpret(params.query, this.#now());
+      signal?.throwIfAborted();
+      query = await this.#interpreter.interpret(params.query, this.#now(), signal);
+      signal?.throwIfAborted();
     } catch (error) {
       return failedSearch(
         error instanceof JarvisQueryError ? error.code : "provider_failed",
@@ -182,6 +187,7 @@ export class JarvisBugSearcher {
     );
     if (!user) return failedSearch("not_logged_in");
     const resolution = await this.#resolveProjects(query.projectNames, known, omit);
+    if (signal?.aborted) return failedSearch("cancelled");
     const plan = this.#plan(query, omit);
     const projectNames = new Map<number, string>();
     for (const project of [...known, ...resolution.targets.values()]) {
@@ -193,7 +199,12 @@ export class JarvisBugSearcher {
     const titles = plan.titles.length > 0 ? plan.titles : [null];
     const tasks = targets.flatMap((project) =>
       scopes.flatMap((createdByMe) =>
-        titles.map((title) => () => this.#fetch(project.id, createdByMe, plan, title)),
+        titles.map(
+          (title) => () =>
+            signal?.aborted
+              ? Promise.resolve({ rows: [], total: 0, capped: false, failed: true })
+              : this.#fetch(project.id, createdByMe, plan, title),
+        ),
       ),
     );
     const outcomes = await mapWithConcurrency(tasks, this.#concurrency, (task) => task());

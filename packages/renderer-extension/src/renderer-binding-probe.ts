@@ -3673,15 +3673,15 @@ export function installRendererBindingProbe(
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
     },
-    search: async (threadHostId, params) => {
+    search: async (threadHostId, params, signal) => {
       // The Desktop-local Host owns the Mac's Jarvis login; prefer it even when
       // the Composer Thread lives on another machine. Fall back only when the
       // local Host has no usable Jarvis.
       if (threadHostId !== "local" && jarvisClient.localAvailable()) {
-        const local = await jarvisClient.searchBugs("local", params);
+        const local = await jarvisClient.searchBugs("local", params, signal);
         if (!jarvisSearchShouldFallback(local)) return local;
       }
-      return jarvisClient.searchBugs(threadHostId, params);
+      return jarvisClient.searchBugs(threadHostId, params, signal);
     },
     readLocale: () => settingsLifecycle.locale,
     anchorForEditor: (editor) =>

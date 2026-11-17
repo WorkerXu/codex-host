@@ -35,6 +35,8 @@ import {
   projectMirrorUpsertParamsSchema,
   JARVIS_STATUS_METHOD,
   JARVIS_BUG_SEARCH_METHOD,
+  JARVIS_BUG_SEARCH_CANCEL_METHOD,
+  jarvisBugSearchCancelParamsSchema,
   JARVIS_SETTINGS_GET_METHOD,
   JARVIS_SETTINGS_SET_METHOD,
   JARVIS_SETTINGS_TEST_METHOD,
@@ -3947,6 +3949,13 @@ export class AppServerHost {
       if (!parsed.success)
         throw new JarvisServiceError("invalid_params", "Invalid install request");
       return await service.install();
+    }
+    if (request.method === JARVIS_BUG_SEARCH_CANCEL_METHOD) {
+      const parsed = jarvisBugSearchCancelParamsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid search cancellation");
+      service.cancelSearch(parsed.data.requestId);
+      return {};
     }
     if (request.method === JARVIS_BUG_SEARCH_METHOD) {
       const parsed = jarvisBugSearchParamsSchema.safeParse(request.params);

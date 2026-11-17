@@ -58,7 +58,6 @@ export { findNativeSuggestionList } from "./renderer-native-at-menu.js";
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
-const SLOW_NOTICE_MS = 8_000;
 const MAX_QUERY_LENGTH = 64;
 
 export interface RendererJarvisTrigger {
@@ -118,7 +117,11 @@ export interface RendererJarvisMentionOptions {
   /** Desktop Host that runs the Composer's Thread; null while unknown. */
   readHostId(editor: HTMLElement): string | null;
   /** Runs the structured Host search; only called after Jarvis was selected. */
-  search(hostId: string, params: JarvisBugSearchParams): Promise<JarvisBugSearchResult>;
+  search(
+    hostId: string,
+    params: JarvisBugSearchParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult>;
   readLocale(): RendererSettingsLocale;
   anchorForEditor(editor: HTMLElement): Element | null;
   /** Opens the Jarvis settings page from an error state. */
@@ -163,7 +166,7 @@ interface ModeState {
   hiddenPanel: { element: HTMLElement; visibility: string } | null;
   locale: RendererSettingsLocale;
   timer: number | null;
-  slowTimer: number | null;
+  request: AbortController | null;
   /** The `@query` text was already removed; insert the mention at the caret. */
   insertAtSelection: boolean;
   /** Native popup bounds, reused if focus makes the popup close. */
@@ -207,7 +210,7 @@ export function installRendererJarvisMention(
   const removeMode = (): void => {
     if (!mode) return;
     if (mode.timer !== null) view.clearTimeout(mode.timer);
-    stopSlowTimer(mode);
+    mode.request?.abort();
     mode.section.remove();
     mode.detachedHost?.remove();
     mode.detachedHost = null;
@@ -326,17 +329,11 @@ export function installRendererJarvisMention(
       hiddenPanel: null,
       locale,
       timer: null,
-      slowTimer: null,
+      request: null,
       insertAtSelection: false,
       lastRect: null,
       detachedHost: null,
     };
-  };
-
-  const stopSlowTimer = (state: ModeState): void => {
-    if (state.slowTimer === null) return;
-    view.clearTimeout(state.slowTimer);
-    state.slowTimer = null;
   };
 
   const renderLoading = (state: ModeState): void => {
@@ -344,20 +341,10 @@ export function installRendererJarvisMention(
     state.section.setAttribute("aria-busy", "true");
     state.entries = [];
     state.selected = -1;
-    state.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
+    state.summary.textContent = state.locale === "zh-CN" ? "正在解析…" : "Parsing…";
     state.chips.replaceChildren();
     state.chips.hidden = true;
     renderJarvisLoading(ownerDocument, state.results);
-    stopSlowTimer(state);
-    const generation = state.generation;
-    state.slowTimer = view.setTimeout(() => {
-      state.slowTimer = null;
-      if (mode !== state || !state.loading || state.generation !== generation) return;
-      state.summary.textContent =
-        state.locale === "zh-CN"
-          ? "Jarvis 响应较慢，仍在查询…"
-          : "Jarvis is slow, still searching…";
-    }, SLOW_NOTICE_MS);
   };
 
   const selectRow = (state: ModeState, index: number): void => {
@@ -415,7 +402,6 @@ export function installRendererJarvisMention(
 
   const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
     state.loading = false;
-    stopSlowTimer(state);
     state.section.removeAttribute("aria-busy");
     state.lastQuery = state.input.value.trim();
     renderChips(state, !result.available || result.errorCode ? [] : result.conditions);
@@ -439,12 +425,13 @@ export function installRendererJarvisMention(
 
   const requestSearch = async (state: ModeState, query: string): Promise<void> => {
     state.generation += 1;
+    state.request?.abort();
+    state.request = new AbortController();
     const generation = state.generation;
     renderLoading(state);
     const hostId = options.readHostId(state.trigger.editor);
     if (!hostId) {
       state.loading = false;
-      stopSlowTimer(state);
       state.section.removeAttribute("aria-busy");
       state.summary.textContent = "";
       renderEmpty(state, {
@@ -458,7 +445,7 @@ export function installRendererJarvisMention(
       return;
     }
     const result = await options
-      .search(hostId, { query, omit: [...state.omit] })
+      .search(hostId, { query, omit: [...state.omit] }, state.request.signal)
       .catch((): JarvisBugSearchResult => ({
         available: false,
         errorCode: "jarvis_failed",
@@ -468,10 +455,14 @@ export function installRendererJarvisMention(
         capped: false,
       }));
     if (mode !== state || generation !== state.generation || !state.section.isConnected) return;
+    state.request = null;
     renderResult(state, result);
   };
 
   const scheduleSearch = (state: ModeState): void => {
+    state.generation += 1;
+    state.request?.abort();
+    renderLoading(state);
     if (state.timer !== null) view.clearTimeout(state.timer);
     state.timer = view.setTimeout(() => {
       state.timer = null;

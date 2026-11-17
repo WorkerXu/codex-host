@@ -101,6 +101,41 @@ describe("Jarvis bug presentation", () => {
 });
 
 describe("Renderer Jarvis client", () => {
+  it("cancels only the superseded Host request and skips already cancelled requests", async () => {
+    let finish!: (value: unknown) => void;
+    const sendRequest = vi.fn((method: string) =>
+      method.endsWith("/cancel")
+        ? Promise.resolve({})
+        : new Promise((resolve) => {
+            finish = resolve;
+          }),
+    );
+    const client = createRendererJarvisClient({
+      forHost: (hostId) => ({ hostId, manager: { sendRequest } }),
+    });
+    const controller = new AbortController();
+    const pending = client.searchBugs("local", { query: "旧查询" }, controller.signal);
+    const params = (sendRequest.mock.calls as unknown as [string, { requestId: string }][])[0]?.[1];
+    expect(params?.requestId).toMatch(/^[0-9a-f-]{36}$/u);
+    controller.abort();
+    expect(sendRequest).toHaveBeenLastCalledWith(
+      "codexhost/jarvis/bug/search/cancel",
+      params && { requestId: params.requestId },
+      expect.any(Object),
+    );
+    finish({
+      available: false,
+      errorCode: "cancelled",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    });
+    await pending;
+    await client.searchBugs("local", { query: "已取消" }, controller.signal);
+    expect(sendRequest).toHaveBeenCalledTimes(2);
+  });
+
   const result: JarvisBugSearchResult = {
     available: true,
     errorCode: null,

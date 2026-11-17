@@ -97,6 +97,7 @@ export class JarvisService {
   readonly #now: () => number;
   readonly #downloads = new Map<string, DownloadSession>();
   readonly #uploads = new Map<string, UploadSession>();
+  readonly #searches = new Map<string, AbortController>();
 
   constructor(options: JarvisServiceOptions) {
     this.#environment = options.environment ?? process.env;
@@ -141,7 +142,20 @@ export class JarvisService {
   }
 
   async searchBugs(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
-    return jarvisBugSearchResultSchema.parse(await this.#searcher.search(params));
+    const controller = new AbortController();
+    if (params.requestId) this.#searches.set(params.requestId, controller);
+    try {
+      return jarvisBugSearchResultSchema.parse(
+        await this.#searcher.search(params, controller.signal),
+      );
+    } finally {
+      if (params.requestId && this.#searches.get(params.requestId) === controller)
+        this.#searches.delete(params.requestId);
+    }
+  }
+
+  cancelSearch(requestId: string): void {
+    this.#searches.get(requestId)?.abort();
   }
 
   async settings(): Promise<JarvisSettingsResult> {

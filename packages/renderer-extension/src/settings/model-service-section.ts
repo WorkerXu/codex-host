@@ -1,14 +1,7 @@
-import type { ModelProvider, ModelServiceSettings } from "@codexhost/shared-contracts";
+import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import { modelServiceErrorText, type RendererModelServiceClient } from "../model-service-client.js";
 import type { RendererSettingsPageMountContext } from "./core.js";
-import { agentMenuFocusIndex, agentMenuPlacement } from "./agent-card-menu.js";
-import { createRendererSettingsIcon } from "./icons.js";
 import { createPreferenceGroup, createPreferenceItem } from "./preference-ui.js";
-
-const MODELS = [
-  { value: "openai", label: "OpenAI · gpt-4.1-mini" },
-  { value: "gemini", label: "Gemini · gemini-3.5-flash-lite" },
-] as const;
 
 function button(document: Document, text: string): HTMLButtonElement {
   const element = document.createElement("button");
@@ -188,138 +181,13 @@ export function mountModelServiceSection(
     description: "",
     controlId: "model-service-provider",
   });
-  modelRow.description.setAttribute("role", "status");
-  const trigger = button(document, "");
-  trigger.id = "model-service-provider";
-  trigger.className =
-    "flex min-w-0 shrink-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-[13px] leading-5 text-settings-text hover:bg-settings-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-settings-focus disabled:opacity-40";
-  trigger.setAttribute("aria-haspopup", "menu");
-  trigger.setAttribute("aria-expanded", "false");
-  trigger.setAttribute("aria-label", "解析模型");
-  const menu = document.createElement("div");
-  menu.id = "model-service-model-menu";
-  menu.className =
-    "fixed z-[90] m-0 w-[296px] max-w-[calc(100vw-16px)] rounded-xl border border-settings-border bg-[var(--color-token-dropdown-background)] p-1 text-settings-text shadow-[var(--shadow-dropdown-overlay)]";
-  menu.hidden = true;
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "解析模型");
-  trigger.setAttribute("aria-controls", menu.id);
-  section.append(menu);
-  const choices = MODELS.map((model) => {
-    const choice = button(document, model.label);
-    choice.className =
-      "flex h-9 w-full items-center justify-between gap-3 rounded-lg border-0 bg-transparent px-2 text-left text-[13px] text-settings-text hover:bg-settings-hover focus-visible:bg-settings-hover focus-visible:outline-none";
-    choice.setAttribute("role", "menuitemradio");
-    choice.dataset.value = model.value;
-    choice.addEventListener("click", () => {
-      closeMenu(true);
-      void choose(model.value);
-    });
-    menu.append(choice);
-    return choice;
-  });
-  let choosing = false;
-  const renderModel = () => {
-    const value = settings?.provider ?? "openai";
-    trigger.replaceChildren(
-      (MODELS.find((model) => model.value === value) ?? MODELS[0]).label,
-      createRendererSettingsIcon("chevron-down", 14),
-    );
-    trigger.dataset.value = value;
-    trigger.disabled = !settings || choosing;
-    choices.forEach((choice, index) => {
-      const model = MODELS[index];
-      if (!model) return;
-      const selected = model.value === value;
-      choice.setAttribute("aria-checked", String(selected));
-      choice.replaceChildren(model.label);
-      if (selected) choice.append(createRendererSettingsIcon("check", 14));
-    });
-  };
-  const closeMenu = (restoreFocus = false) => {
-    menu.hidden = true;
-    trigger.setAttribute("aria-expanded", "false");
-    if (restoreFocus) trigger.focus();
-  };
-  const openMenu = () => {
-    if (trigger.disabled) return;
-    menu.hidden = false;
-    trigger.setAttribute("aria-expanded", "true");
-    const rect = menu.getBoundingClientRect();
-    const placement = agentMenuPlacement({
-      anchor: trigger.getBoundingClientRect(),
-      viewport: { width: view.innerWidth, height: view.innerHeight },
-      menu: rect,
-    });
-    menu.style.top = `${placement.top}px`;
-    menu.style.left = `${placement.left}px`;
-    choices.find((choice) => choice.dataset.value === settings?.provider)?.focus();
-  };
-  const choose = async (provider: ModelProvider) => {
-    if (!client || choosing || settings?.provider === provider) return;
-    choosing = true;
-    modelRow.description.textContent = "";
-    modelRow.description.dataset.invalid = "false";
-    renderModel();
-    try {
-      const result = await client.update({ provider });
-      if (alive()) settings = result;
-    } catch {
-      if (alive()) {
-        modelRow.description.textContent = "模型选择未保存，请重试";
-        modelRow.description.dataset.invalid = "true";
-      }
-    } finally {
-      choosing = false;
-      if (alive()) {
-        refresh();
-        trigger.focus();
-      }
-    }
-  };
-  trigger.addEventListener("click", () => (menu.hidden ? openMenu() : closeMenu()));
-  trigger.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      openMenu();
-    }
-  });
-  view.addEventListener(
-    "keydown",
-    (event) => {
-      if (menu.hidden) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        closeMenu(true);
-      } else if (event.key === "Tab") closeMenu(true);
-    },
-    { capture: true, signal: context.signal },
-  );
-  menu.addEventListener("keydown", (event) => {
-    const current = choices.indexOf(
-      (menu.getRootNode() as ShadowRoot).activeElement as HTMLButtonElement,
-    );
-    const next = agentMenuFocusIndex(current, event.key, choices.length);
-    if (next !== null) {
-      event.preventDefault();
-      choices[next]?.focus();
-    }
-  });
-  document.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (
-        !menu.hidden &&
-        !event.composedPath().includes(menu) &&
-        !event.composedPath().includes(trigger)
-      )
-        closeMenu();
-    },
-    { capture: true, signal: context.signal },
-  );
-  document.addEventListener("scroll", () => closeMenu(), { capture: true, signal: context.signal });
-  view.addEventListener("resize", () => closeMenu(), { signal: context.signal });
+  const modelLabel = modelRow.item.querySelector("label");
+  modelLabel?.removeAttribute("for");
+  modelLabel?.classList.remove("cursor-pointer");
+  const model = document.createElement("span");
+  model.id = "model-service-provider";
+  model.className = "shrink-0 text-[13px] leading-5 text-settings-muted";
+  model.textContent = "OpenAI · gpt-4.1-mini";
   context.signal.addEventListener(
     "abort",
     () => {
@@ -331,12 +199,9 @@ export function mountModelServiceSection(
     section.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
       input.value = "";
     });
-    menu.remove();
   };
-  modelRow.item.append(trigger);
+  modelRow.item.append(model);
   card.append(modelRow.item);
-  controls.push(renderModel);
-  renderModel();
   void (client?.read() ?? Promise.reject(new Error("local_only")))
     .then((result) => {
       if (!alive()) return;

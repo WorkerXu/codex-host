@@ -386,6 +386,7 @@ export function createJarvisModeChrome(
   chips.hidden = true;
   const summary = document.createElement("div");
   summary.setAttribute("data-jarvis-summary", "true");
+  summary.setAttribute("role", "status");
   style(summary, {
     "flex-shrink": "0",
     padding: "0 12px 6px",

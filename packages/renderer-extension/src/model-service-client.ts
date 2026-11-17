@@ -46,7 +46,10 @@ export function createRendererModelServiceClient(
   const request = async (method: string, params: unknown) => {
     const target = manager();
     if (!target) throw new Error("local_only");
-    return target.sendRequest(method, params, { priority: "interactive", timeoutMs: 5_000 });
+    return target.sendRequest(method, params, {
+      priority: "interactive",
+      timeoutMs: method === MODEL_SERVICE_TEST_METHOD ? 12_000 : 5_000,
+    });
   };
   return {
     read: async () => modelServiceSettingsSchema.parse(await request(MODEL_SERVICE_GET_METHOD, {})),
