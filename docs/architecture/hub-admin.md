@@ -1,0 +1,45 @@
+# Hub 管理页
+
+工作台在钉钉、智能体和 Jarvis 之后提供「MCP 服务器」与「记忆」两个独立页面。列表、筛选和概览留在页面内，编辑、详情与危险操作使用原生 `dialog`。页面使用现有设置页的字体、颜色与控件样式。
+
+## 连接与所有权
+
+Renderer 每次请求按选定的 Host ID 调用 `__codexhostHostRoutingV1.forHost(hostId).manager.sendRequest`，方法为 `codexhost/hub-admin/request`。连接不可用时直接报错，不回退到本机或当前 Composer 的主机。主机选择器默认匹配显示名或 ID 为 `india`（MCPHub）、`oracle-main`（MemHub）的连接；显示名不同或服务就在 Desktop 本机时需手动选择。
+
+Host Runtime 的 `HubAdminService` 校验共享契约中的操作枚举和严格参数，再调用固定的 localhost 地址。请求不能携带目标地址、HTTP 方法、任意路径或任意配置字段；不新增端口、隧道或公共端点。HTTP 禁止重定向，单次请求超时 8 秒。上游异常文本和校验错误不进入 RPC 或诊断日志；错误码在页面映射为「连接超时」「连接失败」「无权限」「服务未运行」等中文提示。
+
+## MCPHub
+
+服务位于 india 的 `127.0.0.1:3000`，使用 MCPHub 官方管理 REST API：
+
+| 操作 | REST 路径 |
+| --- | --- |
+| 服务器列表 | `GET /api/servers` |
+| 编辑所需原配置、只读工具列表 | `GET /api/servers/:name` |
+| 添加、编辑、删除、启停 | `POST /api/servers`、`PUT/DELETE /api/servers/:name`、`POST /api/servers/:name/toggle` |
+| 密钥列表、创建、编辑、删除、重新生成 | `GET/POST /api/auth/keys`、`PUT/DELETE /api/auth/keys/:id`、`POST /api/auth/keys/:id/reset` |
+| 认证状态、认证头 | `GET /api/settings`、仅携带两项认证字段的 `PUT /api/system-config` |
+
+Host 读取 `/etc/mcphub.env`，按其中的 `MCPHUB_SETTING_PATH`（默认 `/opt/mcphub/data/mcp_settings.json`）读取 MCPHub 配置。若有持久化 `JWT_SECRET`，使用管理员的原生 sessionVersion 算法签发 60 秒 JWT；否则仅使用已存在的明文、启用、系统级全权限 Bearer 密钥。显式配置 `skipAuth` 的服务可无凭据访问。只有密码哈希或密钥哈希时返回无权限，不生成新凭据、不猜测 secret、不修改服务配置。运行 Host 的用户必须拥有这些文件的读取权限。
+
+认证凭据只用于 Host 到 localhost 的请求。Renderer 收不到管理员密码、哈希、JWT、原密钥或原服务器连接配置。列表密钥统一显示掩码；创建和重新生成的密钥按官方 API 返回值仅在一次性对话框展示并允许复制，关闭时清空控件。编辑服务器时连接字段留空保留原值，填写则替换该项；参数、环境变量、请求头分别使用 JSON 数组/对象。Host 合并原生未知配置，协议切换清理不适用的连接字段。
+
+支持流式 HTTP、SSE、stdio 的新建与编辑。保留其他协议的列表显示，编辑按钮禁用。密钥范围支持全部、排除所选服务器、仅所选服务器；原生用户级密钥或含组范围的密钥可以查看、删除、重新生成，但禁止用简化编辑器改写其范围。
+
+服务器状态映射为在线、离线、未激活、禁用，并显示工具、提示词和资源数量。当前安装版本的列表 API 不提供调用总量，页面显示「—」，不将缺失值解释为零。删除服务器、禁用服务器、删除密钥、重新生成密钥、关闭 Bearer 认证均须确认；相应 RPC 校验确认标记。
+
+## MemHub
+
+服务位于 oracle-main。Host 读取当前用户的 `~/.one-memory/runtime-token`，仅通过 `127.0.0.1:8765` 调用 Core API；不读取 codexhost runtime 目录，不经过 18765 runtime API，也不向 Renderer 回传 token。
+
+- 概览：`GET /api/v2/home-summary`、`GET /api/v1/memory-processing`、最近 4 条的 `GET /api/v2/memory-library`、`GET /api/v1/sources`。
+- 列表与搜索：`GET /api/v2/memory-library`，固定 `scene=all`，每页 10 条，支持 query/source/offset。搜索保留上游 `window_id`，修改关键词或来源清空窗口；上游重置窗口时遵循返回的 offset。
+- 详情：`GET /api/v2/memories/:id`，保留每条记忆的 kind/variant 命名空间，展示全文、来源、时间与 session 引用。
+
+概览优先显示记忆的更新时间，回退到记忆时间或创建时间。整理状态来自处理队列的暂停/阻塞、运行和等待状态。正文以纯文本展示，不执行 HTML 或 Markdown。没有记忆写入、删除、图谱、应用或设置操作。
+
+## 验证与 Desktop 复核
+
+聚焦测试覆盖 RPC 截获、严格白名单、确认标记、凭据读取与短期 JWT、投影脱敏、配置保留、错误映射、搜索窗口和命名空间。`tools/ui-preview` 的 `hub-*` 场景使用隔离假数据；capture runner 通过真实鼠标和键盘执行筛选、输入、打开对话框及确认，分别输出 light/dark 截图。深色主题沿用预览工具的近似变量，最终视觉需在真实 Desktop 上确认。
+
+真实 Desktop 需核对：连接列表里的 india/oracle-main 是否选中正确 Host、断连时是否留在正确页面、长列表滚动、明暗外观、Tab/Escape 的焦点恢复，以及原生连接上自定义 RPC 的往返。MCPHub 管理写操作需在具备认证的测试实例验证；生产排查只读，不能用截图假数据的成功替代生产验证。
