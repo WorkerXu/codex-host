@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { DelegationControlRegistration } from "../src/delegation-types.js";
 import { FakeHarnessSession } from "@codexhost/harness-adapter/testing";
 import { hostThreadIdSchema } from "@codexhost/shared-contracts";
@@ -89,51 +90,66 @@ describe("working folders through the app-server Host path", () => {
   });
 });
 
-it("inherits a native delegate's project even when the child has a different cwd", async () => {
-  let api: DelegationControlRegistration | undefined;
-  const fixture = createFixture({
-    onDelegationApi(value) {
-      api = value;
-    },
-  });
-  await fixture.ready;
-  const requests: JsonObject[] = [];
-  const incoming = new JsonLineCollector(fixture.official.stdin);
-  fixture.official.stdin.on("data", () => {
-    for (const message of incoming.messages.splice(0)) {
-      requests.push(message);
-      const result =
-        message.method === "thread/read"
-          ? { thread: { id: "parent", cwd: "/parent", projectId: "parent-project" } }
-          : message.method === "thread/start"
-            ? { thread: { id: "native-child" } }
-            : message.method === "turn/start"
-              ? { turn: { id: "native-turn" } }
-              : {};
-      fixture.official.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
+it.each([undefined, "/different"])(
+  "inherits a native delegate's project with current environment or explicit cwd (%s)",
+  async (cwd) => {
+    let api: DelegationControlRegistration | undefined;
+    const fixture = createFixture({
+      onDelegationApi(value) {
+        api = value;
+      },
+    });
+    await fixture.ready;
+    const requests: JsonObject[] = [];
+    const incoming = new JsonLineCollector(fixture.official.stdin);
+    fixture.official.stdin.on("data", () => {
+      for (const message of incoming.messages.splice(0)) {
+        requests.push(message);
+        const result =
+          message.method === "thread/read"
+            ? {
+                thread: {
+                  id: "parent",
+                  cwd: "/stale",
+                  environments: [{ environmentId: "env", cwd: "/current" }],
+                  projectId: "parent-project",
+                },
+              }
+            : message.method === "thread/start"
+              ? { thread: { id: "native-child" } }
+              : message.method === "turn/start"
+                ? { turn: { id: "native-turn" } }
+                : {};
+        fixture.official.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
+      }
+    });
+    try {
+      if (!api) throw new Error("No delegation API");
+      await api.start({
+        harnessId: "codex",
+        task: "check",
+        parentThreadId: "parent",
+        ...(cwd ? { cwd } : {}),
+      });
+      expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
+        cwd: cwd ?? "/current",
+        projectId: "parent-project",
+      });
+    } finally {
+      await closeFixture(fixture);
     }
-  });
-  try {
-    if (!api) throw new Error("No delegation API");
-    await api.start({
-      harnessId: "codex",
-      task: "check",
-      parentThreadId: "parent",
-      cwd: "/different",
-    });
-    expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
-      cwd: "/different",
-      projectId: "parent-project",
-    });
-  } finally {
-    await closeFixture(fixture);
-  }
-});
+  },
+);
 
 it.each([true, false])(
   "changes an external Session's native cwd and respects extra-directory capability (%s)",
   async (additionalDirectories) => {
-    const fixture = createFixture();
+    let delegation: DelegationControlRegistration | undefined;
+    const fixture = createFixture({
+      onDelegationApi(value) {
+        delegation = value;
+      },
+    });
     Object.assign(fixture.adapter, { additionalDirectories });
     const nativeOpen = fixture.adapter.open.bind(fixture.adapter);
     const opened = vi.spyOn(fixture.adapter, "open").mockImplementation(async (input) => {
@@ -177,6 +193,13 @@ it.each([true, false])(
       ).toMatchObject({
         projectId: "project-a",
       });
+      if (!delegation) throw new Error("No delegation API");
+      const child = await delegation.start({
+        harnessId: "pi",
+        task: "follow up",
+        parentThreadId: threadId,
+      });
+      expect(child.cwd).toBe(path.resolve("/second"));
     } finally {
       await closeFixture(fixture);
     }

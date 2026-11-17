@@ -2888,10 +2888,15 @@ export class AppServerHost {
     const result = isRecord(response.result) ? response.result : null;
     const thread = result && isRecord(result.thread) ? result.thread : null;
     if (!thread) return {};
+    const primaryEnvironment =
+      Array.isArray(thread.environments) && isRecord(thread.environments[0])
+        ? thread.environments[0]
+        : null;
+    const cwd = typeof primaryEnvironment?.cwd === "string" ? primaryEnvironment.cwd : thread.cwd;
     const title =
       typeof thread.name === "string" && thread.name.trim() ? thread.name : thread.preview;
     return {
-      ...(typeof thread.cwd === "string" && thread.cwd.trim() ? { cwd: thread.cwd } : {}),
+      ...(typeof cwd === "string" && cwd.trim() ? { cwd } : {}),
       ...(typeof title === "string" && title.trim() ? { title } : {}),
       ...(typeof thread.projectId === "string" && thread.projectId
         ? { projectId: thread.projectId }

@@ -979,7 +979,7 @@ export class HarnessDelegationCoordinator {
     if (record)
       return {
         harnessId: record.harnessId as RoutedHarnessId,
-        cwd: record.cwd,
+        cwd: this.#externalRuntime.get(parentThreadId)?.cwd ?? record.cwd,
         title: record.title,
       };
     const metadata = await this.#officialThreadMetadata(parentThreadId).catch(() => ({}));
