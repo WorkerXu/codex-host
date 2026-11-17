@@ -13,6 +13,7 @@ import {
   type ThreadFoldersView,
 } from "./renderer-thread-folders-control.js";
 import { readComposerProject } from "./renderer-project-mirror-model.js";
+import { pickDesktopFolders } from "./renderer-folder-picker.js";
 
 interface FolderContext {
   hostId: string | null;
@@ -148,6 +149,12 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
   const control = createThreadFoldersControl({
     document: d,
     load,
+    async pickLocal() {
+      const current = identity();
+      if (current.hostId !== "local") return [];
+      const picked = await pickDesktopFolders(window);
+      return disposed || identity().key !== current.key ? [] : picked;
+    },
     async save(folders) {
       const current = identity();
       if (current.existing) {

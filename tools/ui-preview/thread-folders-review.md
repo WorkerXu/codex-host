@@ -9,7 +9,40 @@
 - 文件夹场景不加载浅色 shadow-context，也不注入 preview.css 的近似深色映射。浅 / 深色都由 Desktop 自带 `[data-theme]` 和 `light-dark()` 规则解析。实测深色页面 surface 为 `#181818`、菜单为 `rgb(45, 45, 45)`、错误文字为 `rgb(250, 66, 62)`。
 - CSS SHA-256：`45b6cbc843f0dd1b94491ae1ed8ff03fcb9cdf53b16eb10896673037648dd987`。截图及来源校验记录在上述目录的 `manifest.json`；图片不纳入 Git。
 
-## 第三轮：目录浏览子视图（当前 05/06）
+## 第四轮：本机原生目录多选（当前 05/06）
+
+已在 `feat/thread-folders` 上执行 `git merge integ/three-features`，快进到 `f10223ab`，无冲突。按 ui-quality-bar.md 使用真实 Desktop CSS 和原生 Composer 结构，通过 agent-browser 的真实鼠标 / 键盘操作截图。1280×900，以下 10 张最终截图均已逐张打开检查；截图与 manifest 位于仓库外的 `shots-thread-folders/round4/`。
+
+### 原生接口与边界
+
+- 实际调用：`appServices.fileAttachments.pickFiles({kind:"directory", allowMultiple:true, pickerTitle:"选择工作文件夹"})`。通过 `loadCodexNativeServices` 从已加载的 Renderer 模块发现服务，使用返回项的 `fsPath`；不直接访问 Electron，不创建或激活项目。
+- 只读核对了 Mac 已安装的 `/Applications/ChatGPT.app/Contents/Resources/app.asar`（Desktop 26.1111.21308，build 27194）。Renderer 的原生文件选择函数调用上述 service；主进程 `early-bootstrap-226-2f6bd181558008cf.js` 内的 `pickFiles` 在 `kind === "directory"` 时仅传 `openDirectory`，多选时传 `multiSelections`，再调用 `dialog.showOpenDialog`。
+- Desktop 项目选择的旧入口 `electron-pick-workspace-root-option`（`allowMultiple:true`）同样落到系统目录窗口，但通过 `workspace-root-option-picked` 向全局项目组件分发目录，没有返回式取消结果。对话目录采用有独立返回值的 `fileAttachments.pickFiles`，避免改动项目归属。
+- 空数组表示取消，保留主列表并恢复添加入口焦点；接口缺失、发现/调用失败或结果形状不可用才退回浏览子视图。所有选中目录验证完成后去重、一次保存；验证和选择期间禁用编辑。关闭、重开菜单或切换对话会丢弃过期结果。远程不调用本机选择器。
+- 预览的 `picker=selected|cancel|unavailable|error|delayed` 模式模拟服务返回，执行同一个生产 picker 调用函数；没有绘制假的 macOS 系统窗口。截图证明调用后的 UI 和退回路径，macOS 系统窗口、多选操作及前台恢复由用户实机验收。
+
+| 截图 | 修掉的问题与逐图复查 |
+| --- | --- |
+| [05-local-native-selected-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-selected-light.png>) | 本机点击添加后用原生接口的多选返回加入 shared-ui / docs，去重、一次保存，chip 显示 +2；悬停行与主要标记对齐，不再先出现手输路径。 |
+| [05-local-native-selected-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-selected-dark.png>) | 同一多选返回的深色结果；沿用真实 Desktop 深色菜单、文字与悬停变量，主列表没有重复目录。 |
+| [05-local-native-cancel-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-cancel-keyboard-light.png>) | End / Enter 触发选择并模拟取消。修正取消后错误进入子视图的问题，主列表保持原选择，添加入口恢复键盘焦点，焦点环完整。 |
+| [05-local-native-cancel-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-cancel-keyboard-dark.png>) | 深色取消状态，原生焦点环清楚，菜单与 Composer 的间距、边界保持一致。 |
+| [05-local-fallback-hover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-fallback-hover-light.png>) | 模拟 Desktop 缺少目录选择接口后退回子视图；路径获得焦点，packages 行真实鼠标悬停，紧凑弹层没有最近列表重复。 |
+| [05-local-fallback-hover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-fallback-hover-dark.png>) | 模拟原生调用失败后退回深色子视图；不展示英文错误，路径输入、悬停和原生小号主按钮对比正常。 |
+| [06-remote-browser-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/06-remote-browser-keyboard-light.png>) | 远程且本机选择能力可用，仍只浏览远程目录。Tab / End 聚焦末项并内部滚动，保持 420px 上限和固定路径栏。 |
+| [06-remote-browser-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/06-remote-browser-keyboard-dark.png>) | 同一远程键盘状态的深色结果；目录名、焦点环和主按钮均清晰，浮层未超出视口。 |
+| [05-local-native-save-error-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-save-error-light.png>) | 模拟原生选择成功但保存失败。修正焦点误落到未选中的最近目录的问题，焦点返回添加入口；保留全部原选择，中文错误使用 Desktop 危险色。 |
+| [05-local-native-save-error-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round4/05-local-native-save-error-dark.png>) | 同一保存失败的深色状态；错误文字和焦点环可读，错误信息增加后弹层仍完整位于 chip 上方。 |
+
+### 验证
+
+- `npm run build:typescript`、`npm run build:renderer`、`node tools/ui-preview/build.mjs`：通过。
+- Renderer 全目录 Vitest：112 个文件、1137 个用例通过；原生服务发现与项目服务聚焦测试：3 个文件、28 个用例通过。
+- 加载真实 Desktop CSS 的 `tests/e2e/renderer-thread-folders.spec.ts`：15 个用例通过。覆盖原生多选/去重/焦点、取消、原生接口缺失/调用失败退回、保存失败不部分应用、关闭后迟到选择丢弃，以及远程不调用本机选择器；原有子视图的浅深色、滚动、两级 Esc 和目录保护继续覆盖。
+- 上轮两个 Host 回归用例重新执行：2 个通过，其余 80 个按名称筛选跳过。
+- `npm run lint`、改动文件 Prettier、`git diff --check`：通过。未推送、部署；未读取禁止的 runtime 目录。
+
+## 第三轮：目录浏览子视图
 
 点击「添加文件夹…」后整个弹层切换为浏览视图。顶部仅保留返回箭头、路径输入和原生小号主按钮；下面只列当前路径的子目录名。回车 / 添加成功后返回主视图；Esc 先返回主视图，再关闭。高度上限为 `min(420px, 视口高度 - 120px)`，仅子目录列表滚动，路径栏保持可见。
 
@@ -71,6 +104,6 @@
 
 ## 实机集成边界
 
-本轮验证 UI 与交互，未把分支安装到运行中的 Desktop，也未执行真实模型轮次或远程沙箱探针。生产集成仍需按 [工作文件夹功能文档](../../docs/architecture/thread-folders.md) 验证真实 Host 的新对话 / 下一轮目录、文件浏览器根目录及委派归属。原生文件夹 picker 绑定、Desktop writable-roots / applied cwd 私有状态和跨机项目 assignment 的既有缺口见同一文档。
+本轮验证 UI 与交互，未把分支安装到运行中的 Desktop，也未执行真实模型轮次或远程沙箱探针。生产集成仍需按 [工作文件夹功能文档](../../docs/architecture/thread-folders.md) 验证真实 Host 的新对话 / 下一轮目录、文件浏览器根目录及委派归属。原生文件夹 picker 接口与当前验证边界见第四轮；Desktop writable-roots / applied cwd 私有状态和跨机项目 assignment 的既有缺口见同一文档。
 
 未 push、merge 或部署；未读取 `~/.codexhost/runtime/`。

@@ -121,7 +121,9 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
   const close = () => {
     browsing = false;
     ++browseGeneration;
-    if (!view) ++revision;
+    ++revision;
+    busy = false;
+    popover.removeAttribute("aria-busy");
     popover.hidePopover();
     trigger.disabled = false;
     trigger.setAttribute("aria-expanded", "false");
@@ -152,9 +154,10 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         popover.removeAttribute("aria-busy");
         render();
         if (focusPath) {
-          [...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]")]
-            .find((item) => item.getAttribute("aria-label") === focusPath)
-            ?.focus();
+          const target = [
+            ...popover.querySelectorAll<HTMLButtonElement>("[role=menuitemcheckbox]"),
+          ].find((item) => item.getAttribute("aria-label") === focusPath);
+          (target ?? popover.querySelector<HTMLButtonElement>(".codexhost-folders-add"))?.focus();
         }
       }
     }
@@ -259,24 +262,47 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         (path) => !selected.includes(path) && !view?.projectFolders.includes(path),
       ),
     );
-    const addPath = async (path: string) => {
-      const attempt = revision;
-      await options.validate(path);
-      if (disposed || attempt !== revision) return false;
-      return selected.includes(path) || (await applySelection([...selected, path], path));
-    };
     const openBrowser = async () => {
-      if (!view) return;
+      if (!view || busy) return;
+      const attempt = revision;
+      const activeMenu = () =>
+        !disposed && attempt === revision && popover.matches(":popover-open");
       if (!view.remote && options.pickLocal) {
+        let picked: string[] | null = null;
+        busy = true;
+        trigger.disabled = true;
+        render();
         try {
-          const picked = await options.pickLocal();
-          if (picked) {
-            for (const path of picked) await addPath(path);
-            return;
+          picked = await options.pickLocal();
+          if (!activeMenu()) return;
+          if (picked !== null) {
+            try {
+              for (const path of picked) {
+                await options.validate(path);
+                if (!activeMenu()) return;
+              }
+            } catch {
+              if (activeMenu()) errorText = "无法添加文件夹，请确认路径可用后重试";
+              picked = [];
+            }
           }
         } catch {
-          errorText = "无法添加文件夹，请确认路径可用后重试";
-          render();
+          // Unavailable native dialogs use the same browser as remote hosts.
+        } finally {
+          if (!disposed && attempt === revision) {
+            busy = false;
+            trigger.disabled = false;
+            render();
+          }
+        }
+        if (!activeMenu()) return;
+        if (picked !== null) {
+          const folders = [...new Set([...selected, ...picked])];
+          if (folders.length !== selected.length) {
+            const saved = await applySelection(folders, picked[0]);
+            if (!saved && activeMenu())
+              popover.querySelector<HTMLButtonElement>(".codexhost-folders-add")?.focus();
+          } else popover.querySelector<HTMLButtonElement>(".codexhost-folders-add")?.focus();
           return;
         }
       }
@@ -306,7 +332,6 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
         const raw = input.value.trim();
         return /^[A-Za-z]:[\\/]+$/u.test(raw) ? raw : raw.replace(/[\\/]+$/u, "") || "/";
       };
-      const attempt = revision;
       const active = () => browsing && form.isConnected && !disposed && attempt === revision;
       const list = async () => {
         const generation = ++browseGeneration;
@@ -473,9 +498,9 @@ export function createThreadFoldersControl(options: ThreadFoldersControlOptions)
     if (!popover.matches(":popover-open")) {
       browsing = false;
       ++browseGeneration;
-    }
-    if (!popover.matches(":popover-open") && !view) {
       ++revision;
+      busy = false;
+      popover.removeAttribute("aria-busy");
       trigger.disabled = false;
     }
     trigger.setAttribute("aria-expanded", String(popover.matches(":popover-open")));

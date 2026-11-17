@@ -248,3 +248,94 @@ test("a rejected addition stays in the browser and a back action restores the ma
     page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }),
   ).toBeEnabled();
 });
+
+test("native local multi-selection adds all folders without opening the path browser", async ({
+  page,
+}) => {
+  await page.goto("about:blank?picker=selected#thread-folders-local");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-folder-picker-call",
+    JSON.stringify({ kind: "directory", allowMultiple: true, pickerTitle: "选择工作文件夹" }),
+  );
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-folder-selection",
+    JSON.stringify([
+      "/Users/lin/Projects/codexhost",
+      "/Users/lin/Projects/shared-ui",
+      "/Users/lin/Projects/docs",
+    ]),
+  );
+  await expect(page.getByRole("textbox", { name: "文件夹路径", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitemcheckbox", { checked: true })).toHaveCount(3);
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "/Users/lin/Projects/shared-ui", exact: true }),
+  ).toBeFocused();
+});
+
+test("canceling native selection preserves the main menu and selection", async ({ page }) => {
+  await page.goto("about:blank?picker=cancel#thread-folders-local");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  const add = page.getByRole("button", { name: "添加文件夹…", exact: true });
+  await add.click();
+  await expect(add).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "文件夹路径", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitemcheckbox", { checked: true })).toHaveCount(1);
+  await expect(page.locator("body")).not.toHaveAttribute("data-folder-selection");
+});
+
+test("a rejected native addition preserves the whole selection and focuses the retry action", async ({
+  page,
+}) => {
+  await page.goto("about:blank?picker=selected#thread-folders-save-error");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("未能保存工作文件夹，请重试");
+  await expect(page.getByRole("menuitemcheckbox", { checked: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "添加文件夹…", exact: true })).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "文件夹路径", exact: true })).toHaveCount(0);
+});
+
+for (const mode of ["unavailable", "error"]) {
+  test(`local native picker ${mode} falls back to the browser`, async ({ page }) => {
+    await page.goto(`about:blank?picker=${mode}#thread-folders-local`);
+    await page.addScriptTag({ content: bundle });
+    await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+    await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "文件夹路径", exact: true })).toBeFocused();
+    await expect(page.locator(".codexhost-folders-directory")).toHaveText(["packages", "docs"]);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+}
+
+test("remote browsing never invokes the available local picker", async ({ page }) => {
+  await page.goto("about:blank?picker=selected#thread-folders-remote");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "远程文件夹路径", exact: true })).toBeFocused();
+  await expect(page.locator("body")).not.toHaveAttribute("data-folder-picker-call");
+});
+
+test("a dismissed menu ignores a late native selection", async ({ page }) => {
+  await page.goto("about:blank?picker=delayed#thread-folders-local");
+  await page.addScriptTag({ content: bundle });
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await page.getByRole("button", { name: "添加文件夹…", exact: true }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-folder-picker-call", /directory/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }),
+  ).toBeEnabled();
+  await expect(page.locator("body")).not.toHaveAttribute("data-folder-selection");
+  await page.getByRole("button", { name: "工作文件夹 · codexhost", exact: true }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-folder-picker-returned", "true");
+  await expect(page.getByRole("menuitemcheckbox", { checked: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "添加文件夹…", exact: true })).toBeEnabled();
+});
