@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JarvisBugQuery } from "@codexhost/shared-contracts";
 
 import { JarvisBugSearcher, type JarvisBugSearchCli } from "../src/jarvis-bug-search.js";
-import { createJarvisGeminiQuery, JarvisQueryError } from "../src/jarvis-gemini-query.js";
+import { createJarvisProviderQuery, JarvisQueryError } from "../src/jarvis-query-parser.js";
 import type { JarvisBugListOptions, JarvisProjectRow } from "../src/jarvis-cli.js";
 
 const NOW = Date.parse("2026-11-16T10:00:00+08:00");
@@ -110,10 +110,11 @@ describe("Jarvis Gemini bug search", () => {
     [402, "quota_exhausted"],
     [401, "unauthorized"],
     [403, "unauthorized"],
-    [500, "gemini_failed"],
+    [500, "provider_failed"],
   ])("returns an error without querying Jarvis after HTTP %i", async (status, code) => {
     const cli = fakeCli([bug({ id: 80, projectId: 9002, bugTitle: "发货失败" })]);
-    const interpreter = createJarvisGeminiQuery({
+    const interpreter = createJarvisProviderQuery({
+      provider: "gemini",
       readApiKey: async () => "test-key",
       fetchImpl: async () =>
         Response.json(
@@ -152,7 +153,8 @@ describe("Jarvis Gemini bug search", () => {
           candidates: [{ finishReason: "STOP", content: { parts: [{ text: "{}" }] } }],
         });
       });
-      const interpreter = createJarvisGeminiQuery({
+      const interpreter = createJarvisProviderQuery({
+        provider: "gemini",
         readApiKey: async () => (code === "missing_key" ? null : "key"),
         fetchImpl,
       });
@@ -199,7 +201,7 @@ describe("Jarvis Gemini bug search", () => {
       expect.objectContaining({ createdByMe: false, statuses: [1], title: "发货" }),
     );
     expect(result.bugs.map(({ id }) => id).sort()).toEqual([101, 102]);
-    expect(result.source).toBe("gemini");
+    expect(result.source).toBe("model");
     expect(result.conditions).toEqual([
       { key: "scope:assigned", kind: "scope", label: "指派给我" },
       { key: "status:1", kind: "status", label: "未解决" },
@@ -422,14 +424,14 @@ describe("Jarvis Gemini bug search", () => {
     "timeout",
     "invalid_response",
     "unauthorized",
-    "gemini_failed",
+    "provider_failed",
   ])("returns %s without running rules or CLI queries", async (code) => {
     const cli = fakeCli([bug({ id: 70, projectId: 9002 })]);
     const { api, interpret } = searcher(cli);
     interpret.mockRejectedValue(new JarvisQueryError(code));
     expect(await api.search({ query: "我还没处理完成的bug" })).toEqual({
       available: false,
-      source: "gemini",
+      source: "openai",
       errorCode: code,
       conditions: [],
       bugs: [],

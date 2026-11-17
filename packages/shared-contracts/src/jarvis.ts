@@ -179,7 +179,7 @@ export const jarvisBugSearchParamsSchema = z
   .strict();
 export type JarvisBugSearchParams = z.infer<typeof jarvisBugSearchParamsSchema>;
 
-/** Gemini query conditions; timestamps are Unix milliseconds in Asia/Shanghai. */
+/** Model query conditions; timestamps are Unix milliseconds in Asia/Shanghai. */
 export const jarvisBugQuerySchema = z
   .object({
     scope: z.enum(["assigned", "created", "both"]),
@@ -215,7 +215,7 @@ export const jarvisBugSearchResultSchema = z
     total: z.number().int().nonnegative(),
     capped: z.boolean(),
     /** Optional for compatibility with older Hosts. */
-    source: z.literal("gemini").optional(),
+    source: z.enum(["openai", "gemini", "model"]).optional(),
   })
   .strict();
 export type JarvisBugSearchResult = z.infer<typeof jarvisBugSearchResultSchema>;

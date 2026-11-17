@@ -1,28 +1,18 @@
 import { jarvisBugQuerySchema, type JarvisBugQuery } from "@codexhost/shared-contracts";
-
-export const JARVIS_QUERY_MODEL = "gemini-3.5-flash-lite";
-export const JARVIS_QUERY_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${JARVIS_QUERY_MODEL}:generateContent`;
+import {
+  createStructuredQueryClient,
+  StructuredQueryError,
+  strictJsonSchema,
+  type StructuredQueryClientOptions,
+} from "./structured-query-client.js";
+import type { ModelServiceSettingsStore } from "./model-service-settings.js";
+export { StructuredQueryError as JarvisQueryError } from "./structured-query-client.js";
 export const JARVIS_QUERY_TIMEOUT_MS = 3_000;
 export const JARVIS_QUERY_TIME_ZONE = "Asia/Shanghai";
-
-export class JarvisQueryError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = "JarvisQueryError";
-  }
-}
-
 export interface JarvisQueryInterpreter {
   interpret(query: string, now: number): Promise<JarvisBugQuery>;
   test(): Promise<{ ok: boolean; latencyMs: number | null; errorCode: string | null }>;
 }
-
-export interface JarvisGeminiQueryOptions {
-  readApiKey(): Promise<string | null>;
-  fetchImpl?: typeof fetch;
-  now?: () => number;
-}
-
 const numbers = (maximum: number) => ({
   type: "ARRAY",
   maxItems: maximum,
@@ -111,93 +101,22 @@ export function jarvisQueryTimeContext(now: number) {
   };
 }
 
+export const JARVIS_QUERY_SCHEMA = strictJsonSchema(RESPONSE_SCHEMA);
 export function buildJarvisQueryRequest(query: string, now: number) {
   return {
-    systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: JSON.stringify({ query, ...jarvisQueryTimeContext(now) }) }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
-      temperature: 0,
-      maxOutputTokens: 2_048,
-    },
+    instructions: INSTRUCTIONS,
+    input: { query, ...jarvisQueryTimeContext(now) },
+    schema: JARVIS_QUERY_SCHEMA,
+    name: "jarvis_bug_query",
   };
 }
-
-function parseResponse(value: unknown): JarvisBugQuery {
-  try {
-    const response = value as {
-      candidates?: {
-        finishReason?: string;
-        content?: { parts?: { text?: string; thought?: boolean }[] };
-      }[];
-    } | null;
-    const candidate = response?.candidates?.[0];
-    if (candidate?.finishReason !== "STOP" || !Array.isArray(candidate.content?.parts)) {
-      throw new JarvisQueryError("invalid_response");
-    }
-    const text = candidate.content.parts
-      .filter((part) => part.thought !== true && typeof part.text === "string")
-      .map((part) => part.text)
-      .join("");
-    return jarvisBugQuerySchema.parse(JSON.parse(text));
-  } catch {
-    throw new JarvisQueryError("invalid_response");
-  }
-}
-
-export function createJarvisGeminiQuery(options: JarvisGeminiQueryOptions): JarvisQueryInterpreter {
-  const fetchImpl = options.fetchImpl ?? fetch;
+export function createJarvisProviderQuery(
+  options: StructuredQueryClientOptions,
+): JarvisQueryInterpreter {
+  const client = createStructuredQueryClient(options);
   const now = options.now ?? Date.now;
-  const interpret = async (query: string, at: number): Promise<JarvisBugQuery> => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new JarvisQueryError("timeout"));
-      }, JARVIS_QUERY_TIMEOUT_MS);
-    });
-    const request = async (): Promise<JarvisBugQuery> => {
-      const key = await options.readApiKey();
-      if (!key) throw new JarvisQueryError("missing_key");
-      controller.signal.throwIfAborted();
-      const response = await fetchImpl(JARVIS_QUERY_ENDPOINT, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify(buildJarvisQueryRequest(query, at)),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new JarvisQueryError(
-          response.status === 402
-            ? "quota_exhausted"
-            : response.status === 401 || response.status === 403
-              ? "unauthorized"
-              : "gemini_failed",
-        );
-      }
-      let value: unknown;
-      try {
-        value = await response.json();
-      } catch {
-        throw new JarvisQueryError("invalid_response");
-      }
-      return parseResponse(value);
-    };
-    try {
-      return await Promise.race([request(), deadline]);
-    } catch (error) {
-      throw error instanceof JarvisQueryError ? error : new JarvisQueryError("network");
-    } finally {
-      clearTimeout(timer);
-    }
-  };
+  const interpret = async (query: string, at: number) =>
+    client.query(buildJarvisQueryRequest(query, at), jarvisBugQuerySchema);
   return {
     interpret,
     async test() {
@@ -209,9 +128,22 @@ export function createJarvisGeminiQuery(options: JarvisGeminiQueryOptions): Jarv
         return {
           ok: false,
           latencyMs: null,
-          errorCode: error instanceof JarvisQueryError ? error.code : "network",
+          errorCode: error instanceof StructuredQueryError ? error.code : "invalid_response",
         };
       }
     },
   };
+}
+export function createJarvisQueryParser(options: {
+  settings: ModelServiceSettingsStore;
+  isLocalHost: boolean;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+}): JarvisQueryInterpreter {
+  return createJarvisProviderQuery({
+    provider: () => (options.isLocalHost ? options.settings.provider() : Promise.resolve("openai")),
+    readApiKey: (p) => (options.isLocalHost ? options.settings.readKey(p) : Promise.resolve(null)),
+    fetchImpl: options.fetchImpl,
+    now: options.now,
+  });
 }

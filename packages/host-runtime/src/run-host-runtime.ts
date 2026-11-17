@@ -1,3 +1,5 @@
+import { ModelService } from "./model-service.js";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -362,6 +364,9 @@ export async function runHostRuntime(input: {
               modelPrices,
               usageStatistics,
               jarvis,
+              modelService: new ModelService(
+                new ModelServiceSettingsStore({ environment: delegationEnvironment }),
+              ),
               dingtalk,
               codexAgents,
               dingTalkDispatch,
@@ -423,6 +428,9 @@ export async function runHostRuntime(input: {
             stockCodexPath,
             environment: delegationEnvironment,
             jarvis,
+            modelService: new ModelService(
+              new ModelServiceSettingsStore({ environment: delegationEnvironment }),
+            ),
             dingtalk,
             codexAgents,
             dingTalkDispatch,

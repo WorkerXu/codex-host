@@ -25,7 +25,7 @@ import {
 
 import { JarvisBugSearcher } from "./jarvis-bug-search.js";
 import { createJarvisCli, type JarvisCli } from "./jarvis-cli.js";
-import { createJarvisGeminiQuery, type JarvisQueryInterpreter } from "./jarvis-gemini-query.js";
+import { createJarvisQueryParser, type JarvisQueryInterpreter } from "./jarvis-query-parser.js";
 import {
   createJarvisArtifactPath,
   detectJarvisPlatform,
@@ -38,6 +38,7 @@ import {
 } from "./jarvis-install.js";
 import { JarvisLoginError, JarvisLoginForwarder, JarvisLoginManager } from "./jarvis-login.js";
 import { expandJarvisMentions } from "./jarvis-mention-rewrite.js";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
 import { JarvisSettingsStore } from "./jarvis-settings.js";
 
 const DOWNLOAD_TTL_MS = 10 * 60_000;
@@ -55,7 +56,7 @@ export class JarvisServiceError extends Error {
 
 export interface JarvisServiceOptions {
   environment?: NodeJS.ProcessEnv;
-  /** Desktop-local Host owns the Gemini key and login callback forwarding. */
+  /** Desktop-local Host owns model credentials and login callback forwarding. */
   isLocalHost: boolean;
   cli?: JarvisCli;
   settings?: JarvisSettingsStore;
@@ -106,8 +107,9 @@ export class JarvisService {
       options.settings ?? new JarvisSettingsStore({ environment: this.#environment });
     this.#interpreter =
       options.interpreter ??
-      createJarvisGeminiQuery({
-        readApiKey: () => (this.#isLocalHost ? this.#settings.readKey() : Promise.resolve(null)),
+      createJarvisQueryParser({
+        settings: new ModelServiceSettingsStore({ configDirectory: this.#settings.directory }),
+        isLocalHost: this.#isLocalHost,
         fetchImpl: options.fetchImpl ?? fetch,
         now: this.#now,
       });

@@ -624,3 +624,5 @@ export {
   type DingTalkReplyScope,
   type DingTalkDispatchSettings,
 } from "./dingtalk-dispatch.js";
+
+export * from "./model-service.js";

@@ -20,7 +20,7 @@ import {
   type JarvisBugListOptions,
   type JarvisProjectRow,
 } from "./jarvis-cli.js";
-import { JarvisQueryError, type JarvisQueryInterpreter } from "./jarvis-gemini-query.js";
+import { JarvisQueryError, type JarvisQueryInterpreter } from "./jarvis-query-parser.js";
 
 const PAGE_SIZE = 100;
 const MAX_PAGES_PER_QUERY = 2;
@@ -110,10 +110,13 @@ function conditionLabel(value: number, labels: Readonly<Record<number, string>>)
   return labels[value] ?? String(value);
 }
 
-function failedSearch(errorCode: string): JarvisBugSearchResult {
+function failedSearch(
+  errorCode: string,
+  source: "openai" | "gemini" | "model" = "model",
+): JarvisBugSearchResult {
   return {
     available: false,
-    source: "gemini",
+    source,
     errorCode,
     conditions: [],
     bugs: [],
@@ -167,7 +170,10 @@ export class JarvisBugSearcher {
     try {
       query = await this.#interpreter.interpret(params.query, this.#now());
     } catch (error) {
-      return failedSearch(error instanceof JarvisQueryError ? error.code : "gemini_failed");
+      return failedSearch(
+        error instanceof JarvisQueryError ? error.code : "provider_failed",
+        error instanceof JarvisQueryError ? error.provider : "model",
+      );
     }
     if (query.unrecognized !== null) return failedSearch("unrecognized_query");
     const omit = new Set(params.omit ?? []);
@@ -211,7 +217,7 @@ export class JarvisBugSearcher {
         : bugs.length;
     return {
       available: true,
-      source: "gemini",
+      source: "model",
       errorCode: failed ? "cli_failed" : null,
       conditions: this.#conditions(plan, resolution, omit),
       bugs: bugs.slice(0, JARVIS_MAX_SEARCH_BUGS),

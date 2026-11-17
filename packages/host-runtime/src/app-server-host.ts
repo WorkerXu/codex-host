@@ -1,3 +1,4 @@
+import type { ModelService } from "./model-service.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -470,6 +471,8 @@ export interface AppServerHostOptions {
   projectMirror?: ProjectMirrorService;
   /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
   jarvis?: JarvisService;
+  /** Desktop-local shared model credentials and structured connection tests. */
+  modelService?: ModelService;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1497,6 +1500,21 @@ export class AppServerHost {
         ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (request.method.startsWith("codexhost/model-service/")) {
+      this.#dispatchDesktopReply(request, async () => {
+        if (!this.#options.modelService) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await this.#options.modelService.request(request.method, request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch {
+          await this.#writer.json(rpcError(request, -32602, "invalid_params"));
+        }
+      });
       return;
     }
     if (request.method.startsWith("codexhost/jarvis/")) {

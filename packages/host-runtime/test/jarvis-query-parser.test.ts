@@ -4,13 +4,16 @@ import { jarvisBugQuerySchema, type JarvisBugQuery } from "@codexhost/shared-con
 
 import {
   buildJarvisQueryRequest,
-  createJarvisGeminiQuery,
+  createJarvisProviderQuery,
   jarvisQueryTimeContext,
-  JARVIS_QUERY_ENDPOINT,
-  JARVIS_QUERY_MODEL,
-} from "../src/jarvis-gemini-query.js";
+} from "../src/jarvis-query-parser.js";
 import { JarvisService } from "../src/jarvis-service.js";
-import { JarvisSettingsStore } from "../src/jarvis-settings.js";
+import { ModelServiceSettingsStore } from "../src/model-service-settings.js";
+const JARVIS_QUERY_MODEL = "gemini-3.5-flash-lite";
+const JARVIS_QUERY_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${JARVIS_QUERY_MODEL}:generateContent`;
+const createJarvisGeminiQuery = (
+  options: Omit<Parameters<typeof createJarvisProviderQuery>[0], "provider">,
+) => createJarvisProviderQuery({ ...options, provider: "gemini" });
 
 const NOW = Date.parse("2026-11-16T01:30:00+08:00");
 const QUERY: JarvisBugQuery = {
@@ -44,10 +47,14 @@ describe("Jarvis Gemini structured query", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": "test-key" },
-        body: JSON.stringify(buildJarvisQueryRequest("我还没处理的标题有发货的", NOW)),
       }),
     );
-    const request = buildJarvisQueryRequest("我还没处理的标题有发货的", NOW);
+    const request = JSON.parse(
+      (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
+    );
+    expect(request.systemInstruction.parts[0].text).toBe(
+      buildJarvisQueryRequest("我还没处理的标题有发货的", NOW).instructions,
+    );
     expect(request.generationConfig).toMatchObject({
       responseMimeType: "application/json",
       responseSchema: {
@@ -173,8 +180,8 @@ describe("Jarvis Gemini structured query", () => {
     [401, "unauthorized"],
     [402, "quota_exhausted"],
     [403, "unauthorized"],
-    [429, "gemini_failed"],
-    [500, "gemini_failed"],
+    [429, "rate_limited"],
+    [500, "provider_failed"],
   ])("reports HTTP %i", async (status, code) => {
     const client = createJarvisGeminiQuery({
       readApiKey: async () => "key",
@@ -221,10 +228,14 @@ describe("Jarvis Gemini structured query", () => {
   );
 
   it("uses the existing local settings key and avoids reading it on a remote Host", async () => {
-    const settings = new JarvisSettingsStore({ configDirectory: "/unused-jarvis-test-directory" });
-    const readKey = vi.spyOn(settings, "readKey").mockResolvedValue("local-test-key");
+    const readKey = vi
+      .spyOn(ModelServiceSettingsStore.prototype, "readKey")
+      .mockResolvedValue("local-test-key");
+    const provider = vi
+      .spyOn(ModelServiceSettingsStore.prototype, "provider")
+      .mockResolvedValue("gemini");
     const fetchImpl = vi.fn(async () => response());
-    const service = new JarvisService({ settings, fetchImpl, isLocalHost: true, now: () => NOW });
+    const service = new JarvisService({ fetchImpl, isLocalHost: true, now: () => NOW });
     expect(await service.testSettings()).toEqual({ ok: true, latencyMs: 0, errorCode: null });
     expect(readKey).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -233,13 +244,15 @@ describe("Jarvis Gemini structured query", () => {
         headers: expect.objectContaining({ "x-goog-api-key": "local-test-key" }),
       }),
     );
-    const remote = new JarvisService({ settings, fetchImpl, isLocalHost: false });
+    const remote = new JarvisService({ fetchImpl, isLocalHost: false });
     expect(await remote.searchBugs({ query: "bug" })).toMatchObject({
       available: false,
-      source: "gemini",
+      source: "model",
       errorCode: "local_only",
     });
     expect(readKey).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    readKey.mockRestore();
+    provider.mockRestore();
   });
 });
