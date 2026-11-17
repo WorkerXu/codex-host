@@ -386,11 +386,13 @@
 }
 
 .dingtalk-header-menu {
-  position: absolute;
+  position: fixed;
+  inset: auto;
   z-index: 21;
-  top: 48px;
-  right: 8px;
   width: 176px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  margin: 0;
   padding: 4px;
   background: var(--color-token-dropdown-background);
   border: 1px solid var(--color-token-border-default);
@@ -1371,11 +1373,13 @@
 }
 
 .dingtalk-page-menu {
-  position: absolute;
+  position: fixed;
+  inset: auto;
   z-index: 20;
-  top: 52px;
-  right: 12px;
   width: 240px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  margin: 0;
   padding: 8px;
   background: var(--color-token-dropdown-background);
   border: 1px solid var(--color-token-border-default);

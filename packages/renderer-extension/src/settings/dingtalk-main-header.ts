@@ -6,6 +6,7 @@ import type { DingTalkConversation } from "@codexhost/shared-contracts";
 
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import { createElementNode, createIcon, createIconButton } from "./dingtalk-page-view.js";
+import { createDingTalkAnchoredMenu } from "./dingtalk-anchored-menu.js";
 
 export interface DingTalkMainHeaderOptions {
   document: Document;
@@ -45,11 +46,9 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
   const more = createIconButton(document, text.moreActions, EllipsisIcon, {
     className: "dingtalk-more-button",
   });
-  more.setAttribute("aria-haspopup", "menu");
-  more.setAttribute("aria-expanded", "false");
   const menu = createElementNode(document, "div", "dingtalk-header-menu");
   menu.setAttribute("role", "menu");
-  menu.hidden = true;
+  const placement = createDingTalkAnchoredMenu(menu, more);
   const refresh = document.createElement("button");
   refresh.type = "button";
   refresh.className = "dingtalk-menu-action";
@@ -74,10 +73,7 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
     contains(node) {
       return menu.contains(node) || more.contains(node);
     },
-    closeMenu() {
-      menu.hidden = true;
-      more.setAttribute("aria-expanded", "false");
-    },
+    closeMenu: placement.close,
     setConversation(conversation) {
       title.textContent = conversation?.title || text.selectConversation;
       title.title = conversation?.title ?? "";
@@ -98,8 +94,7 @@ export function createDingTalkMainHeader(options: DingTalkMainHeaderOptions): Di
   };
   more.addEventListener("click", (event) => {
     event.stopPropagation();
-    menu.hidden = !menu.hidden;
-    more.setAttribute("aria-expanded", String(!menu.hidden));
+    placement.toggle();
   });
   return api;
 }

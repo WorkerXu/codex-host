@@ -23,6 +23,10 @@ const allScenarios = [
   "dingtalk-at-send",
   "dingtalk-header-menu",
   "dingtalk-page-menu",
+  "dingtalk-empty-menu",
+  "dingtalk-empty-menu-narrow",
+  "dingtalk-header-menu-open",
+  "dingtalk-header-menu-narrow",
   "dingtalk-unread-open",
   "dingtalk-unread-left",
   "dingtalk-live",
@@ -259,6 +263,34 @@ for (const scenario of scenarios) {
       });
       await page.mouse.up();
       await page.waitForTimeout(150);
+    }
+    if (scenario.startsWith("dingtalk-empty-menu")) {
+      await realClick(page, ".dingtalk-sidebar .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])", { state: "hidden" });
+      await realClick(page, ".dingtalk-sidebar .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-page-menu:not([hidden])");
+      if (scenario.endsWith("-narrow")) {
+        await page.setViewportSize({ width: 360, height: 140 });
+        await page.waitForFunction(() => {
+          const root = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+          const anchor = root
+            ?.querySelector(".dingtalk-sidebar .dingtalk-more-button")
+            ?.getBoundingClientRect();
+          const menu = root?.querySelector(".dingtalk-page-menu")?.getBoundingClientRect();
+          return anchor && menu && menu.top >= 8 && menu.bottom <= anchor.top - 3;
+        });
+        await page.evaluate(() => {
+          window.__dingtalkMenuFlippedAbove = true;
+        });
+        await page.setViewportSize({ width: 360, height: 900 });
+      }
+    }
+    if (scenario === "dingtalk-header-menu-open" || scenario === "dingtalk-header-menu-narrow") {
+      await realClick(page, ".dingtalk-main-actions .dingtalk-more-button");
+      await page.waitForSelector(".dingtalk-header-menu:not([hidden])");
+      if (scenario.endsWith("-narrow")) await page.setViewportSize({ width: 640, height: 900 });
     }
     if (scenario === "dingtalk-live") {
       const list = await pointAt(page, ".dingtalk-message-list");
@@ -574,6 +606,45 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario === "dingtalk-page-menu") {
         check("page-menu-open-after-down", window.__dingtalkPageMenuOpenAfterDown === true);
         check("page-menu-still-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
+      }
+      for (const [menuSelector, anchorSelector] of [
+        [".dingtalk-page-menu", ".dingtalk-sidebar .dingtalk-more-button"],
+        [".dingtalk-header-menu", ".dingtalk-main-actions .dingtalk-more-button"],
+      ]) {
+        const menu = query(`${menuSelector}:not([hidden])`);
+        if (!menu) continue;
+        const anchor = query(anchorSelector)?.getBoundingClientRect();
+        const rect = menu.getBoundingClientRect();
+        const left =
+          anchor && Math.min(Math.max(8, anchor.left), window.innerWidth - rect.width - 8);
+        check(
+          `${menuSelector}-below-trigger`,
+          anchor && Math.abs(rect.top - anchor.bottom - 4) <= 1,
+          `top=${rect.top}, anchorBottom=${anchor?.bottom}`,
+        );
+        check(
+          `${menuSelector}-left-aligned-or-clamped`,
+          left !== undefined && Math.abs(rect.left - left) <= 1,
+          `left=${rect.left}, expected=${left}`,
+        );
+        check(
+          `${menuSelector}-inside-viewport`,
+          rect.left >= 8 &&
+            rect.right <= window.innerWidth - 7 &&
+            rect.bottom <= window.innerHeight - 7,
+        );
+        check(`${menuSelector}-top-layer`, menu.matches(":popover-open"));
+      }
+      if (document.body.dataset.scenario.startsWith("dingtalk-empty-menu")) {
+        check("menu-with-right-pane-hidden", Boolean(query(".dingtalk-main")?.hidden));
+        check("sidebar-menu-open", Boolean(query(".dingtalk-page-menu:not([hidden])")));
+        check(
+          "empty-menu-no-conversations",
+          queryAll(".dingtalk-conversation").length === 0 && Boolean(query(".dingtalk-empty-list")),
+        );
+      }
+      if (document.body.dataset.scenario === "dingtalk-empty-menu-narrow") {
+        check("menu-flips-above-in-short-window", window.__dingtalkMenuFlippedAbove === true);
       }
       if (document.body.dataset.scenario === "dingtalk-at-chip") {
         const chips = query(".dingtalk-composer-chips");

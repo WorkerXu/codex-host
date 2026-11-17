@@ -1081,6 +1081,8 @@ export function createDingTalkSettingsPage(
         document.removeEventListener("visibilitychange", onVisibility);
         lightbox.dispose();
         composer.dispose();
+        pageMenu.close();
+        mainHead.closeMenu();
         if (client && state.selectedId) {
           const row = conversationFor(state.selectedId);
           void client.markViewed(

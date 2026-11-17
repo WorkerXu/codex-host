@@ -1020,6 +1020,24 @@ const scenarios: Record<string, () => Promise<void>> = {
     await openFirstConversation(query);
   },
 
+  async "dingtalk-empty-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", true);
+    await waitFor(() => query(".dingtalk-empty-list"));
+  },
+
+  async "dingtalk-empty-menu-narrow"() {
+    await scenarios["dingtalk-empty-menu"]();
+  },
+
+  async "dingtalk-header-menu-open"() {
+    await scenarios["dingtalk-header-menu"]();
+  },
+
+  async "dingtalk-header-menu-narrow"() {
+    await scenarios["dingtalk-header-menu"]();
+  },
+
   async "dingtalk-at-send"() {
     resetConversationMemory();
     const { query, queryAll } = mountSettings("dingtalk");
