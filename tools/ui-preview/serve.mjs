@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { desktopTheme } from "./desktop-theme.mjs";
 /**
  * Static preview server. It only listens on the loopback interface and serves
  * the preview bundle plus the Desktop shadow-root context exported by the
@@ -30,6 +31,12 @@ const types = new Map([
 ]);
 
 let context;
+let theme;
+function readDesktopTheme() {
+  if (theme === undefined)
+    theme = desktopCssPath ? desktopTheme(readFileSync(desktopCssPath, "utf8")) : null;
+  return theme;
+}
 function readShadowContext() {
   if (context !== undefined) return context;
   if (!shadowContextPath) {
@@ -41,10 +48,12 @@ function readShadowContext() {
 
 function shadowContextCss() {
   const context = readShadowContext();
+  const theme = readDesktopTheme();
   const declarations = Object.entries(context.vars ?? {})
+    .filter(([name]) => !theme?.declared.has(name))
     .map(([name, value]) => `  ${name}: ${value};`)
     .join("\n");
-  return `:root {\n${declarations}\n  font-family: ${context.fontFamily ?? "system-ui, sans-serif"};\n}\nhtml, body { font-family: ${context.fontFamily ?? "system-ui, sans-serif"}; }\n`;
+  return `:root {\n${declarations}\n  font-family: ${context.fontFamily ?? "system-ui, sans-serif"};\n}\nhtml, body { font-family: ${context.fontFamily ?? "system-ui, sans-serif"}; }\n${theme?.css ?? ""}`;
 }
 
 function shadowContextMetadata() {
@@ -53,8 +62,10 @@ function shadowContextMetadata() {
     path: shadowContextPath,
     varCount: Object.keys(context.vars ?? {}).length,
     colorScheme: context.colorScheme ?? "light",
-    // The export carries light values; dark captures stay approximate.
-    darkApproximate: (context.colorScheme ?? "light") !== "dark",
+    desktopCssPath,
+    themeSource: readDesktopTheme() ? "desktop-css" : "shadow-export",
+    darkApproximate:
+      !readDesktopTheme()?.colorSchemes && (context.colorScheme ?? "light") !== "dark",
   };
 }
 
