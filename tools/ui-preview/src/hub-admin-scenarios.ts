@@ -102,7 +102,7 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
         ) {
           await waitFor(() => query(".hub-connection-state"));
           if (name !== "hub-connection-empty") {
-            await click(button("连接 MCPHub"));
+            await click(button("连接"));
             await type(
               required('.hub-dialog input[type="password"]'),
               "mcphub_preview_fake_key_5678",

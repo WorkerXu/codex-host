@@ -1,6 +1,7 @@
 import type { RendererHubAdminClient } from "../renderer-hub-admin-client.js";
 import { hubErrorText } from "../renderer-hub-admin-client.js";
 import { hubMcpKeySchema } from "@codexhost/shared-contracts";
+import { createRendererSettingsIcon } from "./icons.js";
 import type { AgentMenuItem } from "./agent-card-menu.js";
 import { hubButton, hubElement, hubField, hubFieldError, type HubPage } from "./hub-admin-ui.js";
 
@@ -20,7 +21,15 @@ export function createMcpConnectionUi(
     input.autocomplete = "off";
     input.spellcheck = false;
     input.placeholder = "输入专用的全权限管理员密钥";
-    modal.content.append(hubElement(document, "p", "hub-muted", "密钥仅保存在所选主机上。"));
+    const hostName = ui.hosts.textContent?.trim() || host;
+    modal.content.append(
+      hubElement(
+        document,
+        "p",
+        "hub-muted",
+        `在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在 ${hostName} 上。`,
+      ),
+    );
     const submit = hubButton(
       document,
       "测试并保存",
@@ -98,10 +107,26 @@ export function createMcpConnectionUi(
   const empty = (invalid = false) => {
     ui.body.replaceChildren();
     const state = hubElement(document, "div", "hub-connection-state");
-    state.append(
-      hubElement(document, "h3", "", invalid ? "密钥无效或权限不足" : "连接 MCPHub"),
-      hubButton(document, invalid ? "更换密钥" : "连接 MCPHub", () => connect(invalid), true),
-    );
+    if (invalid) {
+      state.append(hubElement(document, "h3", "", "密钥无效或权限不足"));
+    } else {
+      state.classList.add("hub-connection-state--empty");
+      const icon = createRendererSettingsIcon("connections", 40);
+      icon.classList.add("hub-connection-icon");
+      icon.setAttribute("stroke-width", "1.5");
+      const copy = hubElement(document, "div", "hub-connection-copy");
+      copy.append(
+        hubElement(document, "h3", "", "尚未连接 MCPHub"),
+        hubElement(
+          document,
+          "p",
+          "hub-muted",
+          "填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥",
+        ),
+      );
+      state.append(icon, copy);
+    }
+    state.append(hubButton(document, invalid ? "更换密钥" : "连接", () => connect(invalid), true));
     ui.body.append(state);
   };
   ui.hosts.addEventListener("change", () => {

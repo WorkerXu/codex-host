@@ -468,8 +468,36 @@ for (const scenario of scenarios) {
         if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
           check(
             "hub-unconfigured-state",
-            query(".hub-connection-state h3")?.textContent === "连接 MCPHub" &&
+            query(".hub-connection-state h3")?.textContent === "尚未连接 MCPHub" &&
               !visible(query('[aria-label="MCPHub 连接设置"]')),
+          );
+        if (scenario === "hub-connection-empty") {
+          const state = query(".hub-connection-state--empty");
+          const icon = state?.querySelector("svg");
+          const button = state?.querySelector("button");
+          check(
+            "hub-empty-content",
+            icon &&
+              button?.textContent === "连接" &&
+              state?.textContent.includes("填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥"),
+          );
+          const pageRect = query(".settings-page").getBoundingClientRect();
+          const center =
+            icon && button
+              ? (icon.getBoundingClientRect().top + button.getBoundingClientRect().bottom) / 2
+              : 0;
+          check(
+            "hub-empty-centered",
+            Math.abs(center - (pageRect.top + pageRect.bottom) / 2) < 48,
+            String(center),
+          );
+        }
+        if (scenario === "hub-connection-connect")
+          check(
+            "hub-connection-host-guidance",
+            query(".hub-dialog-content")?.textContent.includes(
+              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在 india 上。",
+            ),
           );
         if (["hub-auth-error", "hub-error"].includes(scenario))
           check(

@@ -608,3 +608,42 @@
   gap: 16px;
   padding: 64px 16px;
 }
+
+.settings-page__content:has(.hub-connection-state--empty) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+.hub-page:has(.hub-connection-state--empty) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+.hub-body:has(> .hub-connection-state--empty) {
+  display: flex;
+  flex: 1;
+}
+.hub-connection-state--empty {
+  flex: 1;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+}
+.hub-connection-icon {
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+.hub-connection-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hub-page .hub-connection-copy h3 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.hub-connection-copy p {
+  margin: 0;
+}
