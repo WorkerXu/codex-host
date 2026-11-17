@@ -462,12 +462,18 @@ export class HarnessDelegationCoordinator {
     const parent = origin
       ? { harnessId: "codex" as RoutedHarnessId }
       : await this.#parentMetadata(parentThreadId);
+    const desktopProject =
+      !origin && input.projectId === undefined
+        ? await this.#projectForThread?.(parentThreadId)
+        : undefined;
     const projectId =
       input.projectId !== undefined
         ? input.projectId
         : origin
           ? undefined
-          : ((await this.#projectForThread?.(parentThreadId)) ?? parent.projectId);
+          : desktopProject !== undefined
+            ? desktopProject
+            : parent.projectId;
     input = { ...input, ...(projectId !== undefined ? { projectId } : {}) };
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
     const title = delegationTitle(parent.title, input, origin !== undefined);

@@ -53,7 +53,9 @@ async function fixture(
     consumeOutputs: async () => undefined,
     diagnose: () => undefined,
   });
+  const projectForThread = vi.fn(async (): Promise<string | null | undefined> => undefined);
   const coordinator = new HarnessDelegationCoordinator({
+    projectForThread,
     adapters,
     environment,
     externalRuntime: runtime,
@@ -94,6 +96,7 @@ async function fixture(
   return {
     adapter,
     coordinator,
+    projectForThread,
     directory,
     delivered,
     notifications,
@@ -1103,3 +1106,24 @@ describe("delegation project inheritance", () => {
     }
   });
 });
+
+it.each([null, "desktop-project"])(
+  "prefers Desktop's assignment over stale native metadata (%s)",
+  async (projectId) => {
+    const value = await fixture(undefined, async () => ({
+      cwd: "/parent",
+      projectId: "stale-native",
+    }));
+    value.projectForThread.mockResolvedValue(projectId);
+    try {
+      const child = await value.coordinator.start({
+        harnessId: "pi",
+        task: "check",
+        parentThreadId: "parent",
+      });
+      expect((await value.repository.find(child.threadId))?.projectId).toBe(projectId ?? undefined);
+    } finally {
+      await value.close();
+    }
+  },
+);

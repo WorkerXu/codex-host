@@ -1000,7 +1000,9 @@ export class AppServerHost {
       listOfficial: (input) => this.#listDelegationThreads(input),
       projectForThread: async (threadId) => {
         const catalog = await this.#options.desktopProjects?.read().catch(() => null);
-        return catalog?.threadProjectAssignments[threadId]?.projectId;
+        return catalog
+          ? (catalog.threadProjectAssignments[threadId]?.projectId ?? null)
+          : undefined;
       },
       officialThreadMetadata: (threadId) => this.#readOfficialThreadMetadata(threadId),
       activeOfficialParents: () => [...this.#activeOfficialTurns.keys()],
