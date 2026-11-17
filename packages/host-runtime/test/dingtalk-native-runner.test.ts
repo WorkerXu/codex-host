@@ -77,7 +77,12 @@ describe("native DingTalk Threads", () => {
     expect(f.notify).toHaveBeenCalledOnce();
     expect(f.request).toHaveBeenCalledWith(
       "turn/start",
-      expect.objectContaining({ threadId: "native-thread", effort: "high", model: "gpt-test" }),
+      expect.objectContaining({
+        threadId: "native-thread",
+        effort: "high",
+        model: "gpt-test",
+        sandboxPolicy: { type: "readOnly", networkAccess: true },
+      }),
     );
     f.runner.observe({
       method: "item/completed",
@@ -135,6 +140,10 @@ describe("native DingTalk Threads", () => {
           web_search: "disabled",
         }),
       }),
+    );
+    expect(f.request).toHaveBeenCalledWith(
+      "turn/start",
+      expect.objectContaining({ sandboxPolicy: { type: "readOnly", networkAccess: false } }),
     );
     expect(f.request.mock.calls.every(([method]) => !method.startsWith("oa/"))).toBe(true);
     f.runner.dispose();

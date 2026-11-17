@@ -64,6 +64,7 @@ export class DingTalkNativeRunner {
       const turn = await this.#request("turn/start", {
         threadId,
         input: [{ type: "text", text: input.prompt }],
+        sandboxPolicy: { type: "readOnly", networkAccess: !input.readOnlySummary },
         ...(input.model ? { model: input.model } : {}),
         ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {}),
       });

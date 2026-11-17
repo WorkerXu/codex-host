@@ -82,7 +82,7 @@ Host 忽略本人、机器人、早于本次启用监听起点的消息以及已
 
 每条候选事件只发起一次本机 Gemini Decisions 请求，按各智能体名称和描述评分；所有分数达到全局阈值的智能体并行执行，默认阈值为 0.85。Gemini key 复用 Jarvis 设置，只留在 Mac。没有 key 时不创建对话、不回复占位卡，状态显示「未配置 Gemini，未派发」；服务失败或低于阈值也记录跳过原因。
 
-每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
+每次执行创建一个原生 Codex Thread，目录为 `~/Documents/ChatGPT/钉钉智能体`，标题为 `<智能体名> · <群名或对方> · <原文摘要>`。Renderer 使用项目镜像同源的 `appServices.workspaceFiles.createDirectory` 和 `appServices.projects.createLocal` 创建缺失项目，不激活项目、不修改当前 Composer；原生侧栏按目录归属列出 Thread。Desktop 项目 API 不可用时本次派发失败，不用私有存储写入模拟项目。普通消息的 Turn 使用只读文件系统沙箱并允许网络查询，供智能体读取知识库；审批汇总关闭网络。Thread 继承智能体的 developer instructions、Model 和推理强度；输入包含原文、发送人、会话、回复位置以及最近 20 条消息。Turn 失败或超时会写回失败原因；超时同时请求中断该 Turn。
 
 回复目标完全由 Host 决定：群消息选择「私聊」时，回复给事件的发送人开放 ID；选择「群内」时在原群 @ 发送人。单聊始终回到与该发送人的私聊，忽略「回复位置」选择。开始工作前创建 `chat +messages-send-card` 流式文本卡片，启动 Codex 后更新进度，完成后将最终回答写入同一 bizId；创建或更新失败时用原目标的 Markdown 文本消息降级。长结果分段发送，不截断正文。自动回复是启用监听授权的行为，固定目标写命令带 `--yes`，无需逐次确认。智能体卡片和编辑面板每 10 秒更新最近派发时间及已回复、失败或跳过原因。
 
