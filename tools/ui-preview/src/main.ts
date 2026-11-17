@@ -1638,6 +1638,17 @@ scenarios["skills-conflict-files"] = async () => {
   const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
   await previewClick(shadow.querySelector<HTMLElement>("dialog summary")!);
 };
+scenarios["skills-conflict-files-focus"] = async () => {
+  await scenarios["skills-conflict"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-version input:checked")!, "key", {
+    key: "Tab",
+  });
+  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-file-summary")!, "key", {
+    key: "Enter",
+  });
+  await waitFor(() => shadow.querySelector("details[open]"));
+};
 scenarios["skills-sync-selection"] = async () => {
   await scenarios["skills-matrix"]();
   const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;

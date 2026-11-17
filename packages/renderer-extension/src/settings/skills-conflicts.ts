@@ -1,5 +1,6 @@
 import type { SkillSyncPlan } from "@codexhost/shared-contracts";
 import { skillsDialog, skillButton, skillNode } from "./skills-dialog.js";
+import { createRendererSettingsIcon } from "./icons.js";
 import { skillModifiedTime } from "./skills-presentation.js";
 
 export function showSkillConflicts(options: {
@@ -97,15 +98,16 @@ export function showSkillConflicts(options: {
       ),
       diff,
     );
-    const files = skillNode(document, "details");
-    files.append(
-      skillNode(
-        document,
-        "summary",
-        `文件变更 · ${changed.length} 个文件`,
-        "skills-muted cursor-pointer",
-      ),
+    const files = skillNode(document, "details", "", "group/file-list");
+    const summary = skillNode(document, "summary", "", "skills-file-summary");
+    const chevron = createRendererSettingsIcon("chevron-right", 14);
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.setAttribute(
+      "class",
+      "shrink-0 transition-transform duration-150 group-open/file-list:rotate-90 motion-reduce:transition-none",
     );
+    summary.append(chevron, document.createTextNode(`文件变更 · ${changed.length} 个文件`));
+    files.append(summary);
     const list = skillNode(document, "ul", "", "skills-file-list");
     for (const path of changed) list.append(skillNode(document, "li", path));
     files.append(list);

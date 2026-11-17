@@ -23,6 +23,7 @@ const allScenarios = [
   "skills-sync-selection",
   "skills-conflict",
   "skills-conflict-files",
+  "skills-conflict-files-focus",
   "skills-link-preview",
   "dingtalk-heavy",
   "dingtalk-list",
@@ -583,7 +584,32 @@ for (const scenario of scenarios) {
           );
         }
 
-        if (["skills-conflict", "skills-conflict-files"].includes(document.body.dataset.scenario)) {
+        if (document.body.dataset.scenario.startsWith("skills-conflict")) {
+          const summary = query(".skills-file-summary");
+          const chevron = summary?.querySelector("svg");
+          check(
+            "skills-file-chevron",
+            Boolean(chevron) &&
+              getComputedStyle(summary).display === "flex" &&
+              getComputedStyle(summary).listStyleType === "none",
+          );
+          check("skills-file-summary-small", getComputedStyle(summary).fontSize === "12px");
+          check(
+            "skills-file-chevron-animation",
+            Boolean(chevron) &&
+              getComputedStyle(chevron).transitionProperty.includes("transform") &&
+              parseFloat(getComputedStyle(chevron).transitionDuration) > 0,
+          );
+          check(
+            "skills-file-chevron-direction",
+            getComputedStyle(chevron).rotate === (query("details[open]") ? "90deg" : "none"),
+            getComputedStyle(chevron).rotate,
+          );
+          if (document.body.dataset.scenario === "skills-conflict-files-focus")
+            check(
+              "skills-file-keyboard-focus",
+              summary.matches(":focus-visible") && Boolean(query("details[open]")),
+            );
           check("skills-conflict-dialog", visible(query("dialog[open]")));
           check("skills-conflict-versions", queryAll(".skills-version").length === 2);
           const cards = queryAll(".skills-version");

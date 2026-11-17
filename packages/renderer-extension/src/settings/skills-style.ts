@@ -57,7 +57,10 @@ const classes: Record<string, string> = {
   "skills-diff-add": "skills-diff-add bg-settings-success/10 text-settings-success",
   "skills-diff-remove": "skills-diff-remove bg-settings-danger/10 text-settings-danger",
   "skills-diff-context": "skills-diff-context bg-settings-inset text-settings-muted",
-  "skills-file-list": "skills-file-list m-0 grid list-none gap-1 p-0 text-xs text-settings-muted",
+  "skills-file-summary":
+    "skills-file-summary flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm px-1 py-0.5 text-xs leading-5 text-settings-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-settings-focus [&::-webkit-details-marker]:hidden",
+  "skills-file-list":
+    "skills-file-list mt-2 mb-0 grid list-none gap-1 pl-5 text-xs text-settings-muted",
   "skills-target":
     "skills-target flex cursor-pointer items-center gap-2 rounded-md py-1 text-sm [&_input]:size-4 [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-2 [&_input:focus-visible]:outline-settings-focus",
   "skills-field": "skills-field flex flex-wrap items-center gap-2",
