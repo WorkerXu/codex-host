@@ -1,7 +1,15 @@
 import type { HubKey, HubServer, HubResult } from "@codexhost/shared-contracts";
 import type { RendererHubAdminClient } from "../renderer-hub-admin-client.js";
 import type { RendererSettingsPageDefinition } from "./core.js";
-import { createHubPage, hubButton, hubElement, hubField } from "./hub-admin-ui.js";
+import {
+  createHubPage,
+  hubButton,
+  hubElement,
+  hubField,
+  hubIconButton,
+  hubSwitch,
+} from "./hub-admin-ui.js";
+import { openAgentMenu, type AgentMenuHandle, type AgentMenuItem } from "./agent-card-menu.js";
 import { mcpDialogs } from "./mcp-admin-dialogs.js";
 
 export interface HubAdminPageOptions {
@@ -28,6 +36,38 @@ export function createMcpAdminPage(
       let keys: HubResult<"keys"> = { enabled: true, headerName: "Authorization", keys: [] };
       let query = "";
       let filter = "all";
+      let menu: AgentMenuHandle | null = null;
+      const closeMenu = () => {
+        menu?.close();
+        menu = null;
+      };
+      const actions = (label: string, items: AgentMenuItem[]) => {
+        const anchor = hubIconButton(document, label, "ellipsis", () => {
+          if (menu && anchor.getAttribute("aria-expanded") === "true") {
+            closeMenu();
+            return;
+          }
+          closeMenu();
+          const view = document.defaultView;
+          if (!view) return;
+          anchor.setAttribute("aria-expanded", "true");
+          menu = openAgentMenu({
+            document,
+            view,
+            container: ui.page,
+            anchor,
+            label,
+            items,
+            onClose() {
+              anchor.setAttribute("aria-expanded", "false");
+              menu = null;
+            },
+          });
+        });
+        anchor.setAttribute("aria-haspopup", "menu");
+        anchor.setAttribute("aria-expanded", "false");
+        return anchor;
+      };
       const refresh = async () => {
         const host = ui.hosts.value;
         const revision = ui.revision();
@@ -46,6 +86,7 @@ export function createMcpAdminPage(
       const dialogs = mcpDialogs(ui, client, refresh, () => servers);
       const list = hubElement(document, "div", "hub-server-list");
       const renderServers = () => {
+        closeMenu();
         list.replaceChildren();
         const visible = servers.filter(
           (server) =>
@@ -54,45 +95,39 @@ export function createMcpAdminPage(
         );
         for (const server of visible) {
           const card = hubElement(document, "article", "hub-server");
-          const top = hubElement(document, "div", "hub-row");
-          const name = hubElement(document, "strong", "", server.name);
-          const status = hubElement(document, "span", "hub-badge", statuses[server.status]);
-          status.dataset.status = server.status;
-          top.append(name, hubElement(document, "span", "hub-muted", server.version), status);
-          const toggle = hubButton(document, server.status === "disabled" ? "启用" : "禁用", () => {
-            const host = ui.hosts.value;
-            const enabled = server.status === "disabled";
-            const action = async () => {
-              await client.request(host, {
-                op: "serverToggle",
-                name: server.name,
-                enabled,
-                confirmed: !enabled,
-              });
-              await refresh();
-            };
-            if (enabled) void ui.load(action);
-            else ui.confirm("禁用服务器", `禁用 ${server.name} 后，将无法调用其工具。`, action);
+          const top = hubElement(document, "div", "hub-server-top");
+          const title = hubButton(document, server.name, () => {
+            void dialogs.tools(server);
           });
-          toggle.setAttribute("role", "switch");
-          toggle.setAttribute("aria-checked", String(server.status !== "disabled"));
-          toggle.setAttribute("aria-label", `${server.name} 启用状态`);
-          top.append(toggle);
-          const meta = hubElement(
+          title.className = "hub-server-title";
+          const controls = hubElement(document, "div", "hub-card-controls");
+          const toggle = hubSwitch(
             document,
-            "p",
-            "hub-muted",
-            `${server.type === "streamable-http" ? "流式 HTTP" : server.type === "sse" ? "SSE" : server.type} · ${server.tools} 工具 · ${server.prompts} 提示词 · ${server.resources} 资源 · 调用 ${server.calls ?? "—"}`,
+            `${server.name} 启用状态`,
+            server.status !== "disabled",
+            () => {
+              const host = ui.hosts.value;
+              const enabled = server.status === "disabled";
+              const action = async () => {
+                await client.request(host, {
+                  op: "serverToggle",
+                  name: server.name,
+                  enabled,
+                  confirmed: !enabled,
+                });
+                await refresh();
+              };
+              if (enabled) void ui.load(action);
+              else ui.confirm("禁用服务器", `禁用 ${server.name} 后，将无法调用其工具。`, action);
+            },
           );
-          const actions = hubElement(document, "div", "hub-actions");
-          const edit = hubButton(document, "编辑", () => dialogs.server(server));
-          edit.disabled = !["streamable-http", "sse", "stdio"].includes(server.type);
-          actions.append(
-            hubButton(document, "查看工具", () => {
-              void dialogs.tools(server);
-            }),
-            edit,
-            hubButton(document, "删除", () => {
+          const items: AgentMenuItem[] = [];
+          if (["streamable-http", "sse", "stdio"].includes(server.type))
+            items.push({ label: "编辑", run: () => dialogs.server(server) });
+          items.push({
+            label: "删除",
+            danger: true,
+            run() {
               const host = ui.hosts.value;
               ui.confirm("删除服务器", `删除 ${server.name}？此操作无法撤销。`, async () => {
                 await client.request(host, {
@@ -102,9 +137,36 @@ export function createMcpAdminPage(
                 });
                 await refresh();
               });
-            }),
+            },
+          });
+          controls.append(toggle, actions(`${server.name} 的操作`, items));
+          top.append(title, controls);
+          const status = hubElement(document, "span", "hub-status-dot", statuses[server.status]);
+          status.dataset.status = server.status;
+          const protocol =
+            server.type === "streamable-http"
+              ? "流式 HTTP"
+              : server.type === "sse"
+                ? "SSE"
+                : server.type;
+          const meta = hubElement(document, "div", "hub-server-meta");
+          meta.append(status, hubElement(document, "span", "", protocol));
+          if (server.version && server.version !== "—")
+            meta.append(hubElement(document, "span", "", `v${server.version.replace(/^v/u, "")}`));
+          const counts = [
+            `${server.tools} 工具`,
+            `${server.prompts} 提示词`,
+            `${server.resources} 资源`,
+          ];
+          if (server.calls !== null) counts.push(`${server.calls} 次调用`);
+          card.append(
+            top,
+            meta,
+            hubElement(document, "p", "hub-server-counts", counts.join(" · ")),
           );
-          card.append(top, meta, actions);
+          card.addEventListener("click", (event) => {
+            if (!(event.target as Element).closest("button")) void dialogs.tools(server);
+          });
           list.append(card);
         }
         if (!visible.length)
@@ -112,7 +174,7 @@ export function createMcpAdminPage(
       };
       const keyRow = (key: HubKey) => {
         const row = hubElement(document, "article", "hub-key");
-        const info = hubElement(document, "div");
+        const info = hubElement(document, "div", "hub-key-info");
         const scope =
           key.accessType === "all"
             ? "全部服务器"
@@ -120,52 +182,68 @@ export function createMcpAdminPage(
               ? `排除：${key.servers.join("、")}`
               : key.accessType === "servers"
                 ? `仅限：${key.servers.join("、")}`
-                : key.accessType;
+                : "自定义范围";
+        const top = hubElement(document, "div", "hub-row");
+        const status = hubElement(
+          document,
+          "span",
+          "hub-status-dot",
+          key.enabled ? "启用" : "禁用",
+        );
+        status.dataset.status = key.enabled ? "online" : "disabled";
+        top.append(hubElement(document, "strong", "", key.name), status);
         info.append(
-          hubElement(document, "strong", "", key.name),
+          top,
           hubElement(
             document,
             "p",
             "hub-muted",
-            `${key.masked} · ${key.enabled ? "启用" : "禁用"} · ${scope}${key.groups.length ? ` · 组：${key.groups.join("、")}` : ""}${key.kind === "user" ? " · 用户密钥" : ""}`,
+            `${key.masked} · ${scope}${key.groups.length ? ` · 组：${key.groups.join("、")}` : ""}${key.kind === "user" ? " · 用户密钥" : ""}`,
           ),
         );
-        const actions = hubElement(document, "div", "hub-actions");
-        const edit = hubButton(document, "编辑", () => dialogs.key(key));
-        edit.disabled =
-          key.kind === "user" ||
-          key.groups.length > 0 ||
-          !["all", "exclude", "servers"].includes(key.accessType);
-        if (edit.disabled) edit.title = "此访问范围请在 MCPHub 中编辑";
-        actions.append(
-          edit,
-          hubButton(document, "重新生成", () => {
-            const host = ui.hosts.value;
-            const revision = ui.revision();
-            ui.confirm("重新生成密钥", `重新生成 ${key.name}？旧密钥将立即失效。`, async () => {
-              const result = await client.request(host, {
-                op: "keyRegenerate",
-                id: key.id,
-                confirmed: true,
+        const items: AgentMenuItem[] = [];
+        if (
+          key.kind !== "user" &&
+          !key.groups.length &&
+          ["all", "exclude", "servers"].includes(key.accessType)
+        )
+          items.push({ label: "编辑", run: () => dialogs.key(key) });
+        items.push(
+          {
+            label: "重新生成",
+            run() {
+              const host = ui.hosts.value;
+              const revision = ui.revision();
+              ui.confirm("重新生成密钥", `重新生成 ${key.name}？旧密钥将立即失效。`, async () => {
+                const result = await client.request(host, {
+                  op: "keyRegenerate",
+                  id: key.id,
+                  confirmed: true,
+                });
+                if (ui.valid(host, revision) && result.token) dialogs.reveal(result.token);
+                await refresh();
               });
-              if (ui.valid(host, revision) && result.token) dialogs.reveal(result.token);
-              await refresh();
-            });
-          }),
-          hubButton(document, "删除", () => {
-            const host = ui.hosts.value;
-            ui.confirm("删除密钥", `删除 ${key.name}？使用此密钥的连接将失去权限。`, async () => {
-              await client.request(host, { op: "keyDelete", id: key.id, confirmed: true });
-              await refresh();
-            });
-          }),
+            },
+          },
+          {
+            label: "删除",
+            danger: true,
+            run() {
+              const host = ui.hosts.value;
+              ui.confirm("删除密钥", `删除 ${key.name}？使用此密钥的连接将失去权限。`, async () => {
+                await client.request(host, { op: "keyDelete", id: key.id, confirmed: true });
+                await refresh();
+              });
+            },
+          },
         );
-        row.append(info, actions);
+        row.append(info, actions(`${key.name} 的操作`, items));
         return row;
       };
       const render = () => {
+        closeMenu();
         ui.body.replaceChildren();
-        const toolbar = hubElement(document, "div", "hub-row");
+        const toolbar = hubElement(document, "div", "hub-row hub-toolbar");
         const search = hubElement(document, "input");
         search.type = "search";
         search.placeholder = "搜索服务器";
@@ -177,15 +255,15 @@ export function createMcpAdminPage(
         });
         toolbar.append(
           search,
-          hubButton(document, "添加服务器", () => dialogs.server(), true),
-          hubButton(document, "刷新", () => {
+          hubIconButton(document, "刷新", "refresh", () => {
             void refresh();
           }),
+          hubButton(document, "添加服务器", () => dialogs.server(), true),
         );
         const tabs = hubElement(document, "div", "hub-tabs");
         tabs.setAttribute("aria-label", "服务器状态");
-        for (const [value, label] of [["all", "全部"] as const, ...Object.entries(statuses)]) {
-          const tab = hubButton(document, label, () => {
+        for (const [value, text] of [["all", "全部"] as const, ...Object.entries(statuses)]) {
+          const tab = hubButton(document, text, () => {
             filter = value;
             for (const button of tabs.querySelectorAll("button"))
               button.setAttribute("aria-pressed", String(button === tab));
@@ -199,15 +277,42 @@ export function createMcpAdminPage(
         const keyHeader = hubElement(document, "div", "hub-row hub-section-head");
         keyHeader.append(
           hubElement(document, "h3", "", "密钥"),
-          hubButton(document, "创建密钥", () => dialogs.key(), true),
+          hubButton(document, "创建密钥", () => dialogs.key()),
         );
         ui.body.append(keyHeader);
-        const auth = hubElement(document, "div", "hub-auth hub-row");
-        const header = hubField(document, auth, "认证请求头", keys.headerName);
-        const enabled = hubButton(
-          document,
-          keys.enabled ? "Bearer 认证已开启" : "Bearer 认证已关闭",
-          () => {
+        const auth = hubElement(document, "div", "hub-setting-row");
+        const copy = hubElement(document, "div", "hub-setting-copy");
+        copy.append(
+          hubElement(document, "strong", "", "Bearer 认证"),
+          hubElement(document, "p", "hub-muted", "连接服务器时校验访问密钥"),
+        );
+        const controls = hubElement(document, "div", "hub-row");
+        controls.append(
+          hubIconButton(document, "编辑认证请求头", "settings", () => {
+            const host = ui.hosts.value;
+            const modal = ui.dialog("认证请求头");
+            const header = hubField(document, modal.content, "请求头名称", keys.headerName);
+            modal.footer.append(
+              hubButton(
+                document,
+                "保存",
+                () => {
+                  void ui.load(async () => {
+                    await client.request(host, {
+                      op: "authSave",
+                      enabled: keys.enabled,
+                      headerName: header.value,
+                      confirmed: !keys.enabled,
+                    });
+                    modal.close();
+                    await refresh();
+                  });
+                },
+                true,
+              ),
+            );
+          }),
+          hubSwitch(document, "Bearer 认证", keys.enabled, () => {
             const host = ui.hosts.value;
             const action = async () => {
               await client.request(host, {
@@ -221,32 +326,18 @@ export function createMcpAdminPage(
             if (keys.enabled)
               ui.confirm("关闭 Bearer 认证", "关闭后，服务将不再校验 Bearer 密钥。", action);
             else void ui.load(action);
-          },
-        );
-        enabled.setAttribute("role", "switch");
-        enabled.setAttribute("aria-checked", String(keys.enabled));
-        auth.append(
-          enabled,
-          hubButton(document, "保存请求头", () => {
-            const host = ui.hosts.value;
-            void ui.load(async () => {
-              await client.request(host, {
-                op: "authSave",
-                enabled: keys.enabled,
-                headerName: header.value,
-                confirmed: !keys.enabled,
-              });
-              await refresh();
-            });
           }),
         );
+        auth.append(copy, controls);
         ui.body.append(auth);
         for (const key of keys.keys) ui.body.append(keyRow(key));
         if (!keys.keys.length) ui.body.append(hubElement(document, "p", "hub-empty", "暂无密钥"));
       };
+      ui.hosts.addEventListener("change", closeMenu);
       void ui.initialize(() => {
         void refresh();
       });
+      return closeMenu;
     },
   });
 }

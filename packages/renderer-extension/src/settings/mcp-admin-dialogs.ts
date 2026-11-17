@@ -1,3 +1,4 @@
+import { createHubHeaderEditor } from "./hub-header-editor.js";
 import {
   hubServerInputSchema,
   hubKeyInputSchema,
@@ -6,7 +7,14 @@ import {
   type HubResult,
 } from "@codexhost/shared-contracts";
 import { hubErrorText, type RendererHubAdminClient } from "../renderer-hub-admin-client.js";
-import { hubButton, hubElement, hubField, hubSelect, type HubPage } from "./hub-admin-ui.js";
+import {
+  hubButton,
+  hubElement,
+  hubField,
+  hubFieldError,
+  hubSelect,
+  type HubPage,
+} from "./hub-admin-ui.js";
 
 export function mcpDialogs(
   ui: HubPage,
@@ -67,7 +75,9 @@ export function mcpDialogs(
           .catch((error: unknown) => {
             modal.error.textContent =
               error instanceof Error && error.message === "invalid"
-                ? "请检查输入内容"
+                ? modal.root.querySelector(".hub-field-error:not(:empty)")
+                  ? ""
+                  : "请检查输入内容"
                 : hubErrorText(error);
           })
           .finally(() => {
@@ -109,11 +119,12 @@ export function mcpDialogs(
       const command = hubField(document, modal.content, "命令");
       const args = hubField(document, modal.content, "参数（JSON 数组）", "", true);
       const env = hubField(document, modal.content, "环境变量（JSON 对象）", "", true);
-      const headers = hubField(document, modal.content, "请求头（JSON 对象）", "", true);
+      const headers = createHubHeaderEditor(document);
+      modal.content.append(headers.root);
       const update = () => {
         const stdio = type.value === "stdio";
         if (url.parentElement) url.parentElement.hidden = stdio;
-        if (headers.parentElement) headers.parentElement.hidden = stdio;
+        headers.root.hidden = stdio;
         for (const input of [command, args, env]) {
           if (input.parentElement) input.parentElement.hidden = !stdio;
         }
@@ -122,33 +133,76 @@ export function mcpDialogs(
       update();
       save(modal, async () => {
         const stdio = type.value === "stdio";
-        const parse = (text: string): unknown => {
+        for (const field of [name, url, command, args, env]) hubFieldError(field, "");
+        const parse = (field: HTMLInputElement | HTMLTextAreaElement, array = false): unknown => {
+          if (!field.value.trim()) return undefined;
           try {
-            return JSON.parse(text);
+            const value: unknown = JSON.parse(field.value);
+            if (
+              array
+                ? !Array.isArray(value) || !value.every((item) => typeof item === "string")
+                : !value ||
+                  typeof value !== "object" ||
+                  Array.isArray(value) ||
+                  !Object.values(value).every((item) => typeof item === "string")
+            )
+              throw new Error();
+            return value;
           } catch {
+            hubFieldError(
+              field,
+              array
+                ? '请输入字符串数组，例如 ["--port", "3000"]'
+                : "请输入名称与内容均为文本的对象",
+            );
             throw new Error("invalid");
           }
         };
+        const headerValues = stdio ? undefined : headers.read();
         const input = hubServerInputSchema.safeParse({
           name: name.value,
           type: type.value,
           ...(stdio
             ? {
                 ...(command.value.trim() ? { command: command.value.trim() } : {}),
-                ...(args.value.trim() ? { args: parse(args.value) } : {}),
-                ...(env.value.trim() ? { env: parse(env.value) } : {}),
+                ...(args.value.trim() ? { args: parse(args, true) } : {}),
+                ...(env.value.trim() ? { env: parse(env) } : {}),
               }
             : {
                 ...(url.value.trim() ? { url: url.value.trim() } : {}),
-                ...(headers.value.trim() ? { headers: parse(headers.value) } : {}),
+                ...(headerValues ? { headers: headerValues } : {}),
               }),
         });
-        if (
-          !input.success ||
-          ((!server || server.type !== type.value) &&
-            !(stdio ? command.value.trim() : url.value.trim()))
-        )
+        if (!input.success) {
+          for (const issue of input.error.issues) {
+            const field =
+              issue.path[0] === "name"
+                ? name
+                : issue.path[0] === "url"
+                  ? url
+                  : issue.path[0] === "command"
+                    ? command
+                    : issue.path[0] === "args"
+                      ? args
+                      : env;
+            hubFieldError(
+              field,
+              field === name
+                ? "请输入名称（最多 200 个字符）"
+                : field === url
+                  ? "请输入有效的 HTTP 或 HTTPS 地址"
+                  : "请检查此项内容",
+            );
+          }
           throw new Error("invalid");
+        }
+        if (
+          (!server || server.type !== type.value) &&
+          !(stdio ? command.value.trim() : url.value.trim())
+        ) {
+          hubFieldError(stdio ? command : url, stdio ? "请输入启动命令" : "请输入服务器地址");
+          throw new Error("invalid");
+        }
         return client.request(host, {
           op: "serverSave",
           ...(server ? { originalName: server.name } : {}),
@@ -207,7 +261,10 @@ export function mcpDialogs(
             (input) => input.value,
           ),
         });
-        if (!parsed.success) throw new Error("invalid");
+        if (!parsed.success) {
+          hubFieldError(name, name.value.trim() ? "请选择至少一个服务器" : "请输入密钥名称");
+          throw new Error("invalid");
+        }
         return client.request(host, {
           op: "keySave",
           ...(key ? { id: key.id } : {}),
@@ -218,7 +275,7 @@ export function mcpDialogs(
     async tools(server: HubServer) {
       const host = ui.hosts.value;
       const revision = ui.revision();
-      const modal = ui.dialog(`${server.name} 的工具`);
+      const modal = ui.dialog(server.name, true);
       modal.content.textContent = "正在加载…";
       try {
         const result = await client.request(host, { op: "tools", name: server.name });

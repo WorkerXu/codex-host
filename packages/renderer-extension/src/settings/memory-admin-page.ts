@@ -30,7 +30,7 @@ export function createMemoryAdminPage(
       const openMemory = async (memory: HubMemory) => {
         const host = ui.hosts.value;
         const revision = ui.revision();
-        const modal = ui.dialog("记忆详情");
+        const modal = ui.dialog(memory.title, true);
         modal.content.textContent = "正在加载…";
         try {
           const value = await client.request(host, {
@@ -40,11 +40,16 @@ export function createMemoryAdminPage(
             variant: memory.variant,
           });
           if (!ui.valid(host, revision) || !modal.root.isConnected) return;
+          modal.heading.textContent = value.title;
+          modal.root.setAttribute("aria-label", value.title);
           modal.content.replaceChildren(
-            hubElement(document, "h4", "", value.title),
-            hubElement(document, "p", "hub-muted", `${value.source} · ${hubDate(value.time)}`),
+            hubElement(
+              document,
+              "p",
+              "hub-muted hub-memory-meta",
+              `${value.source} · ${hubDate(value.time)}`,
+            ),
             hubElement(document, "div", "hub-memory-text", value.text),
-            hubElement(document, "p", "hub-muted", `关联对话：${value.conversation ?? "无"}`),
           );
         } catch (error) {
           modal.content.textContent = hubErrorText(error);
@@ -123,25 +128,19 @@ export function createMemoryAdminPage(
           const card = hubElement(document, "div", "hub-overview-card");
           card.append(
             hubElement(document, "span", "hub-muted", label),
-            hubElement(document, "strong", "", value),
+            hubElement(
+              document,
+              "strong",
+              label === "记忆总数" ? "hub-stat-number" : "hub-stat-value",
+              value,
+            ),
           );
           overview.append(card);
         }
-        ui.body.append(overview, hubElement(document, "h3", "hub-section-head", "最近更新"));
-        const recent = hubElement(document, "div", "hub-recent");
-        for (const memory of summary.recent) {
-          const button = hubButton(document, memory.title, () => {
-            void openMemory(memory);
-          });
-          button.className = "hub-recent-link";
-          const item = hubElement(document, "div", "hub-row");
-          item.append(button, hubElement(document, "span", "hub-muted", hubDate(memory.time)));
-          recent.append(item);
-        }
-        if (!summary.recent.length)
-          recent.append(hubElement(document, "p", "hub-empty", "暂无记忆"));
-        ui.body.append(recent, hubElement(document, "h3", "hub-section-head", "搜索记忆"));
-        const form = hubElement(document, "form", "hub-row");
+        ui.body.append(overview);
+        const heading = hubElement(document, "h3", "hub-section-head", "最近更新");
+        ui.body.append(heading);
+        const form = hubElement(document, "form", "hub-row hub-memory-search");
         const input = hubElement(document, "input");
         input.type = "search";
         input.placeholder = "搜索记忆";
@@ -150,11 +149,14 @@ export function createMemoryAdminPage(
           ["", "全部来源"],
           ...summary.sources.map((source) => [source.id, source.label] as const),
         ]);
-        const submit = hubElement(document, "button", "agent-primary", "搜索");
+        const submit = hubElement(document, "button", "hub-primary", "搜索");
         submit.type = "submit";
-        form.append(input, sources, submit);
+        const searchBox = hubElement(document, "div", "hub-search-box");
+        searchBox.append(input, sources);
+        form.append(searchBox, submit);
         form.addEventListener("submit", (event) => {
           event.preventDefault();
+          heading.textContent = input.value.trim() || sources.value ? "搜索结果" : "最近更新";
           query = input.value;
           source = sources.value;
           offset = 0;
@@ -162,6 +164,7 @@ export function createMemoryAdminPage(
           void search();
         });
         sources.addEventListener("change", () => {
+          heading.textContent = input.value.trim() || sources.value ? "搜索结果" : "最近更新";
           query = input.value;
           source = sources.value;
           offset = 0;
