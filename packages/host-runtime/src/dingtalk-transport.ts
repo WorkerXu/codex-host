@@ -1,10 +1,16 @@
+import { spawn } from "node:child_process";
+
 import {
+  createDingTalkCli,
   dwsErrorFromValue,
+  parseDwsEventLine,
   runDwsJson,
   runDwsRaw,
+  type DwsEventRecord,
   type DwsRawResult,
   type DwsResult,
   type DwsSpawn,
+  type DingTalkEventStream,
 } from "./dingtalk-cli.js";
 import {
   downloadDingTalkMedia,
@@ -16,7 +22,12 @@ import {
   resolveDingTalkHost,
   type DingTalkHostResolution,
 } from "./dingtalk-settings.js";
-import { requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
+import {
+  peerSshArguments,
+  peerSshEnvironment,
+  requestPeerRoute,
+  type PeerSpawn,
+} from "./peer-transport.js";
 
 export const DINGTALK_DWS_PEER_ROUTE = "/v1/dingtalk/dws";
 export const DINGTALK_MEDIA_PEER_ROUTE = "/v1/dingtalk/media";
@@ -26,10 +37,17 @@ export interface DingTalkTransport {
   /** Known immediately; refreshed when settings change. */
   readonly local: boolean;
   readonly hostName: string;
+  /** The configured Host can run the dws event stream (locally or over SSH). */
+  readonly canListen: boolean;
   configure(resolution: DingTalkHostResolution): void;
   refresh(): Promise<DingTalkHostResolution>;
   run(args: readonly string[], timeoutMs?: number): Promise<DwsResult>;
   runRaw(args: readonly string[], timeoutMs?: number): Promise<DwsRawResult>;
+  /** Streams `dws event consume` from a peer; local Hosts use the CLI path. */
+  openEvents(input: {
+    onRecord(record: DwsEventRecord): void;
+    onExit?(): void;
+  }): Promise<DingTalkEventStream | null>;
   /** Reads a message image from the DingTalk Host's cached download. */
   readMedia(request: DingTalkMediaRequest): Promise<DingTalkMediaResult>;
 }
@@ -131,6 +149,9 @@ export function createDingTalkTransport(input: {
     get hostName() {
       return resolution.name;
     },
+    get canListen() {
+      return resolution.local || resolution.peer !== null;
+    },
     configure(next) {
       resolution = next;
     },
@@ -156,6 +177,68 @@ export function createDingTalkTransport(input: {
             ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
           })
         : await executeRemote(args, timeoutMs);
+    },
+    async openEvents(events) {
+      await ready;
+      if (resolution.local)
+        return createDingTalkCli({
+          environment: input.environment,
+          ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+        }).openEvents(events);
+      if (!resolution.peer) return null;
+      const peer = resolution.peer;
+      const base = peerSshArguments({ environment: input.environment, peer });
+      const args = [
+        ...base.args.slice(0, -2),
+        "~/.local/bin/dws",
+        "event",
+        "consume",
+        "user_im_message_receive_o2o_all",
+        "user_im_message_receive_group_all",
+        "--flatten",
+        "-f",
+        "ndjson",
+      ];
+      let child;
+      try {
+        const spawnImpl: PeerSpawn = input.peerSpawnImpl ?? (spawn as unknown as PeerSpawn);
+        child = spawnImpl(base.command, args, {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: peerSshEnvironment(input.environment),
+        });
+      } catch {
+        return null;
+      }
+      let buffer = "";
+      let stopped = false;
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        buffer += chunk;
+        if (buffer.length > 8 * 1024 * 1024) buffer = buffer.slice(-8 * 1024 * 1024);
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          const parsed = parseDwsEventLine(line);
+          if (parsed && !stopped) events.onRecord(parsed);
+          newline = buffer.indexOf("\n");
+        }
+      });
+      child.stdin.end();
+      child.stderr.resume();
+      child.on("error", () => {
+        if (!stopped) events.onExit?.();
+      });
+      child.on("close", () => {
+        if (!stopped) events.onExit?.();
+      });
+      return {
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          child.kill("SIGTERM");
+        },
+      };
     },
     async readMedia(request) {
       await ready;

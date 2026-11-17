@@ -83,10 +83,13 @@ export function continuesDingTalkGroup(
   return message.createdAt - previous.createdAt <= 3 * MINUTE;
 }
 
-// DingTalk blue plus four nearby cyan/indigo/violet hues at similar saturation.
-const AVATAR_TONES = ["#3296FA", "#22A7D8", "#3F7FEA", "#5A6BF5", "#2C8CE0"];
+const AVATAR_TONES = [
+  "var(--color-avatar-blue)",
+  "var(--color-avatar-light-blue)",
+  "var(--color-avatar-purple)",
+];
 
-/** sdbm spreads neighbouring ids across the DingTalk-blue palette. */
+/** sdbm spreads neighbouring ids across the native avatar palette. */
 export function avatarTone(conversationId: string): string {
   let hash = 0;
   for (const character of conversationId) {
@@ -96,34 +99,16 @@ export function avatarTone(conversationId: string): string {
   return AVATAR_TONES[hash % AVATAR_TONES.length] as (typeof AVATAR_TONES)[number];
 }
 
-const AVATAR_STRIP_PATTERN =
-  /[\s[\]【】()（）<>《》「」『』"'“”‘’·•.,，。!！?？:：;；、\-_/\\|~`^*#]+/gu;
-
-function stripAvatarPunctuation(title: string): string {
-  return title.replace(AVATAR_STRIP_PATTERN, "").trim();
-}
-
-function takeCharacters(text: string, fromEnd: boolean): string {
-  const characters = [...text];
-  const picked = fromEnd ? characters.slice(-2) : characters.slice(0, 2);
-  return picked.join("");
-}
-
-/**
- * DingTalk's default avatar: two characters for Chinese names and group
- * titles, one capital letter for a pure-Latin name, never punctuation.
- */
-export function dingtalkAvatarLabel(title: string, singleChat: boolean, fallback = "钉"): string {
-  const cleaned = stripAvatarPunctuation(title);
-  if (!cleaned) return fallback;
-  if (/^[A-Za-z][A-Za-z .'-]*$/u.test(cleaned)) {
-    return (cleaned.match(/[A-Za-z]/u)?.[0] ?? fallback).toUpperCase();
-  }
-  return takeCharacters(cleaned, singleChat);
+/** The first two Han characters after year prefixes, or one uppercase initial. */
+export function dingtalkAvatarLabel(title: string, fallback = "钉"): string {
+  const name = title.replace(/\d{4}\s*年/gu, "");
+  const han = name.match(/\p{Script=Han}/gu);
+  if (han?.length) return han.slice(0, 2).join("");
+  return name.match(/\p{L}/u)?.[0]?.toUpperCase() ?? fallback;
 }
 
 export function dingtalkInitial(title: string): string {
-  return dingtalkAvatarLabel(title, false);
+  return dingtalkAvatarLabel(title);
 }
 
 export function conversationMention(

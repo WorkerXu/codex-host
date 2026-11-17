@@ -99,6 +99,10 @@ class FakeElement {
     return node === this.document.body;
   }
 
+  get parentElement(): FakeElement | null {
+    return this.parentNode;
+  }
+
   get nextSibling(): FakeElement | FakeText | null {
     const parent = this.parentNode;
     if (!parent) return null;
@@ -352,9 +356,27 @@ describe("DingTalk message render guard", () => {
         resources: [{ kind: "image", resourceId: "media-1", resourceIdType: "mediaId" }],
       }),
       dingtalkPageStrings("zh-CN"),
-      { continuation: false },
+      { continuation: false, attachImage: () => {} },
     );
     expect(hasClass(row as unknown as FakeElement, "dingtalk-message-bubble--image")).toBe(true);
+  });
+
+  it("uses a regular bubble for an unavailable image", () => {
+    const document = new FakeDocument();
+    const row = createMessageRow(
+      document as unknown as Document,
+      message("missing", 1_000, {
+        text: "",
+        resources: [{ kind: "image", resourceId: "missing", resourceIdType: "mediaId" }],
+      }),
+      dingtalkPageStrings("zh-CN"),
+      { continuation: false },
+    );
+    expect(row.textContent).toContain("[图片] 在手机上查看");
+    expect(hasClass(row as unknown as FakeElement, "dingtalk-message-image--unavailable")).toBe(
+      true,
+    );
+    expect(hasClass(row as unknown as FakeElement, "dingtalk-message-bubble--image")).toBe(false);
   });
 
   it("no longer renders a per-message checkbox", () => {

@@ -750,3 +750,23 @@ describe("delegation CLI", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
+
+it.each([
+  { choice: "p", expected: "p" },
+  { choice: "none", expected: null },
+])("passes --project $choice to the Host", async ({ choice, expected }) => {
+  const fetchImpl = successfulFetch({ threadId: "child" });
+  const code = await runDelegationCli({
+    arguments: ["delegate", "start", "--harness", "codex", "--task", "test", "--project", choice],
+    environment: {
+      [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
+      [DELEGATION_RUNTIME_TOKEN_ENV]: "token",
+    },
+    output: new PassThrough(),
+    fetchImpl,
+  });
+  expect(code).toBe(0);
+  expect(JSON.parse(String(vi.mocked(fetchImpl).mock.calls[0]?.[1]?.body))).toMatchObject({
+    projectId: expected,
+  });
+});

@@ -12,10 +12,6 @@ import {
   type RendererForkContractInspection,
 } from "./renderer-fork-control.js";
 import {
-  inspectRendererProjectGroupsContract,
-  type RendererProjectGroupsContractInspection,
-} from "./renderer-project-groups-dom.js";
-import {
   inspectRendererSidebarContract,
   type RendererSidebarContractInspection,
 } from "./renderer-sidebar-agent-icons.js";
@@ -49,7 +45,6 @@ export interface RendererContractAuditInspection {
   };
   settings: RendererSettingsContractInspection;
   sidebar: RendererSidebarContractInspection;
-  projectGroups: RendererProjectGroupsContractInspection;
   transcript: RendererTranscriptContractInspection;
   codexUsageGate: RendererCodexUsageGateInspection & { composerCount: number };
   fork: RendererForkContractInspection;
@@ -119,7 +114,6 @@ export function inspectRendererContracts(
     model: modelCounts(composers.map(inspectComposerModelContract)),
     settings: inspectRendererSettingsContract(ownerWindow.document),
     sidebar: inspectRendererSidebarContract(ownerWindow.document),
-    projectGroups: inspectRendererProjectGroupsContract(ownerWindow.document),
     transcript: inspectRendererTranscriptContract(ownerWindow.document),
     codexUsageGate: codexUsageGateCounts(composers),
     fork: inspectRendererForkContract(ownerWindow.document),

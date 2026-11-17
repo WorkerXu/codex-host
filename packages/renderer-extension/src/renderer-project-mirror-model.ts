@@ -1,8 +1,4 @@
-import type {
-  DesktopSelectedProject,
-  ProjectGroup,
-  ProjectGroupMember,
-} from "@codexhost/shared-contracts";
+import type { DesktopSelectedProject } from "@codexhost/shared-contracts";
 
 export interface MirrorSourceProject {
   id: string;
@@ -47,77 +43,6 @@ export function mirrorDirectoryCandidates(parent: string, name: string, limit = 
     candidates.push(`${normalizedParent}/${base} ${index}`);
   }
   return candidates;
-}
-
-export interface MirrorGroupPlan {
-  groups: ProjectGroup[];
-  action: "created" | "appended" | "skipped-other-group";
-  changed: boolean;
-}
-
-function memberKey(member: ProjectGroupMember): string {
-  return `${member.projectKind}\u0000${member.projectId}`;
-}
-
-function sameMember(left: ProjectGroupMember, right: ProjectGroupMember): boolean {
-  return memberKey(left) === memberKey(right);
-}
-
-/**
- * One project may belong to one group only. A mirror never moves a project out
- * of an existing group; it reports the conflict so the caller can toast once.
- */
-export function planMirrorGroup(input: {
-  groups: readonly ProjectGroup[];
-  name: string;
-  source: ProjectGroupMember;
-  mirror: ProjectGroupMember;
-  createId: () => string;
-  now: string;
-}): MirrorGroupPlan {
-  const name = input.name.trim();
-  const targetMembers = [input.source, input.mirror];
-  const owner = input.groups.find((group) =>
-    group.members.some((member) => targetMembers.some((target) => sameMember(member, target))),
-  );
-  if (owner && owner.name.trim() !== name) {
-    return { groups: [...input.groups], action: "skipped-other-group", changed: false };
-  }
-  const group = input.groups.find((candidate) => candidate.name.trim() === name);
-  if (!group) {
-    const order =
-      input.groups.reduce((maximum, candidate) => Math.max(maximum, candidate.order), -1) + 1;
-    return {
-      action: "created",
-      changed: true,
-      groups: [
-        ...input.groups,
-        {
-          id: input.createId(),
-          name,
-          order,
-          collapsed: false,
-          members: [...targetMembers],
-          createdAt: input.now,
-          updatedAt: input.now,
-        },
-      ],
-    };
-  }
-  const missing = targetMembers.filter(
-    (target) => !group.members.some((member) => sameMember(member, target)),
-  );
-  if (missing.length === 0)
-    return { groups: [...input.groups], action: "appended", changed: false };
-  return {
-    action: "appended",
-    changed: true,
-    groups: input.groups.map((candidate) =>
-      candidate === group
-        ? { ...candidate, members: [...candidate.members, ...missing], updatedAt: input.now }
-        : candidate,
-    ),
-  };
 }
 
 export interface MirrorDestinationInput {
@@ -207,42 +132,4 @@ export function readComposerProject(composer: Element): DesktopSelectedProject |
     fiber = fiber.return ?? undefined;
   }
   return null;
-}
-
-export interface AppendMirrorPlan {
-  groups: ProjectGroup[];
-  action: "appended" | "already-member" | "missing-group" | "conflict";
-  changed: boolean;
-}
-
-/**
- * The group "+" picker already names its target group, so a new mirror is
- * appended there instead of re-running name-based grouping.
- */
-export function appendMirrorToGroup(input: {
-  groups: readonly ProjectGroup[];
-  groupId: string;
-  mirror: ProjectGroupMember;
-  now: string;
-}): AppendMirrorPlan {
-  const group = input.groups.find((candidate) => candidate.id === input.groupId);
-  if (!group) return { groups: [...input.groups], action: "missing-group", changed: false };
-  if (group.members.some((member) => sameMember(member, input.mirror))) {
-    return { groups: [...input.groups], action: "already-member", changed: false };
-  }
-  const other = input.groups.find(
-    (candidate) =>
-      candidate.id !== group.id &&
-      candidate.members.some((member) => sameMember(member, input.mirror)),
-  );
-  if (other) return { groups: [...input.groups], action: "conflict", changed: false };
-  return {
-    groups: input.groups.map((candidate) =>
-      candidate.id === group.id
-        ? { ...candidate, members: [...candidate.members, input.mirror], updatedAt: input.now }
-        : candidate,
-    ),
-    action: "appended",
-    changed: true,
-  };
 }

@@ -196,7 +196,7 @@ describe("Codex agent form logic", () => {
   it("gives a new agent the default choice and keeps it out of the map while off", () => {
     expect(agentDingTalkDraft(defaultDingTalkDispatchSettings(), null)).toEqual({
       enabled: false,
-      eventTypes: ["mention_me", "mention_all", "approval_pending"],
+      eventTypes: ["mention_me", "mention_all", "approval_pending", "direct_message"],
       replyScope: "group",
     });
     const saved = defaultDingTalkDispatchSettings();

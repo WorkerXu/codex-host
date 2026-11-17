@@ -219,6 +219,7 @@ export class ExternalThreadRuntime {
   readonly #consumeOutputs: (thread: ExternalThread) => Promise<void>;
   readonly #diagnose: (error: unknown) => void;
   readonly #environment: NodeJS.ProcessEnv;
+  readonly #workingFolders: (id: string) => Promise<string[] | null>;
   readonly #repository: ExternalThreadRepository;
   readonly #lifecycle = new ExternalThreadLifecycle();
   readonly #hasRunningDescendants: (threadId: string) => boolean;
@@ -229,6 +230,7 @@ export class ExternalThreadRuntime {
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
     environment?: NodeJS.ProcessEnv;
+    workingFolders?(id: string): Promise<string[] | null>;
     repository: ExternalThreadRepository;
     consumeOutputs(thread: ExternalThread): Promise<void>;
     diagnose(error: unknown): void;
@@ -242,6 +244,7 @@ export class ExternalThreadRuntime {
   }) {
     this.#adapters = input.adapters;
     this.#environment = input.environment ?? process.env;
+    this.#workingFolders = input.workingFolders ?? (async () => null);
     this.#repository = input.repository;
     this.#consumeOutputs = input.consumeOutputs;
     this.#diagnose = input.diagnose;
@@ -635,19 +638,36 @@ export class ExternalThreadRuntime {
       thread.record = aligned.record;
       thread.turns = turns;
       thread.historyHydrated = true;
-      thread.thread = externalThreadValue({
-        record: aligned.record,
-        turns,
-        sessionId: thread.sessionId,
-        running: thread.running,
-      });
+      thread.thread = {
+        ...externalThreadValue({
+          record: aligned.record,
+          turns,
+          sessionId: thread.sessionId,
+          running: thread.running,
+        }),
+        cwd: thread.cwd,
+      };
       return null;
     } catch {
       return { code: -32081, message: "External Thread history could not be persisted" };
     }
   }
 
-  async #reviveIdleSession(thread: ExternalThread): Promise<ExternalThreadRpcError | null> {
+  async changeWorkingFolders(
+    thread: ExternalThread,
+    folders?: string[],
+  ): Promise<ExternalThreadRpcError | null> {
+    return this.#withLifecycle(thread.id, async () => {
+      if (!this.#idleForRestore(thread))
+        return { code: -32072, message: "请等待当前轮次结束后更改工作文件夹" };
+      return this.#reviveIdleSession(thread, folders);
+    });
+  }
+
+  async #reviveIdleSession(
+    thread: ExternalThread,
+    selectedFolders?: string[],
+  ): Promise<ExternalThreadRpcError | null> {
     thread.sessionUnavailable = true;
     const harnessId = thread.record.harnessId as ExternalHarnessId;
     const adapter = this.#adapters.get(harnessId);
@@ -664,9 +684,13 @@ export class ExternalThreadRuntime {
       harnessId,
       thread.record.transportModelId,
     );
+    const folders = selectedFolders ?? (await this.#workingFolders(thread.id));
     const opened = await adapter.open({
       kind: "resume",
-      cwd: thread.record.cwd,
+      cwd: folders?.[0] ?? thread.record.cwd,
+      ...(folders && adapter.additionalDirectories
+        ? { additionalDirectories: folders.slice(1) }
+        : {}),
       environment: { ...this.#environment, [DELEGATION_THREAD_ID_ENV]: thread.record.hostThreadId },
       nativeRef: thread.record.nativeSessionRef as NativeSessionRef,
       knownTurnRefs: thread.record.turnMappings.map(({ nativeTurnRef }) => nativeTurnRef),
@@ -744,6 +768,7 @@ export class ExternalThreadRuntime {
         ...(effectivePermissionModeId ? { effectivePermissionModeId } : {}),
       };
       thread.session = session;
+      thread.cwd = folders?.[0] ?? thread.record.cwd;
       thread.record = aligned.record;
       thread.turns = aligned.turns;
       thread.historyHydrated = true;
@@ -757,12 +782,15 @@ export class ExternalThreadRuntime {
       thread.latestUsage = session.initialUsage;
       thread.usageMeter = new UsageMeter();
       thread.usageTurnId = null;
-      thread.thread = externalThreadValue({
-        record: aligned.record,
-        turns: aligned.turns,
-        sessionId: thread.sessionId,
-        running: thread.running,
-      });
+      thread.thread = {
+        ...externalThreadValue({
+          record: aligned.record,
+          turns: aligned.turns,
+          sessionId: thread.sessionId,
+          running: thread.running,
+        }),
+        cwd: thread.cwd,
+      };
       thread.outputTask = this.#consumeOutputs(thread);
       this.idleRelease.clearOutputFailed(thread);
       return null;
@@ -860,9 +888,13 @@ export class ExternalThreadRuntime {
       });
     }
     const restoredSelection = decodeExternalTransportSelection(harnessId, record.transportModelId);
+    const folders = await this.#workingFolders(record.hostThreadId);
     const opened = await adapter.open({
       kind: "resume",
-      cwd: record.cwd,
+      cwd: folders?.[0] ?? record.cwd,
+      ...(folders && adapter.additionalDirectories
+        ? { additionalDirectories: folders.slice(1) }
+        : {}),
       environment: { ...this.#environment, [DELEGATION_THREAD_ID_ENV]: record.hostThreadId },
       nativeRef: record.nativeSessionRef as NativeSessionRef,
       knownTurnRefs: record.turnMappings.map(({ nativeTurnRef }) => nativeTurnRef),
@@ -918,7 +950,7 @@ export class ExternalThreadRuntime {
         }
       }
       const sessionId = await this.#repository.sessionTreeId(aligned.record);
-      return this.register({
+      const restored = this.register({
         record: aligned.record,
         session,
         sessionId,
@@ -938,6 +970,9 @@ export class ExternalThreadRuntime {
         ...(restoredState ? { restoredState } : {}),
         transportModelId,
       });
+      restored.cwd = folders?.[0] ?? record.cwd;
+      restored.thread.cwd = restored.cwd;
+      return restored;
     } catch (error) {
       if (error instanceof ExternalSessionReleaseError) throw error;
       await this.#lifecycle.release(record.hostThreadId, session, Promise.resolve());

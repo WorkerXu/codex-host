@@ -13,6 +13,7 @@ import type {
   DingTalkSendResult,
   DingTalkStatus,
   DingTalkDispatchSettings,
+  DingTalkDispatchStatus,
   JarvisStatus,
 } from "@codexhost/shared-contracts";
 
@@ -41,6 +42,7 @@ export type FakeDingTalkStatus = "connected" | "not-logged-in" | "unreachable";
 export interface FakeDingTalkOptions {
   empty?: boolean;
   error?: boolean;
+  conversationsPending?: boolean;
   messageDelayMs?: number;
   status?: FakeDingTalkStatus;
   heavy?: boolean;
@@ -137,6 +139,7 @@ export function createFakeDingTalkClient(
       };
     },
     async conversations(): Promise<DingTalkConversationsResult> {
+      if (options.conversationsPending) return new Promise(() => {});
       await sleep(40);
       return conversationsResult();
     },
@@ -326,7 +329,7 @@ export function createFakeDingTalkClient(
 }
 
 export function createFakeCodexAgentsClient(
-  options: { withAgents?: boolean } = {},
+  options: { withAgents?: boolean; dispatchStatus?: DingTalkDispatchStatus } = {},
 ): RendererCodexAgentsClient {
   const records: CodexAgentRecord[] =
     options.withAgents === false ? [] : agents.map((row) => ({ ...row }));
@@ -375,6 +378,10 @@ export function createFakeCodexAgentsClient(
     },
     async catalog(): Promise<CodexAgentCatalogResult> {
       return agentCatalog;
+    },
+    async dispatchStatus() {
+      await sleep(30);
+      return options.dispatchStatus ?? {};
     },
     async dispatchSettings() {
       await sleep(60);

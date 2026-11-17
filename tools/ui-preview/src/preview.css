@@ -44,7 +44,6 @@ body {
   line-height: var(--font-text-xs-line-height, 18px);
 }
 
-.preview-group-row,
 .preview-project-row {
   display: flex;
   height: 30px;
@@ -61,39 +60,7 @@ body {
   color: var(--color-token-text-primary, #0d0d0d);
 }
 
-.preview-group-row:hover,
 .preview-project-row:hover {
-  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
-}
-
-.preview-group-icon {
-  width: 14px;
-  height: 14px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  opacity: 0.6;
-}
-
-.preview-group-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.preview-plus {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: var(--color-token-text-secondary, rgba(13, 13, 13, 0.65));
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-}
-
-.preview-plus:hover {
   background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
 }
 
@@ -251,8 +218,8 @@ body {
 }
 
 html[data-theme="dark"] .preview-projects {
-  background: #1f1f1f;
-  border-right-color: rgb(255 255 255 / 10%);
+  background: var(--color-token-side-bar-background);
+  border-right-color: var(--color-token-border-default);
 }
 
 .preview-agent-toolbar {

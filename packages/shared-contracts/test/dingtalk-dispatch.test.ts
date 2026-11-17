@@ -123,3 +123,27 @@ describe("DingTalk dispatch settings contract", () => {
     expect(dingtalkDispatchTargets(settings, "mention_all")).toEqual([]);
   });
 });
+
+it("includes private messages for new agents without expanding existing selections", () => {
+  expect(defaultDingTalkAgentDispatch().eventTypes).toContain("direct_message");
+  const migrated = dingtalkDispatchSettingsSchema.parse({
+    threshold: 0.85,
+    agents: {
+      "old.toml": {
+        enabled: true,
+        eventTypes: ["mention_me", "approval_pending"],
+        replyScope: "group",
+      },
+    },
+  });
+  expect(migrated.agents["old.toml"]?.eventTypes).toEqual(["mention_me", "approval_pending"]);
+  expect(
+    dingtalkDispatchTargets(
+      {
+        threshold: 0.85,
+        agents: { "new.toml": { ...defaultDingTalkAgentDispatch(), enabled: true } },
+      },
+      "direct_message",
+    ),
+  ).toHaveLength(1);
+});

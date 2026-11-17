@@ -42,7 +42,7 @@ describe("DingTalk page model", () => {
 
   it("keeps avatar tones and search highlights deterministic", () => {
     expect(avatarTone("cid-alpha")).toBe(avatarTone("cid-alpha"));
-    expect(avatarTone("cid-alpha")).toMatch(/^#[0-9a-f]{6}$/iu);
+    expect(avatarTone("cid-alpha")).toMatch(/^var\(--color-avatar-[a-z-]+\)$/u);
     expect(highlightSegments("季度预算审批单", "预算")).toEqual([
       { text: "季度", match: false },
       { text: "预算", match: true },
@@ -53,12 +53,17 @@ describe("DingTalk page model", () => {
   it("uses native two-character avatar labels without punctuation", () => {
     expect(dingtalkInitial(" 财务打款群 ")).toBe("财务");
     expect(dingtalkInitial("")).toBe("钉");
-    expect(dingtalkAvatarLabel("【示例Sprint】 进度", false)).toBe("示例");
-    expect(dingtalkAvatarLabel("【线上系统问题反馈群】", false)).toBe("线上");
-    expect(dingtalkAvatarLabel("  [设计评审]", false)).toBe("设计");
-    expect(dingtalkAvatarLabel("林晓", true)).toBe("林晓");
-    expect(dingtalkAvatarLabel("Lucy", true)).toBe("L");
-    expect(dingtalkAvatarLabel("【】[]", false)).toBe("钉");
+    expect(dingtalkAvatarLabel("【示例Sprint】 进度")).toBe("示例");
+    expect(dingtalkAvatarLabel("【线上系统问题反馈群】")).toBe("线上");
+    expect(dingtalkAvatarLabel("  [设计评审]")).toBe("设计");
+    expect(dingtalkAvatarLabel("林晓")).toBe("林晓");
+    expect(dingtalkAvatarLabel("Lucy")).toBe("L");
+    expect(dingtalkAvatarLabel("2026 Q4 华东区渠道生态合作伙伴联合增长计划讨论群")).toBe("华东");
+    expect(dingtalkAvatarLabel("2027 年预算评审")).toBe("预算");
+    expect(dingtalkAvatarLabel("王小明")).toBe("王小");
+    expect(dingtalkAvatarLabel("【2027】 -- product review")).toBe("P");
+    expect(dingtalkAvatarLabel("1234 !")).toBe("钉");
+    expect(dingtalkAvatarLabel("【】[]")).toBe("钉");
   });
 
   it("formats file sizes", () => {

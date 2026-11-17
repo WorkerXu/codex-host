@@ -1,7 +1,9 @@
 import { createDefaultRendererSettingsPages } from "../../../packages/renderer-extension/src/settings/pages.js";
 import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import type { RendererModelServiceClient } from "../../../packages/renderer-extension/src/model-service-client.js";
+import { mountThreadFoldersPreview } from "./thread-folders.js";
 import previewCss from "./preview.css";
+import { applyDesktopTheme } from "./desktop-theme.js";
 import {
   createDingTalkEntryRow,
   installRendererDingTalkEntry,
@@ -15,16 +17,6 @@ import {
   mountRendererAgentPicker,
   renderRendererAgentPicker,
 } from "../../../packages/renderer-extension/src/renderer-agent-picker.js";
-import { ProjectGroupNewChatPicker } from "../../../packages/renderer-extension/src/renderer-project-groups-new-chat.js";
-import {
-  ProjectGroupHeaders,
-  type ProjectGroupHeaderItem,
-} from "../../../packages/renderer-extension/src/renderer-project-groups-header.js";
-import {
-  ProjectGroupLayoutStyle,
-  PROJECT_GROUP_EMPTY_ATTRIBUTE,
-  type ProjectGroupLayoutMember,
-} from "../../../packages/renderer-extension/src/renderer-project-groups-layout.js";
 import { createCodexAgentsSettingsPage } from "../../../packages/renderer-extension/src/settings/codex-agents-page.js";
 import { createJarvisSettingsPage } from "../../../packages/renderer-extension/src/settings/jarvis-page.js";
 import { createDingTalkSettingsPage } from "../../../packages/renderer-extension/src/settings/dingtalk-page.js";
@@ -38,16 +30,6 @@ import {
   type FakeDingTalkOptions,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
-import {
-  projectGroupEmptyVisibility,
-  projectGroupMachineSummary,
-  type ProjectGroupAddMachineResult,
-  type ProjectGroupAddMachineTarget,
-  type ProjectGroupMachineView,
-  type ProjectGroupProjectView,
-  type ProjectGroupView,
-} from "../../../packages/renderer-extension/src/renderer-project-groups-model.js";
-import { addMachineTargets, projectGroupView } from "./fixtures.js";
 import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
 
 const parameters = new URLSearchParams(location.search);
@@ -57,13 +39,29 @@ const locale = "zh-CN" as const;
 const messages = rendererSettingsMessages(locale);
 
 const style = document.createElement("style");
-style.textContent = previewCss;
+style.textContent = scenarioName.startsWith("thread-folders-") ? "" : previewCss;
 document.head.append(style);
 document.documentElement.dataset.theme = theme;
 document.documentElement.style.colorScheme = theme;
 
 const root = document.getElementById("preview-root");
 if (!root) throw new Error("Preview root is missing");
+
+async function loadDesktopCss(): Promise<void> {
+  if (document.querySelector("link[data-preview-desktop-css]")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/codex-desktop.css";
+  link.dataset.previewDesktopCss = "";
+  const loaded = new Promise<void>((resolve, reject) => {
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener("error", () => reject(new Error("Desktop CSS unavailable")), {
+      once: true,
+    });
+  });
+  document.head.append(link);
+  await loaded;
+}
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => {
@@ -147,7 +145,30 @@ function prepareSettings(
       dingtalkOptions.onViewed?.(conversationId, active);
     },
   });
-  const agentsClient = createFakeCodexAgentsClient({ withAgents: !agentsEmpty });
+  const dispatchPreview = scenarioName.startsWith("agents-dispatch-");
+  const agentsClient = createFakeCodexAgentsClient({
+    withAgents: !agentsEmpty,
+    ...(dispatchPreview
+      ? {
+          dispatchStatus: {
+            "reviewer.toml": {
+              lastDispatchAt: Date.now() - 60_000,
+              result: scenarioName.includes("missing-key")
+                ? ("skipped" as const)
+                : ("replied" as const),
+              ...(scenarioName.includes("missing-key")
+                ? { detail: "未配置 Gemini Key，未派发" }
+                : {}),
+            },
+            "writer.toml": {
+              lastDispatchAt: Date.now() - 120_000,
+              result: "failed" as const,
+              detail: "回复发送失败",
+            },
+          },
+        }
+      : {}),
+  });
   const dingtalkPage = createDingTalkSettingsPage(messages, {
     createClient: () => dingtalkClient,
     readLocale: () => locale,
@@ -241,285 +262,6 @@ function mountStage(html: string): HTMLElement {
   return stage;
 }
 
-type AddMachineHandler = (
-  groupId: string,
-  target: ProjectGroupAddMachineTarget,
-) => Promise<ProjectGroupAddMachineResult> | undefined;
-
-function openProjectMenu(onAddMachine: AddMachineHandler): ProjectGroupNewChatPicker {
-  const stage = mountStage(`
-    <aside class="preview-projects">
-      <div class="preview-projects-heading">Projects</div>
-      <div class="preview-group-row">
-        <span class="preview-group-icon"></span>
-        <span class="preview-group-name">codex-host</span>
-        <button type="button" class="preview-plus" aria-label="新建对话">+</button>
-      </div>
-      <div class="preview-project-row">codex-host</div>
-      <div class="preview-project-row">gate-a</div>
-    </aside>
-    <main class="preview-canvas">
-      <article class="preview-thread">
-        <h1>工作台重构</h1>
-        <p>项目组、钉钉与智能体页面正在按照同一套 Desktop 视觉语言收敛。</p>
-        <div class="preview-composer">讨论工作台 UI 的下一步…</div>
-      </article>
-    </main>`);
-  const anchor = stage.querySelector<HTMLButtonElement>(".preview-plus");
-  if (!anchor) throw new Error("Plus anchor is missing");
-  const picker = new ProjectGroupNewChatPicker({
-    document,
-    window,
-    onSelect: () => undefined,
-    loadAddTargets: async () => addMachineTargets,
-    onAddMachine,
-  });
-  picker.open(projectGroupView, anchor);
-  return picker;
-}
-
-interface PreviewProjectMachine {
-  key: string;
-  label: string;
-  projectId: string;
-  threads: string[];
-}
-
-/** Native-shaped sidebar used by the empty-machine preview scenarios. */
-async function mountProjectGroupMachineScene(
-  machines: readonly PreviewProjectMachine[],
-): Promise<void> {
-  await loadDesktopCss();
-  const groupName = "示例工作台";
-  const stage = mountStage(`
-    <aside class="preview-projects preview-native-sidebar">
-      <div class="preview-projects-heading">项目</div>
-      <section data-app-action-sidebar-section data-app-action-sidebar-section-heading="Projects"
-               data-app-action-sidebar-section-collapsed="false">
-        <div class="preview-native-section-body">
-          <div role="list" class="preview-native-project-list"></div>
-        </div>
-      </section>
-    </aside>
-    <main class="preview-canvas preview-canvas--composer"></main>`);
-  const list = stage.querySelector<HTMLElement>(".preview-native-project-list");
-  if (!list) throw new Error("Native project list is missing");
-  for (const machine of machines) {
-    const unit = document.createElement("div");
-    unit.setAttribute("role", "listitem");
-    unit.className = "preview-project-unit";
-    const wrapper = document.createElement("div");
-    wrapper.setAttribute("role", "listitem");
-    wrapper.setAttribute("aria-label", machine.label);
-    const row = document.createElement("div");
-    row.className = "preview-native-project-row";
-    row.setAttribute("role", "button");
-    row.setAttribute("aria-expanded", "true");
-    row.setAttribute("data-app-action-sidebar-project-row", "");
-    row.setAttribute("data-app-action-sidebar-project-id", machine.projectId);
-    row.setAttribute("data-app-action-sidebar-project-label", groupName);
-    row.setAttribute("data-app-action-sidebar-project-collapsed", "false");
-    const leading = document.createElement("div");
-    leading.className = "preview-native-project-leading";
-    const kind = document.createElement("span");
-    kind.setAttribute("data-sidebar-project-kind", machine.key === "local" ? "local" : "remote");
-    const label = document.createElement("span");
-    label.textContent = groupName;
-    const plus = document.createElement("button");
-    plus.type = "button";
-    plus.textContent = "+";
-    leading.append(kind, label, plus);
-    const trailing = document.createElement("div");
-    trailing.className = "preview-native-project-trailing";
-    trailing.textContent = "···";
-    row.append(leading, trailing);
-    wrapper.append(row);
-    const conversations = document.createElement("div");
-    conversations.setAttribute("data-app-action-sidebar-project-list-id", machine.projectId);
-    const conversationList = document.createElement("div");
-    conversationList.setAttribute("role", "list");
-    if (machine.threads.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "preview-empty-chat";
-      empty.textContent = "暂无聊天";
-      conversationList.append(empty);
-    } else {
-      for (const thread of machine.threads) {
-        const threadRow = document.createElement("div");
-        threadRow.className = "preview-thread-row";
-        threadRow.setAttribute("data-app-action-sidebar-thread-row", "");
-        threadRow.textContent = thread;
-        conversationList.append(threadRow);
-      }
-    }
-    conversations.append(conversationList);
-    wrapper.append(conversations);
-    unit.append(wrapper);
-    list.append(unit);
-  }
-
-  const projects = machines.map(
-    (machine) =>
-      ({
-        project: {
-          member: {
-            projectId: machine.projectId,
-            projectKind: machine.key === "local" ? "local" : "remote",
-          },
-          entry: { projectId: machine.projectId },
-          missing: null,
-        },
-        mounted: true,
-        newChatAvailable: true,
-      }) as unknown as ProjectGroupProjectView,
-  );
-  const machineViews: ProjectGroupMachineView[] = machines.map((machine, index) => ({
-    key: machine.key,
-    label: machine.label,
-    state: "connected",
-    projects: [projects[index]!],
-  }));
-  const group = {
-    id: "preview-group",
-    name: groupName,
-    order: 0,
-    collapsed: false,
-    members: [],
-  };
-  const view = {
-    group,
-    projects,
-    machines: machineViews,
-    unresolved: [],
-  } as unknown as ProjectGroupView;
-  const emptyIds = new Set(
-    machines.filter((machine) => machine.threads.length === 0).map((machine) => machine.projectId),
-  );
-  const visibility = projectGroupEmptyVisibility(view, emptyIds);
-  const members: ProjectGroupLayoutMember[] = machines.map((machine) => ({
-    projectId: machine.projectId,
-    label: groupName,
-    machineName: machine.label,
-    kind: machine.key === "local" ? "local" : "remote",
-  }));
-  new ProjectGroupLayoutStyle(document).apply([
-    { id: group.id, name: group.name, collapsed: false, members },
-  ]);
-  const summary = projectGroupMachineSummary(machineViews, visibility.visibleMachines);
-  const items: ProjectGroupHeaderItem[] = [
-    {
-      id: group.id,
-      name: group.name,
-      machineSummary: summary.text,
-      machineSummaryTitle: summary.title,
-      projectIds: machines.map((machine) => machine.projectId),
-    },
-  ];
-  new ProjectGroupHeaders(document, {
-    toggleGroup: () => undefined,
-    openNewChat: () => undefined,
-    openManager: () => undefined,
-    showMoreProjects: () => undefined,
-  }).render(items, { collapsedGroups: new Set(), placeholders: new Map() });
-  for (const projectId of visibility.hiddenProjectIds) {
-    document
-      .querySelector(
-        `[data-app-action-sidebar-project-row][data-app-action-sidebar-project-id="${projectId}"]`,
-      )
-      ?.closest(".preview-project-unit")
-      ?.setAttribute(PROJECT_GROUP_EMPTY_ATTRIBUTE, "true");
-  }
-  document.body.dataset.previewGroupEmpty = String(visibility.hiddenProjectIds.size);
-  await delay(120);
-}
-
-async function openMachineMenu(onAddMachine: AddMachineHandler): Promise<void> {
-  openProjectMenu(onAddMachine);
-  const add = await waitFor(() =>
-    document.querySelector<HTMLElement>("[data-codexhost-add-machine-row]"),
-  );
-  await previewClick(add);
-  await waitFor(() => document.querySelector("[data-codexhost-add-machine-menu]"));
-  await delay(160);
-}
-
-/**
- * Native-DOM scenarios render in the light DOM of the Desktop window, which
- * uses the global Desktop stylesheet. Shadow-root workbench pages never load it.
- */
-async function loadDesktopCss(): Promise<void> {
-  if (document.querySelector("link[data-preview-desktop-css]")) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = "/codex-desktop.css";
-  link.dataset.previewDesktopCss = "";
-  const loaded = new Promise<void>((resolve) => {
-    link.addEventListener("load", () => resolve(), { once: true });
-    link.addEventListener("error", () => resolve(), { once: true });
-  });
-  document.head.append(link);
-  await loaded;
-}
-
-/**
- * Mirror of the real `@` menu DOM captured on 2026-11-16: no listbox/option
- * roles, `data-mention-*` structure and the native row classes.
- */
-const NATIVE_HEADER_CLASS =
-  "text-codex-description shrink-0 h-[var(--suggestion-menu-header-height,auto)] px-row-x py-1 " +
-  "text-sm sticky top-0 z-10 " +
-  "bg-[var(--suggestion-menu-header-background,var(--color-surface-elevated-secondary))]";
-const NATIVE_ROW_CLASS =
-  "text-default outline-hidden focus:bg-secondary-ghost-hover cursor-interaction flex w-full " +
-  "shrink-0 items-center overflow-hidden text-start min-h-[var(--app-menu-item-height,0px)] " +
-  "rounded-[var(--suggestion-menu-item-radius,var(--radius-xl))] " +
-  "p-[var(--suggestion-menu-item-padding,var(--app-menu-item-padding,var(--padding-row-y)_var(--padding-row-x)))] " +
-  "text-sm [content-visibility:auto] [contain-intrinsic-block-size:auto_1lh]";
-const NATIVE_ROW_CONTENT_CLASS =
-  "flex w-full min-w-0 items-center gap-[var(--spacing-menu-item-content,calc(var(--spacing)*1.5))]";
-const NATIVE_ROW_ACTIVE = "bg-secondary-ghost-hover opacity-100";
-const NATIVE_ROW_IDLE = "menu-row-opacity";
-
-function nativeRow(
-  label: string,
-  options: { active?: boolean; description?: string } = {},
-): HTMLButtonElement {
-  const row = document.createElement("button");
-  row.type = "button";
-  row.setAttribute("data-list-navigation-item", "true");
-  row.className = `${NATIVE_ROW_CLASS} ${options.active ? NATIVE_ROW_ACTIVE : NATIVE_ROW_IDLE}`;
-  if (options.active) row.setAttribute("aria-current", "true");
-  const content = document.createElement("div");
-  content.setAttribute("data-menu-row-content", "true");
-  content.className = NATIVE_ROW_CONTENT_CLASS;
-  const labelSpan = document.createElement("span");
-  labelSpan.className = "min-w-0 truncate";
-  labelSpan.textContent = label;
-  content.append(labelSpan);
-  if (options.description) {
-    const description = document.createElement("span");
-    description.className = "min-w-0 flex-1 truncate text-sm text-codex-description";
-    description.textContent = options.description;
-    content.append(description);
-  }
-  row.append(content);
-  return row;
-}
-
-function nativeSection(id: string, title: string, rows: HTMLElement[], first = false): HTMLElement {
-  const section = document.createElement("div");
-  section.setAttribute("data-mention-section-id", id);
-  const header = document.createElement("div");
-  header.className = first ? NATIVE_HEADER_CLASS : `${NATIVE_HEADER_CLASS} pt-2`;
-  header.textContent = title;
-  const items = document.createElement("div");
-  items.setAttribute("data-mention-section-items", "true");
-  items.append(...rows);
-  section.append(header, items);
-  return section;
-}
-
-/** Panel + the single native scroll container that owns every section. */
 function nativeAtMenu(): HTMLElement {
   const panel = document.createElement("div");
   panel.className = "preview-at-menu suggestionMenu-Preview";
@@ -1147,6 +889,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => query(".dingtalk-message"));
   },
 
+  async "dingtalk-conversation-hover"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
+  async "dingtalk-image-unavailable"() {
+    await scenarios["dingtalk-hover"]();
+  },
+
   async "dingtalk-lightbox"() {
     resetConversationMemory();
     const { query } = mountSettings("dingtalk");
@@ -1181,6 +931,24 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
+  },
+
+  async "dingtalk-empty-menu"() {
+    resetConversationMemory();
+    const { query } = mountSettings("dingtalk", true);
+    await waitFor(() => query(".dingtalk-empty-list"));
+  },
+
+  async "dingtalk-empty-menu-narrow"() {
+    await scenarios["dingtalk-empty-menu"]();
+  },
+
+  async "dingtalk-header-menu-open"() {
+    await scenarios["dingtalk-header-menu"]();
+  },
+
+  async "dingtalk-header-menu-narrow"() {
+    await scenarios["dingtalk-header-menu"]();
   },
 
   async "dingtalk-at-send"() {
@@ -1292,11 +1060,19 @@ const scenarios: Record<string, () => Promise<void>> = {
     const { query } = mountSettings("dingtalk");
     await waitFor(() => query(".dingtalk-conversation"));
     await openFirstConversation(query);
-    const input = query<HTMLInputElement>(".dingtalk-search-input");
-    if (!input) throw new Error("Search input is missing");
-    await previewType(input, "示例Sprint");
-    await waitFor(() => query(".dingtalk-search-result"));
-    await delay(260);
+  },
+
+  async "dingtalk-search-empty"() {
+    const { query } = mountSettings("dingtalk");
+    await waitFor(() => query(".dingtalk-conversation"));
+    await openFirstConversation(query);
+  },
+
+  async "dingtalk-loading"() {
+    const { query } = mountSettings("dingtalk", false, false, "connected", false, false, {
+      conversationsPending: true,
+    });
+    await waitFor(() => query(".dingtalk-skeleton-list"));
   },
 
   async "dingtalk-search-more"() {
@@ -1324,6 +1100,16 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "dingtalk-error"() {
     const { query } = mountSettings("dingtalk", false, true);
     await waitFor(() => query(".dingtalk-empty-list"));
+  },
+
+  async "agents-dispatch-status"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-dingtalk-status:not([hidden])"));
+  },
+
+  async "agents-dispatch-missing-key"() {
+    const { query } = mountSettings("codex-agents");
+    await waitFor(() => query(".agent-dingtalk-status:not([hidden])"));
   },
 
   async "agents-cards"() {
@@ -1447,56 +1233,35 @@ const scenarios: Record<string, () => Promise<void>> = {
     await delay(120);
   },
 
-  async "project-group-empty-machine"() {
-    await mountProjectGroupMachineScene([
-      {
-        key: "remote",
-        label: "示例新加坡",
-        projectId: "preview-machine-remote",
-        threads: ["示例：列表页加载失败", "示例：筛选条件未生效"],
+  ...Object.fromEntries(
+    ["empty", "loading", "error", "save-error"].map((state) => [
+      `thread-folders-${state}`,
+      async () => {
+        document.querySelector('link[href="/shadow-context.css"]')?.remove();
+        await loadDesktopCss();
+        mountThreadFoldersPreview(root!, `thread-folders-${state}`);
       },
-      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
-    ]);
+    ]),
+  ),
+  async "thread-folders-local"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountThreadFoldersPreview(root!, "thread-folders-local");
   },
-
-  async "project-group-all-empty"() {
-    await mountProjectGroupMachineScene([
-      { key: "remote", label: "示例新加坡", projectId: "preview-machine-remote", threads: [] },
-      { key: "local", label: "本机", projectId: "preview-machine-local", threads: [] },
-    ]);
+  async "thread-folders-remote"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountThreadFoldersPreview(root!, "thread-folders-remote");
   },
-
-  async "group-plus-menu"() {
-    openProjectMenu();
-    await waitFor(() => document.querySelector("[data-codexhost-project-groups-new-chat]"));
+  async "thread-folders-existing"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountThreadFoldersPreview(root!, "thread-folders-existing");
   },
-
-  async "group-add-machine"() {
-    await openMachineMenu(() => undefined);
-  },
-
-  async "group-add-machine-busy"() {
-    await openMachineMenu(() => new Promise(() => undefined));
-    const row = await waitFor(() =>
-      document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
-    );
-    await previewClick(row);
-    await waitFor(() => row.getAttribute("aria-busy") === "true");
-    await delay(120);
-  },
-
-  async "group-add-machine-error"() {
-    await openMachineMenu(async () => ({ ok: false, message: "创建目录失败：权限不足。" }));
-    const row = await waitFor(() =>
-      document.querySelector<HTMLElement>('[data-codexhost-add-machine-host="host-build"]'),
-    );
-    await previewClick(row);
-    await waitFor(() =>
-      document
-        .querySelector("[data-codexhost-add-machine-menu]")
-        ?.textContent?.includes("创建目录失败：权限不足。"),
-    );
-    await delay(120);
+  async "thread-folders-limited"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountThreadFoldersPreview(root!, "thread-folders-limited");
   },
 
   async "at-entry"() {
@@ -1744,6 +1509,7 @@ async function main() {
   const run = scenarios[scenarioName];
   if (!run) throw new Error(`Unknown preview scenario: ${scenarioName}`);
   try {
+    await applyDesktopTheme(theme);
     await run();
     await delay(250);
     document.body.dataset.scenario = scenarioName;

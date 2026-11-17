@@ -137,3 +137,4 @@ export type {
   StructuredQueryClientOptions,
   StructuredQueryRequest,
 } from "./structured-query-client.js";
+export { probeRemoteThreadFolders } from "./thread-folders-probe.js";

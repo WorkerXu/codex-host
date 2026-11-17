@@ -18,7 +18,6 @@ export const AUDIT_SURFACE_IDS = Object.freeze([
   "usage-credits",
   "codex-usage-gate",
   "fork",
-  "project-groups",
 ]);
 
 const verdictRank = Object.freeze({
@@ -429,27 +428,6 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
           : "codex-usage-account-gate-dormant",
     baseline,
   });
-  const projectGroups = contracts.projectGroups ?? {
-    sectionCount: 0,
-    projectCount: 0,
-    missingNewChatCount: 0,
-    contractOk: false,
-  };
-  const projectGroupsActive = projectGroups.sectionCount > 0;
-  const projectGroupsSurface = classifySurface({
-    id: "project-groups",
-    observed: {
-      sectionCount: projectGroups.sectionCount,
-      projectCount: projectGroups.projectCount,
-      missingNewChatCount: projectGroups.missingNewChatCount,
-      contractOk: projectGroups.contractOk,
-    },
-    live: projectGroupsActive ? (projectGroups.contractOk ? "pass" : "fail") : "inactive",
-    active: projectGroupsActive,
-    reason: projectGroupsActive ? "project-groups-dom-contract" : "projects-section-state-inactive",
-    baseline,
-  });
-
   const forkActive = contracts.fork.annotatedResponseCount > 0;
   const fork = classifySurface({
     id: "fork",
@@ -477,7 +455,6 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
     usageCredits,
     codexUsageGate,
     fork,
-    projectGroupsSurface,
   ];
 }
 

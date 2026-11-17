@@ -64,7 +64,7 @@ const ZH: DingTalkPageText = {
   listFailedReason: "钉钉连接不可用，请稍后重试",
   retry: "重试",
   selectConversation: "选择一个会话",
-  emptyMessages: "从左侧选择会话开始查看消息",
+  emptyMessages: "选择一个会话开始查看",
   messagesFailed: "消息加载失败，请稍后重试",
   notLoaded: "这条消息还没有加载，请继续向上滚动",
   unnamed: "未命名会话",

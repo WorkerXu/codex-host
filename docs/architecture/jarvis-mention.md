@@ -69,6 +69,6 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 `structured-query-client.ts` 公开 `createStructuredQueryClient({provider, readApiKey, fetchImpl?})`。调用 `query({instructions, input, schema, name}, validator)` 提交业务提示词和严格 JSON Schema，再通过业务校验器返回结果；模型选择函数、读 key、网络、响应体均在同一个 3 秒截止时间内。客户端只抛 `StructuredQueryError` 的稳定错误码，原始服务错误不进入 UI。`jarvis-query-parser.ts` 负责 Jarvis 提示词和上海时间上下文。
 
-钉钉 dispatcher 后续可在自己的 Host 组合层复用该设置 Store 和结构化客户端，传入匹配 Agent 所需的独立提示词、schema 与校验器，不复用 Jarvis 的查询语义。当前钉钉分发路径保持原状。
+钉钉 dispatcher 只复用该设置 Store 的 Gemini Key 存储，不复用 Jarvis 查询解析或结构化客户端。匹配继续使用独立的 Gemini Decisions API 与 `gemini-decision-1` 模型，不受通用页「解析模型」选择影响；详见[钉钉派发](dingtalk.md#智能体监听与派发)。
 
 设置菜单不注册「会话导入」或「定时任务」页面。会话导入的 Host 服务、CLI、独立页面工厂，以及官方定时任务能力保留；这些页面工厂没有默认设置路由。

@@ -18,8 +18,14 @@ import { codexAgentFileNameSchema } from "./codex-agents.js";
  */
 export const DINGTALK_DISPATCH_GET_METHOD = "codexhost/dingtalk-dispatch/get";
 export const DINGTALK_DISPATCH_SET_METHOD = "codexhost/dingtalk-dispatch/set";
+export const DINGTALK_DISPATCH_STATUS_METHOD = "codexhost/dingtalk-dispatch/status";
 
-export const DINGTALK_EVENT_TYPES = ["mention_me", "mention_all", "approval_pending"] as const;
+export const DINGTALK_EVENT_TYPES = [
+  "mention_me",
+  "mention_all",
+  "approval_pending",
+  "direct_message",
+] as const;
 export type DingTalkEventType = (typeof DINGTALK_EVENT_TYPES)[number];
 
 export const DINGTALK_REPLY_SCOPES = ["group", "direct"] as const;
@@ -60,6 +66,25 @@ export const dingtalkDispatchSettingsSchema = z
   .strict();
 
 export type DingTalkDispatchSettings = z.infer<typeof dingtalkDispatchSettingsSchema>;
+
+export const DINGTALK_DISPATCH_RESULTS = ["replied", "failed", "skipped"] as const;
+export type DingTalkDispatchResult = (typeof DINGTALK_DISPATCH_RESULTS)[number];
+
+export const dingtalkDispatchAgentStatusSchema = z
+  .object({
+    lastDispatchAt: z.number().int().nonnegative(),
+    result: z.enum(DINGTALK_DISPATCH_RESULTS),
+    detail: z.string().max(200).optional(),
+  })
+  .strict();
+
+export const dingtalkDispatchStatusSchema = z
+  .record(codexAgentFileNameSchema, dingtalkDispatchAgentStatusSchema)
+  .refine((status) => Object.keys(status).length <= DINGTALK_DISPATCH_MAX_AGENTS, {
+    message: "Too many agents",
+  });
+export type DingTalkDispatchStatus = z.infer<typeof dingtalkDispatchStatusSchema>;
+export type DingTalkDispatchAgentStatus = z.infer<typeof dingtalkDispatchAgentStatusSchema>;
 
 export const DEFAULT_DINGTALK_DISPATCH_SETTINGS: DingTalkDispatchSettings = {
   threshold: DEFAULT_DINGTALK_MATCH_THRESHOLD,
@@ -106,3 +131,14 @@ export function dingtalkDispatchTargets(
 }
 
 export const dingtalkDispatchEmptyParamsSchema = z.object({}).strict();
+
+export const DINGTALK_DISPATCH_PROJECT_METHOD = "codexhost/dingtalk-dispatch/prepare-project";
+export const DINGTALK_DISPATCH_PROJECT_READY_METHOD = "codexhost/dingtalk-dispatch/project-ready";
+export const dingtalkDispatchProjectSchema = z.strictObject({
+  requestId: z.string().uuid(),
+  cwd: z.string().min(1).max(4096),
+});
+export const dingtalkDispatchProjectReadySchema = z.strictObject({
+  requestId: z.string().uuid(),
+  error: z.string().max(2000).nullable(),
+});

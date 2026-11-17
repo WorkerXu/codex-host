@@ -28,6 +28,7 @@ function fixture(
   thinkingOptionId = harnessThinkingOptionIdSchema.parse("auto"),
   environment?: NodeJS.ProcessEnv,
   allowDangerouslySkipPermissions = true,
+  additionalDirectories?: readonly string[],
 ) {
   const fakeQuery = new FakeQuery();
   let queryInput: QueryInput | undefined;
@@ -42,6 +43,7 @@ function fixture(
     command: process.execPath,
     ...(environment ? { environment } : {}),
     cwd: process.cwd(),
+    ...(additionalDirectories ? { additionalDirectories } : {}),
     sessionId: "00000000-0000-4000-8000-000000000001",
     openMode,
     permissionMode,
@@ -3563,4 +3565,14 @@ describe("ClaudeSdkTransport steer", () => {
     expect(takeovers).toEqual([false]);
     await expect(steered).rejects.not.toBeInstanceOf(ClaudeSteerMissedTurnError);
   });
+});
+
+it("forwards native additionalDirectories to the Claude SDK on resume", async () => {
+  const value = fixture("resume", "default", undefined, undefined, true, ["/second-root"]);
+  try {
+    await value.transport.start();
+    expect(value.queryInput().options).toMatchObject({ additionalDirectories: ["/second-root"] });
+  } finally {
+    await value.transport.close();
+  }
 });

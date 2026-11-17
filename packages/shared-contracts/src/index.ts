@@ -555,7 +555,7 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
-export * from "./project-groups.js";
+export * from "./desktop-projects.js";
 export * from "./project-mirror.js";
 
 export {
@@ -606,13 +606,21 @@ export {
 export {
   DINGTALK_DISPATCH_GET_METHOD,
   DINGTALK_DISPATCH_SET_METHOD,
+  DINGTALK_DISPATCH_STATUS_METHOD,
+  DINGTALK_DISPATCH_PROJECT_METHOD,
+  DINGTALK_DISPATCH_PROJECT_READY_METHOD,
+  dingtalkDispatchProjectSchema,
+  dingtalkDispatchProjectReadySchema,
   DINGTALK_EVENT_TYPES,
   DINGTALK_REPLY_SCOPES,
+  DINGTALK_DISPATCH_RESULTS,
   DEFAULT_DINGTALK_MATCH_THRESHOLD,
   DEFAULT_DINGTALK_DISPATCH_SETTINGS,
   DINGTALK_DISPATCH_MAX_AGENTS,
   dingtalkAgentDispatchSchema,
   dingtalkDispatchSettingsSchema,
+  dingtalkDispatchAgentStatusSchema,
+  dingtalkDispatchStatusSchema,
   dingtalkDispatchEmptyParamsSchema,
   defaultDingTalkAgentDispatch,
   defaultDingTalkDispatchSettings,
@@ -623,6 +631,11 @@ export {
   type DingTalkEventType,
   type DingTalkReplyScope,
   type DingTalkDispatchSettings,
+  type DingTalkDispatchResult,
+  type DingTalkDispatchStatus,
+  type DingTalkDispatchAgentStatus,
 } from "./dingtalk-dispatch.js";
 
 export * from "./model-service.js";
+export * from "./thread-folders.js";
+export * from "./delegation-projects.js";

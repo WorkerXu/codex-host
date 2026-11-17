@@ -79,7 +79,6 @@ describe("Renderer settings localization", () => {
       "连接",
       "远程连接",
       "账号",
-      "会话导入",
       "用量统计",
       "Jarvis",
       "钉钉",

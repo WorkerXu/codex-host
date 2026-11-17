@@ -3,10 +3,11 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 14;
+const SKILL_VERSION = 15;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
+  "7caa62a4fed8a0d4ae2f757bc28e80da05fefc6bc2b46b231d42d57c01461a32",
   "9d2f491850fb0b4084a31ba9b5e4a550b5e833747af322090d8ed0ff80b88c30",
   "2bb0aebb9b06febbc6c0c0bcdb0b32506c7cdbf8dc3b734cc6b2a86621270e4e",
   "aff258622dc8ff321f32b15620d081e578cb9c9ed1134d6a57f35ca8e7762c0a",
@@ -45,6 +46,11 @@ description: >
 ---
 
 # Execute the task
+
+New delegated Threads inherit the caller's Desktop project even when their
+working folders differ. Use \`--project <projectId>\` to override it, or
+\`--project none\` to start without a project. Cross-machine children are assigned
+by the Desktop renderer when it connects.
 
 Run the CLI through the executable in CODEXHOST_CLI_PATH. If you need command
 details, run help with the form for your shell:

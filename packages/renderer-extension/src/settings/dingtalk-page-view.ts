@@ -1,6 +1,8 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import type { IconNode } from "lucide";
 import BellOffIcon from "lucide/dist/esm/icons/bell-off.mjs";
+import BotIcon from "lucide/dist/esm/icons/bot.mjs";
+import MessagesSquareIcon from "lucide/dist/esm/icons/messages-square.mjs";
 
 import type {
   DingTalkConversation,
@@ -77,7 +79,7 @@ export function createAvatar(
 ): HTMLElement {
   const avatar = createElementNode(document, "span", `dingtalk-avatar dingtalk-avatar--${size}`);
   avatar.style.setProperty("--avatar-tone", avatarTone(conversation.conversationId));
-  avatar.textContent = dingtalkAvatarLabel(conversation.title, conversation.singleChat);
+  avatar.textContent = dingtalkAvatarLabel(conversation.title);
   avatar.setAttribute("aria-hidden", "true");
   return avatar;
 }
@@ -149,13 +151,13 @@ export function updateConversationRow(
   );
   line.append(time);
   const meta = createElementNode(document, "span", "dingtalk-conversation-meta");
-  if (conversation.unreadCount > 1) {
+  if (conversation.muted && conversation.unreadCount > 0) {
     meta.append(
       createElementNode(
         document,
         "span",
         "dingtalk-conversation-count",
-        `[${conversation.unreadCount > 99 ? "99+" : conversation.unreadCount} 条]`,
+        `[${conversation.unreadCount} 条]`,
       ),
     );
   }
@@ -355,6 +357,7 @@ export function dingtalkImageBox(width: number, height: number): { width: number
 export function showImageUnavailable(document: Document, frame: HTMLElement): void {
   frame.classList.remove("dingtalk-message-image--loading", "dingtalk-message-image--loaded");
   frame.classList.add("dingtalk-message-image--unavailable");
+  frame.parentElement?.classList.remove("dingtalk-message-bubble--image");
   frame.style.removeProperty("width");
   frame.style.removeProperty("height");
   frame.replaceChildren(
@@ -540,7 +543,8 @@ function buildMessageRow(
   if (!message.mine && !options.continuation) {
     const sender = createElementNode(document, "span", "dingtalk-message-avatar");
     sender.style.setProperty("--avatar-tone", avatarTone(message.senderId ?? message.senderName));
-    sender.textContent = dingtalkAvatarLabel(message.senderName || "?", true);
+    if (message.bot) sender.append(createIcon(document, BotIcon, 18, "dingtalk-bot-avatar-icon"));
+    else sender.textContent = dingtalkAvatarLabel(message.senderName || "?");
     row.append(sender);
   } else if (!message.mine) {
     row.append(createElementNode(document, "span", "dingtalk-message-avatar-spacer"));
@@ -667,6 +671,13 @@ export function createOlderMessagesSkeleton(document: Document): HTMLElement {
     skeleton.append(row);
   }
   return skeleton;
+}
+
+export function createConversationEmpty(document: Document, message: string): HTMLElement {
+  const empty = createListEmpty(document, message);
+  empty.classList.add("dingtalk-conversation-empty");
+  empty.prepend(createIcon(document, MessagesSquareIcon, 48, "dingtalk-conversation-empty-icon"));
+  return empty;
 }
 
 export function createListEmpty(

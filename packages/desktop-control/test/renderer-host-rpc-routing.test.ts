@@ -830,3 +830,35 @@ it.each([true, false])(
     }
   },
 );
+
+it("keeps working folders scoped to a draft and preserves its explicit project", async () => {
+  const fixture = setup();
+  const routing = await install(fixture);
+  try {
+    const policy = policyOf(routing.forComposer());
+    policy.selectWorkingFolders?.("client-new-thread:folders", ["/main", "/extra"]);
+    const selected = creation("startConversation", "gpt-6.1-sol", {
+      clientThreadId: "client-new-thread:folders",
+    }) as unknown[];
+    const expression = selected[1] as unknown[];
+    const args = expression[3] as Record<string, unknown>[];
+    args[0] = { ...args[0], projectId: "keep-project" };
+    fixture.post(selected);
+    const untouched = creation("startConversation", "gpt-6.1-sol", {
+      clientThreadId: "client-new-thread:other",
+    });
+    fixture.post(untouched);
+    const modified = ((fixture.sent[0] as unknown[])[1] as unknown[])[3] as Record<
+      string,
+      unknown
+    >[];
+    expect(modified[0]).toMatchObject({
+      cwd: "/main",
+      runtimeWorkspaceRoots: ["/main", "/extra"],
+      projectId: "keep-project",
+    });
+    expect(fixture.sent[1]).toEqual(untouched);
+  } finally {
+    routing.dispose();
+  }
+});

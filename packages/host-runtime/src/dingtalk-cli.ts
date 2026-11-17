@@ -40,15 +40,28 @@ export interface DingTalkCliOptions {
   cwd?: string;
   /** Runs on the configured DingTalk Host instead of the local CLI. */
   runImpl?: (args: readonly string[], timeoutMs: number) => Promise<DwsResult>;
+  /** Opens the event stream on a peer; null means this Host is local. */
+  openEventsImpl?: (input: {
+    onRecord(record: DwsEventRecord): void;
+    onExit?(): void;
+  }) => Promise<DingTalkEventStream | null>;
 }
 
 export interface DwsEventRecord {
   messageId: string;
   conversationId: string;
   senderName: string;
+  /** Sender openDingTalkId when dws provides it. */
   senderId?: string;
   text: string;
   createdAt: number;
+  kind: "group" | "direct";
+  atMe: boolean;
+  atAll: boolean;
+  senderUserId?: string;
+  conversationTitle?: string;
+  bot?: boolean;
+  mine?: boolean;
 }
 
 export function dwsExecutableCandidates(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -177,7 +190,12 @@ export function dwsErrorFromValue(value: Record<string, unknown> | null): {
       message: typeof error?.message === "string" ? error.message : null,
     };
   }
-  if (value.errorCode !== undefined && value.errorCode !== null) {
+  if (
+    value.errorCode !== undefined &&
+    value.errorCode !== null &&
+    value.errorCode !== 0 &&
+    value.errorCode !== "0"
+  ) {
     return {
       code: typeof value.errorCode === "string" ? value.errorCode : "operation_failed",
       message: typeof value.errorMsg === "string" ? value.errorMsg : null,
@@ -637,24 +655,71 @@ export function parseDwsEventLine(line: string): DwsEventRecord | null {
     return null;
   }
   if (!record(value)) return null;
-  const payload = record(value.payload) ? value.payload : value;
+  let data: unknown = value.data;
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  const payload = record(value.payload) ? value.payload : record(data) ? data : value;
   const messageId = string(payload.message_id) || string(payload.messageId);
   const conversationId = string(payload.conversation_id) || string(payload.conversationId);
   if (!messageId || !conversationId) return null;
   const senderId = string(payload.sender_open_dingtalk_id) || string(payload.senderId);
   const eventTime = parseDwsTime(payload.create_time) ?? parseDwsTime(payload.event_time);
+  const text = string(payload.content) || string(payload.text);
+  const eventType = string(payload.type) || string(value.event_type) || string(value.type);
+  if (!eventType.startsWith("user_im_message_receive_")) return null;
   return {
     messageId,
     conversationId,
     senderName: string(payload.sender) || "未知成员",
     ...(senderId ? { senderId } : {}),
-    text: string(payload.content) || string(payload.text),
-    createdAt: eventTime ?? Date.now(),
+    text,
+    createdAt: eventTime ?? parseDwsTime(payload.timestamp) ?? 0,
+    kind: eventType.includes("o2o") ? "direct" : "group",
+    ...(string(payload.sender_user_id) ? { senderUserId: string(payload.sender_user_id) } : {}),
+    ...(string(payload.conversation_title)
+      ? { conversationTitle: string(payload.conversation_title) }
+      : {}),
+    ...(payload.sendType === "bot" || payload.sender_type === "bot" ? { bot: true } : {}),
+    ...(payload.mine === true ? { mine: true } : {}),
+    atMe: payload.at_me === true,
+    atAll: /@所有人|<@all>/iu.test(text),
   };
 }
 
 export interface DingTalkEventStream {
   stop(): void;
+}
+
+export interface DingTalkPendingApproval {
+  taskId: string;
+  processInstanceId: string;
+  title: string;
+  originatorName: string;
+  originatorId: string | null;
+  formMessage: string;
+  createdAt: number;
+  url: string | null;
+}
+
+export type DingTalkCardTarget = { group: string } | { openDingTalkId: string };
+
+export interface DingTalkCardInput {
+  target: DingTalkCardTarget;
+  content: string;
+  flowStatus: 1 | 2 | 3 | 4 | 5;
+  atOpenDingTalkIds?: readonly string[];
+  atAll?: boolean;
+}
+
+export interface DingTalkCardResult {
+  ok: boolean;
+  bizId: string | null;
+  errorCode: string | null;
 }
 
 export interface DingTalkCli {
@@ -710,6 +775,21 @@ export interface DingTalkCli {
     text: string,
     options?: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean },
   ): Promise<{ ok: boolean; errorCode: string | null }>;
+  sendDirect(
+    openDingTalkId: string,
+    text: string,
+    options?: { atOpenDingTalkIds?: readonly string[]; atAll?: boolean },
+  ): Promise<{ ok: boolean; errorCode: string | null }>;
+  sendCard(input: DingTalkCardInput): Promise<DingTalkCardResult>;
+  updateCard(input: {
+    bizId: string;
+    content: string;
+    flowStatus: 1 | 2 | 3 | 4 | 5;
+  }): Promise<{ ok: boolean; errorCode: string | null }>;
+  pendingApprovals(limit: number): Promise<{
+    approvals: DingTalkPendingApproval[];
+    errorCode: string | null;
+  }>;
 }
 
 function formatDwsTime(ms: number): string {
@@ -724,6 +804,52 @@ function formatDwsTime(ms: number): string {
 
 function dataObject(result: DwsResult): Record<string, unknown> | null {
   return result.value;
+}
+
+function findString(value: unknown, keys: readonly string[], depth = 0): string | null {
+  if (depth > 4 || value === null || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findString(item, keys, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const entry = value as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = entry[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  for (const candidate of Object.values(entry)) {
+    const found = findString(candidate, keys, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function parsePendingApprovals(value: unknown): DingTalkPendingApproval[] {
+  if (!record(value)) return [];
+  const result = record(value.result) ? value.result : value;
+  const values = Array.isArray(result.values) ? result.values : [];
+  const approvals: DingTalkPendingApproval[] = [];
+  for (const item of values) {
+    if (!record(item)) continue;
+    const taskId = string(item.taskId);
+    const processInstanceId = string(item.processInstanceId);
+    const title = string(item.title);
+    if (!taskId || !processInstanceId || !title) continue;
+    approvals.push({
+      taskId,
+      processInstanceId,
+      title,
+      originatorName: string(item.originatorName) || "未知发起人",
+      originatorId: string(item.originatorId),
+      formMessage: string(item.formMassage) || string(item.formMessage),
+      createdAt: parseDwsTime(item.processCreateTime) ?? 0,
+      url: string(item.url),
+    });
+  }
+  return approvals;
 }
 
 export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli {
@@ -756,6 +882,8 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
     executable: () =>
       external ? Promise.resolve("external") : resolveDwsExecutable({ ...options, environment }),
     async openEvents(input) {
+      const remote = await options.openEventsImpl?.(input);
+      if (remote) return remote;
       if (external) return null;
       const executable = await resolveDwsExecutable({ ...options, environment });
       if (!executable) return null;
@@ -947,12 +1075,75 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         conversationId,
         "--content",
         text,
+        "--yes",
       ];
       const atIds = [...new Set((options.atOpenDingTalkIds ?? []).filter(Boolean))];
       if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
       if (options.atAll === true) args.push("--at-all");
       const result = await run(args, 30_000);
       return { ok: result.errorCode === null, errorCode: result.errorCode };
+    },
+    async sendDirect(openDingTalkId, text, options = {}) {
+      const args = [
+        "chat",
+        "message",
+        "send",
+        "--open-dingtalk-id",
+        openDingTalkId,
+        "--content",
+        text,
+        "--yes",
+      ];
+      const atIds = [...new Set((options.atOpenDingTalkIds ?? []).filter(Boolean))];
+      if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
+      if (options.atAll === true) args.push("--at-all");
+      const result = await run(args, 30_000);
+      return { ok: result.errorCode === null, errorCode: result.errorCode };
+    },
+    async sendCard(input) {
+      const args = ["chat", "+messages-send-card"];
+      if ("group" in input.target) {
+        args.push("--group", input.target.group);
+        const atIds = [...new Set((input.atOpenDingTalkIds ?? []).filter(Boolean))];
+        if (atIds.length > 0) args.push("--at-open-dingtalk-ids", atIds.join(","));
+        if (input.atAll === true) args.push("--at-all");
+      } else {
+        args.push("--receiver-open-dingtalk-id", input.target.openDingTalkId);
+      }
+      args.push("--content", input.content, "--flow-status", String(input.flowStatus), "--yes");
+      const result = await run(args, 30_000);
+      return {
+        ok: result.errorCode === null,
+        bizId: findString(result.value, ["bizId", "biz_id", "bizid"]),
+        errorCode: result.errorCode,
+      };
+    },
+    async updateCard(input) {
+      const result = await run(
+        [
+          "chat",
+          "+messages-update-card",
+          "--biz-id",
+          input.bizId,
+          "--content",
+          input.content,
+          "--flow-status",
+          String(input.flowStatus),
+          "--yes",
+        ],
+        30_000,
+      );
+      return { ok: result.errorCode === null, errorCode: result.errorCode };
+    },
+    async pendingApprovals(limit) {
+      const result = await run(
+        ["oa", "approval", "list-pending", "--limit", String(limit), "--page", "1"],
+        30_000,
+      );
+      return {
+        approvals: result.errorCode === null ? parsePendingApprovals(result.value) : [],
+        errorCode: result.errorCode,
+      };
     },
   };
 }

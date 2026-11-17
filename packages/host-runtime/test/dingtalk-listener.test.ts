@@ -85,3 +85,47 @@ describe("DingTalk event listener", () => {
     }
   });
 });
+
+it("holds the stream beyond page idle, then releases it when disabled", async () => {
+  vi.useFakeTimers();
+  const fake = fakeCli(true);
+  const listener = new DingTalkEventListener({
+    cli: fake.cli,
+    local: () => true,
+    authenticate: async () => true,
+    onRecord: () => undefined,
+  });
+  try {
+    listener.setHold(true);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(listener.running).toBe(true);
+    listener.setHold(false);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(listener.running).toBe(false);
+  } finally {
+    listener.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("retries failed startup without an unhandled rejection", async () => {
+  vi.useFakeTimers();
+  const fake = fakeCli(true);
+  fake.openEvents.mockRejectedValueOnce(new Error("ssh unavailable"));
+  const listener = new DingTalkEventListener({
+    cli: fake.cli,
+    local: () => true,
+    authenticate: async () => true,
+    onRecord: () => undefined,
+  });
+  try {
+    listener.setHold(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listener.running).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(listener.running).toBe(true);
+  } finally {
+    listener.dispose();
+    vi.useRealTimers();
+  }
+});

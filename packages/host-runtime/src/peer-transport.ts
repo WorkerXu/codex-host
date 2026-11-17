@@ -74,7 +74,7 @@ function defaultSpawn(
 }
 
 /** A SendEnv rule must never forward this machine's Runtime token over SSH. */
-function sshEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function peerSshEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(environment).filter(
       ([name]) => name !== DELEGATION_RUNTIME_ENDPOINT_ENV && name !== DELEGATION_RUNTIME_TOKEN_ENV,
@@ -166,7 +166,7 @@ export async function requestPeerRoute(input: {
     try {
       child = (input.spawnImpl ?? defaultSpawn)(command, args, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: sshEnvironment(input.environment),
+        env: peerSshEnvironment(input.environment),
       });
     } catch (error) {
       finish(() => {
