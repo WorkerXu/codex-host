@@ -952,7 +952,11 @@ export class DingTalkService {
             memberCount: conversation.memberCount ?? meta.memberCount,
           }
         : {}),
-      ...(atMeAt !== undefined && atMeAt > viewedAt ? { atMe: true } : {}),
+      atMe:
+        conversation.unreadCount > 0 &&
+        atMeAt !== undefined &&
+        atMeAt > viewedAt &&
+        !this.#active.has(conversation.conversationId),
     };
   }
 
@@ -969,10 +973,33 @@ export class DingTalkService {
     const result = await this.#cli.atMeHits(2, 50).catch(() => null);
     if (!result || result.errorCode !== null || this.#disposed) return false;
     const next = new Map<string, number>();
-    for (const hit of result?.hits ?? []) {
+    const candidates = new Map<string, number>();
+    for (const hit of result.hits) {
       if (hit.createdAt === null) continue;
-      next.set(hit.conversationId, Math.max(next.get(hit.conversationId) ?? 0, hit.createdAt));
+      candidates.set(
+        hit.conversationId,
+        Math.max(candidates.get(hit.conversationId) ?? 0, hit.createdAt),
+      );
     }
+    await mapLimit([...candidates], 3, async ([id, hitAt]) => {
+      const row = this.#list?.rows.find((row) => row.conversationId === id);
+      if (!row || row.unreadCount <= 0 || this.#active.has(id)) return;
+      const page = await this.#cli
+        .messages({ conversationId: id, limit: Math.min(row.unreadCount, 100) })
+        .catch(() => null);
+      if (!page || page.errorCode !== null) return;
+      const unread = page.messages
+        .slice()
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-row.unreadCount);
+      const firstUnreadAt = unread[0]?.createdAt;
+      if (
+        firstUnreadAt !== undefined &&
+        hitAt >= firstUnreadAt &&
+        hitAt <= (row.lastMessageAt ?? 0)
+      )
+        next.set(id, hitAt);
+    });
     const changed =
       next.size !== this.#atMe.size || [...next].some(([id, at]) => this.#atMe.get(id) !== at);
     this.#atMe = next;
@@ -1024,7 +1051,7 @@ export class DingTalkService {
       const updated: DingTalkConversation = {
         ...known,
         unreadCount: active ? 0 : known.unreadCount + 1,
-        atMe: active ? false : known.atMe || event.atMe,
+        atMe: active ? false : known.atMe,
         lastMessageAt: Math.max(known.lastMessageAt ?? 0, record.createdAt),
         preview: previewOf(record.text),
       };

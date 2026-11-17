@@ -716,3 +716,40 @@ it("normalizes a real @display-name mention for the background dispatcher and re
     service.dispose();
   }
 });
+
+it.each([
+  [-100, false],
+  [100, true],
+  [200, true],
+])("only tags @me within current DingTalk unread messages (%i)", async (offset, expected) => {
+  const env = await environment();
+  const fake = state({
+    unread: [conversation("a", 200, 2)],
+    messages: [100, 200].map((offset) => ({
+      messageId: `m${offset}`,
+      conversationId: "a",
+      senderName: "对方",
+      createdAt: RECENT_BASE + offset,
+      text: "消息",
+      unsupported: false,
+      mine: false,
+    })),
+  });
+  const cli = fakeCli(fake);
+  cli.atMeHits = async () => ({
+    hits: [{ conversationId: "a", messageId: "at", createdAt: RECENT_BASE + offset }],
+    errorCode: null,
+  });
+  const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+  vi.useFakeTimers();
+  try {
+    await service.conversations();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await service.conversations()).conversations[0]?.atMe).toBe(expected);
+    await service.markViewed("a", RECENT_BASE + 200);
+    expect((await service.conversations()).conversations[0]?.atMe).toBe(false);
+  } finally {
+    service.dispose();
+    vi.useRealTimers();
+  }
+});
