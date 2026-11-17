@@ -175,7 +175,11 @@ export function createJarvisGeminiQuery(options: JarvisGeminiQueryOptions): Jarv
       });
       if (!response.ok) {
         throw new JarvisQueryError(
-          response.status === 401 || response.status === 403 ? "unauthorized" : "gemini_failed",
+          response.status === 402
+            ? "quota_exhausted"
+            : response.status === 401 || response.status === 403
+              ? "unauthorized"
+              : "gemini_failed",
         );
       }
       let value: unknown;

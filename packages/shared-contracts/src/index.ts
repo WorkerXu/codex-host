@@ -384,6 +384,7 @@ export {
   jarvisBugSchema,
   jarvisBugConditionSchema,
   jarvisBugQuerySchema,
+  jarvisBugFallbackReasonSchema,
   jarvisBugSearchParamsSchema,
   jarvisBugSearchResultSchema,
   jarvisUserSchema,

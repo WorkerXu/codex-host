@@ -206,6 +206,18 @@ export const jarvisBugQuerySchema = z
   .strict();
 export type JarvisBugQuery = z.infer<typeof jarvisBugQuerySchema>;
 
+export const jarvisBugFallbackReasonSchema = z.enum([
+  "missing_key",
+  "quota_exhausted",
+  "unauthorized",
+  "timeout",
+  "network",
+  "invalid_response",
+  "gemini_failed",
+  "local_only",
+  "unrecognized_query",
+]);
+
 export const jarvisBugSearchResultSchema = z
   .object({
     available: z.boolean(),
@@ -215,7 +227,8 @@ export const jarvisBugSearchResultSchema = z
     total: z.number().int().nonnegative(),
     capped: z.boolean(),
     /** Optional for compatibility with older Hosts. */
-    source: z.literal("gemini").optional(),
+    source: z.enum(["gemini", "rules"]).optional(),
+    fallbackReason: jarvisBugFallbackReasonSchema.optional(),
   })
   .strict();
 export type JarvisBugSearchResult = z.infer<typeof jarvisBugSearchResultSchema>;

@@ -2,12 +2,13 @@
  * Structured Jarvis bug search behind the `@` entry.
  *
  * Gemini interprets the full query; only its project names are resolved.
- * Interpretation failures are returned to the UI without running a search.
+ * Interpretation failures use the deterministic parser and project resolver.
  * The search returns the matching set up to the documented cap.
  */
 import {
   JARVIS_MAX_SEARCH_BUGS,
   JARVIS_MAX_SEARCH_PROJECTS,
+  jarvisBugFallbackReasonSchema,
   type JarvisBug,
   type JarvisBugCondition,
   type JarvisBugQuery,
@@ -20,9 +21,11 @@ import {
   jarvisScopeLabel,
   jarvisSeverityLabel,
   jarvisStatusLabel,
+  parseJarvisBugRules,
   type JarvisBugOrder,
   type JarvisBugScope,
 } from "./jarvis-bug-query.js";
+import { resolveJarvisRuleProjects } from "./jarvis-bug-fallback.js";
 import {
   bugFromJarvisRow,
   type JarvisBugListOptions,
@@ -166,21 +169,71 @@ export class JarvisBugSearcher {
   }
 
   async search(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
-    if (!this.#isLocalHost) return failedSearch("local_only");
-    let query: JarvisBugQuery;
-    try {
-      query = await this.#interpreter.interpret(params.query, this.#now());
-    } catch (error) {
-      return failedSearch(error instanceof JarvisQueryError ? error.code : "gemini_failed");
+    const now = this.#now();
+    let query: JarvisBugQuery | undefined;
+    let fallbackReason: JarvisBugSearchResult["fallbackReason"];
+    if (this.#isLocalHost) {
+      try {
+        query = await this.#interpreter.interpret(params.query, now);
+        if (query.unrecognized !== null) {
+          fallbackReason = "unrecognized_query";
+          query = undefined;
+        }
+      } catch (error) {
+        const reason = jarvisBugFallbackReasonSchema.safeParse(
+          error instanceof JarvisQueryError ? error.code : "gemini_failed",
+        );
+        fallbackReason = reason.success ? reason.data : "gemini_failed";
+      }
+    } else {
+      fallbackReason = "local_only";
     }
-    if (query.unrecognized !== null) return failedSearch("unrecognized_query");
+    let rules: ReturnType<typeof parseJarvisBugRules> | null = null;
+    if (!query) {
+      rules = parseJarvisBugRules(params.query, now);
+      query = {
+        scope: rules.scope,
+        statuses: rules.statuses ?? [],
+        priorities: rules.priorities ?? [],
+        severities: rules.severities ?? [],
+        order: rules.order,
+        timeWindow:
+          rules.since === null && rules.until === null
+            ? null
+            : {
+                since: rules.since,
+                until: rules.until,
+                field: rules.timeField,
+              },
+        titleKeywords: rules.title ? [rules.title] : [],
+        projectNames: [],
+        unrecognized: null,
+      };
+    }
+    const metadata = {
+      source: rules ? ("rules" as const) : ("gemini" as const),
+      ...(fallbackReason ? { fallbackReason } : {}),
+    };
     const omit = new Set(params.omit ?? []);
     const [user, known] = await Promise.all([this.#cli.user(), this.#cli.projects()]).catch(
       () => [null, []] as const,
     );
-    if (!user) return failedSearch("not_logged_in");
-    const resolution = await this.#resolveProjects(query.projectNames, known, omit);
+    if (!user) return { ...failedSearch("not_logged_in"), ...metadata };
+    const resolution = rules
+      ? await resolveJarvisRuleProjects(rules.leftover, known, omit, (name) =>
+          this.#searchProjects(name).catch(() => []),
+        )
+      : await this.#resolveProjects(query.projectNames, known, omit);
+    if (rules && "keyword" in resolution) {
+      const title = [rules.title, resolution.keyword].filter(Boolean).join(" ");
+      query.titleKeywords = title ? [title] : [];
+    }
     const plan = this.#plan(query, omit);
+    if (rules) {
+      plan.timeField = rules.timeField;
+      plan.timeLabel = omit.has("time") ? null : rules.timeLabel;
+      plan.orderOmitted ||= !rules.orderExplicit;
+    }
     const projectNames = new Map<number, string>();
     for (const project of [...known, ...resolution.targets.values()]) {
       projectNames.set(project.id, project.name);
@@ -215,7 +268,7 @@ export class JarvisBugSearcher {
         : bugs.length;
     return {
       available: true,
-      source: "gemini",
+      ...metadata,
       errorCode: failed ? "cli_failed" : null,
       conditions: this.#conditions(plan, resolution, omit),
       bugs: bugs.slice(0, JARVIS_MAX_SEARCH_BUGS),

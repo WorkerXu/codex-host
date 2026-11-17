@@ -9,7 +9,11 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Bug from "lucide/dist/esm/icons/bug.mjs";
 
-import type { JarvisBug, JarvisBugCondition } from "@codexhost/shared-contracts";
+import type {
+  JarvisBug,
+  JarvisBugCondition,
+  JarvisBugSearchResult,
+} from "@codexhost/shared-contracts";
 
 import {
   createWorkbenchRow,
@@ -262,6 +266,7 @@ export interface JarvisModeChrome {
   input: HTMLInputElement;
   clear: HTMLButtonElement;
   chips: HTMLElement;
+  fallbackNotice: HTMLElement;
   summary: HTMLElement;
   results: HTMLElement;
 }
@@ -379,6 +384,15 @@ export function createJarvisModeChrome(
     padding: "0 12px 8px",
   });
   chips.hidden = true;
+  const fallbackNotice = document.createElement("div");
+  fallbackNotice.setAttribute("data-jarvis-fallback-notice", "true");
+  fallbackNotice.hidden = true;
+  style(fallbackNotice, {
+    "flex-shrink": "0",
+    padding: "0 12px 6px",
+    color: TEXT_TERTIARY,
+    font: "400 12px/16px system-ui, sans-serif",
+  });
   const summary = document.createElement("div");
   summary.setAttribute("data-jarvis-summary", "true");
   style(summary, {
@@ -412,8 +426,29 @@ export function createJarvisModeChrome(
   });
   results.append(scroller);
 
-  section.append(header, searchWrap, chips, summary, results);
-  return { section, back, input, clear, chips, summary, results };
+  section.append(header, searchWrap, chips, fallbackNotice, summary, results);
+  return { section, back, input, clear, chips, fallbackNotice, summary, results };
+}
+
+export function renderJarvisFallbackNotice(
+  notice: HTMLElement,
+  result: Pick<JarvisBugSearchResult, "source" | "fallbackReason">,
+): void {
+  const reasons: Record<NonNullable<JarvisBugSearchResult["fallbackReason"]>, string> = {
+    missing_key: "未配置 Gemini 密钥",
+    quota_exhausted: "Gemini 额度不足",
+    unauthorized: "Gemini 密钥无效",
+    timeout: "Gemini 请求超时",
+    network: "网络连接失败",
+    invalid_response: "Gemini 返回结果无效",
+    gemini_failed: "Gemini 请求失败",
+    local_only: "此机器未启用智能解析",
+    unrecognized_query: "部分查询未能识别",
+  };
+  notice.hidden = result.source !== "rules";
+  notice.textContent = notice.hidden
+    ? ""
+    : `智能解析暂不可用（${result.fallbackReason ? reasons[result.fallbackReason] : "Gemini 请求失败"}），已按基础规则解析`;
 }
 
 /** The scrollable list that owns bug rows. */

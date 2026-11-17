@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createJarvisConditionChip,
   createJarvisModeChrome,
+  renderJarvisFallbackNotice,
 } from "../src/renderer-jarvis-bug-view.js";
 import {
   createWorkbenchRow,
@@ -412,6 +413,38 @@ describe("focus-safe press", () => {
     expect(chipEvent.preventDefault).toHaveBeenCalled();
     expect(chipEvent.stopPropagation).toHaveBeenCalled();
   });
+
+  it.each([
+    ["quota_exhausted", "Gemini 额度不足"],
+    ["unauthorized", "Gemini 密钥无效"],
+    ["timeout", "Gemini 请求超时"],
+    ["missing_key", "未配置 Gemini 密钥"],
+    ["network", "网络连接失败"],
+    ["invalid_response", "Gemini 返回结果无效"],
+    ["gemini_failed", "Gemini 请求失败"],
+  ] as const)(
+    "shows a muted Chinese notice below the conditions for %s",
+    (fallbackReason, reason) => {
+      const { document } = documentWithView();
+      const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
+      expect(chrome.fallbackNotice.hidden).toBe(true);
+      renderJarvisFallbackNotice(chrome.fallbackNotice, { source: "rules", fallbackReason });
+      expect(chrome.fallbackNotice.hidden).toBe(false);
+      expect(chrome.fallbackNotice.textContent).toBe(
+        `智能解析暂不可用（${reason}），已按基础规则解析`,
+      );
+      const children = (chrome.section as unknown as FakeElement).children;
+      expect(children.indexOf(chrome.fallbackNotice as unknown as FakeElement)).toBe(
+        children.indexOf(chrome.chips as unknown as FakeElement) + 1,
+      );
+      expect((chrome.fallbackNotice as unknown as FakeElement).style.color).toContain(
+        "text-tertiary",
+      );
+      renderJarvisFallbackNotice(chrome.fallbackNotice, { source: "gemini" });
+      expect(chrome.fallbackNotice.hidden).toBe(true);
+      expect(chrome.fallbackNotice.textContent).toBe("");
+    },
+  );
 });
 
 describe("keyboard hand-off", () => {

@@ -25,6 +25,7 @@ import {
   renderJarvisBugRows,
   renderJarvisEmpty,
   renderJarvisLoading,
+  renderJarvisFallbackNotice,
 } from "./renderer-jarvis-bug-view.js";
 import { jarvisErrorText } from "./renderer-jarvis-client.js";
 import {
@@ -153,6 +154,7 @@ interface ModeState {
   input: HTMLInputElement;
   clear: HTMLButtonElement;
   chips: HTMLElement;
+  fallbackNotice: HTMLElement;
   summary: HTMLElement;
   results: HTMLElement;
   entries: { bug: JarvisBug; row: HTMLElement }[];
@@ -348,6 +350,8 @@ export function installRendererJarvisMention(
     state.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
     state.chips.replaceChildren();
     state.chips.hidden = true;
+    state.fallbackNotice.hidden = true;
+    state.fallbackNotice.textContent = "";
     renderJarvisLoading(ownerDocument, state.results);
     stopSlowTimer(state);
     const generation = state.generation;
@@ -437,6 +441,7 @@ export function installRendererJarvisMention(
     state.section.removeAttribute("aria-busy");
     state.lastQuery = state.input.value.trim();
     renderChips(state, result.conditions);
+    renderJarvisFallbackNotice(state.fallbackNotice, result);
     if (!result.available || result.errorCode) {
       state.summary.textContent = "";
     } else if (result.capped) {

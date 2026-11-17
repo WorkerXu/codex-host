@@ -19,7 +19,7 @@ export interface JarvisBugRuleMatch {
   timeLabel: string | null;
   title: string | null;
   leftover: string;
-  /** Fields without an explicit rule match; the model may settle them. */
+  /** Fields without an explicit rule match. */
   unresolved: {
     scope: boolean;
     status: boolean;
