@@ -1,7 +1,5 @@
-import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { HubAdminService } from "../src/hub-admin-service.js";
-import { mcphubCredentials, parseHubEnvironment } from "../src/hub-admin-credentials.js";
 import { HubAdminError, hubJson } from "../src/hub-admin-http.js";
 
 const secret = "test-secret-that-must-not-leak";
@@ -14,7 +12,8 @@ function service(handler: (url: string, init?: RequestInit) => Response | Promis
     fetcher,
     service: new HubAdminService({
       fetch: fetcher as typeof fetch,
-      mcpCredentials: async () => ({ "x-auth-token": secret }),
+      mcpConnection: { read: async () => secret, write: async () => {} },
+      mcpHeaderName: async () => "X-Test-Key",
       memoryCredentials: async () => ({ Authorization: secret }),
     }),
   };
@@ -85,7 +84,7 @@ describe("Hub admin boundary", () => {
     for (const [url, init] of fixture.fetcher.mock.calls) {
       expect(String(url)).toMatch(/^http:\/\/127\.0\.0\.1:3000\/api\//u);
       expect(init?.redirect).toBe("error");
-      expect(init?.headers).toMatchObject({ "x-auth-token": secret });
+      expect(init?.headers).toMatchObject({ "X-Test-Key": `Bearer ${secret}` });
     }
   });
   it("preserves native config and secrets during edits and percent-encodes names", async () => {
@@ -197,8 +196,8 @@ describe("Hub admin boundary", () => {
     }
   });
   it.each([
-    [401, "forbidden"],
-    [403, "forbidden"],
+    [401, "mcp-auth"],
+    [403, "mcp-auth"],
     [404, "missing"],
     [409, "conflict"],
   ])("maps HTTP %s", async (status, code) => {
@@ -220,51 +219,5 @@ describe("Hub admin boundary", () => {
         {},
       ),
     ).rejects.toThrow(String(message));
-  });
-});
-describe("Host-local credentials", () => {
-  const settings = {
-    users: [{ username: "admin", password: "hash", isAdmin: true }],
-    bearerKeys: [],
-  };
-  it("signs short-lived JWTs with the native session version and keeps credentials local", async () => {
-    const read = vi.fn(async (path: string) =>
-      path === "/etc/mcphub.env"
-        ? `JWT_SECRET='${secret}'\nMCPHUB_SETTING_PATH=/data/settings.json`
-        : JSON.stringify(settings),
-    );
-    const headers = await mcphubCredentials(read);
-    const token = String(headers["x-auth-token"]);
-    const [header, body, signature] = token.split(".");
-    expect(signature).toBe(
-      createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url"),
-    );
-    const payload = JSON.parse(Buffer.from(String(body), "base64url").toString());
-    expect(payload.exp - payload.iat).toBe(60);
-    expect(payload.user.sessionVersion).toMatch(/^[a-f0-9]{64}$/u);
-    expect(token).not.toContain(secret);
-    expect(read).toHaveBeenLastCalledWith("/data/settings.json");
-  });
-  it("stops at password hashes instead of inventing a JWT secret", async () => {
-    await expect(
-      mcphubCredentials(async (path) =>
-        path === "/etc/mcphub.env" ? "PORT=3000" : JSON.stringify(settings),
-      ),
-    ).rejects.toMatchObject({ code: "forbidden" });
-  });
-  it("uses only plaintext system all-access keys when available", async () => {
-    expect(
-      await mcphubCredentials(async (path) =>
-        path === "/etc/mcphub.env"
-          ? "PORT=3000"
-          : JSON.stringify({
-              ...settings,
-              bearerKeys: [{ enabled: true, accessType: "all", token: secret }],
-            }),
-      ),
-    ).toEqual({ Authorization: `Bearer ${secret}` });
-    expect(
-      parseHubEnvironment('# x\nPORT=3000\nINVALID\nJWT_SECRET="literal $value"'),
-    ).toMatchObject({ PORT: "3000", JWT_SECRET: "literal $value" });
   });
 });

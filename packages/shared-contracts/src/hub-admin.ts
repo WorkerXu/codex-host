@@ -5,6 +5,7 @@ export const HUB_ERROR_MESSAGES = {
   timeout: "连接超时",
   connection: "连接失败",
   forbidden: "无权限",
+  "mcp-auth": "密钥无效或权限不足",
   unavailable: "服务未运行",
   invalid: "请检查输入内容",
   failed: "操作失败",
@@ -47,7 +48,20 @@ const memoryLocator = {
   kind: z.enum(["chat", "experience", "fact"]),
   variant: z.enum(["working", "coding"]).nullable(),
 };
+export const hubMcpKeySchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(4096)
+  .regex(/^[\x21-\x7e]+$/u);
+const mcpConnection = z.strictObject({
+  configured: z.boolean(),
+  last4: z.string().length(4).nullable(),
+});
 export const hubAdminParamsSchema = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("mcpConnection") }),
+  z.strictObject({ op: z.literal("mcpConnect"), key: hubMcpKeySchema }),
+  z.strictObject({ op: z.literal("mcpDisconnect"), confirmed: z.literal(true) }),
   z.strictObject({ op: z.literal("servers") }),
   z.strictObject({
     op: z.literal("serverSave"),
@@ -121,6 +135,9 @@ export const hubMemorySchema = z.strictObject({
 export type HubMemory = z.infer<typeof hubMemorySchema>;
 const saved = z.strictObject({ ok: z.literal(true), token: z.string().optional() });
 export const hubResultSchemas = {
+  mcpConnection,
+  mcpConnect: mcpConnection,
+  mcpDisconnect: mcpConnection,
   servers: z.strictObject({ servers: z.array(hubServerSchema) }),
   serverSave: saved,
   serverDelete: saved,
