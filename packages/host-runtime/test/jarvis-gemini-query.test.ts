@@ -10,7 +10,6 @@ import {
   JARVIS_QUERY_MODEL,
 } from "../src/jarvis-gemini-query.js";
 import { JarvisService } from "../src/jarvis-service.js";
-import { createJarvisCli } from "../src/jarvis-cli.js";
 import { JarvisSettingsStore } from "../src/jarvis-settings.js";
 
 const NOW = Date.parse("2026-11-16T01:30:00+08:00");
@@ -234,15 +233,11 @@ describe("Jarvis Gemini structured query", () => {
         headers: expect.objectContaining({ "x-goog-api-key": "local-test-key" }),
       }),
     );
-    const cli = createJarvisCli({ executable: "/unused-jarvis-test-cli" });
-    vi.spyOn(cli, "user").mockResolvedValue({ id: 1, name: "测试" });
-    vi.spyOn(cli, "projects").mockResolvedValue([]);
-    const remote = new JarvisService({ settings, fetchImpl, cli, isLocalHost: false });
+    const remote = new JarvisService({ settings, fetchImpl, isLocalHost: false });
     expect(await remote.searchBugs({ query: "bug" })).toMatchObject({
-      available: true,
-      source: "rules",
-      fallbackReason: "local_only",
-      errorCode: null,
+      available: false,
+      source: "gemini",
+      errorCode: "local_only",
     });
     expect(readKey).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);

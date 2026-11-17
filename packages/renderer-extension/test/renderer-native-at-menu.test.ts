@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createJarvisConditionChip,
   createJarvisModeChrome,
-  renderJarvisFallbackNotice,
+  renderJarvisEmpty,
 } from "../src/renderer-jarvis-bug-view.js";
 import {
   createWorkbenchRow,
@@ -96,6 +96,11 @@ class FakeElement {
 
   remove(): void {
     this.parentElement?.removeChild(this);
+  }
+
+  replaceChildren(...nodes: FakeElement[]): void {
+    for (const child of [...this.children]) this.removeChild(child);
+    this.append(...nodes);
   }
 
   setAttribute(name: string, value: string): void {
@@ -417,34 +422,41 @@ describe("focus-safe press", () => {
   it.each([
     ["quota_exhausted", "Gemini 额度不足"],
     ["unauthorized", "Gemini 密钥无效"],
-    ["timeout", "Gemini 请求超时"],
     ["missing_key", "未配置 Gemini 密钥"],
+    ["timeout", "请求超时"],
     ["network", "网络连接失败"],
-    ["invalid_response", "Gemini 返回结果无效"],
-    ["gemini_failed", "Gemini 请求失败"],
-  ] as const)(
-    "shows a muted Chinese notice below the conditions for %s",
-    (fallbackReason, reason) => {
-      const { document } = documentWithView();
-      const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
-      expect(chrome.fallbackNotice.hidden).toBe(true);
-      renderJarvisFallbackNotice(chrome.fallbackNotice, { source: "rules", fallbackReason });
-      expect(chrome.fallbackNotice.hidden).toBe(false);
-      expect(chrome.fallbackNotice.textContent).toBe(
-        `智能解析暂不可用（${reason}），已按基础规则解析`,
-      );
-      const children = (chrome.section as unknown as FakeElement).children;
-      expect(children.indexOf(chrome.fallbackNotice as unknown as FakeElement)).toBe(
-        children.indexOf(chrome.chips as unknown as FakeElement) + 1,
-      );
-      expect((chrome.fallbackNotice as unknown as FakeElement).style.color).toContain(
-        "text-tertiary",
-      );
-      renderJarvisFallbackNotice(chrome.fallbackNotice, { source: "gemini" });
-      expect(chrome.fallbackNotice.hidden).toBe(true);
-      expect(chrome.fallbackNotice.textContent).toBe("");
-    },
-  );
+    ["invalid_response", "Gemini 查询理解结果无效，请重试"],
+  ])("shows only the Chinese reason and settings action for %s", (errorCode, reason) => {
+    const { document } = documentWithView();
+    const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
+    const onSettings = vi.fn();
+    renderJarvisEmpty(
+      document as unknown as Document,
+      chrome.results,
+      { available: false, errorCode, conditions: [], bugs: [], total: 0, capped: false },
+      "zh-CN",
+      onSettings,
+    );
+    expect(chrome.results.querySelector("span")?.textContent).toBe(reason);
+    const button = chrome.results.querySelector("[data-jarvis-settings]") as unknown as FakeElement;
+    expect(button.textContent).toBe("去设置");
+    const event = press();
+    button.dispatch("click", event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(button);
+    expect(chrome.results.querySelectorAll("button")).toHaveLength(1);
+    expect(chrome.results.querySelectorAll("span")).toHaveLength(1);
+    renderJarvisEmpty(
+      document as unknown as Document,
+      chrome.results,
+      { available: true, errorCode: null, conditions: [], bugs: [], total: 0, capped: false },
+      "zh-CN",
+      onSettings,
+    );
+    expect(chrome.results.querySelector("[data-jarvis-settings]")).toBeNull();
+    expect(chrome.results.querySelector("span")?.textContent).toContain("没有符合条件的 Bug");
+  });
 });
 
 describe("keyboard hand-off", () => {

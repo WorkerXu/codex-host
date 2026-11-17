@@ -21,12 +21,12 @@ Codex Composer 的原生 `@` 菜单提供「工作台」分组，里面有一行
 
 ## 搜索流水线
 
-Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis。Gemini key 使用本地 `~/.config/codexhost/gemini-api-key`，不传给 Renderer 或远程 Host。远程 Host 不读取 key、不调用 Gemini，使用基础规则查询。
+Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（Mac）的 Jarvis。Gemini key 使用本地 `~/.config/codexhost/gemini-api-key`，不传给 Renderer 或远程 Host。远程 Host 不读取 key、不执行查询理解，搜索返回 `local_only` 错误。
 
 1. **整句理解**：本地 Host 把完整查询交给 `gemini-3.5-flash-lite`，调用 Gemini API `generateContent`，通过 `responseMimeType=application/json` 和 `responseSchema` 返回固定字段：`scope`、`statuses`、`priorities`、`severities`、`order`、`timeWindow`、`titleKeywords`、`projectNames`、`unrecognized`。空数组表示不限对应条件，时间范围为空时为 `null`。时间区间使用 Unix 毫秒，包含 `since`、不包含 `until`，`field` 区分创建和更新时间。
 2. **上海时区与校验**：请求带上当前时刻、`Asia/Shanghai` 时区、当天日期和今天、昨天、本周、上周、本月的边界，模型据此换算相对时间。“最近的”只表示排序，不自动添加时间范围。返回 JSON 必须通过完整 schema 校验，不接受部分字段或不合法的时间区间。
-3. **智能解析失败时使用基础规则**：从读取 key 到响应读取、校验共用 3 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，用 `jarvis-bug-query.ts` 的规则继续解析和查询。规则从标题字段表达中抽取关键词，再把剩余文本用于项目解析；项目模糊命中超过 3 个且没有完整项目名依据时，保留原词作为标题候选。结果通过 `source=gemini|rules` 标记来源，规则兜底附带 `fallbackReason` 原因码。条件区下方用灰字显示中文说明：402 对应“Gemini 额度不足”、401/403 对应“Gemini 密钥无效”，其他原因区分未配置密钥、超时、网络失败和返回结果无效，不显示 API 错误原文。加载新查询或智能解析恢复后清除说明。设置页的“测试连接”仍单独报告模型及结构化输出能力是否可用。
-4. **智能解析的项目条件**：只有 `projectNames` 参与 `project list --scope visible --name <项目名>` 搜索，并与 `project list` 返回的本人 Bug 关联项目合并去重。项目名不会被缩短成其他搜索词，也不会改作标题关键词；同名迭代项目可以一起命中。用户点名的项目未命中时保留项目条件并返回空结果；没有项目条件时查询本人 Bug 关联项目。项目搜索结果短暂缓存，不预加载全部可见项目。
+3. **失败直接显示错误**：从读取 key 到响应读取、校验共用 3 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，页面显示错误；不执行规则解析、不继续查询 Bug、不回退远程 Host。错误区只显示中文原因和“去设置”入口：402 为“Gemini 额度不足”、401/403 为“Gemini 密钥无效”，并区分未配密钥、超时、网络失败和输出非法，不展示 API 错误原文，也不保留上次查询的结果或条件。结果用 `source=gemini` 标记来源。设置页的“测试连接”也验证同一个模型及结构化输出能力。
+4. **按模型点名解析项目**：只有 `projectNames` 参与 `project list --scope visible --name <项目名>` 搜索，并与 `project list` 返回的本人 Bug 关联项目合并去重。项目名不会被缩短成其他搜索词，也不会改作标题关键词；同名迭代项目可以一起命中。用户点名的项目未命中时保留项目条件并返回空结果；没有项目条件时查询本人 Bug 关联项目。项目搜索结果短暂缓存，不预加载全部可见项目。
 5. **精确取数与标题查询**：`titleKeywords` 逐个通过 `bug list --title` 查询，多个关键词按 OR 合并；项目与标题条件可以同时生效。作用域为“两者”时分别查询指派给我和我创建的，最终按 `projectId + bugId` 去重。并发 8，每次 CLI 查询每页 100 条、最多 200 条，最多查询 40 个项目，最多显示 200 条；达到限制时在 UI 标记截断。多个关键词或作用域可能重叠，截断时不把各查询的服务端总数直接相加。
 6. **本地过滤与排序**：状态、优先级、严重程度、标题关键词和时间窗口在本地再校验；Jarvis 无时区的时间戳按上海时间解读。按模型返回的顺序和时间字段排序；无时间字段时最新按更新时间、最早按创建时间。解析后的条件仍使用现有 chip 和稳定 key，删除 chip 会把该 key 作为 `omit` 传给 Host，并去掉对应条件。
 

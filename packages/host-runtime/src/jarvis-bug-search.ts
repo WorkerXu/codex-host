@@ -2,13 +2,12 @@
  * Structured Jarvis bug search behind the `@` entry.
  *
  * Gemini interprets the full query; only its project names are resolved.
- * Interpretation failures use the deterministic parser and project resolver.
+ * Interpretation failures are returned to the UI without running a search.
  * The search returns the matching set up to the documented cap.
  */
 import {
   JARVIS_MAX_SEARCH_BUGS,
   JARVIS_MAX_SEARCH_PROJECTS,
-  jarvisBugFallbackReasonSchema,
   type JarvisBug,
   type JarvisBugCondition,
   type JarvisBugQuery,
@@ -16,16 +15,6 @@ import {
   type JarvisBugSearchResult,
 } from "@codexhost/shared-contracts";
 
-import {
-  jarvisPriorityLabel,
-  jarvisScopeLabel,
-  jarvisSeverityLabel,
-  jarvisStatusLabel,
-  parseJarvisBugRules,
-  type JarvisBugOrder,
-  type JarvisBugScope,
-} from "./jarvis-bug-query.js";
-import { resolveJarvisRuleProjects } from "./jarvis-bug-fallback.js";
 import {
   bugFromJarvisRow,
   type JarvisBugListOptions,
@@ -73,11 +62,11 @@ interface ProjectResolution {
 }
 
 interface SearchPlan {
-  scope: JarvisBugScope;
+  scope: JarvisBugQuery["scope"];
   statuses: number[] | null;
   priorities: number[] | null;
   severities: number[] | null;
-  order: JarvisBugOrder;
+  order: JarvisBugQuery["order"];
   timeField: "create" | "update";
   since: number | null;
   until: number | null;
@@ -115,6 +104,10 @@ function timestamp(value: string | undefined): number {
 
 function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
+}
+
+function conditionLabel(value: number, labels: Readonly<Record<number, string>>): string {
+  return labels[value] ?? String(value);
 }
 
 function failedSearch(errorCode: string): JarvisBugSearchResult {
@@ -169,71 +162,21 @@ export class JarvisBugSearcher {
   }
 
   async search(params: JarvisBugSearchParams): Promise<JarvisBugSearchResult> {
-    const now = this.#now();
-    let query: JarvisBugQuery | undefined;
-    let fallbackReason: JarvisBugSearchResult["fallbackReason"];
-    if (this.#isLocalHost) {
-      try {
-        query = await this.#interpreter.interpret(params.query, now);
-        if (query.unrecognized !== null) {
-          fallbackReason = "unrecognized_query";
-          query = undefined;
-        }
-      } catch (error) {
-        const reason = jarvisBugFallbackReasonSchema.safeParse(
-          error instanceof JarvisQueryError ? error.code : "gemini_failed",
-        );
-        fallbackReason = reason.success ? reason.data : "gemini_failed";
-      }
-    } else {
-      fallbackReason = "local_only";
+    if (!this.#isLocalHost) return failedSearch("local_only");
+    let query: JarvisBugQuery;
+    try {
+      query = await this.#interpreter.interpret(params.query, this.#now());
+    } catch (error) {
+      return failedSearch(error instanceof JarvisQueryError ? error.code : "gemini_failed");
     }
-    let rules: ReturnType<typeof parseJarvisBugRules> | null = null;
-    if (!query) {
-      rules = parseJarvisBugRules(params.query, now);
-      query = {
-        scope: rules.scope,
-        statuses: rules.statuses ?? [],
-        priorities: rules.priorities ?? [],
-        severities: rules.severities ?? [],
-        order: rules.order,
-        timeWindow:
-          rules.since === null && rules.until === null
-            ? null
-            : {
-                since: rules.since,
-                until: rules.until,
-                field: rules.timeField,
-              },
-        titleKeywords: rules.title ? [rules.title] : [],
-        projectNames: [],
-        unrecognized: null,
-      };
-    }
-    const metadata = {
-      source: rules ? ("rules" as const) : ("gemini" as const),
-      ...(fallbackReason ? { fallbackReason } : {}),
-    };
+    if (query.unrecognized !== null) return failedSearch("unrecognized_query");
     const omit = new Set(params.omit ?? []);
     const [user, known] = await Promise.all([this.#cli.user(), this.#cli.projects()]).catch(
       () => [null, []] as const,
     );
-    if (!user) return { ...failedSearch("not_logged_in"), ...metadata };
-    const resolution = rules
-      ? await resolveJarvisRuleProjects(rules.leftover, known, omit, (name) =>
-          this.#searchProjects(name).catch(() => []),
-        )
-      : await this.#resolveProjects(query.projectNames, known, omit);
-    if (rules && "keyword" in resolution) {
-      const title = [rules.title, resolution.keyword].filter(Boolean).join(" ");
-      query.titleKeywords = title ? [title] : [];
-    }
+    if (!user) return failedSearch("not_logged_in");
+    const resolution = await this.#resolveProjects(query.projectNames, known, omit);
     const plan = this.#plan(query, omit);
-    if (rules) {
-      plan.timeField = rules.timeField;
-      plan.timeLabel = omit.has("time") ? null : rules.timeLabel;
-      plan.orderOmitted ||= !rules.orderExplicit;
-    }
     const projectNames = new Map<number, string>();
     for (const project of [...known, ...resolution.targets.values()]) {
       projectNames.set(project.id, project.name);
@@ -268,7 +211,7 @@ export class JarvisBugSearcher {
         : bugs.length;
     return {
       available: true,
-      ...metadata,
+      source: "gemini",
       errorCode: failed ? "cli_failed" : null,
       conditions: this.#conditions(plan, resolution, omit),
       bugs: bugs.slice(0, JARVIS_MAX_SEARCH_BUGS),
@@ -437,7 +380,12 @@ export class JarvisBugSearcher {
       conditions.push(condition);
     };
     if (!plan.scopeOmitted) {
-      push({ key: `scope:${plan.scope}`, kind: "scope", label: jarvisScopeLabel(plan.scope) });
+      push({
+        key: `scope:${plan.scope}`,
+        kind: "scope",
+        label:
+          plan.scope === "created" ? "我创建的" : plan.scope === "both" ? "指派或创建" : "指派给我",
+      });
     }
     if (plan.statuses) {
       if (plan.statuses.length >= 3) {
@@ -447,7 +395,7 @@ export class JarvisBugSearcher {
           push({
             key: `status:${status}`,
             kind: "status",
-            label: jarvisStatusLabel([status]),
+            label: conditionLabel(status, { 1: "未解决", 2: "已解决", 3: "已关闭" }),
           });
         }
       }
@@ -457,7 +405,7 @@ export class JarvisBugSearcher {
         push({
           key: `priority:${priority}`,
           kind: "priority",
-          label: jarvisPriorityLabel([priority]),
+          label: conditionLabel(priority, { 1: "高优先级", 2: "中优先级", 3: "低优先级" }),
         });
       }
     }
@@ -466,7 +414,7 @@ export class JarvisBugSearcher {
         push({
           key: `severity:${severity}`,
           kind: "severity",
-          label: jarvisSeverityLabel([severity]),
+          label: conditionLabel(severity, { 1: "致命", 2: "严重", 3: "一般", 4: "低" }),
         });
       }
     }

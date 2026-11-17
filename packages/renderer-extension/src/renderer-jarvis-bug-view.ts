@@ -20,6 +20,7 @@ import {
   createWorkbenchSection,
   keepEditorFocusOnPress,
 } from "./renderer-native-at-menu.js";
+import { jarvisErrorText } from "./renderer-jarvis-client.js";
 import { createJarvisMark } from "./settings/jarvis-icon.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
@@ -266,7 +267,6 @@ export interface JarvisModeChrome {
   input: HTMLInputElement;
   clear: HTMLButtonElement;
   chips: HTMLElement;
-  fallbackNotice: HTMLElement;
   summary: HTMLElement;
   results: HTMLElement;
 }
@@ -384,15 +384,6 @@ export function createJarvisModeChrome(
     padding: "0 12px 8px",
   });
   chips.hidden = true;
-  const fallbackNotice = document.createElement("div");
-  fallbackNotice.setAttribute("data-jarvis-fallback-notice", "true");
-  fallbackNotice.hidden = true;
-  style(fallbackNotice, {
-    "flex-shrink": "0",
-    padding: "0 12px 6px",
-    color: TEXT_TERTIARY,
-    font: "400 12px/16px system-ui, sans-serif",
-  });
   const summary = document.createElement("div");
   summary.setAttribute("data-jarvis-summary", "true");
   style(summary, {
@@ -426,29 +417,8 @@ export function createJarvisModeChrome(
   });
   results.append(scroller);
 
-  section.append(header, searchWrap, chips, fallbackNotice, summary, results);
-  return { section, back, input, clear, chips, fallbackNotice, summary, results };
-}
-
-export function renderJarvisFallbackNotice(
-  notice: HTMLElement,
-  result: Pick<JarvisBugSearchResult, "source" | "fallbackReason">,
-): void {
-  const reasons: Record<NonNullable<JarvisBugSearchResult["fallbackReason"]>, string> = {
-    missing_key: "未配置 Gemini 密钥",
-    quota_exhausted: "Gemini 额度不足",
-    unauthorized: "Gemini 密钥无效",
-    timeout: "Gemini 请求超时",
-    network: "网络连接失败",
-    invalid_response: "Gemini 返回结果无效",
-    gemini_failed: "Gemini 请求失败",
-    local_only: "此机器未启用智能解析",
-    unrecognized_query: "部分查询未能识别",
-  };
-  notice.hidden = result.source !== "rules";
-  notice.textContent = notice.hidden
-    ? ""
-    : `智能解析暂不可用（${result.fallbackReason ? reasons[result.fallbackReason] : "Gemini 请求失败"}），已按基础规则解析`;
+  section.append(header, searchWrap, chips, summary, results);
+  return { section, back, input, clear, chips, summary, results };
 }
 
 /** The scrollable list that owns bug rows. */
@@ -626,17 +596,23 @@ export function renderJarvisBugRows(
   return entries;
 }
 
-export interface JarvisEmptyAction {
-  label: string;
-  onSelect(opener: HTMLElement): void;
-}
-
 export function renderJarvisEmpty(
   document: Document,
   results: HTMLElement,
-  message: string,
-  action?: JarvisEmptyAction,
+  result: JarvisBugSearchResult,
+  locale: RendererSettingsLocale,
+  onSettings?: (opener: HTMLElement) => void,
 ): void {
+  const failed = !result.available || result.errorCode !== null;
+  const message = failed
+    ? result.errorCode === "not_logged_in"
+      ? locale === "zh-CN"
+        ? "Jarvis 未安装或未登录"
+        : "Jarvis is not installed or signed in"
+      : jarvisErrorText(result.errorCode, locale)
+    : locale === "zh-CN"
+      ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
+      : "No matching bugs. Try removing a condition or rephrasing.";
   const scroller = jarvisResultsScroller(results);
   scroller.replaceChildren();
   scroller.scrollTop = 0;
@@ -650,11 +626,11 @@ export function renderJarvisEmpty(
   const messageText = document.createElement("span");
   messageText.textContent = message;
   empty.append(messageText);
-  if (action) {
+  if (failed && onSettings) {
     const link = document.createElement("button");
     link.type = "button";
     link.setAttribute("data-jarvis-settings", "true");
-    link.textContent = action.label;
+    link.textContent = locale === "zh-CN" ? "去设置" : "Open settings";
     link.style.cssText =
       "margin-left:4px;border:0;background:transparent;color:" +
       TEXT_PRIMARY +
@@ -663,7 +639,7 @@ export function renderJarvisEmpty(
     link.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      action.onSelect(link);
+      onSettings(link);
     });
     empty.append(link);
   }

@@ -105,23 +105,14 @@ function searcher(cli: JarvisBugSearchCli, values: Partial<JarvisBugQuery> = {})
   return { api, interpret };
 }
 
-function fallbackSearcher(cli: JarvisBugSearchCli) {
-  const { api, interpret } = searcher(cli);
-  interpret.mockRejectedValue(new JarvisQueryError("quota_exhausted"));
-  return api;
-}
-
 describe("Jarvis Gemini bug search", () => {
   it.each([
     [402, "quota_exhausted"],
     [401, "unauthorized"],
     [403, "unauthorized"],
-  ])("searches the real title query with rules after HTTP %i", async (status, reason) => {
-    const cli = fakeCli([
-      bug({ id: 80, projectId: 9002, bugTitle: "发货失败" }),
-      bug({ id: 81, projectId: 9002, bugTitle: "发货失败", status: 2 }),
-      bug({ id: 82, projectId: 9001, bugTitle: "登录失败" }),
-    ]);
+    [500, "gemini_failed"],
+  ])("returns an error without querying Jarvis after HTTP %i", async (status, code) => {
+    const cli = fakeCli([bug({ id: 80, projectId: 9002, bugTitle: "发货失败" })]);
     const interpreter = createJarvisGeminiQuery({
       readApiKey: async () => "test-key",
       fetchImpl: async () =>
@@ -130,137 +121,63 @@ describe("Jarvis Gemini bug search", () => {
           { status: Number(status) },
         ),
     });
-    const api = new JarvisBugSearcher({ cli, interpreter, isLocalHost: true, now: () => NOW });
-    const result = await api.search({ query: "我还没处理的标题有发货的" });
-    expect(result).toMatchObject({
-      available: true,
-      source: "rules",
-      fallbackReason: reason,
-      errorCode: null,
-      total: 1,
-      bugs: [{ id: 80 }],
-    });
-    expect(result.conditions).toEqual([
-      { key: "scope:assigned", kind: "scope", label: "指派给我" },
-      { key: "status:1", kind: "status", label: "未解决" },
-      { key: "title", kind: "title", label: "标题含「发货」" },
-    ]);
-    expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(JSON.stringify(result)).not.toContain("prepayment");
-    const omitted = await api.search({
+    const result = await new JarvisBugSearcher({ cli, interpreter, isLocalHost: true }).search({
       query: "我还没处理的标题有发货的",
-      omit: ["title", "status:1"],
     });
-    expect(omitted.total).toBe(3);
-    expect(omitted.conditions).toEqual([
-      { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    ]);
+    expect(result).toEqual({
+      available: false,
+      source: "gemini",
+      errorCode: code,
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    });
+    expect(cli.user).not.toHaveBeenCalled();
+    expect(cli.projects).not.toHaveBeenCalled();
+    expect(cli.searchProjects).not.toHaveBeenCalled();
+    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("prepayment");
   });
 
-  it.each(["missing_key", "invalid_response", "timeout"])(
-    "continues searching after a real %s failure",
-    async (failure) => {
+  it.each(["missing_key", "invalid_response", "timeout", "network"])(
+    "returns %s without CLI queries",
+    async (code) => {
       vi.useFakeTimers();
-      const cli = fakeCli([bug({ id: 83, projectId: 9002, bugTitle: "发货失败" })]);
-      const fetchImpl = vi.fn(async () =>
-        failure === "timeout"
-          ? new Promise<Response>(() => {})
-          : Response.json({
-              candidates: [{ finishReason: "STOP", content: { parts: [{ text: "{}" }] } }],
-            }),
-      );
+      const cli = fakeCli([]);
+      const fetchImpl = vi.fn(async () => {
+        if (code === "timeout") return new Promise<Response>(() => {});
+        if (code === "network") throw new Error("raw network failure");
+        return Response.json({
+          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "{}" }] } }],
+        });
+      });
       const interpreter = createJarvisGeminiQuery({
-        readApiKey: async () => (failure === "missing_key" ? null : "key"),
+        readApiKey: async () => (code === "missing_key" ? null : "key"),
         fetchImpl,
       });
-      const pending = new JarvisBugSearcher({
-        cli,
-        interpreter,
-        isLocalHost: true,
-        now: () => NOW,
-      }).search({ query: "我还没处理的标题有发货的" });
-      if (failure === "timeout") await vi.advanceTimersByTimeAsync(3_000);
-      expect(await pending).toMatchObject({
-        available: true,
-        source: "rules",
-        fallbackReason: failure,
-        errorCode: null,
-        total: 1,
+      const pending = new JarvisBugSearcher({ cli, interpreter, isLocalHost: true }).search({
+        query: "我还没处理完成的bug",
       });
-      if (failure === "missing_key") expect(fetchImpl).not.toHaveBeenCalled();
-    },
-  );
-
-  it("preserves the recent project example and combined project/title rules", async () => {
-    const cli = fakeCli([
-      bug({ id: 84, projectId: 9003, bugTitle: "登录失败" }),
-      bug({ id: 85, projectId: 9004, bugTitle: "支付失败" }),
-    ]);
-    const api = fallbackSearcher(cli);
-    const recent = await api.search({ query: "安心买的最近的bug" });
-    expect(recent.total).toBe(2);
-    expect(recent.conditions).toContainEqual({
-      key: "project:安心买",
-      kind: "project",
-      label: "安心买 ×2 个项目",
-    });
-    expect(recent.conditions).toContainEqual({ key: "order:newest", kind: "order", label: "最新" });
-    expect(recent.conditions.some(({ kind }) => kind === "title")).toBe(false);
-    const combined = await api.search({ query: "安心买的标题含登录的bug" });
-    expect(combined.bugs.map(({ id }) => id)).toEqual([84]);
-    expect(combined.conditions).toContainEqual({
-      key: "project:安心买",
-      kind: "project",
-      label: "安心买 ×2 个项目",
-    });
-    expect(combined.conditions).toContainEqual({
-      key: "title",
-      kind: "title",
-      label: "标题含「登录」",
-    });
-    expect(cli.searchProjects).toHaveBeenCalledExactlyOnceWith("安心买");
-  });
-
-  it("restores project variants and removal of a project chip matched from a longer phrase", async () => {
-    const cli = fakeCli([bug({ id: 86, projectId: 9003, bugTitle: "支付失败" })]);
-    const api = fallbackSearcher(cli);
-    const first = await api.search({ query: "安心买支付的bug" });
-    expect(first.total).toBe(1);
-    expect(first.conditions).toContainEqual({
-      key: "project:安心买",
-      kind: "project",
-      label: "安心买 ×2 个项目",
-    });
-    const omitted = await api.search({ query: "安心买支付的bug", omit: ["project:安心买"] });
-    expect(omitted.conditions.some(({ kind }) => kind === "project")).toBe(false);
-    expect(omitted.conditions).toContainEqual({
-      key: "title",
-      kind: "title",
-      label: "标题含「安心买支付」",
-    });
-  });
-
-  it.each(["visible", "known", "variant"])(
-    "preserves the broad %s project-match guard in rule fallback",
-    async (source) => {
-      const cli = fakeCli([bug({ id: 87, projectId: 9002, bugTitle: "支付失败" })]);
-      const broad = Array.from({ length: 4 }, (_, index) => ({
-        id: 9100 + index,
-        name: `支付平台${index}`,
-      }));
-      vi.mocked(cli.projects).mockResolvedValue(source === "known" ? [...KNOWN, ...broad] : KNOWN);
-      vi.mocked(cli.searchProjects).mockImplementation(async (name) =>
-        source !== "known" && name === "支付" ? broad : [],
-      );
-      const keyword = source === "variant" ? "支付失败" : "支付";
-      const result = await fallbackSearcher(cli).search({ query: `${keyword}的bug` });
-      expect(result.conditions.some(({ kind }) => kind === "project")).toBe(false);
-      expect(result.conditions).toContainEqual({
-        key: "title",
-        kind: "title",
-        label: `标题含「${keyword}」`,
+      if (code === "timeout") {
+        await vi.advanceTimersByTimeAsync(2_999);
+        expect(cli.bugs).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(await pending).toEqual({
+        available: false,
+        source: "gemini",
+        errorCode: code,
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
       });
-      expect(result.total).toBe(1);
+      if (code === "missing_key") expect(fetchImpl).not.toHaveBeenCalled();
+      expect(cli.user).not.toHaveBeenCalled();
+      expect(cli.projects).not.toHaveBeenCalled();
+      expect(cli.searchProjects).not.toHaveBeenCalled();
+      expect(cli.bugs).not.toHaveBeenCalled();
     },
   );
 
@@ -506,41 +423,31 @@ describe("Jarvis Gemini bug search", () => {
     "invalid_response",
     "unauthorized",
     "gemini_failed",
-  ])("falls back to rules after %s", async (code) => {
+  ])("returns %s without running rules or CLI queries", async (code) => {
     const cli = fakeCli([bug({ id: 70, projectId: 9002 })]);
     const { api, interpret } = searcher(cli);
     interpret.mockRejectedValue(new JarvisQueryError(code));
-    const result = await api.search({ query: "我还没处理完成的bug" });
-    expect(result).toMatchObject({
-      available: true,
-      source: "rules",
-      fallbackReason: code,
-      errorCode: null,
-      total: 1,
-      bugs: [{ id: 70 }],
+    expect(await api.search({ query: "我还没处理完成的bug" })).toEqual({
+      available: false,
+      source: "gemini",
+      errorCode: code,
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
     });
-    expect(result.conditions).toEqual([
-      { key: "scope:assigned", kind: "scope", label: "指派给我" },
-      { key: "status:1", kind: "status", label: "未解决" },
-    ]);
+    expect(cli.user).not.toHaveBeenCalled();
+    expect(cli.projects).not.toHaveBeenCalled();
     expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(cli.bugs).toHaveBeenCalledWith(
-      9002,
-      expect.objectContaining({ statuses: [1], createdByMe: false }),
-    );
+    expect(cli.bugs).not.toHaveBeenCalled();
   });
 
-  it("uses rules when Gemini cannot recognize the query", async () => {
+  it("surfaces unrecognized text instead of silently dropping it", async () => {
     const cli = fakeCli([]);
     expect(
       await searcher(cli, { unrecognized: "不明条件" }).api.search({ query: "不明条件的bug" }),
-    ).toMatchObject({
-      available: true,
-      source: "rules",
-      fallbackReason: "unrecognized_query",
-      errorCode: null,
-    });
-    expect(cli.bugs).toHaveBeenCalled();
+    ).toMatchObject({ available: false, errorCode: "unrecognized_query" });
+    expect(cli.bugs).not.toHaveBeenCalled();
   });
 
   it("does not invoke the model on a remote Host", async () => {
@@ -548,13 +455,11 @@ describe("Jarvis Gemini bug search", () => {
     const interpret = vi.fn();
     const api = new JarvisBugSearcher({ cli, interpreter: { interpret }, isLocalHost: false });
     expect(await api.search({ query: "我还没处理完成的bug" })).toMatchObject({
-      available: true,
-      source: "rules",
-      fallbackReason: "local_only",
-      errorCode: null,
+      available: false,
+      errorCode: "local_only",
     });
     expect(interpret).not.toHaveBeenCalled();
-    expect(cli.bugs).toHaveBeenCalled();
+    expect(cli.bugs).not.toHaveBeenCalled();
   });
 
   it("reports missing authentication and CLI failure", async () => {
