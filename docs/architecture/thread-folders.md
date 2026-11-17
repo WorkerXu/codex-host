@@ -26,6 +26,20 @@ Composer 上方的「工作文件夹」显示主要目录的末级名称和额�
 
 Desktop 按 Thread ID 分配项目。目录改写不迁移项目，也不直接写 `.codex-global-state.json`。
 
+## 从代码仓库添加
+
+工作文件夹菜单提供「从仓库添加…」，弹窗按 GitHub / GitLab 分页签展示自己的仓库首屏（最多 20 项），包含目录名、命名空间、简短说明和最近活动日期。搜索由服务端执行，输入期间旧结果立即清除，过期回复丢弃；Tab、上下方向键、Home / End 和 Enter 可选择仓库。GitHub 通过 Mac 的 `/opt/homebrew/bin/gh api` 读取 `user/repos?affiliation=owner&sort=pushed&direction=desc&per_page=20`，搜索限定已登录用户；GitLab 固定使用 `https://gitlab.xianghuanji.com/api/v4/projects?membership=true&order_by=last_activity_at&per_page=20&search=`。仓库地址由 Host 已读取的列表取得，Renderer 提交仓库 ID，不接受任意克隆 URL。
+
+目标机器沿用当前对话的 Host。本机默认克隆位置为 `~/Downloads`；选中仓库后通过 `appServices.fileAttachments.pickFiles({kind:"directory", allowMultiple:false, pickerTitle:"选择克隆位置"})` 选择父目录，「更改位置…」可重新打开，接口不可用才退回目录子视图。该 Desktop 接口没有已核验的 `defaultPath` 参数，因此应用的默认目标为 Downloads，系统窗口的初始位置沿用 Desktop / 系统状态。远程默认 `~/projects`（缺少时创建），通过 Mac 使用现有 peer SSH alias 读取子目录，复用同一个目录浏览子视图；进入目录、路径输入、内部滚动和 Esc 返回一致。不会在服务器上调用本机文件夹选择器。
+
+所有 GitHub、GitLab 与 git 网络访问均发生在 Desktop 所在的 Mac。Mac 先在临时目录克隆；本机目标复制完整 checkout，远程目标使用包含 `.git` 的 tar 包经 Mac 已配置 peer 的 SSH 连接传输。最终地址为 `<所选父目录>/<仓库目录名>`，保留原始 `origin`，远程解包不沿用 Mac 的文件所有者，文件归接收用户所有。状态按列出、克隆、传输、完成显示；成功保存工作文件夹后显示结果确认。克隆失败、无权限、连接失败均只返回固定错误码，由 Renderer 显示中文说明，不透传子进程输出。
+
+预检查发现目标已经存在时，不启动克隆，也不改动目标；弹窗要求选择其他位置，或明确选择「使用已有文件夹」。后者只把经过验证的目录加入对话，不覆盖、不执行克隆。空目录、非空目录和文件均不直接覆盖；文件不能作为工作文件夹加入。最终创建还使用独占 mkdir，防止预检查后的竞态覆盖。操作产生的临时 checkout、askpass 脚本和传输包在成功/失败后清理；传输失败只清理本次独占创建的远程目录。
+
+通用设置的「代码仓库」与「模型服务」使用同一卡片 / 行组件。GitHub 只读显示 `gh` 的登录用户。GitLab 访问令牌需要 `read_api`、`read_repository`，提供测试、更换、清除；Mac Host 原子写入 `~/.config/codexhost/gitlab-token`（0600），公开状态只含 configured 和末四位，不返回令牌。GitLab HTTPS 克隆使用一次性 `GIT_ASKPASS` 脚本与该次 git 子进程的环境，令牌不进入远程 URL、git 参数、`.git/config` 或 SSH 传输环境。令牌输入在保存、取消或卸载时清空。
+
+已知网络限制：复制到服务器的 GitLab 仓库保留原始 GitLab origin；服务器无法访问内网 GitLab 时，不能自行 fetch / pull / push。本功能不把 Mac 令牌同步到服务器，也不改变服务器网络。远程传输需要该 peer 可执行 `python3`、`tar`。
+
 ## 持久化与 Harness
 
 每个执行 Host 在 `${CODEXHOST_DATA_DIR:-~/.codexhost}/thread-folders/` 保存自己的选择，因此 Host 文件系统加 Thread ID 构成命名空间。文件名是 Thread ID 的 SHA-256，内容包含 `folders`、`appliedFolders`、`changedAt` 和变更记录。写入通过临时文件与 rename 原子替换，最近目录来自同一 Host 的记录。旧项目组文件不读取、不迁移、不删除。
@@ -33,6 +47,8 @@ Desktop 按 Thread ID 分配项目。目录改写不迁移项目，也不直接�
 外部 Harness 在下一轮开始前重新打开同一个 Native Session。运行中的轮次或后台工作不会被目录切换打断；恢复沿用 native ref、配置与历史映射。原 Mapping Store 的 cwd 保留原生会话定位语义，加载的 Thread 使用当前执行 cwd。
 
 Adapter 通过可选 `additionalDirectories` 能力声明原生额外目录支持。Claude Code 将额外目录传到官方 SDK 的 `additionalDirectories`（原生 `--add-dir` 语义），Broker 也传递这些原生选项。其他 Adapter 使用主要目录；chip tooltip 和弹窗说明这一限制，发送给 Harness 的变更说明只列有效目录。
+
+Host 回答目录能力前等待安装的 Harness 插件加载完成，避免远程首次读取时把尚未加载的 Claude Code Adapter 误判为仅支持主要目录。插件不可用时不会硬编码声称具有能力。
 
 ## Desktop 绑定边界
 
