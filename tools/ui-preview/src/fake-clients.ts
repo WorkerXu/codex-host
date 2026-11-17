@@ -146,6 +146,9 @@ export function createFakeDingTalkClient(
       await sleep(40);
       return conversationsResult();
     },
+    async details(rows) {
+      return [...rows];
+    },
     async preview(conversationId) {
       await sleep(20);
       const row = conversations.find((item) => item.conversationId === conversationId);

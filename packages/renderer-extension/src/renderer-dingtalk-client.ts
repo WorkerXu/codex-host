@@ -4,6 +4,9 @@ import {
   DINGTALK_MESSAGES_METHOD,
   DINGTALK_MEMBERS_METHOD,
   DINGTALK_PREVIEW_METHOD,
+  DINGTALK_DETAILS_METHOD,
+  dingtalkDetailsSchema,
+  type DingTalkConversation,
   DINGTALK_RESOURCE_METHOD,
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_SEARCH_METHOD,
@@ -68,6 +71,7 @@ export interface RendererDingTalkClient {
   endSession(): void;
   status(refresh?: boolean): Promise<DingTalkStatus>;
   conversations(): Promise<DingTalkConversationsResult>;
+  details(conversations: readonly DingTalkConversation[]): Promise<DingTalkConversation[]>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
   members(conversationId: string): Promise<DingTalkMembersResult>;
@@ -301,13 +305,20 @@ export function createRendererDingTalkClient(
         await request(DINGTALK_CONVERSATIONS_METHOD, {}),
       );
     },
+    async details(conversations) {
+      return dingtalkDetailsSchema.parse(
+        await request(DINGTALK_DETAILS_METHOD, { conversations }, 90_000, "background"),
+      ).conversations;
+    },
     async preview(conversationId) {
       return dingtalkPreviewResultSchema.parse(
         await request(DINGTALK_PREVIEW_METHOD, { conversationId }, 30_000, "background"),
       );
     },
     async messages(params) {
-      return dingtalkMessagesResultSchema.parse(await request(DINGTALK_MESSAGES_METHOD, params));
+      return dingtalkMessagesResultSchema.parse(
+        await request(DINGTALK_MESSAGES_METHOD, { ...params, includeConversation: false }),
+      );
     },
     async members(conversationId) {
       return dingtalkMembersResultSchema.parse(

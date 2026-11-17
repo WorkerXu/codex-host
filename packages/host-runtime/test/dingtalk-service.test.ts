@@ -176,8 +176,7 @@ describe("DingTalk conversation views", () => {
       expect(result.source).toBe("unread");
       expect(result.conversations.map(({ conversationId }) => conversationId)).toEqual(["a", "b"]);
       expect(result.conversations[0]?.groupType).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect((await service.conversations()).conversations[0]).toMatchObject({
+      expect((await service.details(result.conversations)).conversations[0]).toMatchObject({
         groupType: "INTERNAL_GROUP",
         memberCount: 18,
       });
@@ -279,9 +278,13 @@ describe("DingTalk conversation views", () => {
     cli.groupDirectory = async () => new Promise(() => {});
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
     await service.conversations();
-    const result = await service.messages({ conversationId: "direct", limit: 30 });
+    const result = await service.messages({
+      conversationId: "direct",
+      limit: 30,
+      includeConversation: false,
+    });
     expect(result.messages).toHaveLength(1);
-    expect(result.conversation?.title).toBe("潘建开");
+    expect(result.conversation).toBeNull();
     expect(info).not.toHaveBeenCalled();
     expect(people).not.toHaveBeenCalled();
     service.dispose();
@@ -361,7 +364,6 @@ describe("DingTalk conversation views", () => {
     expect(result.conversations[0]).toMatchObject({
       conversationId: "a",
       unreadCount: 0,
-      preview: "新消息",
     });
     service.dispose();
   });
@@ -464,9 +466,9 @@ describe("DingTalk keyword search", () => {
       title: "罗浩",
     });
     expect(resolve).toHaveBeenCalledWith("open-luo");
-    expect((await service.messages({ conversationId: "dm-luo" })).conversation?.singleChat).toBe(
-      true,
-    );
+    expect(
+      (await service.messages({ conversationId: "dm-luo", includeConversation: false })).errorCode,
+    ).toBeNull();
     service.dispose();
   });
   it("merges local list matches with groups, people and messages", async () => {
@@ -565,7 +567,7 @@ describe("DingTalk change notifications", () => {
     for (let i = 0; i < 5; i += 1) fake.onRecord?.(event);
     expect(dispatch).toHaveBeenCalledTimes(1);
     cli.unreadConversations = async () => ({ conversations: [], errorCode: "offline" });
-    expect((await service.conversations()).conversations[0]?.unreadCount).toBe(2);
+    expect((await service.conversations()).conversations).toEqual([]);
     service.dispose();
   });
   it("notifies every Desktop session that shares the service", async () => {
@@ -703,13 +705,40 @@ it.each([
   const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
   vi.useFakeTimers();
   try {
-    await service.conversations();
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect((await service.conversations()).conversations[0]?.atMe).toBe(expected);
+    const first = await service.conversations();
+    expect((await service.details(first.conversations)).conversations[0]?.atMe).toBe(expected);
     await service.markViewed("a", RECENT_BASE + 200);
-    expect((await service.conversations()).conversations[0]?.atMe).toBe(false);
+    expect((await service.details(fake.unread)).conversations[0]?.atMe).toBe(false);
   } finally {
     service.dispose();
     vi.useRealTimers();
+  }
+});
+
+it("reads rows and labels fresh and never serves old rows after a read error", async () => {
+  const env = await environment();
+  const fake = state({ unread: [conversation("a", 100)] });
+  const cli = fakeCli(fake);
+  let members = 2;
+  const directory = vi.spyOn(cli, "groupDirectory").mockImplementation(async () => ({
+    directory: new Map([["a", { title: "A", memberCount: members, groupType: "INTERNAL_GROUP" }]]),
+    errorCode: null,
+  }));
+  const unread = vi.spyOn(cli, "unreadConversations");
+  const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+  try {
+    const first = await service.conversations();
+    expect((await service.details(first.conversations)).conversations[0]?.memberCount).toBe(2);
+    members = 7;
+    fake.unread[0]!.title = "新标题";
+    const second = await service.conversations();
+    expect(second.conversations[0]?.title).toBe("新标题");
+    expect((await service.details(second.conversations)).conversations[0]?.memberCount).toBe(7);
+    expect(directory).toHaveBeenCalledTimes(2);
+    expect(unread).toHaveBeenCalledTimes(2);
+    unread.mockResolvedValue({ conversations: [], errorCode: "offline" });
+    expect((await service.conversations()).conversations).toEqual([]);
+  } finally {
+    service.dispose();
   }
 });

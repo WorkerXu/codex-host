@@ -231,6 +231,7 @@ export const DINGTALK_SETTINGS_SET_METHOD = "codexhost/dingtalk/settings/set";
 /** Methods every Host can serve; reads route to the configured DingTalk Host. */
 export const DINGTALK_STATUS_METHOD = "codexhost/dingtalk/status";
 export const DINGTALK_CONVERSATIONS_METHOD = "codexhost/dingtalk/conversations";
+export const DINGTALK_DETAILS_METHOD = "codexhost/dingtalk/details";
 export const DINGTALK_PREVIEW_METHOD = "codexhost/dingtalk/preview";
 export const DINGTALK_MESSAGES_METHOD = "codexhost/dingtalk/messages";
 export const DINGTALK_MEMBERS_METHOD = "codexhost/dingtalk/members";
@@ -240,7 +241,7 @@ export const DINGTALK_SEARCH_METHOD = "codexhost/dingtalk/search";
 export const DINGTALK_RESOLVE_METHOD = "codexhost/dingtalk/resolve";
 export const DINGTALK_VIEWED_METHOD = "codexhost/dingtalk/viewed";
 
-/** Host → Renderer notification: cached unread state changed. */
+/** Host → Renderer notification: reread current DingTalk state. */
 export const DINGTALK_CHANGED_METHOD = "codexhost/dingtalk/changed";
 
 export const DINGTALK_DEFAULT_PEER = "mac";
@@ -306,6 +307,11 @@ export const dingtalkConversationsResultSchema = z
   .strict();
 export type DingTalkConversationsResult = z.infer<typeof dingtalkConversationsResultSchema>;
 
+/** Labels for the rows currently displayed; the Host does not retain these rows. */
+export const dingtalkDetailsSchema = z
+  .object({ conversations: z.array(dingtalkConversationSchema).max(DINGTALK_MAX_CONVERSATIONS) })
+  .strict();
+
 export const dingtalkPreviewParamsSchema = z
   .object({ conversationId: z.string().trim().min(1).max(512) })
   .strict();
@@ -325,6 +331,8 @@ export const dingtalkMessagesParamsSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(512),
     before: z.number().int().nonnegative().optional(),
+    /** The workbench already has a live title; skip a second CLI read. */
+    includeConversation: z.boolean().optional(),
     limit: z.number().int().min(1).max(DINGTALK_MAX_MESSAGES).optional(),
   })
   .strict();

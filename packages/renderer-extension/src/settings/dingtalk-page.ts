@@ -99,9 +99,9 @@ export function createDingTalkSettingsPage(
       let searchExpanded = { conversations: false, messages: false };
       let searchCursor = -1;
       let loadingOlderRequest = false;
-      const previews = new Map<string, string | null>();
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
+      const previewAttempted = new Set<string>();
       let previewActive = 0;
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
@@ -304,7 +304,7 @@ export function createDingTalkSettingsPage(
       };
 
       const applyPreview = (conversationId: string, preview: string | null): void => {
-        previews.set(conversationId, preview);
+        previewAttempted.add(conversationId);
         const row = state.conversations.find(
           (conversation) => conversation.conversationId === conversationId,
         );
@@ -318,23 +318,33 @@ export function createDingTalkSettingsPage(
       const pumpPreviews = (): void => {
         while (previewActive < PREVIEW_CONCURRENCY && previewQueue.length > 0) {
           const conversationId = previewQueue.shift();
-          if (!conversationId || previewPending.has(conversationId)) continue;
+          if (
+            !conversationId ||
+            previewPending.has(conversationId) ||
+            previewAttempted.has(conversationId)
+          )
+            continue;
           previewPending.add(conversationId);
           previewActive += 1;
           void (async () => {
+            const generation = listGeneration;
             const result = await client?.preview(conversationId).catch(() => null);
-            if (disposed) return;
+            if (disposed || generation !== listGeneration) return;
             applyPreview(conversationId, result?.preview ?? null);
           })().finally(() => {
             previewPending.delete(conversationId);
             previewActive -= 1;
-            if (!disposed) pumpPreviews();
+            if (!disposed) {
+              pumpPreviews();
+              renderList();
+            }
           });
         }
       };
 
       const requestPreview = (conversationId: string): void => {
-        if (!client || previews.has(conversationId) || previewPending.has(conversationId)) return;
+        if (!client || previewPending.has(conversationId) || previewAttempted.has(conversationId))
+          return;
         previewQueue.push(conversationId);
         pumpPreviews();
       };
@@ -375,7 +385,7 @@ export function createDingTalkSettingsPage(
         }
         conversationRows.render(state.conversations, state.selectedId);
         for (const conversation of state.conversations) {
-          if (previews.has(conversation.conversationId)) continue;
+          if (previewAttempted.has(conversation.conversationId)) continue;
           const row = conversationRows.elementFor(conversation.conversationId);
           if (!row) continue;
           if (!conversation.preview && previewObserver) previewObserver.observe(row);
@@ -713,12 +723,47 @@ export function createDingTalkSettingsPage(
           void loadStatus();
           return;
         }
-        state.conversations = result.conversations.map((conversation) => ({
-          ...conversation,
-          ...(previews.has(conversation.conversationId) && !conversation.preview
-            ? { preview: previews.get(conversation.conversationId) ?? undefined }
-            : {}),
-        }));
+        previewObserver?.disconnect();
+        previewQueue.length = 0;
+        previewAttempted.clear();
+        state.conversations = result.conversations.map((row) => ({ ...row }));
+        // Keep only the row that is actually open; never reuse it after leaving the page.
+        if (
+          state.currentConversation &&
+          !state.conversations.some((row) => row.conversationId === state.selectedId)
+        ) {
+          state.conversations.unshift({
+            ...state.currentConversation,
+            unreadCount: 0,
+            atMe: false,
+          });
+        }
+        void client
+          .details(result.conversations)
+          .then((details) => {
+            if (disposed || generation !== listGeneration) return;
+            const byId = new Map(details.map((row) => [row.conversationId, row]));
+            state.conversations = state.conversations.map((row) => {
+              const detail = byId.get(row.conversationId);
+              return detail
+                ? {
+                    ...row,
+                    groupType: detail.groupType,
+                    memberCount: detail.memberCount,
+                    atMe: row.conversationId !== state.selectedId && detail.atMe === true,
+                  }
+                : row;
+            });
+            const selected = state.conversations.find(
+              (row) => row.conversationId === state.selectedId,
+            );
+            if (selected) {
+              state.currentConversation = selected;
+              updateHeader();
+            }
+            renderList();
+          })
+          .catch(() => undefined);
         state.source = result.source;
         state.listError = !result.available;
         if (!result.available) void loadStatus();
@@ -877,7 +922,6 @@ export function createDingTalkSettingsPage(
             ? { ...row, lastMessageAt: result.sentAt, preview: `我：${message.text}` }
             : row,
         );
-        previews.set(conversationId, `我：${message.text}`);
         state.messages = mergeDingTalkMessages([], state.messages);
         renderMessages({ scroll: "bottom" });
         scrollToBottom();
@@ -1099,7 +1143,6 @@ export function createDingTalkSettingsPage(
         previewObserver?.disconnect();
         previewQueue.length = 0;
         previewPending.clear();
-        previews.clear();
         conversationRows.clear();
         messageListView.dispose();
         if (searchTimer !== null) view.clearTimeout(searchTimer);

@@ -56,6 +56,7 @@ import {
   DINGTALK_SETTINGS_SET_METHOD,
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_PREVIEW_METHOD,
+  DINGTALK_DETAILS_METHOD,
   DINGTALK_MESSAGES_METHOD,
   DINGTALK_MEMBERS_METHOD,
   DINGTALK_RESOURCE_METHOD,
@@ -67,6 +68,7 @@ import {
   dingtalkStatusParamsSchema,
   dingtalkConversationsParamsSchema,
   dingtalkPreviewParamsSchema,
+  dingtalkDetailsSchema,
   dingtalkMessagesParamsSchema,
   dingtalkMembersParamsSchema,
   dingtalkResourceParamsSchema,
@@ -3804,6 +3806,12 @@ export class AppServerHost {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk conversation request");
       }
       return await service.conversations();
+    }
+    if (request.method === DINGTALK_DETAILS_METHOD) {
+      const parsed = dingtalkDetailsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk details request");
+      return await service.details(parsed.data.conversations);
     }
     if (request.method === DINGTALK_PREVIEW_METHOD) {
       const parsed = dingtalkPreviewParamsSchema.safeParse(request.params);

@@ -35,23 +35,25 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 - Renderer 每次打开页面先向本机 Host 读取 `status()`，用返回的 `defaultHostId` 找到 Desktop 已有的远端 Host 连接；找到后，`conversations / preview / messages / resource / send / search / resolve / viewed` 都直接发给那台 Host，并只订阅它的 `codexhost/dingtalk/changed`。没有该连接时才退回本机 Host 的 peer-exec 转发。`status` 和设置始终留在本机 Host。
 - 工作台不提供「钉钉登录 / 默认机器」下拉。⋯ 菜单只显示一行连接状态：已连接时显示 `已连接 · <userName>（<corpName>）`，未登录显示「钉钉未登录」，DingTalk Host 不可达显示「无法连接钉钉服务」；后两种状态附「重试」。
 - 读取请求通过 `peer-exec` 的 `/v1/dingtalk/dws` 路由转发同一组参数数组；对端 Host 执行本机 `dws` 并原样返回 stdout、stderr 与退出码。目标机器上设置自动解析为本机，因此同一份默认值在 Mac 和各服务器上都指向 Mac 的登录。
-- 图片下载通过同级的 `/v1/dingtalk/media` 路由在登录机器上执行，只接受会话、消息和资源 id；返回 base64、MIME 和大小。缓存目录按运行时隔离，不读取 `~/.codexhost/runtime/`。
+- 图片下载通过同级的 `/v1/dingtalk/media` 路由在登录机器上执行，只接受会话、消息和资源 id；返回 base64、MIME 和大小。每次读取使用独立临时下载文件，读完或失败即删除，不复用或保留媒体文件，不读取 `~/.codexhost/runtime/`。
 - CLI 透传 `codexhost dingtalk dws [--host <peer|Host ID>] [--yes] -- <dws args>`：只读命令白名单直接执行；其余命令（包括未知的新命令）视为写操作。OA 仅放行明确列出的审批查询，所有其他 OA 命令（含同意、拒绝、撤销、转交、加签、评论及未知命令）始终拒绝，无论调用者或是否提供 `--yes`，错误提示「审批状态只能由你本人在钉钉里处理」。派发环境中所有写命令都拒绝。其余场景的非 OA 写命令仍需 `--yes`。限制均在解析 Host、启动进程或跨机请求前执行；无法识别的命令前置选项也拒绝，防止选项值混淆命令路径。
 
-## 性能与缓存
+## 实时读取与性能
 
 - 消息快照、增量追加和历史翻页都按 `messageId` 合并；同一 ID 的重复投递更新已有行，正文相同但 ID 不同的消息仍分别保留。Host 在向工作台和派发广播前按会话与消息 ID 去重最近 4000 个事件，重放不会重复增加未读数。工作台和派发订阅同一个 `DingTalkService`，监听保活只延长同一条事件流。
 - 本人消息按登录 `userId` 与 `contact user get-self` 中同一用户的 `openDingTalkId` 识别，不按姓名判断。发送返回的稳定消息 ID 会保留到 Renderer；缺少 ID 时，仅把同会话、发送时间附近、正文一致的本地发送占位与本人的服务端消息一对一合并。事件先回流或发送先确认都只留下右侧一条气泡。
 
-- 工作台不缓存消息、摘要或会话列表：每次打开、刷新、收到 `codexhost/dingtalk/changed` 和定时轮询都重新读取 dws。Host 只对完全相同的并发请求做 in-flight 去重，并保留 `chat group list-all` 的群类型/人数元数据用于标签。
+- 工作台不缓存消息、摘要或会话列表：每次打开、刷新、收到 `codexhost/dingtalk/changed` 和定时轮询都重新读取 dws。Host 只合并尚未完成的相同并发请求，完成即释放结果；不保留会话快照、群目录、@ 查询或媒体结果。页面只保留当前显示的数据，刷新重新取摘要，退出释放。
 - 通知之外还有保底轮询：页面可见时每 10 秒刷新当前会话，每 30 秒刷新未读列表；页面隐藏时停止，恢复可见时立即补一次。轮询不写入缓存，也不与慢请求重叠。事件通知在 Host 侧合并 250 ms 内的事件，并广播给共享同一 DingTalk 服务的所有 Desktop 会话。
-- 首屏只等待 `list-unread-conversations`，认证与消息、列表读取并行且不阻塞它们。认证状态和本人身份只在 Host 生命周期内记住；仅命令返回认证错误或用户点击「重试」时重查。本人开放 ID 只对同一身份补全一次，消息不等待补全。群目录、最近两天的 `chat +at-me` 在消息读取结束并空闲 5 秒后并行补全，数据变化时才发一次通知；这些补充查询不占用首屏消息的等待路径。
-- 当前会话消息和未读列表在事件到达后并行刷新；消息 RPC 使用 interactive 优先级，列表摘要使用 background。消息读取复用已有会话标题，未知会话也只并行查询基本信息。
+- 首屏只等待 `list-unread-conversations`，认证与消息、列表读取并行且不阻塞它们。认证状态和本人身份只在 Host 生命周期内记住；仅命令返回认证错误或用户点击「重试」时重查。本人开放 ID 只对同一身份补全一次，消息不等待补全。页面收到实时未读列表后，另发 `details` 请求并行读取群目录和最近两天的 `chat +at-me`；补充结果只用于该次列表。首屏、会话消息和摘要均不等待补充查询，补充响应不会触发循环刷新。
+- 当前会话消息和未读列表在事件到达后并行刷新；消息 RPC 使用 interactive 优先级，列表摘要使用 background。工作台使用当前页面的会话标题，消息请求显式设置 `includeConversation: false`，只执行一次消息读取；派发与引用展开按需并行读取实时基本信息。
 - 提交时展开会话引用只读取最近 100 条消息并跳过单聊职位补全，`conversationInfo` 与消息列表并行执行，避免一条引用串行等待多次 dws。
 - 会话列表只为可见行懒加载最近一条消息摘要，最多 3 个并发；拿不到摘要时第二行留空。
 - 最近消息每次按会话实时读取；滚动加载更早消息走同一 `chat message list` 游标，不阻塞首屏。Renderer 只保留当前会话最近 200 条消息和对应 DOM，首屏 30 条。
-- 只有 `dws` 已登录时才在 DingTalk Host 启动长连接事件流；本机工作台直接消费，桌面派发可通过 SSH 消费。订阅使用 `event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期。事件用于增加未读数、更新最近消息和向 Renderer 推送 `codexhost/dingtalk/changed`，不轮询。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求或轮询再启动。退出用 SIGTERM，让 CLI 自行退订。
+- 只有 `dws` 已登录时才在 DingTalk Host 启动长连接事件流；本机工作台直接消费，桌面派发可通过 SSH 消费。订阅使用 `event consume` 的两个全量 IM EventKey，即 `+listen-im` 的底层订阅生命周期。事件只向派发投递，并向 Renderer 推送 `codexhost/dingtalk/changed`；工作台收到通知后读取钉钉实时状态。事件流按 5 秒到 60 秒退避重启；5 分钟无请求后停止，下次请求或轮询再启动。退出用 SIGTERM，让 CLI 自行退订。
 - `dws` 以参数数组启动，无 shell；单次输出和总时长都有上限。
+
+已读时间、当前打开的会话 ID 和派发去重 ID 是用户操作与防重状态，不存储消息正文、联系人目录或列表副本。
 
 ## 已读状态
 
@@ -76,8 +78,8 @@ cid 可能包含 `/`、`+`、`=`，因此路径按段 percent-encode；解析时
 ## 边界
 
 - `shared-contracts` 只放 carrier、数据类型和 RPC schema，保持浏览器安全。
-- `renderer-extension` 只做 DOM、缓存展示、搜索编排和 chip 插入；不读取 key、不直接调用 CLI 或 SSH。
-- `host-runtime` 负责 CLI 发现、参数校验、缓存、事件流、搜索合并、媒体缓存、peer 路由和提交时展开。
+- `renderer-extension` 只做 DOM、当前页面展示、搜索编排和 chip 插入；不读取 key、不直接调用 CLI 或 SSH。
+- `host-runtime` 负责 CLI 发现、参数校验、事件流、搜索合并、临时媒体下载、peer 路由和提交时展开。
 - 工作台页面发送消息由用户点击或 Enter 触发；启用智能体监听后，派发运行时按固定目标自动回复进度和结果。测试和开发环境不对真实账号发送消息或执行审批写操作。
 
 ## 智能体监听与派发
