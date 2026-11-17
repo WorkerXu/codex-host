@@ -1,3 +1,4 @@
+import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-project.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
@@ -1261,6 +1262,10 @@ export function installRendererBindingProbe(
   let jarvisMention: RendererJarvisMentionControl | null = null;
   let dingtalkMention: RendererDingTalkEntryControl | null = null;
   const disposeDingTalkLinks = installRendererDingTalkLinks(document);
+  const disposeDingTalkProject = installDingTalkDispatchProject(window, () => {
+    const route = window.__codexhostHostRoutingV1?.forHost("local");
+    return route ? { hostId: "local", manager: route.manager } : null;
+  });
   let peerDelegationCatalog: DelegationPeerCatalog | null = null;
   let peerDelegationCatalogAt = 0;
   let peerDelegationCatalogRequest: Promise<void> | null = null;
@@ -3843,6 +3848,7 @@ export function installRendererBindingProbe(
       jarvisMention?.dispose();
       dingtalkMention?.dispose();
       disposeDingTalkLinks();
+      disposeDingTalkProject();
       sidebarAgentIcons.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();
