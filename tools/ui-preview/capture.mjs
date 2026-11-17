@@ -1812,11 +1812,7 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario === "jarvis-mode-slow") {
         check(
           "slow-notice",
-          Boolean(
-            query("[data-codexhost-jarvis-mode]")?.textContent?.includes(
-              "Jarvis 响应较慢，仍在查询…",
-            ),
-          ),
+          Boolean(query("[data-codexhost-jarvis-mode]")?.textContent?.includes("正在解析…")),
         );
         check("slow-keeps-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
       }

@@ -206,7 +206,7 @@ describe("Jarvis Gemini structured query", () => {
   });
 
   it.each(["key", "fetch", "body"])(
-    "enforces a single three-second deadline including stalled %s",
+    "enforces a single ten-second deadline including stalled %s",
     async (stage) => {
       vi.useFakeTimers();
       const stalled = () => new Promise<never>(() => {});
@@ -219,7 +219,7 @@ describe("Jarvis Gemini structured query", () => {
       });
       const result = client.interpret("我还没处理完成的bug", NOW);
       const assertion = expect(result).rejects.toMatchObject({ code: "timeout" });
-      await vi.advanceTimersByTimeAsync(2_999);
+      await vi.advanceTimersByTimeAsync(9_999);
       if (stage !== "key") expect(fetchImpl).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
       await assertion;

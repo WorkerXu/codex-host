@@ -25,7 +25,7 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 1. **整句理解**：本地 Host 默认把完整查询交给 OpenAI `gpt-4.1-mini`，通过 Chat Completions 的 `response_format: json_schema`、`strict: true` 返回固定字段：`scope`、`statuses`、`priorities`、`severities`、`order`、`timeWindow`、`titleKeywords`、`projectNames`、`unrecognized`。空数组表示不限对应条件，时间范围为空时为 `null`。时间区间使用 Unix 毫秒，包含 `since`、不包含 `until`，`field` 区分创建和更新时间。
 2. **上海时区与校验**：请求带上当前时刻、`Asia/Shanghai` 时区、当天日期和今天、昨天、本周、上周、本月的边界，模型据此换算相对时间。“最近的”只表示排序，不自动添加时间范围。JSON Schema 的对象禁止额外属性、所有属性必填、可空字段使用类型联合；返回 JSON 必须通过共享契约的 Zod schema 校验，不接受部分字段或不合法的时间区间。
-3. **失败直接显示错误**：从读取模型选择、key 到响应读取、校验共用 3 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，页面显示错误；不执行规则解析、不继续查询 Bug、不回退远程 Host。错误区只显示中文原因和“去设置”入口：402、`insufficient_quota` 或额度类 429 为“OpenAI 额度不足”，401/403 为“OpenAI Key 无效”；普通 429 显示请求过于频繁，并区分未配密钥、超时、网络失败和输出非法，不展示 API 错误原文，也不保留上次查询的结果或条件。失败结果以 `source=openai|gemini` 标记模型服务，成功结果以 `source=model` 标记结构化解析。“去设置”打开通用页顶部的模型服务区。
+3. **失败直接显示错误**：从读取模型选择、key 到响应读取、校验共用 10 秒截止时间。未配 key、网络或 API 失败、超时、JSON/schema 不合法，以及存在无法理解的片段时，页面显示错误；不执行规则解析、不继续查询 Bug、不回退远程 Host。错误区只显示中文原因和“去设置”入口：402、`insufficient_quota` 或额度类 429 为“OpenAI 额度不足”，401/403 为“OpenAI Key 无效”；普通 429 显示请求过于频繁，并区分未配密钥、超时、网络失败和输出非法，不展示 API 错误原文，也不保留上次查询的结果或条件。失败结果以 `source=openai|gemini` 标记模型服务，成功结果以 `source=model` 标记结构化解析。“去设置”打开通用页顶部的模型服务区。解析期间输入框下显示“正在解析…”，输入保持可编辑；新输入立即取消旧请求、使旧结果失效，再按防抖启动新查询。Renderer 用每次查询的随机 requestId 发送取消 RPC，Host 将 AbortSignal 传入模型 HTTP 请求，已取消的解析不会继续查询 Bug。
 4. **按模型点名解析项目**：只有 `projectNames` 参与 `project list --scope visible --name <项目名>` 搜索，并与 `project list` 返回的本人 Bug 关联项目合并去重。项目名不会被缩短成其他搜索词，也不会改作标题关键词；同名迭代项目可以一起命中。用户点名的项目未命中时保留项目条件并返回空结果；没有项目条件时查询本人 Bug 关联项目。项目搜索结果短暂缓存，不预加载全部可见项目。
 5. **精确取数与标题查询**：`titleKeywords` 逐个通过 `bug list --title` 查询，多个关键词按 OR 合并；项目与标题条件可以同时生效。作用域为“两者”时分别查询指派给我和我创建的，最终按 `projectId + bugId` 去重。并发 8，每次 CLI 查询每页 100 条、最多 200 条，最多查询 40 个项目，最多显示 200 条；达到限制时在 UI 标记截断。多个关键词或作用域可能重叠，截断时不把各查询的服务端总数直接相加。
 6. **本地过滤与排序**：状态、优先级、严重程度、标题关键词和时间窗口在本地再校验；Jarvis 无时区的时间戳按上海时间解读。按模型返回的顺序和时间字段排序；无时间字段时最新按更新时间、最早按创建时间。解析后的条件仍使用现有 chip 和稳定 key，删除 chip 会把该 key 作为 `omit` 传给 Host，并去掉对应条件。
@@ -67,7 +67,7 @@ Renderer 不直接调用 CLI：`@` 查询固定先发给 Desktop 本地 Host（M
 
 `model-service-settings.ts` 的 `ModelServiceSettingsStore` 在 Desktop 本地 Host 读取 `~/.config/codexhost`：复用 `gemini-api-key`，新增 `openai-api-key`，模型选择写入 `model-service.json`；原子写入，文件权限 0600。`readKey(provider)` 只供 Host 内部使用；公开 `read()/update()` 与 `codexhost/model-service/get|set|test` 只返回 `configured` 和末四位，不回传密钥。Renderer 不持久化密钥，保存成功后清空密码输入框。远程 Host 不注册这些共享设置 RPC。
 
-`structured-query-client.ts` 公开 `createStructuredQueryClient({provider, readApiKey, fetchImpl?})`。调用 `query({instructions, input, schema, name}, validator)` 提交业务提示词和严格 JSON Schema，再通过业务校验器返回结果；模型选择函数、读 key、网络、响应体均在同一个 3 秒截止时间内。客户端只抛 `StructuredQueryError` 的稳定错误码，原始服务错误不进入 UI。`jarvis-query-parser.ts` 负责 Jarvis 提示词和上海时间上下文。
+`structured-query-client.ts` 公开 `createStructuredQueryClient({provider, readApiKey, fetchImpl?})`。调用 `query({instructions, input, schema, name}, validator)` 提交业务提示词和严格 JSON Schema，再通过业务校验器返回结果；Jarvis 的模型选择函数、读 key、网络、响应体均在同一个 10 秒截止时间内（共享客户端的默认截止时间仍为 3 秒）。客户端只抛 `StructuredQueryError` 的稳定错误码，原始服务错误不进入 UI。`jarvis-query-parser.ts` 负责 Jarvis 提示词和上海时间上下文。
 
 钉钉 dispatcher 只复用该设置 Store 的 Gemini Key 存储，不复用 Jarvis 查询解析或结构化客户端。匹配继续使用独立的 Gemini Decisions API 与 `gemini-decision-1` 模型，不受通用页「解析模型」选择影响；详见[钉钉派发](dingtalk.md#智能体监听与派发)。
 

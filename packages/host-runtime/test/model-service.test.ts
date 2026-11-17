@@ -45,6 +45,57 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 describe("OpenAI structured parser", () => {
+  it("accepts a proxy response after 5.8 seconds and aborts at exactly ten seconds", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_800));
+      return openaiResponse();
+    });
+    const result = client(fetchImpl).interpret("我还没处理的，标题有发货的", 0);
+    await vi.advanceTimersByTimeAsync(5_800);
+    expect(await result).toEqual(QUERY);
+    const signals: AbortSignal[] = [];
+    const stalled = client(async (_url, init) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise(() => {});
+    });
+    const assertion = expect(stalled.interpret("bug", 0)).rejects.toMatchObject({
+      code: "timeout",
+    });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(signals[0]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await assertion;
+    expect(signals[0]?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["key", "fetch", "body"])(
+    "cancels stalled %s immediately and aborts the HTTP signal",
+    async (stage) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      let signal: AbortSignal | null | undefined;
+      const stalled = () => new Promise<never>(() => {});
+      const parser = client(
+        async (_url, init) => {
+          signal = init?.signal;
+          return stage === "fetch"
+            ? stalled()
+            : ({ ok: true, json: stalled } as unknown as Response);
+        },
+        stage === "key" ? stalled : async () => "fake-key",
+      );
+      const result = parser.interpret("旧查询", 0, controller.signal);
+      const assertion = expect(result).rejects.toMatchObject({ code: "cancelled" });
+      await vi.advanceTimersByTimeAsync(1);
+      controller.abort();
+      await assertion;
+      if (stage !== "key") expect(signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it("posts the original instructions, whole query and Shanghai boundaries with a strict schema", async () => {
     const fetchImpl = vi.fn(async () => openaiResponse());
     const now = Date.parse("2026-11-16T01:30:00+08:00");
@@ -150,7 +201,7 @@ describe("OpenAI structured parser", () => {
       client(async () => openaiResponse({ ...QUERY, extra: true })).interpret("bug", 0),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
-  it.each(["key", "fetch", "body"])("bounds stalled %s to three seconds", async (stage) => {
+  it.each(["key", "fetch", "body"])("bounds stalled %s to ten seconds", async (stage) => {
     vi.useFakeTimers();
     const stalled = () => new Promise<never>(() => {});
     const parser = client(
@@ -162,18 +213,18 @@ describe("OpenAI structured parser", () => {
       code: "timeout",
       provider: "openai",
     });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(10000);
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("includes stalled provider selection in the three-second deadline", async () => {
+  it("includes stalled provider selection in the ten-second deadline", async () => {
     vi.useFakeTimers();
     const settings = await store();
     vi.spyOn(settings, "provider").mockImplementation(() => new Promise(() => {}));
     const readKey = vi.spyOn(settings, "readKey");
     const parser = createJarvisQueryParser({ settings, isLocalHost: true });
     const assertion = expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(10000);
     await assertion;
     expect(readKey).not.toHaveBeenCalled();
   });

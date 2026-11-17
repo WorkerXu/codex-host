@@ -162,7 +162,7 @@ describe("Jarvis Gemini bug search", () => {
         query: "我还没处理完成的bug",
       });
       if (code === "timeout") {
-        await vi.advanceTimersByTimeAsync(2_999);
+        await vi.advanceTimersByTimeAsync(9_999);
         expect(cli.bugs).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
       }
@@ -193,7 +193,7 @@ describe("Jarvis Gemini bug search", () => {
     ]);
     const { api, interpret } = searcher(cli, { statuses: [1], titleKeywords: ["发货"] });
     const result = await api.search({ query: "我还没处理的标题有发货的" });
-    expect(interpret).toHaveBeenCalledExactlyOnceWith("我还没处理的标题有发货的", NOW);
+    expect(interpret).toHaveBeenCalledExactlyOnceWith("我还没处理的标题有发货的", NOW, undefined);
     expect(cli.searchProjects).not.toHaveBeenCalled();
     expect(cli.bugs).toHaveBeenCalledTimes(2);
     expect(cli.bugs).toHaveBeenCalledWith(

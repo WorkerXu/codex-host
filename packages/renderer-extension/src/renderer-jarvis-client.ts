@@ -1,6 +1,7 @@
 import { modelServiceErrorText } from "./model-service-client.js";
 import {
   JARVIS_BUG_SEARCH_METHOD,
+  JARVIS_BUG_SEARCH_CANCEL_METHOD,
   JARVIS_DOWNLOAD_CHUNK_METHOD,
   JARVIS_DOWNLOAD_START_METHOD,
   JARVIS_INSTALL_METHOD,
@@ -88,7 +89,11 @@ export interface RendererJarvisClient {
   settings(): Promise<JarvisSettingsResult>;
   updateSettings(input: JarvisSettingsSetParams): Promise<JarvisSettingsResult>;
   testSettings(): Promise<JarvisSettingsTestResult>;
-  searchBugs(hostId: string, params: JarvisBugSearchParams): Promise<JarvisBugSearchResult>;
+  searchBugs(
+    hostId: string,
+    params: JarvisBugSearchParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult>;
   install(
     hostId: string,
     onProgress?: (progress: RendererJarvisInstallProgress) => void,
@@ -335,7 +340,7 @@ export function createRendererJarvisClient(
         ),
       );
     },
-    async searchBugs(hostId, params) {
+    async searchBugs(hostId, params, signal) {
       const missing: JarvisBugSearchResult = {
         available: false,
         errorCode: "jarvis_failed",
@@ -344,14 +349,31 @@ export function createRendererJarvisClient(
         total: 0,
         capped: false,
       };
-      return await request(
-        hostId,
-        JARVIS_BUG_SEARCH_METHOD,
-        params,
-        jarvisBugSearchResultSchema,
-        { priority: "interactive", timeoutMs: 90_000 },
-        missing,
-      );
+      if (signal?.aborted) return missing;
+      const requestId = signal ? crypto.randomUUID() : undefined;
+      const cancel = () => {
+        void request(
+          hostId,
+          JARVIS_BUG_SEARCH_CANCEL_METHOD,
+          { requestId },
+          { parse: () => ({}) },
+          { priority: "interactive", timeoutMs: 5_000 },
+          {},
+        );
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        return await request(
+          hostId,
+          JARVIS_BUG_SEARCH_METHOD,
+          requestId ? { ...params, requestId } : params,
+          jarvisBugSearchResultSchema,
+          { priority: "interactive", timeoutMs: 90_000 },
+          missing,
+        );
+      } finally {
+        signal?.removeEventListener("abort", cancel);
+      }
     },
     async install(hostId, onProgress) {
       const target = requireRoute(hostId);

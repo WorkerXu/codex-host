@@ -41,6 +41,7 @@ export interface StructuredQueryClientOptions {
   readApiKey(provider: ModelProvider): Promise<string | null>;
   fetchImpl?: typeof fetch | undefined;
   now?: (() => number) | undefined;
+  timeoutMs?: number;
 }
 export interface StructuredQueryRequest {
   instructions: string;
@@ -67,18 +68,27 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
     async query<T>(
       request: StructuredQueryRequest,
       validator: { parse(value: unknown): T },
+      signal?: AbortSignal,
     ): Promise<T> {
       let provider: ModelProvider =
         typeof options.provider === "string" ? options.provider : "openai";
       const fail = (code: string) => new StructuredQueryError(code, provider);
       const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(fail("timeout"));
-        }, STRUCTURED_QUERY_TIMEOUT_MS);
+      const cancel = () => controller.abort();
+      signal?.addEventListener("abort", cancel, { once: true });
+      if (signal?.aborted) cancel();
+      const cancelled = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => reject(fail(signal?.aborted ? "cancelled" : "timeout")),
+          { once: true },
+        );
+        if (controller.signal.aborted) reject(fail("cancelled"));
       });
+      const timer = setTimeout(
+        () => controller.abort(),
+        options.timeoutMs ?? STRUCTURED_QUERY_TIMEOUT_MS,
+      );
       const run = async () => {
         provider =
           typeof options.provider === "function" ? await options.provider() : options.provider;
@@ -181,11 +191,13 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
         }
       };
       try {
-        return await Promise.race([run(), deadline]);
+        return await Promise.race([run(), cancelled]);
       } catch (error) {
+        if (signal?.aborted) throw fail("cancelled");
         throw error instanceof StructuredQueryError ? error : fail("network");
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
       }
     },
   };

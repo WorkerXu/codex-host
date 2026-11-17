@@ -7,10 +7,10 @@ import {
 } from "./structured-query-client.js";
 import type { ModelServiceSettingsStore } from "./model-service-settings.js";
 export { StructuredQueryError as JarvisQueryError } from "./structured-query-client.js";
-export const JARVIS_QUERY_TIMEOUT_MS = 3_000;
+export const JARVIS_QUERY_TIMEOUT_MS = 10_000;
 export const JARVIS_QUERY_TIME_ZONE = "Asia/Shanghai";
 export interface JarvisQueryInterpreter {
-  interpret(query: string, now: number): Promise<JarvisBugQuery>;
+  interpret(query: string, now: number, signal?: AbortSignal): Promise<JarvisBugQuery>;
   test(): Promise<{ ok: boolean; latencyMs: number | null; errorCode: string | null }>;
 }
 const numbers = (maximum: number) => ({
@@ -113,10 +113,10 @@ export function buildJarvisQueryRequest(query: string, now: number) {
 export function createJarvisProviderQuery(
   options: StructuredQueryClientOptions,
 ): JarvisQueryInterpreter {
-  const client = createStructuredQueryClient(options);
+  const client = createStructuredQueryClient({ ...options, timeoutMs: JARVIS_QUERY_TIMEOUT_MS });
   const now = options.now ?? Date.now;
-  const interpret = async (query: string, at: number) =>
-    client.query(buildJarvisQueryRequest(query, at), jarvisBugQuerySchema);
+  const interpret = async (query: string, at: number, signal?: AbortSignal) =>
+    client.query(buildJarvisQueryRequest(query, at), jarvisBugQuerySchema, signal);
   return {
     interpret,
     async test() {
