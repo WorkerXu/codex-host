@@ -4,13 +4,13 @@
 
 ## 选择与显示
 
-Composer 上方的「工作文件夹」显示主要目录的末级名称和额外目录数。弹窗显示当前目录、尚未选择的项目目录和该机器最近使用的目录。复选框多选，「设为主要」把目录移到第一位；至少保留一个目录才能应用。目录按顺序保存，第一项就是 `cwd`。
+Composer 上方的「工作文件夹」显示主要目录的末级名称和额外目录数。弹窗显示当前目录、尚未选择的项目目录和该机器最近使用的目录。菜单对勾多选，选择即时保存；「设为主要」把目录移到第一位，始终保留至少一个目录。目录按顺序保存，第一项就是 `cwd`。
 
 「添加文件夹…」提供绝对路径输入和子目录补全。当前没有已核验的 Desktop 原生文件夹 picker 绑定，使用路径输入方式；控件为原生 picker 保留可选回调。目录元数据和列表始终通过所选 Host 的 `fs/getMetadata`、`fs/readDirectory` 获取，浏览不创建目录。Mac 路径不会拿到远程机器上解析。列表过滤为目录，异步补全丢弃过期结果。
 
-鼠标、Tab、空格、Enter 和 Esc 使用真实 DOM 控件。Esc 关闭弹窗并把焦点交回触发按钮。Popover 随内容尺寸重新定位，保持在视口内。应用期间禁用编辑；切换对话后，旧异步回复不能更新新对话的控件。
+鼠标、Tab、空格、Enter 和 Esc 使用真实 DOM 控件，上下方向键和 Home / End 导航菜单。Esc 关闭弹窗并把焦点交回触发按钮。Popover 随内容尺寸重新定位，保持在视口内。保存期间禁用编辑；切换对话后，旧异步回复不能更新新对话的控件。
 
-已有对话显示最近一次「工作文件夹已改为 …」提示。提示放在当前对话最后一个原生 `[data-turn-key]` 后；无法识别 transcript 容器时放在 Composer 前。Host 保留最多 100 条变更记录，重新加载后恢复最近一条提示。
+已有对话显示最近一次「工作文件夹已改为 …」提示。提示使用居中细分隔线，显示目录名和主要标记，完整路径放在 title。提示放在当前对话最后一个原生 `[data-turn-key]` 后；无法识别 transcript 容器时放在 Composer 前。Host 保留最多 100 条变更记录，重新加载后恢复最近一条提示。
 
 ## 原生 Codex 请求
 
@@ -40,7 +40,7 @@ Host 的环境和目录列表是执行层事实。当前没有已核验的 `thre
 
 ## 相关验证
 
-聚焦测试覆盖 start/turn 改写、环境优先级、`projectId` 保留、持久化隔离、失败重试、草稿并发隔离、委派项目继承，以及 app-server Host 路径。Playwright 使用真实鼠标/键盘覆盖多选、主要目录、目录补全、提示、Esc 和空选择。预览入口为 `thread-folders-local|remote|existing|limited`，截图清单见 [界面验收记录](../../tools/ui-preview/thread-folders-review.md)。
+聚焦测试覆盖 start/turn 改写、环境优先级、`projectId` 保留、持久化隔离、失败重试、草稿并发隔离、委派项目继承，以及 app-server Host 路径。Playwright 使用真实鼠标/键盘覆盖多选、主要目录、目录补全、提示、Esc、点击外部关闭和最后一个目录保护。预览入口为 `thread-folders-local|remote|existing|limited`，截图清单见 [界面验收记录](../../tools/ui-preview/thread-folders-review.md)。
 
 手动远程校验（先运行 `npm run build:typescript`）：
 

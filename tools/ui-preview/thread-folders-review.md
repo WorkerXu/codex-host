@@ -1,65 +1,55 @@
-# 对话工作文件夹界面验收
+# 对话工作文件夹界面复审记录
 
-2026-11-17，`tools/ui-preview`，Chromium，1280×900。预览直接导入生产 `createThreadFoldersControl`，使用隔离的假 Host 和文件系统回复。使用 `agent-browser` 的真实鼠标/键盘操作后截图；以下 12 张均已逐张打开查看。
+2026-11-17；按 ui-quality-bar.md 和 review-thread-folders-ui.md 的 0–8 项修改。以下 26 张最终截图均经过真实鼠标 / 键盘操作，并逐张打开查看。常规窗口 1280×900，窄窗口 390×740。
 
-截图位于工作区外：`/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/`，未纳入 Git。
+## 原生结构与主题来源
 
-| 截图 | 操作与查看结果 |
-| --- | --- |
-| `local-chip-hover-light.png` | 鼠标悬停 chip；与机器/项目 chip 同行，标签完整 |
-| `local-popover-light.png` | 点击 chip；主要目录、最近目录、添加/取消/应用可辨认 |
-| `local-multiselect-hover-light.png` | 点击第二个复选框并悬停「设为主要」；多选与按钮状态清楚 |
-| `local-main-light.png` | 点击「设为主要」；主要目录移到首位，原项目目录保留 |
-| `local-popover-dark.png` | 深色多选；路径、复选框、主要标记和动作按钮可辨认 |
-| `local-path-completion-light.png` | 输入本机绝对路径；目录补全列表展开，弹窗保持在视口内 |
-| `remote-popover-dark.png` | 深色远程弹窗；机器标识明确，路径属于远程 Host |
-| `remote-browse-hover-dark.png` | 输入远程父路径并悬停子目录；列表展开向上重定位，无裁切 |
-| `remote-popover-hover-light.png` | 浅色远程弹窗；目录行 hover 与 chip 状态正常 |
-| `existing-note-light.png` | 已有对话多选、切主要目录并应用；出现变更提示和 `+1` |
-| `existing-note-dark.png` | 已有对话深色提示；提示、chip 与 Composer 层级可辨认 |
-| `limited-popover-dark.png` | 主目录模式 Harness；弹窗解释只使用主要文件夹，tooltip 有相同限制 |
+- `tools/ui-preview/fixtures/native-composer.html` 来自当日运行中的 Desktop，只读 CDP 导出后去除 Host 注入控件、对话标识并清空编辑器。保留真实 `ComposerLayoutRoot`、ProseMirror、附件区及 footer 结构；原生模型位置的标签和机器 / 项目值使用确定性 fixture。
+- `loadDesktopCss` 加载 `CODEX_DESKTOP_CSS` 指定的真实 Desktop 样式；文件为 `/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-reference/codex-desktop.css`。文件系统、保存回复及示例转录是 fixture，不连接真实 Host。
+- 文件夹场景不加载浅色 shadow-context，也不注入 preview.css 的近似深色映射。浅 / 深色都由 Desktop 自带 `[data-theme]` 和 `light-dark()` 规则解析。实测深色页面 surface 为 `#181818`、菜单为 `rgb(45, 45, 45)`、错误文字为 `rgb(250, 66, 62)`。
+- CSS SHA-256：`45b6cbc843f0dd1b94491ae1ed8ff03fcb9cdf53b16eb10896673037648dd987`。截图及来源校验记录在上述目录的 `manifest.json`；图片不纳入 Git。
 
-另以真实 Enter 执行添加/设置主要目录、Esc 关闭并观察焦点返回；Playwright 覆盖相同键盘操作、空选择禁用应用，以及远程补全后的视口边界。没有通过脚本直接修改 DOM 来伪造交互结果。
+## 逐图复查
 
-深色使用 ui-preview 的深色映射；导出的 Desktop shadow context 是浅色来源，深色不等同于实机主题证明。
+| 截图 | 对应审查项 | 已修问题与复查结果 |
+| --- | --- | --- |
+| [01-local-chip-hover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/01-local-chip-hover-light.png>) | 0、7 | 鼠标悬停工作文件夹 chip。统一两个 chip 的字号、间距、圆角及悬停底色，Composer 使用原生 DOM。 |
+| [02-local-popover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/02-local-popover-light.png>) | 1、2、3、5、6 | 打开本机菜单。移除浏览器复选框、机器副标题和底部操作；目录名为主、缩写路径为次，保留末级目录和完整 title；添加图标与文字列对齐，浮层向上对齐 chip 左缘。 |
+| [03-local-multiselect-hover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/03-local-multiselect-hover-light.png>) | 1、4 | 真实点击多选后悬停「设为主要」。选项即时生效，chip 立即出现 +1；主要标记缩为小标签，动作只在悬停或键盘聚焦时显示。 |
+| [04-local-main-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/04-local-main-keyboard-light.png>) | 4、键盘 | Tab 后 Enter 设置主要目录。新主要项移到首位，蓝色原生焦点环清楚，原目录仍选中；没有取消 / 应用按钮。 |
+| [05-local-completion-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/05-local-completion-light.png>) | 2、5、6 | 键盘输入本机父路径。补全项也使用目录名、缩写路径和图标；内容增长时浮层向上重新定位，输入框焦点不丢失。 |
+| [06-remote-browse-hover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/06-remote-browse-hover-light.png>) | 2、5、6、7 | 在开发机输入远程路径，鼠标悬停 sandbox。远程标识留在机器 chip，补全列表不超视口，悬停底色与主列表一致。 |
+| [07-existing-note-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/07-existing-note-light.png>) | 4、8 | 已有对话多选并切主要项，Esc 关闭。长路径段落改为短名称、主要标记和居中细分隔线；完整路径保留在 title，焦点返回 chip。 |
+| [08-limited-popover-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/08-limited-popover-light.png>) | 1、3 | 仅主要目录模式。保留必要能力说明，移除机器 / 对话用途副标题；最后一个已选目录不能取消。 |
+| [09-empty-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/09-empty-light.png>) | 空态 | 空目录集合。使用简短空态文字和带图标的添加入口，无空列表或多余底栏。 |
+| [10-loading-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/10-loading-light.png>) | 加载态 | 延迟加载。菜单显示中文读取状态并保持 chip 锚点，Esc / 点击外部仍可关闭。 |
+| [11-error-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/11-error-light.png>) | 错误态 | 读取失败。将英文后端异常转为可读中文提示，使用 Desktop 危险色，无浏览器弹窗。 |
+| [12-save-error-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/12-save-error-light.png>) | 错误态、4 | 即时保存失败。保留原目录和 chip 标签，展示中文错误；修正鼠标悬停与程序焦点造成的双行背景。 |
+| [13-narrow-keyboard-light.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/13-narrow-keyboard-light.png>) | 2、6、7、聚焦 | 390×740 窄窗口，真实 Tab / Enter 打开。两个 chip 同排收缩省略，浮层仅在右侧空间不足时向左限位，保持 12px 视口边距和键盘焦点环。 |
+| [01-local-chip-hover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/01-local-chip-hover-dark.png>) | 0、7 | 鼠标悬停工作文件夹 chip。统一两个 chip 的字号、间距、圆角及悬停底色，Composer 使用原生 DOM。 |
+| [02-local-popover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/02-local-popover-dark.png>) | 1、2、3、5、6 | 打开本机菜单。移除浏览器复选框、机器副标题和底部操作；目录名为主、缩写路径为次，保留末级目录和完整 title；添加图标与文字列对齐，浮层向上对齐 chip 左缘。 |
+| [03-local-multiselect-hover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/03-local-multiselect-hover-dark.png>) | 1、4 | 真实点击多选后悬停「设为主要」。选项即时生效，chip 立即出现 +1；主要标记缩为小标签，动作只在悬停或键盘聚焦时显示。 |
+| [04-local-main-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/04-local-main-keyboard-dark.png>) | 4、键盘 | Tab 后 Enter 设置主要目录。新主要项移到首位，蓝色原生焦点环清楚，原目录仍选中；没有取消 / 应用按钮。 |
+| [05-local-completion-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/05-local-completion-dark.png>) | 2、5、6 | 键盘输入本机父路径。补全项也使用目录名、缩写路径和图标；内容增长时浮层向上重新定位，输入框焦点不丢失。 |
+| [06-remote-browse-hover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/06-remote-browse-hover-dark.png>) | 2、5、6、7 | 在开发机输入远程路径，鼠标悬停 sandbox。远程标识留在机器 chip，补全列表不超视口，悬停底色与主列表一致。 |
+| [07-existing-note-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/07-existing-note-dark.png>) | 4、8 | 已有对话多选并切主要项，Esc 关闭。长路径段落改为短名称、主要标记和居中细分隔线；完整路径保留在 title，焦点返回 chip。 深色提示使用次要文字色，修正三级色在页面背景上过淡的问题。 |
+| [08-limited-popover-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/08-limited-popover-dark.png>) | 1、3 | 仅主要目录模式。保留必要能力说明，移除机器 / 对话用途副标题；最后一个已选目录不能取消。 |
+| [09-empty-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/09-empty-dark.png>) | 空态 | 空目录集合。使用简短空态文字和带图标的添加入口，无空列表或多余底栏。 |
+| [10-loading-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/10-loading-dark.png>) | 加载态 | 延迟加载。菜单显示中文读取状态并保持 chip 锚点，Esc / 点击外部仍可关闭。 |
+| [11-error-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/11-error-dark.png>) | 错误态 | 读取失败。将英文后端异常转为可读中文提示，使用 Desktop 危险色，无浏览器弹窗。 |
+| [12-save-error-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/12-save-error-dark.png>) | 错误态、4 | 即时保存失败。保留原目录和 chip 标签，展示中文错误；修正鼠标悬停与程序焦点造成的双行背景。 |
+| [13-narrow-keyboard-dark.png](</home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-thread-folders/round2/13-narrow-keyboard-dark.png>) | 2、6、7、聚焦 | 390×740 窄窗口，真实 Tab / Enter 打开。两个 chip 同排收缩省略，浮层仅在右侧空间不足时向左限位，保持 12px 视口边距和键盘焦点环。 |
 
-## 真实 Desktop 待验
+## 验证
 
-1. Mac 本机和已连接 SSH Host：从同一个项目创建对话，选择两个目录，确认 `cwd` 为主要目录且可以写入第二目录，侧栏仍归原项目；草稿与预热不能串到其他对话。
-2. 已有原生对话：切换主要/额外目录，确认下一轮、CLI 续聊和重新加载后的选择一致；agent 只收到一次变更说明。检查当前 `environmentId` 可读。
-3. Claude Code：确认 SDK 原生额外目录可用，主要目录切换后的 Native Session 身份、历史、配置和继续执行正常。其他 Harness 确认主要目录模式提示与实际行为一致。
-4. 委派：同机 Codex 与外部子 Thread 继承父项目；`--project <id>|none` 优先。跨机检查实际 `threadProjectAssignments.assign` 导出和签名；绑定不可用时 `window.__codexhostDelegationProjectsV1.status()` 显示 pending/error，记录保留并重试。
-5. 文件浏览器/diff 根目录：当前未写入未核验的 `thread-writable-roots` / applied workspace cwd 私有 atom，可能显示旧根；这是明确的集成缺口。
-6. 侧栏保持原生项目；跨机镜像仍创建目录/项目、打开新对话并选择 Harness；旧组文件保持原样。
+- `npm run build:typescript`、`npm run build:renderer`、`node tools/ui-preview/build.mjs`：通过。
+- 加载真实 Desktop CSS 的 `tests/e2e/renderer-thread-folders.spec.ts`：5 个用例通过，覆盖即时保存、主要目录、完整 title、浮层锚点、Home / End、Esc、远程输入补全、点击外部、最后目录保护、保存失败及加载 / 空 / 错误态。
+- 聚焦 Vitest：`renderer-binding-probe.test.ts` 与 `renderer-binding-probe-host-catalog.test.ts`，2 个文件、79 个用例通过。
+- `npm run lint`：通过，包含包边界检查。改动文件 Prettier 和 `git diff --check`：通过。
+- `npm run typecheck`：仍为此前独立基线已确认的 11 个既存测试类型错误，分布在 external-inject-items、DingTalk、native-at-menu 和 accept2 测试；本轮修改文件无新增错误。
 
-手动远程探针：`node tools/thread-folders-check.mjs --host <SSH别名> --cli <远程codex路径>`。需要目标机已登录 Codex，使用一次模型轮次；创建 ephemeral Thread，在随机 cache 目录验证第二根目录可写并清理。此环境未执行真实远程探针。
+## 实机集成边界
 
+本轮验证 UI 与交互，未把分支安装到运行中的 Desktop，也未执行真实模型轮次或远程沙箱探针。生产集成仍需按 [工作文件夹功能文档](../../docs/architecture/thread-folders.md) 验证真实 Host 的新对话 / 下一轮目录、文件浏览器根目录及委派归属。原生文件夹 picker 绑定、Desktop writable-roots / applied cwd 私有状态和跨机项目 assignment 的既有缺口见同一文档。
 
-## 本地检查
-
-- `npm run build:typescript`、`npm run build:renderer`：通过。
-- 聚焦 Vitest：33 个文件、594 个用例通过；末次父会话目录继承改动另以 5 个 Host 路径用例验证，52 个原生投影用例单文件重跑通过。并行负载下两项 Usage 用例曾触发 fixture 固定 2 秒等待上限，没有修改等待时间或跳过用例。
-- `tests/e2e/renderer-thread-folders.spec.ts`：3 个真实交互用例通过。
-- `npm run lint`：通过；包含边界检查。
-- `npm run typecheck`：11 个错误，与独立 `a9162bb5` 基线 worktree 的错误完全一致。错误位于原有 external-inject-items、DingTalk、native-at-menu 和 accept2 测试文件，未修改这些文件。
-- 改动文件 Prettier 检查与 `git diff --check`：通过。
-- 远程探针仅检查 `--help`；没有执行真实远程模型轮次。
-
-## 功能提交
-
-以下提交均为本地提交，没有 push、merge 或部署：
-
-```text
-2b54a73b refactor: remove project groups and preserve native project mirrors
-1605e91f feat: persist thread folders and delegation project metadata
-15e5599a feat: pass native additional directories to Claude Code
-36afbac1 feat: rewrite and track per-thread working folder requests
-f5ad16b9 feat: apply thread folders and inherit delegation projects
-99a2de4f feat: expose delegation project choices and upgrade managed skill
-e1593f7a feat: scope working folders to native conversation drafts
-3cdc4bcc fix: honor cleared Desktop project assignments in delegation
-f824f657 feat: add conversation working folder controls to Composer
-7cc965d9 fix: inherit the parent thread current working directory
-```
-
-委派 Skill 升为 v15。v14 fixture 来自真实已安装文件，SHA-256 为 `7caa62a4fed8a0d4ae2f757bc28e80da05fefc6bc2b46b231d42d57c01461a32`，与升级白名单一致。
+未 push、merge 或部署；未读取 `~/.codexhost/runtime/`。
