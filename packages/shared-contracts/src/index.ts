@@ -622,3 +622,4 @@ export {
   type DingTalkReplyScope,
   type DingTalkDispatchSettings,
 } from "./dingtalk-dispatch.js";
+export * from "./skills-hub.js";
