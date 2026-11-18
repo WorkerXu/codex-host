@@ -105,6 +105,9 @@ export interface ResumeSessionInput {
   kind: "resume";
   nativeRef: NativeSessionRef;
   cwd: string;
+  /** Directory the Native Session was last opened in, when the working folders changed.
+   * Adapters that verify history ownership may accept this one prior directory. */
+  previousCwd?: string;
   environment?: Record<string, string | undefined>;
   knownTurnRefs?: NativeTurnRef[];
   permissionModeId?: HarnessPermissionModeId;

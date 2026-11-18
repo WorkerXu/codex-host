@@ -71,7 +71,10 @@ import {
   nativeCommandsEnabled,
 } from "./slash-commands.js";
 
-type SessionInput = Extract<OpenSessionInput, { kind: "create" | "resume" }>;
+/** `previousCwd` accompanies a resume when the Host changed the working folders. */
+type SessionInput = Extract<OpenSessionInput, { kind: "create" | "resume" }> & {
+  previousCwd?: string;
+};
 export type CodeBuddyHistoryReader = typeof readNativeHistory;
 interface ActiveTurn {
   command: TurnStartCommand;
@@ -222,6 +225,12 @@ export class CodeBuddySession implements HarnessSession {
     });
   }
 
+  #historyReadOptions(): { previousCwd?: string } | undefined {
+    return this.input.kind === "resume" && this.input.previousCwd
+      ? { previousCwd: this.input.previousCwd }
+      : undefined;
+  }
+
   /** Every fresh process must restore an unanchored rewind before it can accept prompts. */
   async #openClient(): Promise<Record<string, unknown>> {
     let rewind: ReturnType<typeof pendingNativeHistoryRewind>;
@@ -231,6 +240,7 @@ export class CodeBuddySession implements HarnessSession {
         this.#ref,
         this.environment,
         this.profile,
+        this.#historyReadOptions(),
       );
       this.#hasTurn =
         snapshotFromHistory(history, this.#ref, this.input.cwd, this.profile).turns.length > 0;
@@ -355,6 +365,7 @@ export class CodeBuddySession implements HarnessSession {
         this.#ref,
         this.environment,
         this.profile,
+        this.#historyReadOptions(),
       );
       this.#usage = historyUsage(history);
       // Requests the last Turn added, now persisted; CodeBuddy ACP reports no per-request usage.
@@ -390,6 +401,7 @@ export class CodeBuddySession implements HarnessSession {
         this.#ref,
         this.environment,
         this.profile,
+        this.#historyReadOptions(),
       );
       if (this.#closed || this.#fault || this.#active !== active || this.#generation !== generation)
         return;
