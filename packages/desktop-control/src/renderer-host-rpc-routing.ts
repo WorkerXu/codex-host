@@ -197,7 +197,10 @@ export function installRendererHostRpcRouting(
         [
           {
             ...input,
-            ...(folders ? { cwd: folders[0], runtimeWorkspaceRoots: [...folders] } : {}),
+            // This object is already capnweb wire format: a plain array would be read as a
+            // special value tag (`["/path"]` → "unknown special value"), so escape it as
+            // capnweb does, by wrapping it in one more array.
+            ...(folders ? { cwd: folders[0], runtimeWorkspaceRoots: [[...folders]] } : {}),
             ...(model
               ? {
                   collaborationMode: {

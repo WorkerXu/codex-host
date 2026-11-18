@@ -854,7 +854,9 @@ it("keeps working folders scoped to a draft and preserves its explicit project",
     >[];
     expect(modified[0]).toMatchObject({
       cwd: "/main",
-      runtimeWorkspaceRoots: ["/main", "/extra"],
+      // capnweb wire format: array literals are escaped as [[...]]; a bare ["/main", …]
+      // is decoded as a special-value tag and Desktop rejects the submit.
+      runtimeWorkspaceRoots: [["/main", "/extra"]],
       projectId: "keep-project",
     });
     expect(fixture.sent[1]).toEqual(untouched);
