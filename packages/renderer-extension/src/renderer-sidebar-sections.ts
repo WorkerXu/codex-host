@@ -159,7 +159,10 @@ export function installRendererSidebarSections(
 
   const sectionContainers = (): HTMLElement[] =>
     [...document.querySelectorAll<HTMLElement>(SIDEBAR_SECTION_CONTAINER_SELECTOR)].filter(
-      (container) => container.getClientRects().length > 0,
+      (container) => {
+        const rect = container.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      },
     );
 
   const containersById = (sectionId: string): HTMLElement[] =>
