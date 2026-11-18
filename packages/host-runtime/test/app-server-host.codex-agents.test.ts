@@ -82,7 +82,7 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 4))).toMatchObject({
-        result: { threshold: 0.85, agents: {} },
+        result: { threshold: 0.7, agents: {} },
       });
 
       writeRequest(fixture.desktopInput, {

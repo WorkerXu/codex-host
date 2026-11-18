@@ -455,7 +455,7 @@ it.each([false, true])(
     await vi.waitFor(async () =>
       expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
         result: "skipped",
-        detail: "匹配度 0.52，未达阈值 0.85，不相关 0.29，有点相关 0.39，高度相关 0.32",
+        detail: "匹配度 0.29，未达阈值 0.85",
       }),
     );
     expect(f.startThread).not.toHaveBeenCalled();
@@ -469,7 +469,7 @@ it("retains the normalized score and probabilities after a selected task replies
       scoreDingTalkCandidates: async () => ({
         available: true,
         scores: { "qa.toml": 0.9 },
-        probabilities: { "qa.toml": { 不相关: 0.05, 有点相关: 0.1, 高度相关: 0.85 } },
+        probabilities: { "qa.toml": { 不能处理: 0.1, 能处理: 0.9 } },
         errorCode: null,
       }),
     },
@@ -477,7 +477,5 @@ it("retains the normalized score and probabilities after a selected task replies
   f.emit();
   await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
   await f.finish();
-  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe(
-    "匹配度 0.90，已达阈值 0.85，不相关 0.05，有点相关 0.10，高度相关 0.85",
-  );
+  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe("匹配度 0.90，已达阈值 0.85");
 });

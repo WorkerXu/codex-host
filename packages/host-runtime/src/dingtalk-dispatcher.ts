@@ -131,13 +131,8 @@ function matchDetail(
 ): string {
   const score = match.scores[fileName];
   if (typeof score !== "number" || !Number.isFinite(score)) return "无法取得匹配度，未派发";
-  const distribution = Object.entries(match.probabilities?.[fileName] ?? {}).map(
-    ([criterion, probability]) => `${criterion} ${probability.toFixed(2)}`,
-  );
-  return [
-    `匹配度 ${score.toFixed(2)}，${score >= threshold ? "已达" : "未达"}阈值 ${threshold.toFixed(2)}`,
-    ...distribution,
-  ].join("，");
+  // Two-criterion scores make the probability list redundant with the score itself.
+  return `匹配度 ${score.toFixed(2)}，${score >= threshold ? "已达" : "未达"}阈值 ${threshold.toFixed(2)}`;
 }
 
 /** Listens, matches, starts native Codex Threads and owns their reply destinations. */

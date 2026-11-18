@@ -10,6 +10,7 @@ import {
   parseBugDecisionAnswers,
   parseBugOrderResponse,
   parseAgentScores,
+  buildAgentScoreRequest,
 } from "../src/jarvis-decisions.js";
 
 const bug = (id: number, title: string, updatedAt: string): JarvisBug => ({
@@ -222,7 +223,7 @@ describe("DingTalk agent matching", () => {
       expect(body.questions.agent_1.instructions).toContain("采购审批");
       return new Response(
         JSON.stringify({
-          answers: { agent_0: { score: 1.7 }, agent_1: { score: 1.9 }, agent_2: { score: "1" } },
+          answers: { agent_0: { score: 0.85 }, agent_1: { score: 0.95 }, agent_2: { score: "1" } },
         }),
       );
     });
@@ -255,31 +256,52 @@ describe("DingTalk agent matching", () => {
 const realReviewScore = JSON.parse(
   readFileSync(new URL("./fixtures/dingtalk-decisions-review-score.json", import.meta.url), "utf8"),
 );
+const realKnowledgeScore = JSON.parse(
+  readFileSync(new URL("./fixtures/dingtalk-decisions-kb-score.json", import.meta.url), "utf8"),
+);
+// Real three-level answer (Jarvis bug ordering still uses 不相关/有点相关/高度相关).
+const realThreeLevelScore = JSON.parse(
+  readFileSync(new URL("./fixtures/decisions-three-level-score.json", import.meta.url), "utf8"),
+);
 it("accepts probabilities keyed by criterion text", () => {
   const parsed = parseAgentScores(
-    { answers: { agent_0: { score: 2, probabilities: { 高度相关: 0.9 } } } },
+    { answers: { agent_0: { score: 1, probabilities: { 能处理: 0.9 } } } },
     [{ fileName: "a.toml" }],
   );
   expect(parsed.scores["a.toml"]).toBe(1);
-  expect(parsed.probabilities["a.toml"]).toEqual({ 高度相关: 0.9 });
+  expect(parsed.probabilities["a.toml"]).toEqual({ 能处理: 0.9 });
 });
 
-it("normalizes the reported MR-review answer by the number of criterion intervals", () => {
-  const parsed = parseAgentScores(realReviewScore, [{ fileName: "问源代问.toml" }]);
-  expect(parsed.scores["问源代问.toml"]).toBeCloseTo(0.517);
-  expect(parsed.scores["问源代问.toml"]).toBeLessThan(0.85);
-  // Real Decisions answers key probabilities by criterion index and name them in `legend`.
-  const distribution = parsed.probabilities["问源代问.toml"] ?? {};
-  expect(Object.keys(distribution).sort()).toEqual(["不相关", "有点相关", "高度相关"].sort());
-  expect(distribution["不相关"]).toBeCloseTo(0.288, 3);
-  expect(distribution["有点相关"]).toBeCloseTo(0.39, 2);
-  expect(distribution["高度相关"]).toBeCloseTo(0.322, 3);
+it("separates real dispatch answers on the two-criterion scale", () => {
+  const review = parseAgentScores(realReviewScore, [{ fileName: "问源代问.toml" }]);
+  expect(review.scores["问源代问.toml"]).toBeCloseTo(0.291, 3);
+  expect(review.probabilities["问源代问.toml"]).toEqual({
+    不能处理: realReviewScore.answers.agent_0.probabilities["0"],
+    能处理: realReviewScore.answers.agent_0.probabilities["1"],
+  });
+  const knowledge = parseAgentScores(realKnowledgeScore, [{ fileName: "问源代问.toml" }]);
+  expect(knowledge.scores["问源代问.toml"]).toBeCloseTo(0.767, 3);
+  expect(knowledge.scores["问源代问.toml"]).toBeGreaterThan(0.7);
+  expect(review.scores["问源代问.toml"]).toBeLessThan(0.7);
+});
+
+it("asks one two-criterion question per agent with only the message as input", () => {
+  const request = buildAgentScoreRequest({
+    text: "徐涛：@许涛 帮我从知识库查一下安心买是什么业务",
+    candidates: [{ fileName: "a.toml", name: "问源代问", description: "从知识库查询并回答" }],
+  });
+  expect(request.input).toBe("钉钉消息：徐涛：@许涛 帮我从知识库查一下安心买是什么业务");
+  expect(request.questions.agent_0).toMatchObject({
+    type: "score",
+    criteria: ["不能处理", "能处理"],
+  });
+  expect(String(request.questions.agent_0?.instructions)).toContain("问源代问");
 });
 
 it.each([
   [0, 0],
-  [1, 0.5],
-  [2, 1],
+  [0.5, 0.5],
+  [1, 1],
   [Number.NaN, 0],
   [Number.POSITIVE_INFINITY, 0],
   ["1.034", 0],
@@ -295,7 +317,7 @@ it("keeps valid scores above one distinct when sorting Jarvis bugs", async () =>
     fetchImpl: async () =>
       Response.json({
         answers: {
-          rel_0: realReviewScore.answers.agent_0,
+          rel_0: realThreeLevelScore.answers.agent_0,
           rel_1: { score: 1.8 },
           rel_2: { score: 0.9 },
         },
@@ -307,7 +329,7 @@ it("keeps valid scores above one distinct when sorting Jarvis bugs", async () =>
     bug(3, "登录超时", "2026-11-13"),
   ];
   const order = parseBugOrderResponse(
-    { answers: { rel_0: realReviewScore.answers.agent_0, rel_1: { score: 1.8 } } },
+    { answers: { rel_0: realThreeLevelScore.answers.agent_0, rel_1: { score: 1.8 } } },
     2,
   );
   expect(order[0]).toBeCloseTo(0.517, 3);
