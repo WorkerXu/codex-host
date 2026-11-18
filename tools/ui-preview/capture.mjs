@@ -1754,7 +1754,7 @@ for (const scenario of scenarios) {
             ? "OpenAI 额度不足"
             : document.body.dataset.scenario === "jarvis-mode-openai-missing-key"
               ? "未配置 OpenAI Key"
-              : "解析超时";
+              : "连接超时";
         const results = mode?.querySelector('[data-jarvis-results="true"]');
         check(
           "model-query-typed",

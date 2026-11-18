@@ -7,7 +7,7 @@ import {
 } from "./structured-query-client.js";
 import type { ModelServiceSettingsStore } from "./model-service-settings.js";
 export { StructuredQueryError as JarvisQueryError } from "./structured-query-client.js";
-export const JARVIS_QUERY_TIMEOUT_MS = 10_000;
+export const JARVIS_QUERY_TIMEOUT_MS = 20_000;
 export const JARVIS_QUERY_TIME_ZONE = "Asia/Shanghai";
 export interface JarvisQueryInterpreter {
   interpret(query: string, now: number, signal?: AbortSignal): Promise<JarvisBugQuery>;

@@ -15,7 +15,7 @@ import {
   buildJarvisQueryRequest,
   JARVIS_QUERY_SCHEMA,
 } from "../src/jarvis-query-parser.js";
-import { strictJsonSchema } from "../src/structured-query-client.js";
+import { STRUCTURED_QUERY_TIMEOUT_MS, strictJsonSchema } from "../src/structured-query-client.js";
 
 const directories: string[] = [];
 const QUERY = {
@@ -58,7 +58,7 @@ describe("OpenAI structured parser", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("accepts a proxy response after 5.8 seconds and aborts at exactly ten seconds", async () => {
+  it("accepts a proxy response after 5.8 seconds and aborts at exactly twenty seconds", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 5_800));
@@ -75,7 +75,7 @@ describe("OpenAI structured parser", () => {
     const assertion = expect(stalled.interpret("bug", 0)).rejects.toMatchObject({
       code: "timeout",
     });
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(19_999);
     expect(signals[0]?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await assertion;
@@ -214,7 +214,7 @@ describe("OpenAI structured parser", () => {
       client(async () => openaiResponse({ ...QUERY, extra: true })).interpret("bug", 0),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
-  it.each(["key", "fetch", "body"])("bounds stalled %s to ten seconds", async (stage) => {
+  it.each(["key", "fetch", "body"])("bounds stalled %s to twenty seconds", async (stage) => {
     vi.useFakeTimers();
     const stalled = () => new Promise<never>(() => {});
     const parser = client(
@@ -226,18 +226,18 @@ describe("OpenAI structured parser", () => {
       code: "timeout",
       provider: "openai",
     });
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(20000);
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("includes stalled provider selection in the ten-second deadline", async () => {
+  it("includes stalled provider selection in the twenty-second deadline", async () => {
     vi.useFakeTimers();
     const settings = await store();
     vi.spyOn(settings, "provider").mockImplementation(() => new Promise(() => {}));
     const readKey = vi.spyOn(settings, "readKey");
     const parser = createJarvisQueryParser({ settings, isLocalHost: true });
     const assertion = expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(20000);
     await assertion;
     expect(readKey).not.toHaveBeenCalled();
   });
@@ -341,6 +341,23 @@ describe("shared model settings", () => {
       latencyMs: null,
       errorCode: "missing_key",
     });
+  });
+  it("keeps the OpenAI connection test minimal while allowing a slow reply", async () => {
+    expect(STRUCTURED_QUERY_TIMEOUT_MS).toBe(20_000);
+    const settings = await store();
+    await settings.update({ key: { provider: "openai", value: "fake-openai-key" } });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body)).max_tokens).toBe(16);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return openaiResponse({ ok: true });
+    });
+    await expect(
+      new ModelService(settings, fetchImpl as unknown as typeof fetch).request(
+        MODEL_SERVICE_TEST_METHOD,
+        { provider: "openai" },
+      ),
+    ).resolves.toMatchObject({ ok: true, errorCode: null });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
   it.each([
     [402, "quota_exhausted"],

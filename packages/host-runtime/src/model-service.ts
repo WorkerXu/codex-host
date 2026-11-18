@@ -6,7 +6,11 @@ import {
   modelServiceTestParamsSchema,
 } from "@codexhost/shared-contracts";
 import { ModelServiceSettingsStore } from "./model-service-settings.js";
-import { createStructuredQueryClient, StructuredQueryError } from "./structured-query-client.js";
+import {
+  createStructuredQueryClient,
+  STRUCTURED_QUERY_TIMEOUT_MS,
+  StructuredQueryError,
+} from "./structured-query-client.js";
 import { createJarvisDecisions } from "./jarvis-decisions.js";
 
 /** Registered only on the Desktop-local Host. Credentials stay inside this service. */
@@ -44,11 +48,13 @@ export class ModelService {
         provider,
         readApiKey: (p) => this.settings.readKey(p),
         fetchImpl: this.fetchImpl,
+        timeoutMs: STRUCTURED_QUERY_TIMEOUT_MS,
       }).query(
         {
           name: "connection_test",
           instructions: 'Return the JSON object {"ok":true}.',
           input: "test",
+          maxTokens: 16,
           schema: {
             type: "object",
             properties: { ok: { type: "boolean" } },

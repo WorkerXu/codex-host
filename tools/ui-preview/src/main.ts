@@ -1497,7 +1497,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       true,
       (mode) =>
         document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("解析超时") === true,
+        mode.textContent?.includes("连接超时") === true,
     );
   },
 

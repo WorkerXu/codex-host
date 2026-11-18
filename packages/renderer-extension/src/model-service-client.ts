@@ -32,7 +32,7 @@ export function modelServiceErrorText(
     quota_exhausted: `${name} 额度不足`,
     unauthorized: `${name} Key 无效`,
     invalid_key: `${name} Key 无效`,
-    timeout: "解析超时",
+    timeout: "连接超时，模型未响应",
     network: "网络连接失败",
     rate_limited: "请求过于频繁，请稍后重试",
     invalid_response: "解析结果无效，请重试",
@@ -48,7 +48,7 @@ export function createRendererModelServiceClient(
     if (!target) throw new Error("local_only");
     return target.sendRequest(method, params, {
       priority: "interactive",
-      timeoutMs: method === MODEL_SERVICE_TEST_METHOD ? 12_000 : 5_000,
+      timeoutMs: method === MODEL_SERVICE_TEST_METHOD ? 25_000 : 5_000,
     });
   };
   return {

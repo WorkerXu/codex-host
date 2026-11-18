@@ -335,7 +335,7 @@ export function createRendererJarvisClient(
           {},
           {
             priority: "interactive",
-            timeoutMs: 15_000,
+            timeoutMs: 25_000,
           },
         ),
       );

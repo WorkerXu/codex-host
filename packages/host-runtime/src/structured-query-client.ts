@@ -2,7 +2,7 @@ import type { ModelProvider } from "@codexhost/shared-contracts";
 export const MODEL_SERVICE_MODELS = {
   openai: "gpt-4.1-mini",
 } as const;
-export const STRUCTURED_QUERY_TIMEOUT_MS = 3_000;
+export const STRUCTURED_QUERY_TIMEOUT_MS = 20_000;
 export class StructuredQueryError extends Error {
   constructor(
     readonly code: string,
@@ -47,6 +47,8 @@ export interface StructuredQueryRequest {
   input: unknown;
   schema: Record<string, unknown>;
   name: string;
+  /** Bounds the reply for small probes such as the connection test. */
+  maxTokens?: number;
 }
 export function createStructuredQueryClient(options: StructuredQueryClientOptions) {
   return {
@@ -94,7 +96,7 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
             json_schema: { name: request.name, strict: true, schema: request.schema },
           },
           temperature: 0,
-          max_tokens: 2_048,
+          max_tokens: request.maxTokens ?? 2_048,
         };
         const response = await (options.fetchImpl ?? fetch)(endpoint, {
           method: "POST",

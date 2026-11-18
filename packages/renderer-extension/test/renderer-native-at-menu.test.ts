@@ -423,7 +423,7 @@ describe("focus-safe press", () => {
     ["quota_exhausted", "OpenAI 额度不足"],
     ["unauthorized", "OpenAI Key 无效"],
     ["missing_key", "未配置 OpenAI Key"],
-    ["timeout", "解析超时"],
+    ["timeout", "连接超时，模型未响应"],
     ["network", "网络连接失败"],
     ["invalid_response", "解析结果无效，请重试"],
   ])("shows only the Chinese reason and settings action for %s", (errorCode, reason) => {
