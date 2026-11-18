@@ -13,6 +13,7 @@ import {
   SIDEBAR_PROJECT_ROW_ATTRIBUTE,
   SIDEBAR_PROJECT_SHOW_ALL_ATTRIBUTE,
   SIDEBAR_SECTION_CONTAINER_SELECTOR,
+  MERGED_MORE_ATTRIBUTE,
   SIDEBAR_THREAD_ID_ATTRIBUTE,
   SIDEBAR_THREAD_ROW_ATTRIBUTE,
   findSectionElement,
@@ -23,8 +24,12 @@ import {
   type SidebarSectionSnapshot,
 } from "./renderer-sidebar-sections-dom.js";
 import {
+  MERGED_MORE_COLLAPSE_LABEL,
+  MERGED_MORE_EXPAND_LABEL,
+  createMergedMoreControl,
   createSectionDisplayToggle,
   placeSectionDisplayToggle,
+  setMergedMoreLabel,
 } from "./renderer-sidebar-sections-control.js";
 import {
   MERGED_SECTION_STATE_ATTRIBUTE,
@@ -199,6 +204,52 @@ export function installRendererSidebarSections(
       });
   };
 
+  const mergedMoreControl = (list: HTMLElement): HTMLElement | null =>
+    [...list.children].find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement && child.hasAttribute(MERGED_MORE_ATTRIBUTE),
+    ) ?? null;
+
+  const removeMergedMore = (container: HTMLElement): void => {
+    for (const element of container.querySelectorAll(`[${MERGED_MORE_ATTRIBUTE}]`)) {
+      element.remove();
+    }
+  };
+
+  const toggleSectionPagination = (container: HTMLElement): void => {
+    const result = readSectionSnapshot(container);
+    if (!result.ok) {
+      schedule();
+      return;
+    }
+    const collapsed = result.snapshot.projects.filter((project) => !project.showAll);
+    const targets = collapsed.length > 0 ? collapsed : result.snapshot.projects;
+    for (const project of targets) project.toggle?.button.click();
+    schedule();
+  };
+
+  const ensureMergedMore = (snapshot: SidebarSectionSnapshot): void => {
+    const existing = mergedMoreControl(snapshot.list);
+    const template = snapshot.projects.find((project) => project.toggle)?.toggle ?? null;
+    if (!template) {
+      existing?.remove();
+      return;
+    }
+    const label = snapshot.projects.some((project) => !project.showAll)
+      ? MERGED_MORE_EXPAND_LABEL
+      : MERGED_MORE_COLLAPSE_LABEL;
+    if (!existing) {
+      const created = createMergedMoreControl(template, label, () => {
+        toggleSectionPagination(snapshot.container);
+      });
+      if (!created) return;
+      snapshot.list.append(created.container);
+      return;
+    }
+    setMergedMoreLabel(existing, label);
+    if (snapshot.list.lastElementChild !== existing) snapshot.list.append(existing);
+  };
+
   const toggleSection = (sectionId: string): void => {
     const current = readSectionDisplayMode(sectionId, storage);
     const next: SidebarSectionDisplayMode = current === "merged" ? "grouped" : "merged";
@@ -248,18 +299,21 @@ export function installRendererSidebarSections(
       const result = readSectionSnapshot(container);
       if (!result.ok) {
         clearMergeMarks(container);
+        removeMergedMore(container);
         container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, `fallback:${result.reason}`);
         warnOnce(sectionId, result.reason);
         continue;
       }
       if (!ensureToggle(result.snapshot, mode)) {
         clearMergeMarks(container);
+        removeMergedMore(container);
         container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "fallback:toggle-missing");
         warnOnce(sectionId, "toggle-missing");
         continue;
       }
       if (mode === "grouped") {
         clearMergeMarks(container);
+        removeMergedMore(container);
         container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "grouped");
         continue;
       }
@@ -269,6 +323,7 @@ export function installRendererSidebarSections(
         for (const row of project.rows) row.element.removeAttribute(MERGE_ORDER_ATTRIBUTE);
       }
       applyMergeMarks(result.snapshot, orderByRow);
+      ensureMergedMore(result.snapshot);
       container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "merged");
     }
     style.apply(mergeStyleCss(maxOrder));
@@ -316,6 +371,7 @@ export function installRendererSidebarSections(
         )) {
           button.remove();
         }
+        removeMergedMore(container);
         clearMergeMarks(container);
       }
       style.dispose();

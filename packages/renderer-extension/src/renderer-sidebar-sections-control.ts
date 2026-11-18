@@ -1,9 +1,18 @@
 /** The section-header control that switches the section between native and merged display. */
 
-import { SIDEBAR_THREAD_ROW_ATTRIBUTE } from "./renderer-sidebar-sections-dom.js";
-import { SECTION_DISPLAY_TOGGLE_ATTRIBUTE } from "./renderer-sidebar-sections-layout.js";
+import {
+  MERGED_MORE_ATTRIBUTE,
+  SIDEBAR_THREAD_ROW_ATTRIBUTE,
+  type SidebarSectionPaginationToggle,
+} from "./renderer-sidebar-sections-dom.js";
+import {
+  MERGE_HIDDEN_ATTRIBUTE,
+  SECTION_DISPLAY_TOGGLE_ATTRIBUTE,
+} from "./renderer-sidebar-sections-layout.js";
 
 export const SECTION_DISPLAY_LABEL = "显示项目分组";
+export const MERGED_MORE_EXPAND_LABEL = "展开显示";
+export const MERGED_MORE_COLLAPSE_LABEL = "收起";
 
 const ICON_PATHS = [
   "M21 12h-8",
@@ -74,4 +83,43 @@ export function placeSectionDisplayToggle(
   if (!cluster) return false;
   if (button.parentElement !== cluster) cluster.append(button);
   return true;
+}
+
+export interface MergedMoreControl {
+  container: HTMLElement;
+  setLabel(label: string): void;
+}
+
+export function setMergedMoreLabel(container: HTMLElement, label: string): void {
+  const button = container.querySelector("button");
+  if (!button) return;
+  const target = [...button.querySelectorAll("span")].find(
+    (span) => span.children.length === 0 && Boolean(span.textContent?.trim()),
+  );
+  if (target) target.textContent = label;
+  else if (button.children.length === 0) button.textContent = label;
+}
+
+/** Clones the native expand/collapse row so the merged control keeps Desktop's look. */
+export function createMergedMoreControl(
+  template: SidebarSectionPaginationToggle,
+  label: string,
+  onActivate: () => void,
+): MergedMoreControl | null {
+  const container = template.container.cloneNode(true) as HTMLElement;
+  if (!(container instanceof HTMLElement)) return null;
+  container.removeAttribute(MERGE_HIDDEN_ATTRIBUTE);
+  for (const element of container.querySelectorAll(`[${MERGE_HIDDEN_ATTRIBUTE}]`)) {
+    element.removeAttribute(MERGE_HIDDEN_ATTRIBUTE);
+  }
+  container.setAttribute(MERGED_MORE_ATTRIBUTE, "");
+  const button = container.querySelector("button");
+  if (!button) return null;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onActivate();
+  });
+  setMergedMoreLabel(container, label);
+  return { container, setLabel: (value) => setMergedMoreLabel(container, value) };
 }

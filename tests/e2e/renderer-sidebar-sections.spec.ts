@@ -33,7 +33,19 @@ const { outputFiles } = await build({
         element.append(line);
         return element;
       };
-      const project = (projectId, label, rows) => {
+      const rowUnit = (projectId, threadId, title) => {
+        const unitRow = document.createElement("div");
+        unitRow.setAttribute("role", "listitem");
+        const rowOverflow = document.createElement("div");
+        const rowContents = document.createElement("div");
+        const drop = document.createElement("div");
+        drop.append(row(projectId, threadId, title));
+        rowContents.append(drop);
+        rowOverflow.append(rowContents);
+        unitRow.append(rowOverflow);
+        return unitRow;
+      };
+      const project = (projectId, label, rows, moreRows = []) => {
         const unit = document.createElement("div");
         unit.setAttribute("role", "listitem");
         const overflow = document.createElement("div");
@@ -64,17 +76,37 @@ const { outputFiles } = await build({
         list.style.display = "flex";
         list.style.flexDirection = "column";
         list.style.gap = "1px";
-        for (const [threadId, title] of rows) {
-          const unitRow = document.createElement("div");
-          unitRow.setAttribute("role", "listitem");
-          const rowOverflow = document.createElement("div");
-          const rowContents = document.createElement("div");
-          const drop = document.createElement("div");
-          drop.append(row(projectId, threadId, title));
-          rowContents.append(drop);
-          rowOverflow.append(rowContents);
-          unitRow.append(rowOverflow);
-          list.append(unitRow);
+        for (const [threadId, title] of rows) list.append(rowUnit(projectId, threadId, title));
+        const toggleItem = document.createElement("div");
+        toggleItem.setAttribute("role", "listitem");
+        const toggleButton = document.createElement("button");
+        toggleButton.type = "button";
+        toggleButton.textContent = "展开显示";
+        toggleItem.append(toggleButton);
+        if (moreRows.length > 0) {
+          list.append(toggleItem);
+          listWrap.setAttribute("data-app-action-sidebar-project-show-all", "false");
+          toggleButton.addEventListener("click", () => {
+            const expanded =
+              listWrap.getAttribute("data-app-action-sidebar-project-show-all") === "true";
+            if (expanded) {
+              for (const extra of [...list.querySelectorAll("[data-extra-row]")]) extra.remove();
+              listWrap.setAttribute("data-app-action-sidebar-project-show-all", "false");
+              toggleButton.textContent = "展开显示";
+              list.append(toggleItem);
+            } else {
+              for (const [threadId, title] of moreRows) {
+                const extra = rowUnit(projectId, threadId, title);
+                extra.setAttribute("data-extra-row", "");
+                list.append(extra);
+              }
+              listWrap.setAttribute("data-app-action-sidebar-project-show-all", "true");
+              toggleButton.textContent = "收起";
+              list.append(toggleItem);
+            }
+          });
+        } else {
+          listWrap.setAttribute("data-app-action-sidebar-project-show-all", "true");
         }
         inner.append(list);
         listWrap.append(inner);
@@ -112,7 +144,7 @@ const { outputFiles } = await build({
         list.style.gap = "1px";
         const outer = document.createElement("div");
         outer.append(project("p1", "项目一", [["a1", "A1"], ["a2", "A2"], ["a3", "A3"]]));
-        outer.append(project("p2", "项目二", [["b1", "B1"], ["b2", "B2"]]));
+        outer.append(project("p2", "项目二", [["b1", "B1"], ["b2", "B2"]], [["b3", "B3"]]));
         list.append(...outer.children);
         contentWrapper.append(list);
         content.append(contentWrapper);
@@ -206,6 +238,43 @@ test("merges projects by recency while keeping native rows and hiding project ch
     "none",
   ]);
   expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("merged");
+});
+
+test("merges the visible rows and replaces project expanders with one merged control", async ({
+  page,
+}) => {
+  await setup(page);
+  const more = page.locator("[data-codexhost-merge-more]");
+  await expect(more).toHaveCount(1);
+  await expect(more.locator("button")).toHaveText("展开显示");
+  await expect(
+    page.locator("[data-codexhost-merge-hidden] button").filter({ hasText: "展开显示" }),
+  ).toHaveCount(1);
+  const collapsed = [...(await tops(page))].sort((left, right) => left.top - right.top);
+  expect(collapsed.map((row) => row.thread)).toEqual([
+    "host:a1",
+    "host:b1",
+    "host:b2",
+    "host:a2",
+    "host:a3",
+  ]);
+
+  await more.locator("button").click();
+  await expect(more.locator("button")).toHaveText("收起");
+  await expect(page.locator("[data-app-action-sidebar-thread-row]")).toHaveCount(6);
+  const expanded = [...(await tops(page))].sort((left, right) => left.top - right.top);
+  expect(expanded.map((row) => row.thread)).toEqual([
+    "host:a1",
+    "host:b1",
+    "host:b2",
+    "host:b3",
+    "host:a2",
+    "host:a3",
+  ]);
+
+  await more.locator("button").click();
+  await expect(more.locator("button")).toHaveText("展开显示");
+  await expect(page.locator("[data-app-action-sidebar-thread-row]")).toHaveCount(5);
 });
 
 test("removes the project row lead slot only in merged mode", async ({ page }) => {

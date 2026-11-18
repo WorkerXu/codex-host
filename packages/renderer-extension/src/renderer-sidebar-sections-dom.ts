@@ -19,6 +19,7 @@ export const SIDEBAR_THREAD_ROW_ATTRIBUTE = "data-app-action-sidebar-thread-row"
 export const SIDEBAR_THREAD_ID_ATTRIBUTE = "data-app-action-sidebar-thread-id";
 export const SIDEBAR_THREAD_HOST_ID_ATTRIBUTE = "data-app-action-sidebar-thread-host-id";
 export const SIDEBAR_THREAD_PINNED_ATTRIBUTE = "data-app-action-sidebar-thread-pinned";
+export const MERGED_MORE_ATTRIBUTE = "data-codexhost-merge-more";
 
 export type SidebarSectionFallbackReason =
   | "section-missing"
@@ -39,11 +40,20 @@ export interface SidebarSectionRow {
   pinned: boolean;
 }
 
+export interface SidebarSectionPaginationToggle {
+  container: HTMLElement;
+  button: HTMLElement;
+}
+
 export interface SidebarSectionProject {
   container: HTMLElement;
   rows: SidebarSectionRow[];
   /** Direct project children that carry no conversation row (header wrapper, rail). */
   hidden: HTMLElement[];
+  /** Native rows are all mounted; false means the project shows its initial limit. */
+  showAll: boolean;
+  /** Native 「展开显示」/「收起」 control, present when the project can toggle its limit. */
+  toggle: SidebarSectionPaginationToggle | null;
 }
 
 export interface SidebarSectionSnapshot {
@@ -91,6 +101,7 @@ function directProjectUnits(list: HTMLElement): HTMLElement[] | null {
   const units: HTMLElement[] = [];
   for (const child of list.children) {
     if (!(child instanceof HTMLElement)) continue;
+    if (child.hasAttribute(MERGED_MORE_ATTRIBUTE)) continue;
     if (child.getAttribute("role") !== "listitem") return null;
     if (child.querySelector(`div[${SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE}^="project:"]`) === null) {
       return null;
@@ -98,6 +109,19 @@ function directProjectUnits(list: HTMLElement): HTMLElement[] | null {
     units.push(child);
   }
   return units.length > 0 ? units : null;
+}
+
+function findPaginationToggle(rowList: HTMLElement): SidebarSectionPaginationToggle | null {
+  const items = [...rowList.querySelectorAll<HTMLElement>('div[role="listitem"]')].filter(
+    (item) => item.querySelector(`[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`) === null,
+  );
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (!item) continue;
+    const button = item.querySelector<HTMLElement>("button");
+    if (button) return { container: item, button };
+  }
+  return null;
 }
 
 function threadKey(hostId: string, threadId: string): string {
@@ -126,9 +150,14 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
       return { ok: false, reason: "project-collapsed" };
     }
     const rowList = project.querySelector<HTMLElement>(`[${SIDEBAR_PROJECT_LIST_ATTRIBUTE}]`);
-    if (!rowList || rowList.getAttribute(SIDEBAR_PROJECT_SHOW_ALL_ATTRIBUTE) !== "true") {
+    const showAllValue = rowList?.getAttribute(SIDEBAR_PROJECT_SHOW_ALL_ATTRIBUTE);
+    if (!rowList || (showAllValue !== "true" && showAllValue !== "false")) {
       return { ok: false, reason: "project-pagination" };
     }
+    const toggle = findPaginationToggle(rowList);
+    // Desktop renders the expander only when rows are actually hidden, so a
+    // false flag without an expander means the full project list is mounted.
+    const showAll = showAllValue === "true" || !toggle;
 
     const rows: SidebarSectionRow[] = [];
     for (const element of rowList.querySelectorAll<HTMLElement>(
@@ -153,7 +182,7 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
         child instanceof HTMLElement &&
         child.querySelector(`[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`) === null,
     );
-    projects.push({ container: project, rows, hidden });
+    projects.push({ container: project, rows, hidden, showAll, toggle });
   }
 
   const owned = new Set(projects.flatMap((project) => project.rows.map((row) => row.element)));
