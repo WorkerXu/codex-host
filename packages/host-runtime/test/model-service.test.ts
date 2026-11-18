@@ -33,6 +33,17 @@ const openaiResponse = (value: unknown = QUERY) =>
   Response.json({
     choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }],
   });
+const geminiResponse = (value: unknown = QUERY) =>
+  Response.json({
+    candidates: [
+      {
+        content: { parts: [{ text: JSON.stringify(value) }], role: "model" },
+        finishReason: "STOP",
+        index: 0,
+      },
+    ],
+    modelVersion: "gemini-3.5-flash-lite",
+  });
 const client = (fetchImpl: typeof fetch, readApiKey = async () => "fake-api-key-1234") =>
   createJarvisProviderQuery({ provider: "openai", fetchImpl, readApiKey });
 async function store() {
@@ -45,20 +56,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
 describe("OpenAI structured parser", () => {
-  it("rejects a removed parser provider before reading credentials or sending a request", async () => {
-    const readApiKey = vi.fn();
-    const fetchImpl = vi.fn();
-    const parser = createJarvisProviderQuery({
-      provider: "gemini",
-      readApiKey,
-      fetchImpl,
-    } as never);
-    await expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "provider_failed" });
-    expect(readApiKey).not.toHaveBeenCalled();
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("accepts a proxy response after 5.8 seconds and aborts at exactly ten seconds", async () => {
+  it("accepts a proxy response after 5.8 seconds and aborts at exactly twenty seconds", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 5_800));
@@ -75,7 +73,7 @@ describe("OpenAI structured parser", () => {
     const assertion = expect(stalled.interpret("bug", 0)).rejects.toMatchObject({
       code: "timeout",
     });
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(19_999);
     expect(signals[0]?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await assertion;
@@ -214,7 +212,7 @@ describe("OpenAI structured parser", () => {
       client(async () => openaiResponse({ ...QUERY, extra: true })).interpret("bug", 0),
     ).rejects.toMatchObject({ code: "invalid_response" });
   });
-  it.each(["key", "fetch", "body"])("bounds stalled %s to ten seconds", async (stage) => {
+  it.each(["key", "fetch", "body"])("bounds stalled %s to twenty seconds", async (stage) => {
     vi.useFakeTimers();
     const stalled = () => new Promise<never>(() => {});
     const parser = client(
@@ -226,20 +224,21 @@ describe("OpenAI structured parser", () => {
       code: "timeout",
       provider: "openai",
     });
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(20000);
     await assertion;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("includes stalled provider selection in the ten-second deadline", async () => {
-    vi.useFakeTimers();
+  it("does not read the legacy stored provider selection", async () => {
     const settings = await store();
-    vi.spyOn(settings, "provider").mockImplementation(() => new Promise(() => {}));
-    const readKey = vi.spyOn(settings, "readKey");
-    const parser = createJarvisQueryParser({ settings, isLocalHost: true });
-    const assertion = expect(parser.interpret("bug", 0)).rejects.toMatchObject({ code: "timeout" });
-    await vi.advanceTimersByTimeAsync(10000);
-    await assertion;
-    expect(readKey).not.toHaveBeenCalled();
+    await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    const provider = vi.spyOn(settings, "provider");
+    const fetchImpl = vi.fn(async () => geminiResponse());
+    const parser = createJarvisQueryParser({ settings, isLocalHost: true, fetchImpl });
+    expect(await parser.interpret("bug", 0)).toEqual(QUERY);
+    expect(provider).not.toHaveBeenCalled();
+    expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+    );
   });
   it("does not request a model with no key", async () => {
     const fetchImpl = vi.fn();
@@ -281,28 +280,24 @@ describe("shared model settings", () => {
     ).rejects.toThrow();
     expect((await settings.read()).openai.configured).toBe(false);
   });
-  it("normalizes legacy Gemini parser selection to OpenAI and keeps both keys independent", async () => {
+  it("parses with the Gemini key while keeping the stored OpenAI key untouched", async () => {
     const settings = await store();
     await settings.update({ key: { provider: "gemini", value: "fake-gemini-key" } });
+    await settings.update({ key: { provider: "openai", value: "stored-openai-key" } });
     await writeFile(
       path.join(path.dirname(settings.keyPath("gemini")), "model-service.json"),
-      JSON.stringify({ provider: "gemini" }),
+      JSON.stringify({ provider: "openai" }),
     );
-    expect((await settings.read()).provider).toBe("openai");
-    const fetchImpl = vi.fn(async () => openaiResponse());
+    const fetchImpl = vi.fn(async () => geminiResponse());
     const parser = createJarvisQueryParser({ settings, isLocalHost: true, fetchImpl });
-    await expect(parser.interpret("bug", 0)).rejects.toMatchObject({
-      code: "missing_key",
-      provider: "openai",
-    });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    await settings.update({ key: { provider: "openai", value: "fake-openai-key" } });
     expect(await parser.interpret("bug", 0)).toEqual(QUERY);
     expect((fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[0]).toBe(
-      "https://api.openai.com/v1/chat/completions",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
     );
-    expect(await settings.readKey("gemini")).toBe("fake-gemini-key");
-    await expect(settings.update({ provider: "gemini" } as never)).rejects.toThrow();
+    expect(
+      (fetchImpl.mock.calls as unknown as [string, RequestInit][])[0]?.[1].headers,
+    ).toMatchObject({ "x-goog-api-key": "fake-gemini-key" });
+    expect(await settings.readKey("openai")).toBe("stored-openai-key");
     const remote = createJarvisQueryParser({ settings, isLocalHost: false, fetchImpl });
     const key = vi.spyOn(settings, "readKey");
     await expect(remote.interpret("bug", 0)).rejects.toMatchObject({ code: "missing_key" });

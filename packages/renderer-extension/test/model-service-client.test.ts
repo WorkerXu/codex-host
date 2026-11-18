@@ -40,9 +40,9 @@ describe("shared renderer model service", () => {
     await expect(createRendererModelServiceClient(() => null).read()).rejects.toThrow("local_only");
   });
   it.each([
-    ["missing_key", "未配置 OpenAI Key"],
-    ["quota_exhausted", "OpenAI 额度不足"],
-    ["unauthorized", "OpenAI Key 无效"],
+    ["missing_key", "未配置 Gemini Key"],
+    ["quota_exhausted", "Gemini 额度不足"],
+    ["unauthorized", "Gemini Key 无效"],
     ["timeout", "解析超时"],
     ["network", "网络连接失败"],
     ["prepayment credits are depleted", "无法连接本地模型服务"],

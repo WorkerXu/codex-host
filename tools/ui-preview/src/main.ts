@@ -722,14 +722,14 @@ async function mountModelSettings(
   shell.openSettings(undefined, "appearance");
   const shadow = shell.root.shadowRoot!;
   await waitFor(() =>
-    shadow.querySelector<HTMLButtonElement>("#model-service-edit-openai:not(:disabled)"),
+    shadow.querySelector<HTMLButtonElement>("#model-service-edit-gemini:not(:disabled)"),
   );
   const queryButton = (provider: string, text: string) =>
     [...shadow.querySelectorAll<HTMLButtonElement>(`[data-provider="${provider}"] button`)].find(
       (button) => button.textContent === text,
     )!;
   if (state !== "empty" && state !== "add") {
-    for (const provider of ["openai", "gemini"]) {
+    for (const provider of ["gemini"]) {
       await previewClick(queryButton(provider, "添加"));
       const keyInput = shadow.querySelector<HTMLInputElement>(`#model-service-${provider}`)!;
       await previewClick(keyInput);
@@ -743,26 +743,26 @@ async function mountModelSettings(
     }
   }
   if (state === "testing" || state === "error" || state === "configured") {
-    await previewClick(queryButton("openai", "测试"));
+    await previewClick(queryButton("gemini", "测试"));
     await waitFor(() =>
       shadow.textContent?.includes(
         state === "testing"
           ? "正在测试…"
           : state === "error"
-            ? "OpenAI 额度不足"
+            ? "Gemini 额度不足"
             : "连接成功 123 毫秒",
       ),
     );
   }
   if (state === "edit" || state === "add") {
-    await previewClick(queryButton("openai", state === "add" ? "添加" : "更换"));
-    const input = shadow.querySelector<HTMLInputElement>("#model-service-openai")!;
+    await previewClick(queryButton("gemini", state === "add" ? "添加" : "更换"));
+    const input = shadow.querySelector<HTMLInputElement>("#model-service-gemini")!;
     await previewType(input, "fake-preview-replacement-5678");
   }
   if (state === "focus") {
-    await previewKey(queryButton("openai", "测试"), "Tab");
+    await previewKey(queryButton("gemini", "测试"), "Tab");
   }
-  if (state === "hover") await previewHover(queryButton("openai", "更换"));
+  if (state === "hover") await previewHover(queryButton("gemini", "更换"));
   document.body.dataset.modelServiceState = state;
   await delay(120);
 }
@@ -1471,36 +1471,36 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "model-service-add"() {
     await mountModelSettings("add");
   },
-  async "jarvis-mode-openai-missing-key"() {
+  async "jarvis-mode-gemini-missing-key"() {
     await mountJarvisSearch(
       {
-        result: { ...jarvisPreviewError, source: "openai", errorCode: "missing_key" },
+        result: { ...jarvisPreviewError, source: "gemini", errorCode: "missing_key" },
         delayMs: 80,
       },
       "我还没处理的标题有发货的",
       true,
       (mode) =>
         document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("未配置 OpenAI Key") === true,
+        mode.textContent?.includes("未配置 Gemini Key") === true,
     );
   },
-  async "jarvis-mode-openai-quota"() {
+  async "jarvis-mode-gemini-quota"() {
     await mountJarvisSearch(
       {
-        result: { ...jarvisPreviewError, source: "openai", errorCode: "quota_exhausted" },
+        result: { ...jarvisPreviewError, source: "gemini", errorCode: "quota_exhausted" },
         delayMs: 80,
       },
       "我还没处理的标题有发货的",
       true,
       (mode) =>
         document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("OpenAI 额度不足") === true,
+        mode.textContent?.includes("Gemini 额度不足") === true,
     );
   },
 
-  async "jarvis-mode-openai-timeout"() {
+  async "jarvis-mode-gemini-timeout"() {
     await mountJarvisSearch(
-      { result: { ...jarvisPreviewError, source: "openai", errorCode: "timeout" }, delayMs: 80 },
+      { result: { ...jarvisPreviewError, source: "gemini", errorCode: "timeout" }, delayMs: 80 },
       "我还没处理的标题有发货的",
       true,
       (mode) =>

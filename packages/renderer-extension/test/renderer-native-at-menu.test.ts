@@ -420,9 +420,9 @@ describe("focus-safe press", () => {
   });
 
   it.each([
-    ["quota_exhausted", "OpenAI 额度不足"],
-    ["unauthorized", "OpenAI Key 无效"],
-    ["missing_key", "未配置 OpenAI Key"],
+    ["quota_exhausted", "Gemini 额度不足"],
+    ["unauthorized", "Gemini Key 无效"],
+    ["missing_key", "未配置 Gemini Key"],
     ["timeout", "解析超时"],
     ["network", "网络连接失败"],
     ["invalid_response", "解析结果无效，请重试"],

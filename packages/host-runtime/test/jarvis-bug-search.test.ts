@@ -114,7 +114,7 @@ describe("Jarvis structured bug search", () => {
   ])("returns an error without querying Jarvis after HTTP %i", async (status, code) => {
     const cli = fakeCli([bug({ id: 80, projectId: 9002, bugTitle: "发货失败" })]);
     const interpreter = createJarvisProviderQuery({
-      provider: "openai",
+      provider: "gemini",
       readApiKey: async () => "test-key",
       fetchImpl: async () =>
         Response.json(
@@ -127,7 +127,7 @@ describe("Jarvis structured bug search", () => {
     });
     expect(result).toEqual({
       available: false,
-      source: "openai",
+      source: "gemini",
       errorCode: code,
       conditions: [],
       bugs: [],
@@ -154,7 +154,7 @@ describe("Jarvis structured bug search", () => {
         });
       });
       const interpreter = createJarvisProviderQuery({
-        provider: "openai",
+        provider: "gemini",
         readApiKey: async () => (code === "missing_key" ? null : "key"),
         fetchImpl,
       });
@@ -162,13 +162,13 @@ describe("Jarvis structured bug search", () => {
         query: "我还没处理完成的bug",
       });
       if (code === "timeout") {
-        await vi.advanceTimersByTimeAsync(9_999);
+        await vi.advanceTimersByTimeAsync(19_999);
         expect(cli.bugs).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
       }
       expect(await pending).toEqual({
         available: false,
-        source: "openai",
+        source: "gemini",
         errorCode: code,
         conditions: [],
         bugs: [],
@@ -428,10 +428,10 @@ describe("Jarvis structured bug search", () => {
   ])("returns %s without running rules or CLI queries", async (code) => {
     const cli = fakeCli([bug({ id: 70, projectId: 9002 })]);
     const { api, interpret } = searcher(cli);
-    interpret.mockRejectedValue(new JarvisQueryError(code));
+    interpret.mockRejectedValue(new JarvisQueryError(code, "gemini"));
     expect(await api.search({ query: "我还没处理完成的bug" })).toEqual({
       available: false,
-      source: "openai",
+      source: "gemini",
       errorCode: code,
       conditions: [],
       bugs: [],

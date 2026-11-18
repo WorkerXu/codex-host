@@ -142,7 +142,7 @@ function base64ByteLength(value: string): number {
 export function jarvisErrorText(
   code: string | null | undefined,
   locale: RendererSettingsLocale,
-  provider: string = "openai",
+  provider: string = "gemini",
 ): string {
   if (
     [

@@ -24,7 +24,7 @@ export interface RendererModelServiceClient {
 }
 export function modelServiceErrorText(
   code: string | null | undefined,
-  provider: string = "openai",
+  provider: string = "gemini",
 ): string {
   const name = provider === "gemini" ? "Gemini" : "OpenAI";
   const messages: Record<string, string> = {

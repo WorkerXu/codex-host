@@ -29,11 +29,11 @@ export function mountModelServiceSection(
   const controls: (() => void)[] = [];
   const alive = () => !context.signal.aborted;
   const refresh = () => controls.forEach((render) => render());
-  for (const provider of ["openai", "gemini"] as const) {
+  for (const provider of ["gemini"] as const) {
     const wrapper = document.createElement("div");
     wrapper.className = "border-t border-settings-divider first:border-t-0";
     wrapper.dataset.provider = provider;
-    const name = provider === "openai" ? "OpenAI" : "Gemini";
+    const name = "Gemini";
     const row = createPreferenceItem(document, {
       title: `${name} API Key`,
       description: "正在读取…",
@@ -187,7 +187,7 @@ export function mountModelServiceSection(
   const model = document.createElement("span");
   model.id = "model-service-provider";
   model.className = "shrink-0 text-[13px] leading-5 text-settings-muted";
-  model.textContent = "OpenAI · gpt-4.1-mini";
+  model.textContent = "Gemini · gemini-3.5-flash-lite";
   context.signal.addEventListener(
     "abort",
     () => {
