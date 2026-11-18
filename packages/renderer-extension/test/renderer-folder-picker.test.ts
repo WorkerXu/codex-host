@@ -34,6 +34,15 @@ describe("Desktop native folder picker", () => {
     });
   });
 
+  it("accepts a callable RPC service object for file attachments", async () => {
+    const fileAttachments = Object.assign(() => undefined, {
+      pickFiles: vi.fn(async () => [{ fsPath: "/Users/lin/One" }]),
+    });
+    await expect(
+      pickDesktopFolders(ownerWindow(), async () => ({ appServices: { fileAttachments } })),
+    ).resolves.toEqual(["/Users/lin/One"]);
+  });
+
   it("keeps cancellation distinct from unavailable services", async () => {
     await expect(
       pickDesktopFolders(ownerWindow(), async () => ({

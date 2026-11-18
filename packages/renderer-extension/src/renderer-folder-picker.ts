@@ -13,10 +13,18 @@ interface FolderPickerServices {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+/** Desktop services are RPC stubs; a stubbed service object is callable. */
+const serviceObject = (value: unknown): value is object =>
+  (typeof value === "object" || typeof value === "function") && value !== null;
+
 function isFolderPickerServices(value: unknown): value is FolderPickerServices {
-  if (!record(value)) return false;
+  if (!serviceObject(value)) return false;
   try {
-    return record(value.fileAttachments) && typeof value.fileAttachments.pickFiles === "function";
+    const fileAttachments = (value as { fileAttachments?: unknown }).fileAttachments;
+    return (
+      serviceObject(fileAttachments) &&
+      typeof (fileAttachments as { pickFiles?: unknown }).pickFiles === "function"
+    );
   } catch {
     return false;
   }
