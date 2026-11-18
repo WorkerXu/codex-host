@@ -12,7 +12,7 @@ const CANDIDATES = [
   { fileName: "review.toml", name: "代码评审", description: "评审代码变更" },
 ];
 const response = () =>
-  Response.json({ answers: { agent_0: { score: 1.9 }, agent_1: { score: 0.4 } } });
+  Response.json({ answers: { agent_0: { score: 0.95 }, agent_1: { score: 0.2 } } });
 async function settings() {
   const configDirectory = await mkdtemp(path.join(os.tmpdir(), "dispatch-decisions-test-"));
   directories.push(configDirectory);

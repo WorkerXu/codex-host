@@ -447,6 +447,7 @@ export function sanitizeDingTalkText(text: string): string {
       .replace(IMAGE_CONTENT_PATTERN, "\n")
       .replace(MEDIA_MARKER_PATTERN, "")
       .replace(MEDIA_ID_PATTERN, "")
+      .replace(/注意：如需下载使用\s*dws chat message download-media\s*命令下载/gu, "")
       .replace(/图片内容[:：]/gu, "")
       .replace(HTML_TAG_PATTERN, "")
       .replace(/\r\n?/gu, "\n"),

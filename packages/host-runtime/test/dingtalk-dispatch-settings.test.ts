@@ -37,7 +37,7 @@ describe("DingTalkDispatchSettingsStore", () => {
   it("returns defaults with every agent off", async () => {
     const settings = await (await store()).read([agent("terra-worker.toml", "terra_worker")]);
     expect(settings).toEqual(defaultDingTalkDispatchSettings());
-    expect(settings.threshold).toBe(0.85);
+    expect(settings.threshold).toBe(0.7);
     expect(settings.agents).toEqual({});
   });
 
@@ -136,9 +136,11 @@ describe("DingTalkDispatchSettingsStore", () => {
         participatingAgents: ["reviewer"],
       }),
     );
-    expect(await settings.read([agent("reviewer.toml", "reviewer")])).toEqual(
-      defaultDingTalkDispatchSettings(),
-    );
+    // The legacy threshold is the user's own choice and survives the new default.
+    expect(await settings.read([agent("reviewer.toml", "reviewer")])).toEqual({
+      ...defaultDingTalkDispatchSettings(),
+      threshold: 0.85,
+    });
   });
 
   it("drops entries for agents that no longer exist and persists the prune", async () => {

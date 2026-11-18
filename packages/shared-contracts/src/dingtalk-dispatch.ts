@@ -31,7 +31,7 @@ export type DingTalkEventType = (typeof DINGTALK_EVENT_TYPES)[number];
 export const DINGTALK_REPLY_SCOPES = ["group", "direct"] as const;
 export type DingTalkReplyScope = (typeof DINGTALK_REPLY_SCOPES)[number];
 
-export const DEFAULT_DINGTALK_MATCH_THRESHOLD = 0.85;
+export const DEFAULT_DINGTALK_MATCH_THRESHOLD = 0.7;
 export const DINGTALK_DISPATCH_MAX_AGENTS = 512;
 
 const eventTypesSchema = z

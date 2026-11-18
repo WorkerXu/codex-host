@@ -6,9 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultDingTalkAgentDispatch,
   type CodexAgentRecord,
+  type DingTalkConversation,
   type DingTalkDispatchSettings,
+  type DingTalkMessage,
 } from "@codexhost/shared-contracts";
-import { createDingTalkCli, parseDwsEventLine, type DwsEventRecord } from "../src/dingtalk-cli.js";
+import {
+  createDingTalkCli,
+  parseDwsEventLine,
+  parseMessages,
+  type DwsEventRecord,
+} from "../src/dingtalk-cli.js";
 import { createDingTalkDispatchMatcher } from "../src/dingtalk-dispatch-matcher.js";
 import { ModelServiceSettingsStore } from "../src/model-service-settings.js";
 import {
@@ -37,6 +44,25 @@ const agent = (fileName: string): CodexAgentRecord => ({
   reasoningEffort: "high",
   revision: "1",
 });
+/** Real `dws chat message list` response with names, text and ids redacted. */
+const fixtureMessages = (name: string): DingTalkMessage[] =>
+  parseMessages(
+    JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")) as Record<
+      string,
+      unknown
+    >,
+    null,
+  );
+const clock = (value: number): string =>
+  new Date(value + 8 * 60 * 60_000).toISOString().replace("T", " ").slice(0, 19);
+const targetEvent = (target: DingTalkMessage, conversationId: string): Partial<DwsEventRecord> => ({
+  messageId: target.messageId,
+  conversationId,
+  senderName: target.senderName,
+  ...(target.senderId ? { senderId: target.senderId } : {}),
+  text: target.text,
+  createdAt: target.createdAt,
+});
 const event = (overrides: Partial<DwsEventRecord> = {}): DwsEventRecord => ({
   messageId: "m1",
   conversationId: "group-1",
@@ -59,6 +85,8 @@ async function setup(
     updateFails?: boolean;
     runFails?: boolean;
     approvals?: boolean;
+    messages?: DingTalkMessage[];
+    conversation?: DingTalkConversation;
   } = {},
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-dispatch-"));
@@ -103,8 +131,8 @@ async function setup(
       errorCode: null,
     }),
     selfOpenDingTalkId: async () => "open-self",
-    messages: vi.fn(async () => ({
-      conversation: {
+    messages: vi.fn(async (input: { conversationId: string; limit: number; before?: number }) => ({
+      conversation: options.conversation ?? {
         conversationId: "group-1",
         title: "技术群",
         singleChat: false,
@@ -112,7 +140,12 @@ async function setup(
         lastMessageAt: null,
         muted: false,
       },
-      messages: [],
+      messages: (options.messages ?? [])
+        .filter((message) => input.before === undefined || message.createdAt < input.before)
+        .slice()
+        .sort((left, right) => left.createdAt - right.createdAt)
+        .slice(-input.limit)
+        .reverse(),
     })),
     send: (input) => cli.send(input.conversationId, input.text, input),
     sendDirect: cli.sendDirect,
@@ -258,6 +291,111 @@ describe("DingTalk dispatch runtime (fake dws only)", () => {
     expect(updates.at(-1)).toEqual(
       expect.arrayContaining(["--biz-id", "card-1", "--flow-status", "FINISH"]),
     );
+  });
+
+  it("builds the prompt from 30 real messages before the target and marks the target", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-context.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const conversation: DingTalkConversation = {
+      conversationId: "cid-fixture",
+      title: "技术群",
+      singleChat: false,
+      unreadCount: 0,
+      lastMessageAt: null,
+      muted: false,
+    };
+    const f = await setup({ messages, conversation });
+    f.emit(event(targetEvent(target, conversation.conversationId)));
+    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
+    expect(f.service.messages).toHaveBeenCalledWith({
+      conversationId: "cid-fixture",
+      limit: 40,
+      before: target.createdAt + 1_000,
+    });
+    expect(prompt).toContain("最近 30 条上下文（旧 → 新，最多 30 条，不含待处理消息）：");
+    const context = prompt.split("\n").filter((line) => line.startsWith("- 20"));
+    expect(context).toHaveLength(30);
+    // Oldest first; the 30 prior messages end just before the target.
+    expect(context[0]).toContain(`：上下文消息 31`);
+    expect(context.at(-1)).toContain(`：上下文消息 2`);
+    const images = context.filter((line) => line.includes("[图片]"));
+    expect(images).toHaveLength(4);
+    expect(images.every((line) => line.endsWith("：[图片]"))).toBe(true);
+    expect(context.some((line) => line.endsWith("：上下文消息 1"))).toBe(false);
+    expect(prompt).toContain(
+      `待处理消息（${target.senderName}，${clock(target.createdAt).slice(0, 16)}）：\n${target.text}`,
+    );
+    const conversationArg = "'cid-fixture'";
+    expect(prompt).toContain(
+      `需要更多信息时，可在本对话运行以下只读命令；dws 只在钉钉 Host 上，不要在本机查找或安装 dws：`,
+    );
+    expect(prompt).toContain(
+      `- 更多消息：codexhost dingtalk dws -- chat message list --conversation-id ${conversationArg} --limit 50`,
+    );
+    expect(prompt).toContain(
+      `- 更早的消息：codexhost dingtalk dws -- chat message list --conversation-id ${conversationArg} --time '${clock(messages[30]?.createdAt ?? 0)}' --direction older --limit 50`,
+    );
+    expect(prompt).toContain(
+      `- 会话信息：codexhost dingtalk dws -- chat +conversation-info --group ${conversationArg}`,
+    );
+    expect(prompt).toContain(
+      `- 群成员：codexhost dingtalk dws -- chat +chat-members-list --conversation-id ${conversationArg} --member-types user`,
+    );
+    expect(prompt).toContain("回复由 Host 发送；不要自行发消息或创建卡片。");
+    await f.finish();
+  });
+
+  it("reports a new conversation as having no earlier messages instead of counting the target", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const conversation: DingTalkConversation = {
+      conversationId: "cid-fixture",
+      title: "技术群",
+      singleChat: false,
+      unreadCount: 0,
+      lastMessageAt: null,
+      muted: false,
+    };
+    const f = await setup({ messages, conversation });
+    f.emit(event(targetEvent(target, conversation.conversationId)));
+    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
+    expect(prompt).toContain("最近 0 条上下文（旧 → 新，最多 30 条，不含待处理消息）：");
+    expect(prompt).toContain("（没有更早的消息）");
+    expect(prompt).not.toContain("最近 1 条上下文");
+    expect(prompt).toContain(`待处理消息（${target.senderName}，`);
+    expect(prompt.split("\n").some((line) => line.endsWith(`：${target.text}`))).toBe(false);
+    await f.finish();
+  });
+
+  it("ignores messages that arrived after the target when building context", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const conversation: DingTalkConversation = {
+      conversationId: "cid-fixture",
+      title: "技术群",
+      singleChat: false,
+      unreadCount: 0,
+      lastMessageAt: null,
+      muted: false,
+    };
+    const late: DingTalkMessage = {
+      ...target,
+      messageId: "msg-late",
+      text: "后到的消息",
+      createdAt: target.createdAt + 5_000,
+    };
+    const f = await setup({ messages: [...messages, late], conversation });
+    f.emit(event(targetEvent(target, conversation.conversationId)));
+    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
+    expect(prompt).not.toContain("后到的消息");
+    expect(prompt).toContain("最近 0 条上下文");
+    await f.finish();
   });
 
   it.each([
@@ -455,7 +593,7 @@ it.each([false, true])(
     await vi.waitFor(async () =>
       expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
         result: "skipped",
-        detail: "匹配度 0.52，未达阈值 0.85，不相关 0.29，有点相关 0.39，高度相关 0.32",
+        detail: "匹配度 0.29，未达阈值 0.85",
       }),
     );
     expect(f.startThread).not.toHaveBeenCalled();
@@ -469,7 +607,7 @@ it("retains the normalized score and probabilities after a selected task replies
       scoreDingTalkCandidates: async () => ({
         available: true,
         scores: { "qa.toml": 0.9 },
-        probabilities: { "qa.toml": { 不相关: 0.05, 有点相关: 0.1, 高度相关: 0.85 } },
+        probabilities: { "qa.toml": { 不能处理: 0.1, 能处理: 0.9 } },
         errorCode: null,
       }),
     },
@@ -477,7 +615,5 @@ it("retains the normalized score and probabilities after a selected task replies
   f.emit();
   await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
   await f.finish();
-  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe(
-    "匹配度 0.90，已达阈值 0.85，不相关 0.05，有点相关 0.10，高度相关 0.85",
-  );
+  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe("匹配度 0.90，已达阈值 0.85");
 });
