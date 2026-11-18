@@ -31,6 +31,8 @@ export function mountCodeRepositoriesSection(
   const test = button("测试"),
     edit = button("添加"),
     clear = button("清除");
+  clear.className =
+    "shrink-0 rounded-md border-0 bg-transparent px-2 py-1.5 text-xs leading-[18px] text-settings-muted hover:bg-settings-hover hover:text-settings-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-settings-focus disabled:opacity-40";
   edit.id = "repository-token-edit";
   actions.append(test, edit, clear);
   gitlab.item.append(actions);

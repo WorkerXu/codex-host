@@ -18,7 +18,7 @@ const { outputFiles } = await build({
   format: "iife",
   platform: "browser",
   target: "es2024",
-  loader: { ".css": "text", ".html": "text" },
+  loader: { ".css": "text", ".html": "text", ".svg": "dataurl" },
   write: false,
 });
 const fixtureBundle = outputFiles[0]?.text;

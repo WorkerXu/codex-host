@@ -54,7 +54,9 @@ Host 回答目录能力前等待安装的 Harness 插件加载完成，避免远
 
 Host 的环境和目录列表是执行层事实。当前没有已核验的 `thread-writable-roots` / applied workspace cwd 写接口，因此不直接改写这些 Desktop 私有持久化 atom。Desktop 的文件浏览器、diff 面板可能暂时保留旧根目录；重新打开对话后的根目录显示需要在真实 Desktop 验证。
 
-同主机与跨主机委派均保留来源 Thread 和显式项目选择，由 Mac Renderer 调用 Desktop 的 `appServices.threadProjectAssignments.readMemberships()` 读取父归属，再调用 `setMembership({hostId, threadId, assignment, projectless})` 登记子归属。`hostId` 是子对话执行主机；`assignment` 保留父分配中的 `projectKind`、`projectId`、远程项目的 `hostId` 和可选 `projectOrigin`。这些字段与调用形状已通过 Mac Desktop 的只读 CDP 数据和已加载原生调用点核对。服务不可用、写入失败或父分配尚未加载时保留记录并重试；显式无项目使用 `assignment:null, projectless:true`，已有人工归属（包括无项目）不被覆盖。不直接改写全局状态文件。真实委派后侧栏显示仍须在目标 Desktop 验收。
+跨机器目录不迁移项目。执行主机由 Composer 的机器选择决定，工作文件夹只改写该对话的 `cwd` 与环境根目录。Desktop 的新对话归属按执行主机选择项目：执行主机为本机时只登记本机项目（`projectKind: "local"`）或不登记，远程项目只在项目主机与执行主机一致时登记。`readMemberships()` 返回 `{assignments, projectlessThreadIds}`，远程归属带 `hostId`。侧栏项目分组按 `projectKind + projectId` 收集对话 ID，但只显示项目主机上的对话行；只读核对中把本机对话登记到远程项目后，该对话仍列在「对话」列表而不出现在项目下。因此在另一台机器上选择工作文件夹后，对话只会归入该机器的同名本机项目或无项目；跨机器保留原项目需要 Desktop 支持按项目聚合多主机对话，当前版本没有可用接口，不写入这种归属。
+
+同主机与跨主机委派均保留来源 Thread 和显式项目选择，由 Mac Renderer 调用 Desktop 的 `appServices.threadProjectAssignments.readMemberships()` 读取父归属，再调用 `setMembership({hostId, threadId, assignment, projectless})` 登记子归属。`hostId` 是子对话执行主机；`assignment` 保留父分配中的 `projectKind`、`projectId`、远程项目的 `hostId` 和可选 `projectOrigin`。这些字段与调用形状已通过 Mac Desktop 的只读 CDP 数据和已加载原生调用点核对。服务不可用、写入失败或父分配尚未加载时保留记录并重试；显式无项目使用 `assignment:null, projectless:true`，已有人工归属（包括无项目）不被覆盖。不直接改写全局状态文件。跨主机子对话即使写入了父项目的远程归属，也受上面的项目聚合规则限制，仍列在「对话」列表。
 
 ## 相关验证
 

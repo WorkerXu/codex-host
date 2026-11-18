@@ -114,6 +114,50 @@ test("clones to the local default, uses the native target picker and adds only o
   );
 });
 
+for (const state of ["cloning", "transferring"]) {
+  test(`active ${state} keeps keyboard focus and asks before closing`, async ({ page }) => {
+    await setup(page, state, true);
+    await page.getByRole("button", { name: "WorkerXu/codex-host", exact: true }).click();
+    await page.getByRole("button", { name: "克隆并添加", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText(
+      state === "cloning" ? "正在克隆…" : "正在传输…",
+    );
+    const current = page.locator('.codexhost-repo-progress [aria-current="step"]');
+    await expect(current).toHaveText(state === "cloning" ? "克隆" : "传输");
+    await expect(page.locator('.codexhost-repo-progress [data-state="done"]')).toHaveCount(
+      state === "cloning" ? 1 : 2,
+    );
+    const close = page.getByRole("button", { name: "关闭", exact: true });
+    await expect(close.locator("svg")).toHaveCount(1);
+    await close.focus();
+    // A job refresh must not replace the close control or restart its focus state.
+    await page.waitForTimeout(1100);
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toContainText("克隆或传输会继续");
+    await expect(page.getByRole("button", { name: "继续查看", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(current).toHaveText(state === "cloning" ? "克隆" : "传输");
+    await close.click();
+    await page.getByRole("button", { name: "关闭窗口", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("body")).not.toHaveAttribute("data-folder-selection");
+  });
+}
+
+test("continuing to watch preserves automatic addition when a job completes", async ({ page }) => {
+  await setup(page, "ready", true);
+  await page.getByRole("button", { name: "WorkerXu/codex-host", exact: true }).click();
+  await page.getByRole("button", { name: "克隆并添加", exact: true }).click();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "继续查看", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "工作文件夹已添加", exact: true })).toBeVisible();
+  await expect(page.locator('.codexhost-repo-progress [data-state="done"]')).toHaveCount(4);
+  await expect(page.locator(".codexhost-repo-progress [aria-current]")).toHaveCount(0);
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-folder-selection", /codex-host/);
+});
+
 test("remote targets reuse the directory subview and bypass the Mac folder picker", async ({
   page,
 }) => {

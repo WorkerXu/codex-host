@@ -7,6 +7,7 @@ import { repositoryErrorText, type CodeRepositoriesClient } from "./code-reposit
 import css from "./renderer-repository-dialog.css";
 import { mountFolderBrowser } from "./renderer-folder-browser.js";
 import folderCss from "./renderer-thread-folders.css";
+import { createRendererSettingsIcon } from "./settings/icons.js";
 
 export interface RepositoryDialogOptions {
   document: Document;
@@ -39,6 +40,8 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     query = "",
     timer: ReturnType<typeof setTimeout> | undefined;
   let poll: ReturnType<typeof setTimeout> | undefined;
+  let progressState: RepositoryJob["state"] | null = null;
+  let confirmingClose = false;
   let finish: () => void = () => {};
   const done = new Promise<void>((resolve) => {
     finish = resolve;
@@ -51,8 +54,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     b.addEventListener("click", action);
     return b;
   };
-  const close = () => {
-    if (busy) return;
+  const dismiss = () => {
     disposed = true;
     ++generation;
     clearTimeout(timer);
@@ -62,8 +64,37 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     opener?.focus();
     finish();
   };
+  const resumeProgress = () => {
+    if (!confirmingClose) return;
+    confirmingClose = false;
+    const state = progressState;
+    progressState = null;
+    if (state) showProgress(state);
+    dialog.querySelector<HTMLButtonElement>(".codexhost-repo-close")?.focus();
+  };
+  const close = () => {
+    if (confirmingClose) {
+      dismiss();
+      return;
+    }
+    if (busy && (progressState === "cloning" || progressState === "transferring")) {
+      confirmingClose = true;
+      header("关闭添加窗口？");
+      message("克隆或传输会继续，但完成后需要手动将文件夹加入对话；留在窗口内会在完成后自动加入。");
+      const keep = button("继续查看", resumeProgress);
+      footer(keep, button("关闭窗口", dismiss, true));
+      keep.focus();
+      return;
+    }
+    if (busy) return;
+    dismiss();
+  };
   dialog.addEventListener("cancel", (e) => {
     e.preventDefault();
+    if (confirmingClose) {
+      resumeProgress();
+      return;
+    }
     close();
   });
   const header = (title: string) => {
@@ -71,8 +102,12 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     const head = d.createElement("header"),
       heading = d.createElement("h2");
     heading.textContent = title;
-    const cancel = button("关闭", close);
-    cancel.disabled = busy;
+    const cancel = button("", close);
+    cancel.classList.add("codexhost-repo-close");
+    cancel.setAttribute("aria-label", "关闭");
+    cancel.title = "关闭";
+    cancel.append(createRendererSettingsIcon("close", 16));
+    cancel.disabled = busy && progressState === "complete";
     head.append(heading, cancel);
     dialog.append(head);
   };
@@ -260,6 +295,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
   };
   const renderTarget = () => {
     if (!repo) return;
+    progressState = null;
     header("选择克隆位置");
     const content = d.createElement("div");
     content.className = "codexhost-repo-target";
@@ -360,24 +396,55 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     });
   };
   const showProgress = (state: RepositoryJob["state"]) => {
+    if (state === progressState) return;
+    progressState = state;
+    if (confirmingClose) return;
+    const keepCloseFocus = dialog.querySelector(".codexhost-repo-close") === d.activeElement;
     header("正在添加仓库");
-    message(repo ? `${repo.namespace}/${repo.name}` : "");
+    const summary = d.createElement("div");
+    summary.className = "codexhost-repo-summary";
+    const name = d.createElement("p");
+    name.textContent = repo ? `${repo.namespace}/${repo.name}` : "";
+    const status = d.createElement("p");
+    status.setAttribute("role", "status");
+    status.textContent =
+      state === "cloning"
+        ? "正在克隆…"
+        : state === "transferring"
+          ? "正在传输…"
+          : busy
+            ? "正在加入工作文件夹…"
+            : "已加入当前对话";
+    summary.append(name, status);
+    dialog.append(summary);
     const steps = d.createElement("ol");
     steps.className = "codexhost-repo-progress";
-    steps.setAttribute("role", "status");
+    steps.setAttribute("aria-label", "添加进度");
     const current = state === "cloning" ? 1 : state === "transferring" ? 2 : 3;
     ["列出", "克隆", "传输", "完成"].forEach((text, index) => {
       const li = d.createElement("li");
-      li.textContent = text;
-      li.dataset.current = String(index === current);
+      const done = index < current || (state === "complete" && !busy);
+      li.dataset.state = done ? "done" : index === current ? "current" : "pending";
+      if (!done && index === current) li.setAttribute("aria-current", "step");
+      const marker = d.createElement("span");
+      marker.className = "codexhost-repo-step-marker";
+      marker.setAttribute("aria-hidden", "true");
+      if (done) marker.append(createRendererSettingsIcon("check", 14));
+      const label = d.createElement("span");
+      label.textContent = text;
+      li.append(marker, label);
       steps.append(li);
     });
     dialog.append(steps);
+    if (keepCloseFocus) dialog.querySelector<HTMLButtonElement>(".codexhost-repo-close")?.focus();
   };
   const finishJob = async (job: RepositoryJob) => {
     if (disposed) return;
+    if (job.state === "conflict" || job.state === "error" || job.state === "complete")
+      confirmingClose = false;
     if (job.state === "conflict") {
       busy = false;
+      progressState = null;
       header("目标目录已存在");
       message(job.path);
       message("是否直接使用已有文件夹？不会克隆或覆盖其中的内容。");
@@ -395,6 +462,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     }
     if (job.state === "error") {
       busy = false;
+      progressState = null;
       header("未能添加仓库");
       message(repositoryErrorText(job.errorCode), true);
       footer(button("返回", renderTarget));
@@ -411,6 +479,8 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
   };
   const failed = (error: unknown) => {
     if (disposed) return;
+    confirmingClose = false;
+    progressState = null;
     busy = false;
     header("未能添加仓库");
     message(repositoryErrorText(error), true);
@@ -422,6 +492,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
     try {
       await options.add(path);
       busy = false;
+      progressState = null;
       showProgress("complete");
       const title = dialog.querySelector("h2");
       if (title) title.textContent = "工作文件夹已添加";
@@ -430,6 +501,7 @@ export function openRepositoryDialog(options: RepositoryDialogOptions): Promise<
       dialog.querySelector<HTMLButtonElement>(".codexhost-repo-primary")?.focus();
     } catch {
       busy = false;
+      progressState = null;
       header("仓库已就绪");
       message("文件夹未能加入对话，请重试。仓库内容已保留。", true);
       footer(
