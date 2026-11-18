@@ -6,7 +6,10 @@
  * become flex items of the section list and can be reordered with `order`.
  */
 
-import type { SidebarSectionSnapshot } from "./renderer-sidebar-sections-dom.js";
+import {
+  MERGED_MORE_ATTRIBUTE,
+  type SidebarSectionSnapshot,
+} from "./renderer-sidebar-sections-dom.js";
 
 export const MERGED_SECTION_ATTRIBUTE = "data-codexhost-merged-section";
 export const MERGED_SECTION_STATE_ATTRIBUTE = "data-codexhost-merged-state";
@@ -36,6 +39,7 @@ export function applyMergeMarks(
   for (const project of snapshot.projects) {
     project.container.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
     for (const hidden of project.hidden) hidden.setAttribute(MERGE_HIDDEN_ATTRIBUTE, "");
+    project.toggle?.container.setAttribute(MERGE_HIDDEN_ATTRIBUTE, "");
     for (const row of project.rows) {
       const order = orderByRow.get(row.element);
       if (order !== undefined) row.element.setAttribute(MERGE_ORDER_ATTRIBUTE, String(order));
@@ -121,6 +125,7 @@ export function mergeStyleCss(maxOrder: number): string {
   for (let order = 0; order <= maxOrder; order += 1) {
     lines.push(`[${MERGE_ORDER_ATTRIBUTE}="${order}"] { order: ${order}; }`);
   }
+  lines.push(`[${MERGED_MORE_ATTRIBUTE}] { order: 10000; }`);
   return lines.join("\n");
 }
 

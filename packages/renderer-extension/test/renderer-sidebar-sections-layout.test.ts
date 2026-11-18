@@ -25,6 +25,7 @@ describe("merged section stylesheet", () => {
       expect(css).toContain(`[${MERGE_ORDER_ATTRIBUTE}="${order}"] { order: ${order}; }`);
     }
     expect(css).not.toContain(`[${MERGE_ORDER_ATTRIBUTE}="4"]`);
+    expect(css).toContain("[data-codexhost-merge-more] { order: 10000; }");
   });
 
   it("gives the header toggle native hover, pressed and focus styling", () => {

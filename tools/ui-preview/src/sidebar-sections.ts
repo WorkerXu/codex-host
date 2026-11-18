@@ -60,11 +60,6 @@ function buildSection(): HTMLElement {
   const unit = template.content.firstElementChild;
   if (!(unit instanceof HTMLElement)) throw new Error("Local project fixture is missing");
   list.append(unit);
-  // Desktop expands every project inside a custom section; the captured local
-  // project still carries the compact Projects-section state.
-  for (const wrapper of unit.querySelectorAll("[data-app-action-sidebar-project-list-id]")) {
-    wrapper.setAttribute("data-app-action-sidebar-project-show-all", "true");
-  }
   // The capture stripped remote image sources; draw a neutral agent glyph instead.
   for (const image of section.querySelectorAll("img"))
     image.replaceWith(neutralAgentIcon(document));
@@ -78,6 +73,14 @@ function buildSection(): HTMLElement {
   if (!remote || !local) throw new Error("Project fixtures are missing");
   renameProjectRows(remote, "远端");
   renameProjectRows(local, "本机");
+  // The capture has no agent icons; draw a neutral glyph where the renderer
+  // extension inserts the real one.
+  for (const row of section.querySelectorAll("[data-app-action-sidebar-thread-row]")) {
+    const trigger = row.querySelector("[data-thread-title-trigger]");
+    if (trigger && !trigger.querySelector('img, [role="img"]')) {
+      trigger.prepend(neutralAgentIcon(document));
+    }
+  }
   return section;
 }
 
