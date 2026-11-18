@@ -40,8 +40,48 @@ describe("cross-host harness catalog", () => {
         ],
       }),
     ).toEqual([
-      { hostId: "remote-ssh-codex-managed:one", label: "oracle-sg" },
+      {
+        hostId: "remote-ssh-codex-managed:one",
+        label: "oracle-sg",
+        displayName: "oracle-sg",
+      },
       { hostId: "remote-ssh-discovered:colab", label: "colab" },
+    ]);
+  });
+
+  it("drops offline Hosts that only survive as stale remote projects", async () => {
+    const catalog = await loadCrossHostHarnessCatalog({
+      connections: [{ hostId: "remote-ssh-discovered:oracle-main", displayName: "甲骨文新加坡" }],
+      knownHostIds: ["local"],
+      remoteProjectHostIds: [
+        "remote-ssh-discovered:oracle-main",
+        "remote-ssh-codex-managed:967b5332-4d90-4970-8b4a-c71cc495f5d9",
+      ],
+      isOnline: (hostId) =>
+        hostId !== "remote-ssh-codex-managed:967b5332-4d90-4970-8b4a-c71cc495f5d9",
+      refresh: async () => undefined,
+      directory: () => ({ plugins: [], availability: {}, error: null }),
+    });
+    expect(catalog.machines.map(({ hostId, label }) => ({ hostId, label }))).toEqual([
+      { hostId: "remote-ssh-discovered:oracle-main", label: "甲骨文新加坡" },
+    ]);
+  });
+
+  it("keeps an offline configured machine with its Desktop display name", async () => {
+    const catalog = await loadCrossHostHarnessCatalog({
+      connections: [{ hostId: "remote-ssh-codex-managed:offline", displayName: "远程测试机" }],
+      knownHostIds: [],
+      isOnline: () => false,
+      refresh: async () => undefined,
+      directory: () => ({ plugins: [], availability: {}, error: null }),
+    });
+    expect(catalog.machines).toEqual([
+      {
+        hostId: "remote-ssh-codex-managed:offline",
+        label: "远程测试机",
+        state: "offline",
+        harnesses: [],
+      },
     ]);
   });
 

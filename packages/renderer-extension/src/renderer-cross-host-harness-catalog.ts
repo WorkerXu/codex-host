@@ -22,6 +22,8 @@ export interface CrossHostHarnessCatalog {
 export interface CrossHostMachineEntry {
   hostId: string;
   label: string;
+  /** Set only for machines Desktop still lists as a remote connection. */
+  displayName?: string;
 }
 
 /** Snapshot from the renderer binding probe, which owns per-Host availability. */
@@ -57,13 +59,21 @@ export function crossHostMachineEntries(
 ): CrossHostMachineEntry[] {
   const entries: CrossHostMachineEntry[] = [];
   const seen = new Set<string>();
-  const push = (hostId: string, label: string): void => {
+  const push = (hostId: string, label: string, displayName?: string): void => {
     if (hostId === "local" || hostId === "durable" || seen.has(hostId)) return;
     seen.add(hostId);
-    entries.push({ hostId, label: label.trim() || fallbackHostLabel(hostId) });
+    entries.push({
+      hostId,
+      label: label.trim() || fallbackHostLabel(hostId),
+      ...(displayName ? { displayName } : {}),
+    });
   };
   for (const connection of input.connections)
-    push(connection.hostId, connection.displayName || fallbackHostLabel(connection.hostId));
+    push(
+      connection.hostId,
+      connection.displayName || fallbackHostLabel(connection.hostId),
+      connection.displayName || undefined,
+    );
   for (const hostId of input.knownHostIds) push(hostId, fallbackHostLabel(hostId));
   for (const hostId of input.remoteProjectHostIds ?? []) push(hostId, fallbackHostLabel(hostId));
   return entries;
@@ -97,25 +107,49 @@ export function readyHarnessPlugins(
 export async function loadCrossHostHarnessCatalog(
   input: CrossHostHarnessCatalogInput,
 ): Promise<CrossHostHarnessCatalog> {
-  const machines = await Promise.all(
-    crossHostMachineEntries(input).map(async (entry): Promise<CrossHostMachine> => {
-      if (!input.isOnline(entry.hostId)) return { ...entry, state: "offline", harnesses: [] };
-      try {
-        await input.refresh(entry.hostId);
-        const directory = input.directory(entry.hostId);
-        if (directory.error || !directory.plugins)
-          return { ...entry, state: "error", harnesses: [CODEX_HARNESS] };
-        return {
-          ...entry,
-          state: "ready",
-          harnesses: readyHarnessPlugins(directory.plugins, directory.availability),
-        };
-      } catch {
-        // The Host is reachable but could not inspect its Harnesses. Codex is
-        // still the native default, so keep the machine usable.
-        return { ...entry, state: "error", harnesses: [CODEX_HARNESS] };
-      }
-    }),
-  );
+  const machines = (
+    await Promise.all(
+      crossHostMachineEntries(input).map(async (entry): Promise<CrossHostMachine | null> => {
+        if (!input.isOnline(entry.hostId)) {
+          // A Host that only survives as a stale remote project is not a
+          // configured Desktop machine. Without a Desktop display name the row
+          // would expose its raw Host ID, so keep it out of the menu.
+          if (!entry.displayName) return null;
+          return {
+            hostId: entry.hostId,
+            label: entry.label,
+            state: "offline",
+            harnesses: [],
+          };
+        }
+        try {
+          await input.refresh(entry.hostId);
+          const directory = input.directory(entry.hostId);
+          if (directory.error || !directory.plugins)
+            return {
+              hostId: entry.hostId,
+              label: entry.label,
+              state: "error",
+              harnesses: [CODEX_HARNESS],
+            };
+          return {
+            hostId: entry.hostId,
+            label: entry.label,
+            state: "ready",
+            harnesses: readyHarnessPlugins(directory.plugins, directory.availability),
+          };
+        } catch {
+          // The Host is reachable but could not inspect its Harnesses. Codex is
+          // still the native default, so keep the machine usable.
+          return {
+            hostId: entry.hostId,
+            label: entry.label,
+            state: "error",
+            harnesses: [CODEX_HARNESS],
+          };
+        }
+      }),
+    )
+  ).filter((machine): machine is CrossHostMachine => machine !== null);
   return { machines, loadedPeers: machines.filter(({ state }) => state === "ready").length };
 }
