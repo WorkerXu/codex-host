@@ -67,6 +67,8 @@ declare global {
 
 const REFRESH_DELAY_MS = 60;
 const RECENCY_TTL_MS = 1_000;
+/** Let Desktop render the native expand animation before judging the attempt. */
+const EXPAND_GRACE_MS = 1_000;
 const THREAD_KEY_SEPARATOR = "\u0000";
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -161,6 +163,8 @@ export function installRendererSidebarSections(
 
   let disposed = false;
   let timer: number | null = null;
+  let expandTimer: number | null = null;
+  const expandAttempts = new Map<string, number>();
   let recency: Map<string, number> | null = null;
   let recencyAt = 0;
   let recencyPending = false;
@@ -182,6 +186,23 @@ export function installRendererSidebarSections(
     if (warned.has(key)) return;
     warned.add(key);
     console.warn(`codexhost sidebar section kept native layout: ${reason}`);
+  };
+
+  const expandKey = (sectionId: string, projectId: string): string =>
+    `${sectionId}${THREAD_KEY_SEPARATOR}${projectId}`;
+
+  const clearExpandAttempts = (sectionId: string): void => {
+    for (const key of expandAttempts.keys()) {
+      if (key.startsWith(`${sectionId}${THREAD_KEY_SEPARATOR}`)) expandAttempts.delete(key);
+    }
+  };
+
+  const scheduleExpandCheck = (): void => {
+    if (disposed || expandTimer !== null) return;
+    expandTimer = target.setTimeout(() => {
+      expandTimer = null;
+      refresh();
+    }, EXPAND_GRACE_MS);
   };
 
   const ensureRecency = (): void => {
@@ -218,6 +239,17 @@ export function installRendererSidebarSections(
     for (const element of container.querySelectorAll(`[${MERGED_MORE_ATTRIBUTE}]`)) {
       element.remove();
     }
+  };
+
+  const keepNative = (
+    container: HTMLElement,
+    sectionId: string,
+    reason: SidebarSectionFallbackReason,
+  ): void => {
+    clearMergeMarks(container);
+    removeMergedMore(container);
+    container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, `fallback:${reason}`);
+    warnOnce(sectionId, reason);
   };
 
   const toggleSectionPagination = (container: HTMLElement): void => {
@@ -258,6 +290,9 @@ export function installRendererSidebarSections(
     const current = readSectionDisplayMode(sectionId, storage);
     const next: SidebarSectionDisplayMode = current === "merged" ? "grouped" : "merged";
     if (!writeSectionDisplayMode(sectionId, next, storage)) return;
+    // A new merged session gets one fresh native expand attempt per project;
+    // grouped mode never touches Desktop's collapse state.
+    clearExpandAttempts(sectionId);
     refresh();
     if (next === "merged") {
       const failed = containersById(sectionId).some((container) =>
@@ -271,18 +306,19 @@ export function installRendererSidebarSections(
   };
 
   const ensureToggle = (
-    snapshot: SidebarSectionSnapshot,
+    sectionId: string,
+    section: HTMLElement,
     mode: SidebarSectionDisplayMode,
   ): HTMLButtonElement | null => {
-    let button = toggles.get(snapshot.section);
+    let button = toggles.get(section);
     if (!button) {
       button = createSectionDisplayToggle(document, mode === "grouped", () => {
-        toggleSection(snapshot.sectionId);
+        toggleSection(sectionId);
       });
-      toggles.set(snapshot.section, button);
+      toggles.set(section, button);
     }
     button.setAttribute("aria-pressed", String(mode === "grouped"));
-    if (!placeSectionDisplayToggle(snapshot.section, button)) {
+    if (!placeSectionDisplayToggle(section, button)) {
       button.remove();
       return null;
     }
@@ -298,21 +334,14 @@ export function installRendererSidebarSections(
       if (!sectionId) continue;
       const mode = readSectionDisplayMode(sectionId, storage);
       const sectionElement = findSectionElement(container);
-      const existingToggle = sectionElement ? toggles.get(sectionElement) : undefined;
-      existingToggle?.setAttribute("aria-pressed", String(mode === "grouped"));
-      const result = readSectionSnapshot(container);
-      if (!result.ok) {
-        clearMergeMarks(container);
-        removeMergedMore(container);
-        container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, `fallback:${result.reason}`);
-        warnOnce(sectionId, result.reason);
+      if (!sectionElement) {
+        keepNative(container, sectionId, "section-missing");
         continue;
       }
-      if (!ensureToggle(result.snapshot, mode)) {
-        clearMergeMarks(container);
-        removeMergedMore(container);
-        container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "fallback:toggle-missing");
-        warnOnce(sectionId, "toggle-missing");
+      const existingToggle = toggles.get(sectionElement);
+      existingToggle?.setAttribute("aria-pressed", String(mode === "grouped"));
+      if (!ensureToggle(sectionId, sectionElement, mode)) {
+        keepNative(container, sectionId, "toggle-missing");
         continue;
       }
       if (mode === "grouped") {
@@ -321,6 +350,34 @@ export function installRendererSidebarSections(
         container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "grouped");
         continue;
       }
+      const result = readSectionSnapshot(container);
+      if (!result.ok) {
+        if (result.reason === "project-collapsed") {
+          const key = expandKey(sectionId, result.projectId);
+          const attemptedAt = expandAttempts.get(key);
+          const now = Date.now();
+          if (attemptedAt === undefined) {
+            expandAttempts.set(key, now);
+            // Use the native header toggle; never write Desktop's React state.
+            result.header.click();
+            clearMergeMarks(container);
+            removeMergedMore(container);
+            container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "expanding");
+            scheduleExpandCheck();
+            continue;
+          }
+          if (now - attemptedAt < EXPAND_GRACE_MS) {
+            clearMergeMarks(container);
+            removeMergedMore(container);
+            container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "expanding");
+            scheduleExpandCheck();
+            continue;
+          }
+        }
+        keepNative(container, sectionId, result.reason);
+        continue;
+      }
+      clearExpandAttempts(sectionId);
       const { orderByRow, maxOrder: sectionMaxOrder } = mergedOrder(result.snapshot, recency);
       maxOrder = Math.max(maxOrder, sectionMaxOrder);
       // Drop every previous mark first so a re-render that moved a node cannot
@@ -369,6 +426,7 @@ export function installRendererSidebarSections(
       target.removeEventListener("storage", schedule);
       target.removeEventListener("resize", schedule);
       if (timer !== null) target.clearTimeout(timer);
+      if (expandTimer !== null) target.clearTimeout(expandTimer);
       for (const container of document.querySelectorAll<HTMLElement>(
         SIDEBAR_SECTION_CONTAINER_SELECTOR,
       )) {

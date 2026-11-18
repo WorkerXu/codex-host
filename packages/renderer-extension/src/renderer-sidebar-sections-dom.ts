@@ -74,7 +74,14 @@ export interface SidebarSectionSnapshot {
 
 export type SidebarSectionReadResult =
   | { ok: true; snapshot: SidebarSectionSnapshot }
-  | { ok: false; reason: SidebarSectionFallbackReason };
+  | {
+      ok: false;
+      reason: "project-collapsed";
+      /** Native project toggle; clicking it is the only way to expand. */
+      header: HTMLElement;
+      projectId: string;
+    }
+  | { ok: false; reason: Exclude<SidebarSectionFallbackReason, "project-collapsed"> };
 
 export function readSectionId(container: Element): string | null {
   const value = container.getAttribute(SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE);
@@ -159,7 +166,9 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
   const stray: SidebarSectionRow[] = [];
   const strayUnits: HTMLElement[] = [];
   const seenThreads = new Set<string>();
-  const readRows = (scope: HTMLElement): SidebarSectionRow[] | SidebarSectionFallbackReason => {
+  const readRows = (
+    scope: HTMLElement,
+  ): SidebarSectionRow[] | "thread-id-missing" | "duplicate-thread" => {
     const rows: SidebarSectionRow[] = [];
     for (const element of scope.querySelectorAll<HTMLElement>(
       `[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`,
@@ -191,7 +200,12 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
     const headerRow = project.querySelector<HTMLElement>(`[${SIDEBAR_PROJECT_ROW_ATTRIBUTE}]`);
     if (!headerRow) return { ok: false, reason: "project-header-missing" };
     if (headerRow.getAttribute(SIDEBAR_PROJECT_COLLAPSED_ATTRIBUTE) !== "false") {
-      return { ok: false, reason: "project-collapsed" };
+      return {
+        ok: false,
+        reason: "project-collapsed",
+        header: headerRow,
+        projectId: project.getAttribute(SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE) ?? "",
+      };
     }
     const rowList = project.querySelector<HTMLElement>(`[${SIDEBAR_PROJECT_LIST_ATTRIBUTE}]`);
     const showAllValue = rowList?.getAttribute(SIDEBAR_PROJECT_SHOW_ALL_ATTRIBUTE);

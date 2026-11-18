@@ -153,6 +153,24 @@ const { outputFiles } = await build({
         container.append(section);
         document.body.append(container);
 
+        const expandClicks = new Map();
+        const collapseProject = (projectId) => {
+          const header = [...document.querySelectorAll("[data-app-action-sidebar-project-row]")].find(
+            (candidate) => candidate.getAttribute("data-app-action-sidebar-project-id") === projectId,
+          );
+          const projectContainer = header.closest('[data-sidebar-project-container-id^="project:"]');
+          const listWrap = projectContainer.querySelector("[data-app-action-sidebar-project-list-id]");
+          header.setAttribute("data-app-action-sidebar-project-collapsed", "true");
+          listWrap.style.display = "none";
+          header.addEventListener("click", () => {
+            expandClicks.set(projectId, (expandClicks.get(projectId) ?? 0) + 1);
+            if (options.expandFails) return;
+            header.setAttribute("data-app-action-sidebar-project-collapsed", "false");
+            listWrap.style.display = "";
+          });
+        };
+        if (options.collapsedProject) collapseProject(options.collapsedProject);
+
         const storageValues = new Map(options.storage ? Object.entries(options.storage) : []);
         const storage = { getItem: (key) => storageValues.get(key) ?? null, setItem: (key, value) => storageValues.set(key, value) };
         const recency = new Map([["host\\u0000a1", 300], ["host\\u0000a2", 100], ["host\\u0000b1", 250], ["host\\u0000b2", 200]]);
@@ -170,11 +188,11 @@ const { outputFiles } = await build({
           railDisplays: () => [...document.querySelectorAll('.rail')].map((rail) => getComputedStyle(rail).display),
           state: () => document.querySelector('[data-sidebar-project-container-id^="custom:"]')?.getAttribute('data-codexhost-merged-state'),
           toggle: () => document.querySelector('[data-codexhost-section-display-toggle]'),
-          setCollapsed: (index, collapsed) => document.querySelectorAll('[data-app-action-sidebar-project-row]')[index].setAttribute('data-app-action-sidebar-project-collapsed', String(collapsed)),
           removeMenu: () => menu.remove(),
           refresh: () => control.refresh(),
           preserve: () => { const first = document.querySelector('[data-app-action-sidebar-thread-row]'); first.dataset.marker = "kept"; return first; },
           marker: () => document.querySelector('[data-app-action-sidebar-thread-row]')?.dataset.marker,
+          expandClicks: (projectId) => expandClicks.get(projectId) ?? 0,
           addSectionRow: (threadId, title) => {
             const unit = rowUnit("draft", threadId, title);
             unit.setAttribute("data-fixture-section-row", "");
@@ -385,29 +403,67 @@ test("restores a stored grouped choice on install", async ({ page }) => {
   expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("grouped");
 });
 
-test("falls back to native layout and reverts the choice when structure is unusable", async ({
+test("expects a collapsed project in grouped mode to stay folded and untouched", async ({
   page,
 }) => {
   await setup(page, {
     storage: { "codexhost.sidebarSectionDisplay.v1": JSON.stringify({ fixture: "grouped" }) },
+    collapsedProject: "p2",
   });
-  await page.evaluate(() => Reflect.get(window, "sectionFixture").setCollapsed(1, true));
-  await page.evaluate(() => Reflect.get(window, "sectionFixture").refresh());
-  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe(
-    "fallback:project-collapsed",
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("grouped");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").expandClicks("p2"))).toBe(
+    0,
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-app-action-sidebar-project-id="p2"]')
+          ?.getAttribute("data-app-action-sidebar-project-collapsed") ?? null,
+    ),
+  ).toBe("true");
+  expect(await page.locator("[data-codexhost-merged-section]").count()).toBe(0);
+});
+
+test("expands a collapsed project once with its native header and then merges", async ({
+  page,
+}) => {
+  await setup(page, { collapsedProject: "p2" });
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "sectionFixture").state()), {
+      timeout: 3_000,
+    })
+    .toBe("merged");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").expandClicks("p2"))).toBe(
+    1,
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-app-action-sidebar-project-id="p2"]')
+          ?.getAttribute("data-app-action-sidebar-project-collapsed") ?? null,
+    ),
+  ).toBe("false");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").headerDisplays())).toEqual(
+    ["none", "none"],
+  );
+});
+
+test("falls back after one failed attempt to expand a collapsed project", async ({ page }) => {
+  await setup(page, { collapsedProject: "p2", expandFails: true });
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "sectionFixture").state()), {
+      timeout: 3_000,
+    })
+    .toBe("fallback:project-collapsed");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").expandClicks("p2"))).toBe(
+    1,
   );
   expect(await page.locator("[data-codexhost-merged-section]").count()).toBe(0);
-
-  // Turning grouping off cannot apply; the choice returns to the native grouped layout.
-  await page.locator("[data-codexhost-section-display-toggle]").click();
-  await expect(page.locator("[data-codexhost-section-display-toggle]")).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").headerDisplays())).toEqual(
+    ["block", "block"],
   );
-  const stored = await page.evaluate(() =>
-    Reflect.get(window, "sectionFixture").storageValues.get("codexhost.sidebarSectionDisplay.v1"),
-  );
-  expect(JSON.parse(stored ?? "{}")).toEqual({ fixture: "grouped" });
 });
 
 test("keeps the section native when the header has no menu trigger", async ({ page }) => {
