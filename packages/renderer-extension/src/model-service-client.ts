@@ -48,7 +48,7 @@ export function createRendererModelServiceClient(
     if (!target) throw new Error("local_only");
     return target.sendRequest(method, params, {
       priority: "interactive",
-      timeoutMs: method === MODEL_SERVICE_TEST_METHOD ? 12_000 : 5_000,
+      timeoutMs: method === MODEL_SERVICE_TEST_METHOD ? 25_000 : 5_000,
     });
   };
   return {

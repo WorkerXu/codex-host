@@ -685,9 +685,12 @@ export class ExternalThreadRuntime {
       thread.record.transportModelId,
     );
     const folders = selectedFolders ?? (await this.#workingFolders(thread.id));
+    const cwd = folders?.[0] ?? thread.record.cwd;
+    const previousCwd = cwd !== thread.cwd ? thread.cwd : undefined;
     const opened = await adapter.open({
       kind: "resume",
-      cwd: folders?.[0] ?? thread.record.cwd,
+      cwd,
+      ...(previousCwd ? { previousCwd } : {}),
       ...(folders && adapter.additionalDirectories
         ? { additionalDirectories: folders.slice(1) }
         : {}),
@@ -889,9 +892,12 @@ export class ExternalThreadRuntime {
     }
     const restoredSelection = decodeExternalTransportSelection(harnessId, record.transportModelId);
     const folders = await this.#workingFolders(record.hostThreadId);
+    const cwd = folders?.[0] ?? record.cwd;
+    const previousCwd = cwd !== record.cwd ? record.cwd : undefined;
     const opened = await adapter.open({
       kind: "resume",
-      cwd: folders?.[0] ?? record.cwd,
+      cwd,
+      ...(previousCwd ? { previousCwd } : {}),
       ...(folders && adapter.additionalDirectories
         ? { additionalDirectories: folders.slice(1) }
         : {}),

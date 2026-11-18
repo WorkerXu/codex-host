@@ -22,6 +22,7 @@ import {
   readComposerProject,
 } from "./renderer-project-mirror-model.js";
 import { confirmProjectMirror, showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
+import { joinMirroredProjectSection } from "./renderer-project-mirror-section.js";
 import {
   createProjectMirrorRpc,
   localProjectMirrorManager,
@@ -438,6 +439,20 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
           updatedAt: now,
         },
       });
+
+      try {
+        await joinMirroredProjectSection({
+          services,
+          sourceProjectId: sourceId,
+          remoteProjectId: projectId,
+          projectName: name,
+          targetHostId: hostId,
+        });
+      } catch (error) {
+        // The remote conversation is still usable; only the shared section failed.
+        status.lastError = errorMessage(error);
+        showProjectMirrorNotice(document, "项目已创建，但未能自动加入同一分区", "error");
+      }
 
       const row = await waitForSidebarProject(projectId);
       if (!row) return fail("项目已创建，但侧栏尚未显示，请稍后手动打开");

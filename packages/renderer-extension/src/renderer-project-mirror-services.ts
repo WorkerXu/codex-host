@@ -30,6 +30,13 @@ export interface ProjectMirrorDesktopServices {
   executionPaths: {
     readHomeDirectory(hostId: string): Promise<{ homeDirectory: string }>;
   };
+  /** Desktop's native sidebar section state; absent only on older versions. */
+  applicationState?: {
+    read(key: string): Promise<unknown>;
+  };
+  savedCustomSections?: {
+    applySavedCustomSectionCommand(input: unknown): Promise<unknown>;
+  };
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>

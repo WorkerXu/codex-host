@@ -3,7 +3,7 @@ export const MODEL_SERVICE_MODELS = {
   openai: "gpt-4.1-mini",
   gemini: "gemini-3.5-flash-lite",
 } as const;
-export const STRUCTURED_QUERY_TIMEOUT_MS = 3_000;
+export const STRUCTURED_QUERY_TIMEOUT_MS = 20_000;
 export class StructuredQueryError extends Error {
   constructor(
     readonly code: string,
@@ -48,6 +48,8 @@ export interface StructuredQueryRequest {
   input: unknown;
   schema: Record<string, unknown>;
   name: string;
+  /** Bounds the reply for small probes such as the connection test. */
+  maxTokens?: number;
 }
 /** Convert strict JSON Schema back to Gemini's uppercase, nullable response schema. */
 function geminiSchema(value: unknown): unknown {
@@ -113,7 +115,7 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
                 json_schema: { name: request.name, strict: true, schema: request.schema },
               },
               temperature: 0,
-              max_tokens: 2_048,
+              max_tokens: request.maxTokens ?? 2_048,
             }
           : {
               systemInstruction: { parts: [{ text: request.instructions }] },
@@ -122,7 +124,7 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
                 responseMimeType: "application/json",
                 responseSchema: geminiSchema(request.schema),
                 temperature: 0,
-                maxOutputTokens: 2_048,
+                maxOutputTokens: request.maxTokens ?? 2_048,
               },
             };
         const response = await (options.fetchImpl ?? fetch)(endpoint, {

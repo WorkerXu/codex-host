@@ -6,9 +6,9 @@
 
 Composer 上方的「工作文件夹」显示主要目录的末级名称和额外目录数。弹窗显示当前目录、尚未选择的项目目录和该机器最近使用的目录。菜单对勾多选，选择即时保存；「设为主要」把目录移到第一位，始终保留至少一个目录。目录按顺序保存，第一项就是 `cwd`。
 
-本机点击「添加文件夹…」调用 Desktop 的 `appServices.fileAttachments.pickFiles({kind:"directory", allowMultiple:true, pickerTitle:"选择工作文件夹"})`，打开系统目录选择框，按返回的 `fsPath` 一次加入多个文件夹。通过已加载模块中的原生服务发现该接口，不直接访问 Electron。取消选择保留主列表；接口缺失、调用失败或返回格式不可用时退回目录浏览子视图。异步选择返回后，对话已切换或菜单已关闭时丢弃结果。此调用不创建或激活 Desktop 项目。
+本机点击「添加文件夹…」调用 Desktop 的 `appServices.fileAttachments.pickFiles({kind:"directory", allowMultiple:true, pickerTitle:"选择工作文件夹"})`，打开系统目录选择框，按返回的 `fsPath` 一次加入多个文件夹。通过已加载模块中的原生服务发现该接口，不直接访问 Electron；Desktop 把这些服务暴露为可调用的 RPC stub，发现逻辑必须接受函数形态的服务对象。取消选择保留主列表；接口缺失、调用失败或返回格式不可用时退回目录浏览子视图。异步选择返回后，对话已切换或菜单已关闭时丢弃结果。此调用不创建或激活 Desktop 项目。
 
-远程机器始终使用目录浏览子视图，顶部提供返回箭头、绝对路径输入及原生小号主按钮「添加」。列表仅显示当前路径的子文件夹名，点击子目录进入该目录；回车或点击「添加」保存当前路径后返回主视图。Esc 先返回主视图，再次 Esc 关闭弹窗。弹层高度最多为 `min(420px, 视口高度 - 120px)`，内容在内部滚动，浏览视图的路径栏保持可见。目录元数据和列表始终通过所选 Host 的 `fs/getMetadata`、`fs/readDirectory` 获取，浏览不创建目录。Mac 路径不会拿到远程机器上解析。列表过滤为目录，异步浏览丢弃过期结果。
+远程机器始终使用目录浏览子视图，顶部提供返回箭头、绝对路径输入及原生小号主按钮「添加」。列表仅显示当前路径的子文件夹名，点击子目录进入该目录；回车或点击「添加」保存当前路径后返回主视图。Esc 先返回主视图，再次 Esc 关闭弹窗。弹层高度最多为 `min(420px, 视口高度 - 120px)`，内容在内部滚动，浏览视图的路径栏保持可见。目录元数据和列表始终通过所选 Host 的 `fs/getMetadata`、`fs/readDirectory` 获取，浏览不创建目录。Mac 路径不会拿到远程机器上解析。列表过滤为目录并隐藏以 `.` 开头的目录，异步浏览丢弃过期结果。
 
 鼠标、Tab、空格、Enter 和 Esc 使用真实 DOM 控件，上下方向键和 Home / End 导航菜单。Esc 关闭弹窗并把焦点交回触发按钮。Popover 随内容尺寸重新定位，保持在视口内。保存期间禁用编辑；切换对话后，旧异步回复不能更新新对话的控件。
 
@@ -44,7 +44,7 @@ Desktop 按 Thread ID 分配项目。目录改写不迁移项目，也不直接�
 
 每个执行 Host 在 `${CODEXHOST_DATA_DIR:-~/.codexhost}/thread-folders/` 保存自己的选择，因此 Host 文件系统加 Thread ID 构成命名空间。文件名是 Thread ID 的 SHA-256，内容包含 `folders`、`appliedFolders`、`changedAt` 和变更记录。写入通过临时文件与 rename 原子替换，最近目录来自同一 Host 的记录。旧项目组文件不读取、不迁移、不删除。
 
-外部 Harness 在下一轮开始前重新打开同一个 Native Session。运行中的轮次或后台工作不会被目录切换打断；恢复沿用 native ref、配置与历史映射。原 Mapping Store 的 cwd 保留原生会话定位语义，加载的 Thread 使用当前执行 cwd。
+外部 Harness 在下一轮开始前重新打开同一个 Native Session。运行中的轮次或后台工作不会被目录切换打断；恢复沿用 native ref、配置与历史映射。原 Mapping Store 的 cwd 保留原生会话定位语义，加载的 Thread 使用当前执行 cwd。目录变化后的 resume 同时带上原目录 `previousCwd`，让按历史目录校验归属的 Adapter（如 CodeBuddy）接受旧历史；恢复失败只回中文说明，不透传 Adapter 的原始英文错误。
 
 Adapter 通过可选 `additionalDirectories` 能力声明原生额外目录支持。Claude Code 将额外目录传到官方 SDK 的 `additionalDirectories`（原生 `--add-dir` 语义），Broker 也传递这些原生选项。其他 Adapter 使用主要目录；chip tooltip 和弹窗说明这一限制，发送给 Harness 的变更说明只列有效目录。
 

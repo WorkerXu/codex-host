@@ -20,7 +20,7 @@
    - 触发：`button[aria-haspopup="menu"][aria-controls="<composerId>-agent-menu"]`
    - 菜单：`<div id="<composerId>-agent-menu" role="menu" popover="auto">`
 3. 菜单打开时在末尾追加 `data-codexhost-cross-host-agent-menu` 分组：
-   - 按机器分组，机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`）；离线置灰。
+   - 按机器分组，机器名优先用 Desktop 的 `displayName`（如 `oracle-sg`）；离线置灰。只作为残留远程项目存在、没有 Desktop 显示名且离线的 Host 不显示，避免暴露原始 Host ID。
    - 展开机器后列出该机器的 Harness：Codex 固定第一项，其余来自目标 Host 的插件目录，并按该 Host 的 availability 只保留 `ready`（未安装/不可用不显示）。
    - 行高、内边距、字体和图标复用 Agent 选择器原生行；机器行带服务器图标与状态点，Harness 行缩进一级并带各自图标。
    - 列表加载中/失败用一条与原生行同色的次要文字展示，不再放右侧徽标；滚动由整个弹框承担。
@@ -50,6 +50,14 @@
 - 若目标机已有同名但不同路径的项目，不复用；按候选规则新建。
 - 兼容层：在目标 Host 调用 `project/create {name, roots:[{path}], metadata:{}, idempotencyKey:<remoteProjectId>}`；失败只写日志，不影响主流程。使用 remote project id 作为幂等键，未来 Desktop 迁移时不会重复建项目。
 - 创建后等待侧栏出现 `data-app-action-sidebar-project-id="<id>"`，再点击该项目行的原生新对话按钮。
+
+## 自动分区
+
+- 镜像项目与源项目放进同一个 Desktop 原生分区，使用 `appServices.savedCustomSections.applySavedCustomSectionCommand`：
+  - 源项目已在某分区时，把远程项目的 `codex:project:<remoteProjectId>` 移入该分区；否则新建以项目名命名的分区，同时包含两个项目。
+  - 命令返回的 transition 在 `local` 和目标 Host 上补齐分区副本（`createSection` + `saveReplica`，已有 `hostSectionIds` 时跳过）。
+  - 分区状态由 Desktop 自己持久化和广播；codexhost 不直接写全局状态文件。
+- 分区服务不可用或副本创建失败时，提示「项目已创建，但未能自动加入同一分区」，新对话仍照常打开。
 
 ## Harness 预选
 
@@ -97,6 +105,7 @@ Host 只提供本地 RPC：
 | `createRemote` 返回 null（用户取消信任确认） | toast，结束 |
 | 项目已创建但侧栏未出现（5s） | toast「项目已创建，请稍后手动打开」 |
 | 原生新对话按钮不存在/禁用 | toast，项目保留 |
+| 自动分区失败 | toast「项目已创建，但未能自动加入同一分区」，不阻塞 |
 | Harness 切换失败/超时 | 新对话保留默认 Codex，不阻塞 |
 | `project/create` 失败 | 仅日志，继续 |
 

@@ -26,6 +26,26 @@ const drafts = new Map<string, string[]>();
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+/** Visible child folders of one directory result; dot-directories stay out. */
+export function directoryFolderPaths(value: unknown, path: string): string[] {
+  if (!record(value) || !Array.isArray(value.entries)) throw new Error("机器未返回目录列表");
+  const separator = path.includes("\\") ? "\\" : "/";
+  return value.entries
+    .filter(
+      (entry) =>
+        record(entry) &&
+        entry.isDirectory === true &&
+        typeof entry.fileName === "string" &&
+        !entry.fileName.startsWith(".") &&
+        !/[\\/]/u.test(entry.fileName),
+    )
+    .map(
+      (entry) =>
+        `${path.replace(/[\\/]+$/u, "")}${separator}${(entry as { fileName: string }).fileName}`,
+    )
+    .sort();
+}
+
 export function mountRendererThreadFolders(composer: Element, context: () => FolderContext) {
   const d = composer.ownerDocument;
   let generation = 0;
@@ -202,21 +222,7 @@ export function mountRendererThreadFolders(composer: Element, context: () => Fol
     async list(path) {
       const current = identity();
       const value = await current.route.manager.sendRequest("fs/readDirectory", { path });
-      if (!record(value) || !Array.isArray(value.entries)) throw new Error("机器未返回目录列表");
-      const separator = path.includes("\\") ? "\\" : "/";
-      return value.entries
-        .filter(
-          (entry) =>
-            record(entry) &&
-            entry.isDirectory === true &&
-            typeof entry.fileName === "string" &&
-            !/[\\/]/u.test(entry.fileName),
-        )
-        .map(
-          (entry) =>
-            `${path.replace(/[\\/]+$/u, "")}${separator}${(entry as { fileName: string }).fileName}`,
-        )
-        .sort();
+      return directoryFolderPaths(value, path);
     },
     async validate(path) {
       const value = await identity().route.manager.sendRequest("fs/getMetadata", { path });

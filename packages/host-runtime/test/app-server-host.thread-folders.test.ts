@@ -191,6 +191,50 @@ it.each([undefined, "/different"])(
   },
 );
 
+it("passes the previous cwd when an existing external Thread changes folders", async () => {
+  const fixture = createFixture();
+  Object.assign(fixture.adapter, { additionalDirectories: true });
+  const nativeOpen = fixture.adapter.open.bind(fixture.adapter);
+  const opened = vi.spyOn(fixture.adapter, "open").mockImplementation(async (input) => {
+    if (input.kind !== "resume") return nativeOpen(input);
+    const previous = fixture.adapter.sessions.at(-1);
+    if (!previous) throw new Error("No persisted Session");
+    const session = new FakeHarnessSession(
+      fixture.adapter.harnessId,
+      fixture.adapter.catalog,
+      undefined,
+      input.nativeRef,
+      previous.persistedSnapshot(),
+      true,
+      input.cwd,
+    );
+    fixture.adapter.sessions.push(session);
+    return { ok: true, value: session };
+  });
+  try {
+    const threadId = await startExternalThread(fixture, "codexhost/pi-native", 30, {
+      projectId: "project-a",
+      codexhostWorkingFolders: ["/first", "/extra-one"],
+    });
+    await completePiTurn(fixture, threadId, 31);
+    writeRequest(fixture.desktopInput, {
+      id: 32,
+      method: "codexhost/thread-folders/set",
+      params: { threadId, folders: ["/second", "/extra-two"] },
+    });
+    await fixture.collector.waitFor((message) => requestId(message, 32));
+    await completePiTurn(fixture, threadId, 33, 1);
+    expect(opened.mock.calls.at(-1)?.[0]).toMatchObject({
+      kind: "resume",
+      cwd: "/second",
+      previousCwd: "/first",
+      additionalDirectories: ["/extra-two"],
+    });
+  } finally {
+    await closeFixture(fixture);
+  }
+});
+
 it.each([true, false])(
   "changes an external Session's native cwd and respects extra-directory capability (%s)",
   async (additionalDirectories) => {

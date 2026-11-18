@@ -15,7 +15,7 @@ import {
   buildJarvisQueryRequest,
   JARVIS_QUERY_SCHEMA,
 } from "../src/jarvis-query-parser.js";
-import { strictJsonSchema } from "../src/structured-query-client.js";
+import { STRUCTURED_QUERY_TIMEOUT_MS, strictJsonSchema } from "../src/structured-query-client.js";
 
 const directories: string[] = [];
 const QUERY = {
@@ -336,6 +336,23 @@ describe("shared model settings", () => {
       latencyMs: null,
       errorCode: "missing_key",
     });
+  });
+  it("keeps the OpenAI connection test minimal while allowing a slow reply", async () => {
+    expect(STRUCTURED_QUERY_TIMEOUT_MS).toBe(20_000);
+    const settings = await store();
+    await settings.update({ key: { provider: "openai", value: "fake-openai-key" } });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body)).max_tokens).toBe(16);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return openaiResponse({ ok: true });
+    });
+    await expect(
+      new ModelService(settings, fetchImpl as unknown as typeof fetch).request(
+        MODEL_SERVICE_TEST_METHOD,
+        { provider: "openai" },
+      ),
+    ).resolves.toMatchObject({ ok: true, errorCode: null });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
   it.each([
     [402, "quota_exhausted"],
