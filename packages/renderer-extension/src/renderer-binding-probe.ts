@@ -667,6 +667,18 @@ export function shouldTransferComposerState(
   );
 }
 
+export function isNewDraftTarget(
+  mountedTarget: readonly unknown[] | null,
+  currentTarget: readonly unknown[] | null,
+): boolean {
+  if (currentTarget?.[0] !== "default") return false;
+  return (
+    mountedTarget === null ||
+    mountedTarget.length !== currentTarget.length ||
+    mountedTarget.some((value, index) => value !== currentTarget[index])
+  );
+}
+
 export function isLateConversationTarget(
   mountedTarget: readonly unknown[] | null,
   currentTarget: readonly unknown[] | null,
@@ -820,6 +832,10 @@ export function installRendererBindingProbe(
   };
   const controllerTarget = (target: readonly unknown[] | null, hostId: string | null) =>
     scopedComposerTarget(target, hostId);
+  const preferredNewThreadAgent = (hostId: string | null): RendererAgent =>
+    readNewThreadAgentPreference(undefined, rendererNewThreadPreferenceStorage(hostId)) ??
+    options.defaultAgent ??
+    "codex";
   const usageSubscriptions = new Map<
     string,
     { client: RendererModelClient; dispose: () => void }
@@ -1722,8 +1738,53 @@ export function installRendererBindingProbe(
     }
   };
 
-  const refreshMountedConversationTarget = (mounted: MountedComposer): boolean => {
+  /** Desktop keeps one Composer root across chats. Starting a new chat in it must not keep
+   * the previous Thread's locked Agent, Model Views, or Usage snapshot. */
+  const startDraftInComposer = (
+    mounted: MountedComposer,
+    target: readonly unknown[],
+    hostId: string | null,
+  ): void => {
+    controller.detach(mounted.composer);
+    const state = controller.mount(
+      mounted.composer,
+      controllerTarget(target, hostId),
+      preferredNewThreadAgent(hostId),
+    );
+    mounted.modelTarget = target;
+    mounted.hostId = hostId;
+    mounted.composerId = state.composerId;
+    mounted.modelView = { status: "idle" };
+    mounted.permissionModeView = { status: "idle" };
+    mounted.threadConfiguration = undefined;
+    mounted.ownershipStatus = "not-required";
+    mounted.usage = null;
+    mounted.accountCredits = null;
+    mounted.accountCreditsSupported = false;
+    mounted.usageRequestGeneration += 1;
+    usageRefreshAttempts.delete(mounted.composer);
+    const timer = usageRefreshTimers.get(mounted.composer);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      usageRefreshTimers.delete(mounted.composer);
+    }
+    if (isComposerModelWriteAllowed(mounted.modelTarget)) {
+      applyDraftAgentCarrier(mounted.composer, state.agent);
+    }
+    renderMounted(mounted);
+    void refreshDraftUsage(mounted);
+    void refreshCommands(mounted);
+    if (state.agent !== "codex") void loadExternalCatalog(mounted);
+  };
+
+  const refreshMountedComposerTarget = (mounted: MountedComposer): boolean => {
     const currentTarget = findComposerModelTarget(mounted.composer);
+    const nextHostId = activeModelHostId(mounted.composer);
+    if (isNewDraftTarget(mounted.modelTarget, currentTarget) && currentTarget) {
+      startDraftInComposer(mounted, currentTarget, nextHostId);
+      sidebarAgentIcons.refresh();
+      return true;
+    }
     const resolution = lateConversationTargetResolution(
       mounted.modelTarget,
       currentTarget,
@@ -1733,10 +1794,9 @@ export function installRendererBindingProbe(
     if (resolution === "none") return false;
 
     const previousTarget = mounted.modelTarget;
-    const nextHostId = activeModelHostId(mounted.composer);
-    const nextControllerTarget = controllerTarget(currentTarget, nextHostId);
     mounted.modelTarget = currentTarget;
     mounted.hostId = nextHostId;
+    const nextControllerTarget = controllerTarget(currentTarget, nextHostId);
     const rebound =
       resolution === "transfer"
         ? controller.transfer(mounted.composer, mounted.composer, nextControllerTarget)
@@ -3115,11 +3175,7 @@ export function installRendererBindingProbe(
     const state = controller.mount(
       composer,
       controllerTarget(modelTarget, hostId),
-      modelTarget?.[0] === "default"
-        ? (readNewThreadAgentPreference(undefined, rendererNewThreadPreferenceStorage(hostId)) ??
-            options.defaultAgent ??
-            "codex")
-        : undefined,
+      modelTarget?.[0] === "default" ? preferredNewThreadAgent(hostId) : undefined,
     );
     const inherited = pendingReplacements.get(composer)?.source;
     const control = mountComposerAgentControl(
@@ -3268,7 +3324,7 @@ export function installRendererBindingProbe(
       }
       // Unknown roots retain state, but cannot derive targets or retry requests.
       if (kind === "unknown") continue;
-      if (refreshTargets) refreshMountedConversationTarget(mounted);
+      if (refreshTargets) refreshMountedComposerTarget(mounted);
       const ownershipGeneration = ownershipRecovery.get(mounted);
       const modelGeneration = modelRecovery.get(mounted);
       ownershipRecovery.delete(mounted);

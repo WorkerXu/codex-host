@@ -7,6 +7,7 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import type * as RendererComposerDom from "../src/renderer-composer-dom.js";
+import { rendererAgentPickerView } from "../src/renderer-agent-picker.js";
 import {
   isRendererModelPickerDisabled,
   rendererModelSelectionFailed,
@@ -1753,5 +1754,83 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     expect(testState.renderedModelViews).not.toContainEqual(
       expect.objectContaining({ status: "error" }),
     );
+  });
+
+  it("returns a reused Composer to its draft when a new chat follows a submitted Thread", async () => {
+    installFakeBrowser();
+    testState.modelTarget = ["default", "client-new-thread:submitted"];
+    const host = {
+      listHarnessPlugins,
+      inspectHarness: vi.fn(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const modelControl = {
+      currentHostId: () => "local",
+      clientForHost: () => host,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    probe.setAdapter(
+      { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+      undefined,
+      () => true,
+      modelControl as never,
+    );
+    const notify = testState.notifyMutations;
+    assert(notify);
+    const flushStructure = () => {
+      notify([
+        {
+          type: "childList",
+          target: { nodeType: 1, parentElement: undefined },
+          addedNodes: [],
+          removedNodes: [],
+        } as unknown as MutationRecord,
+      ]);
+      for (const callback of testState.animationFrames.splice(0)) callback(performance.now());
+    };
+
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "draft" });
+    testState.documentListeners.get("keydown")?.({
+      target: testState.editor,
+      key: "Enter",
+      shiftKey: false,
+      isComposing: false,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "draft" });
+
+    testState.modelTarget = ["conversation", "thread-a"];
+    flushStructure();
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "locked" });
+
+    // The same Composer root starts the next new chat.
+    testState.modelTarget = ["default", "client-new-thread:next"];
+    flushStructure();
+    const reused = probe.status().selections[0];
+    expect(reused).toMatchObject({ phase: "draft" });
+    await vi.waitFor(() =>
+      expect(probe.harnessDirectory("local").availability["claude-code"]).toBe("ready"),
+    );
+    const availability = probe.harnessDirectory("local").availability;
+    expect(
+      rendererAgentPickerView(
+        { agent: reused?.agent ?? "codex", phase: reused?.phase ?? "draft" },
+        "ready",
+        false,
+        probe.status().enabledAgents,
+        availability,
+      ),
+    ).toMatchObject({
+      triggerDisabled: false,
+      optionDisabled: { "claude-code": false },
+    });
   });
 });
