@@ -2,6 +2,7 @@ import { createDefaultRendererSettingsPages } from "../../../packages/renderer-e
 import type { ModelServiceSettings } from "@codexhost/shared-contracts";
 import type { RendererModelServiceClient } from "../../../packages/renderer-extension/src/model-service-client.js";
 import { mountThreadFoldersPreview } from "./thread-folders.js";
+import { mountSidebarSectionsPreview } from "./sidebar-sections.js";
 import { createRepositoryPreviewClient } from "./code-repositories.js";
 import previewCss from "./preview.css";
 import { applyDesktopTheme } from "./desktop-theme.js";
@@ -40,7 +41,10 @@ const locale = "zh-CN" as const;
 const messages = rendererSettingsMessages(locale);
 
 const style = document.createElement("style");
-style.textContent = scenarioName.startsWith("thread-folders-") ? "" : previewCss;
+style.textContent =
+  scenarioName.startsWith("thread-folders-") || scenarioName.startsWith("sidebar-sections")
+    ? ""
+    : previewCss;
 document.head.append(style);
 document.documentElement.dataset.theme = theme;
 document.documentElement.style.colorScheme = theme;
@@ -1305,6 +1309,16 @@ const scenarios: Record<string, () => Promise<void>> = {
     document.querySelector('link[href="/shadow-context.css"]')?.remove();
     await loadDesktopCss();
     mountThreadFoldersPreview(root!, "thread-folders-limited");
+  },
+  async "sidebar-sections"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountSidebarSectionsPreview(root!, "merged");
+  },
+  async "sidebar-sections-grouped"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    mountSidebarSectionsPreview(root!, "grouped");
   },
 
   async "at-entry"() {

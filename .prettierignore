@@ -17,3 +17,6 @@ package-lock.json
 Cargo.lock
 # Generated models.dev price snapshot.
 packages/host-runtime/src/model-prices.generated.ts
+
+# Captured Desktop sidebar DOM fixtures: whitespace is part of the captured structure.
+tools/ui-preview/fixtures/native-sidebar-*.html
