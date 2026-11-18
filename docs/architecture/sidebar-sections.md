@@ -14,6 +14,7 @@ Desktop 的「分区」（项目 `···` → 分区）原生存成员关系，c
 - 只读取结构：`[data-app-action-sidebar-project-row]`（项目头）、`[data-app-action-sidebar-project-list-id]`（行容器）、`[data-app-action-sidebar-thread-row]`（行）、`data-app-action-sidebar-thread-id` / `-host-id` / `-pinned`。
 - 行保持原节点。把项目容器到行之间的包装层标记 `data-codexhost-merge-flatten`，样式设为 `display: contents`；项目头包装层与左侧导轨标记 `data-codexhost-merge-hidden`。行因此成为分区列表的 flex 子项。
 - 每个行写入 `data-codexhost-merge-order="<n>"`，由生成的样式表给出 `order`。分区列表的 `gap` 固定为 1px；`display: contents` 元素的原生 `::before` / `::after`（项目分隔线）一并关闭，避免它们继续参与布局。
+- 项目行内部为项目缩进预留了 16px 前导槽（加上行内 8px 间距共 24px）。没有项目标题时这层缩进只会留下空白，因此合并态把标题触发器前的空前导槽标为 `data-codexhost-merge-lead` 并隐藏，行图标与分区下原生行一致（实测 `sectionLeft + 16px`）；切回分组态后立即恢复。
 - 排序用 `electronBridge.getInitialSidebarBootstrap()` 的 `catalogEntries[].sourceRecencyAt`，键为 `hostId + threadId`；草稿行用行的 React `conversationId`。归并只比较每个项目的队首，因此单个项目内部的顺序永远保持原生；置顶行优先。没有目录时间的旧行排在同项目已知行之后；整个分区没有任何时间时直接保留项目块顺序。
 - 结构或时间不可用时不做任何视觉改动，只记录状态并回退到原生布局。
 

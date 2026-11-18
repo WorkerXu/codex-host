@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MERGE_FLATTEN_ATTRIBUTE,
   MERGE_HIDDEN_ATTRIBUTE,
+  MERGE_LEAD_ATTRIBUTE,
   MERGE_ORDER_ATTRIBUTE,
   SECTION_DISPLAY_TOGGLE_ATTRIBUTE,
   mergeStyleCss,
@@ -12,6 +13,7 @@ describe("merged section stylesheet", () => {
     const css = mergeStyleCss(0);
     expect(css).toContain(`[${MERGE_FLATTEN_ATTRIBUTE}] { display: contents !important; }`);
     expect(css).toContain(`[${MERGE_HIDDEN_ATTRIBUTE}] { display: none !important; }`);
+    expect(css).toContain(`[${MERGE_LEAD_ATTRIBUTE}] { display: none !important; }`);
     expect(css).toContain("flex-direction: column !important;");
     expect(css).toContain(`[${MERGE_FLATTEN_ATTRIBUTE}]::before`);
     expect(css).toContain("content: none !important;");

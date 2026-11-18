@@ -16,9 +16,21 @@ const { outputFiles } = await build({
         element.setAttribute("data-app-action-sidebar-thread-id", "host:" + threadId);
         element.setAttribute("data-app-action-sidebar-thread-pinned", "false");
         element.setAttribute("data-app-action-sidebar-thread-title", title);
-        element.textContent = title;
         element.style.height = "30px";
         element.dataset.thread = threadId;
+        const line = document.createElement("div");
+        line.className = "row-line";
+        const lead = document.createElement("div");
+        lead.className = "row-lead";
+        lead.append(document.createElement("div"));
+        const trigger = document.createElement("div");
+        trigger.setAttribute("data-thread-title-trigger", "");
+        const titleSpan = document.createElement("span");
+        titleSpan.setAttribute("data-thread-title", "");
+        titleSpan.textContent = title;
+        trigger.append(titleSpan);
+        line.append(lead, trigger);
+        element.append(line);
         return element;
       };
       const project = (projectId, label, rows) => {
@@ -151,6 +163,8 @@ async function setup(page: Page, options: Record<string, unknown> = {}) {
   await page.setContent(`<!doctype html><style>
     body { margin: 0; font: 13px system-ui; }
     [data-app-action-sidebar-thread-row], [data-app-action-sidebar-project-row] { padding: 0 8px; box-sizing: border-box; }
+    .row-line { display: flex; align-items: center; gap: 8px; height: 100%; }
+    .row-lead { width: 16px; flex: 0 0 16px; }
   </style>`);
   await page.addScriptTag({ content: bundle });
   await page.evaluate((value) => Reflect.get(window, "setupSections")(value), options);
@@ -192,6 +206,16 @@ test("merges projects by recency while keeping native rows and hiding project ch
     "none",
   ]);
   expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("merged");
+});
+
+test("removes the project row lead slot only in merged mode", async ({ page }) => {
+  await setup(page);
+  const lead = page.locator(".row-lead").first();
+  await expect(lead).toHaveCSS("display", "none");
+  await page.locator("[data-codexhost-section-display-toggle]").click();
+  await expect(lead).toHaveCSS("display", "block");
+  await page.locator("[data-codexhost-section-display-toggle]").click();
+  await expect(lead).toHaveCSS("display", "none");
 });
 
 test("keeps every native row node during merge", async ({ page }) => {

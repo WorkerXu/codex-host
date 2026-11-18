@@ -13,10 +13,10 @@
 | 截图 | 逐图检查与修掉的问题 |
 | --- | --- |
 | [01-merged-light.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/01-merged-light.png) | 两个项目的 8 行按时间交错排列（远端 1 → 本机 1 → 远端 2 …），项目头与左侧导轨完全隐藏，预览行距统一（每行 29px + 1px 间隔，与原生列表同一套间距）。修复了被 `display: contents` 提升的分隔线伪元素造成的首行后 12px 空隙。 |
-| [01-merged-dark.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/01-merged-dark.png) | 深色使用真实 `--color-surface`，文字、图标、未读环和选中行对比正常；没有白色背景块或近似深色。 |
+| [01-merged-dark.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/01-merged-dark.png) | 深色使用真实 `--color-surface`，文字、图标、未读环和选中行对比正常；行首无项目缩进，左侧没有多余空白或裁切。 |
 | [02-hover-header-light.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/02-hover-header-light.png) | 分区头悬停出现原生「选项」「新建聊天」和新增的 24px 列表树按钮；三者同高、右对齐，未裁切。 |
 | [02-hover-header-dark.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/02-hover-header-dark.png) | 深色未悬停状态：新图标使用三级文字色，与原生图标亮度一致，无多余背景。 |
-| [03-hover-toggle-light.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/03-hover-toggle-light.png) | 新按钮悬停背景改用原生 `--color-background-secondary-ghost-hover`，24×24、6px 圆角，与相邻按钮的命中区和圆角一致；右侧留 8px 不触边。 |
+| [03-hover-toggle-light.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/03-hover-toggle-light.png) | 新按钮悬停背景改用原生 `--color-background-secondary-ghost-hover`，24×24、6px 圆角，与相邻按钮的命中区和圆角一致；右侧留 8px 不触边。行首缩进已移除，图标与分区标题的左边距关系自然。 |
 | [03-hover-toggle-dark.png](/home/ubuntu/Documents/ChatGPT/AI工作台/codexhost-pack/ui-review/shots-sidebar-sections/03-hover-toggle-dark.png) | 深色悬停背景可辨但不抢眼，图标不丢对比。 |
 
 ## 显示项目分组（原样恢复）
@@ -30,7 +30,7 @@
 
 - 真实鼠标点击切换：`aria-pressed` 由 `false → true → false`，`data-codexhost-merged-state` 对应 `merged → grouped → merged`。
 - 真实键盘：聚焦按钮后 Enter 同样切回合并视图。
-- 合并视图 8 行 top 差值全部为 30px（预览中行高 29px + 1px 间隔）；视觉顺序为 远端 1、本机 1、远端 2、本机 2、远端 3、本机 3、远端 4、远端 5，对应 catalog 时间交错。
+- 合并视图 8 行 top 差值全部为 30px（预览中行高 29px + 1px 间隔）；行图标 `left = 68px`，与真实 Desktop「最近」区原生行相同，分组态恢复 `92px`。视觉顺序为 远端 1、本机 1、远端 2、本机 2、远端 3、本机 3、远端 4、远端 5，对应 catalog 时间交错。
 - 新按钮尺寸 24×24，`aria-label="显示项目分组"`，导入的样式表只包含本功能标记选择器。
 
 ## 未覆盖

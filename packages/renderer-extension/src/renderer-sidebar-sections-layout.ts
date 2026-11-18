@@ -14,6 +14,7 @@ export const MERGE_LIST_ATTRIBUTE = "data-codexhost-merge-list";
 export const MERGE_FLATTEN_ATTRIBUTE = "data-codexhost-merge-flatten";
 export const MERGE_HIDDEN_ATTRIBUTE = "data-codexhost-merge-hidden";
 export const MERGE_ORDER_ATTRIBUTE = "data-codexhost-merge-order";
+export const MERGE_LEAD_ATTRIBUTE = "data-codexhost-merge-lead";
 export const SECTION_DISPLAY_TOGGLE_ATTRIBUTE = "data-codexhost-section-display-toggle";
 export const SECTION_DISPLAY_STYLE_ATTRIBUTE = "data-codexhost-sidebar-sections-style";
 
@@ -22,6 +23,7 @@ const MARKED_ATTRIBUTES = [
   MERGE_FLATTEN_ATTRIBUTE,
   MERGE_HIDDEN_ATTRIBUTE,
   MERGE_ORDER_ATTRIBUTE,
+  MERGE_LEAD_ATTRIBUTE,
 ];
 
 /** Applies the flatten/hide/order marks for one section snapshot. */
@@ -37,6 +39,18 @@ export function applyMergeMarks(
     for (const row of project.rows) {
       const order = orderByRow.get(row.element);
       if (order !== undefined) row.element.setAttribute(MERGE_ORDER_ATTRIBUTE, String(order));
+      // Project rows reserve a leading slot for the project indent. Without a
+      // project header above it, that slot reads as a stray left margin.
+      const trigger = row.element.querySelector("[data-thread-title-trigger]");
+      const lead = trigger?.previousElementSibling;
+      if (
+        lead instanceof HTMLElement &&
+        lead.tagName === "DIV" &&
+        !lead.textContent?.trim() &&
+        lead.querySelector("svg, img") === null
+      ) {
+        lead.setAttribute(MERGE_LEAD_ATTRIBUTE, "");
+      }
       let ancestor = row.element.parentElement;
       while (ancestor && ancestor !== snapshot.list) {
         ancestor.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
@@ -102,6 +116,7 @@ export function mergeStyleCss(maxOrder: number): string {
     "  display: none !important;",
     "}",
     `[${MERGE_HIDDEN_ATTRIBUTE}] { display: none !important; }`,
+    `[${MERGE_LEAD_ATTRIBUTE}] { display: none !important; }`,
   ];
   for (let order = 0; order <= maxOrder; order += 1) {
     lines.push(`[${MERGE_ORDER_ATTRIBUTE}="${order}"] { order: ${order}; }`);
