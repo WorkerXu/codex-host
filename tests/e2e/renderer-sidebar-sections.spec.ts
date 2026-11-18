@@ -175,6 +175,12 @@ const { outputFiles } = await build({
           refresh: () => control.refresh(),
           preserve: () => { const first = document.querySelector('[data-app-action-sidebar-thread-row]'); first.dataset.marker = "kept"; return first; },
           marker: () => document.querySelector('[data-app-action-sidebar-thread-row]')?.dataset.marker,
+          addSectionRow: (threadId, title) => {
+            const unit = rowUnit("draft", threadId, title);
+            unit.setAttribute("data-fixture-section-row", "");
+            list.prepend(unit);
+            return unit;
+          },
         };
       };
     `,
@@ -238,6 +244,56 @@ test("merges projects by recency while keeping native rows and hiding project ch
     "none",
   ]);
   expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("merged");
+});
+
+test("keeps a new section-level chat merged instead of falling back to project headers", async ({
+  page,
+}) => {
+  await setup(page);
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("merged");
+
+  // Desktop mounts the in-flight new chat as a direct listitem of the section
+  // list until it belongs to a project; the merged view must absorb it.
+  await page.evaluate(() =>
+    Reflect.get(window, "sectionFixture").addSectionRow("draft-1", "新对话"),
+  );
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, "sectionFixture").state()))
+    .toBe("merged");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").headerDisplays())).toEqual(
+    ["none", "none"],
+  );
+  const rows = [...(await tops(page))].sort((left, right) => left.top - right.top);
+  expect(rows.map((row) => row.thread)).toEqual([
+    "host:draft-1",
+    "host:a1",
+    "host:b1",
+    "host:b2",
+    "host:a2",
+    "host:a3",
+  ]);
+  expect(rows.map((row) => Number(row.order))).toEqual([0, 1, 2, 3, 4, 5]);
+  const titleLefts = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-thread-title-trigger]")].map((trigger) =>
+      Math.round(trigger.getBoundingClientRect().left),
+    ),
+  );
+  expect(new Set(titleLefts).size).toBe(1);
+
+  await page.locator("[data-codexhost-section-display-toggle]").click();
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").state())).toBe("grouped");
+  expect(await page.evaluate(() => Reflect.get(window, "sectionFixture").headerDisplays())).toEqual(
+    ["block", "block"],
+  );
+  const native = [...(await tops(page))].sort((left, right) => left.top - right.top);
+  expect(native.map((row) => row.thread)).toEqual([
+    "host:draft-1",
+    "host:a1",
+    "host:a2",
+    "host:a3",
+    "host:b1",
+    "host:b2",
+  ]);
 });
 
 test("merges the visible rows and replaces project expanders with one merged control", async ({

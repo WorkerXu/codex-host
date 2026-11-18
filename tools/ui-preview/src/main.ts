@@ -1348,6 +1348,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     mountSidebarSectionsPreview(root!, "grouped");
   },
 
+  async "sidebar-sections-new-chat"() {
+    document.querySelector('link[href="/shadow-context.css"]')?.remove();
+    await loadDesktopCss();
+    const preview = mountSidebarSectionsPreview(root!, "merged");
+    preview.simulateNewChat();
+    await delay(120);
+  },
+
   async "at-entry"() {
     await loadDesktopCss();
     const stage = mountStage(`

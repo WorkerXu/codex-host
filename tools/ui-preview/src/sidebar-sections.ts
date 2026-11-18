@@ -4,6 +4,8 @@ import { installRendererSidebarSections } from "../../../packages/renderer-exten
 
 export interface SidebarSectionsPreview {
   dispose(): void;
+  /** Mount Desktop's new-chat draft directly on the section list. */
+  simulateNewChat(): void;
 }
 
 const REMOTE_HOST = "fixture-remote-host";
@@ -145,5 +147,23 @@ export function mountSidebarSectionsPreview(
     storage,
     loadRecency: async () => recency,
   });
-  return { dispose: () => control.dispose() };
+  return {
+    dispose: () => control.dispose(),
+    simulateNewChat() {
+      const list = section.querySelector<HTMLElement>('div[role="list"]');
+      const row = section.querySelector<HTMLElement>("[data-app-action-sidebar-thread-row]");
+      const unit = row?.closest<HTMLElement>('[role="listitem"]');
+      if (!list || !unit) throw new Error("Section row fixture is missing");
+      const draft = unit.cloneNode(true) as HTMLElement;
+      const draftRow = draft.querySelector<HTMLElement>("[data-app-action-sidebar-thread-row]");
+      draftRow?.setAttribute("data-app-action-sidebar-thread-id", `${LOCAL_HOST}:draft-new-chat`);
+      draftRow?.setAttribute("data-app-action-sidebar-thread-host-id", LOCAL_HOST);
+      for (const title of draft.querySelectorAll<HTMLElement>(
+        "[data-thread-title], [data-marquee-content]",
+      )) {
+        title.textContent = "新对话";
+      }
+      list.prepend(draft);
+    },
+  };
 }

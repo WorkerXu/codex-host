@@ -62,6 +62,14 @@ export interface SidebarSectionSnapshot {
   section: HTMLElement;
   list: HTMLElement;
   projects: SidebarSectionProject[];
+  /**
+   * Rows mounted directly on the section list, outside every project. Desktop
+   * renders a new-chat draft this way until it is attached to a project; they
+   * are part of the merged list instead of forcing the section back to native.
+   */
+  stray: SidebarSectionRow[];
+  /** Direct listitems that hold the stray rows and have no project container. */
+  strayUnits: HTMLElement[];
 }
 
 export type SidebarSectionReadResult =
@@ -97,16 +105,26 @@ export function findSectionList(section: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function directProjectUnits(list: HTMLElement): HTMLElement[] | null {
-  const units: HTMLElement[] = [];
+interface SectionUnit {
+  element: HTMLElement;
+  project: HTMLElement | null;
+}
+
+/**
+ * Direct listitems are either a project block or a row mounted on the section
+ * itself (Desktop's new-chat draft). Anything else keeps the section native.
+ */
+function directSectionUnits(list: HTMLElement): SectionUnit[] | null {
+  const units: SectionUnit[] = [];
   for (const child of list.children) {
     if (!(child instanceof HTMLElement)) continue;
     if (child.hasAttribute(MERGED_MORE_ATTRIBUTE)) continue;
     if (child.getAttribute("role") !== "listitem") return null;
-    if (child.querySelector(`div[${SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE}^="project:"]`) === null) {
-      return null;
-    }
-    units.push(child);
+    const project = child.querySelector<HTMLElement>(
+      `div[${SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE}^="project:"]`,
+    );
+    if (!project && child.querySelector(`[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`) === null) return null;
+    units.push({ element: child, project });
   }
   return units.length > 0 ? units : null;
 }
@@ -134,16 +152,42 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
   if (!sectionId || !section) return { ok: false, reason: "section-missing" };
   const list = findSectionList(section);
   if (!list) return { ok: false, reason: "list-missing" };
-  const units = directProjectUnits(list);
+  const units = directSectionUnits(list);
   if (!units) return { ok: false, reason: "project-missing" };
 
   const projects: SidebarSectionProject[] = [];
+  const stray: SidebarSectionRow[] = [];
+  const strayUnits: HTMLElement[] = [];
   const seenThreads = new Set<string>();
+  const readRows = (scope: HTMLElement): SidebarSectionRow[] | SidebarSectionFallbackReason => {
+    const rows: SidebarSectionRow[] = [];
+    for (const element of scope.querySelectorAll<HTMLElement>(
+      `[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`,
+    )) {
+      const threadId = element.getAttribute(SIDEBAR_THREAD_ID_ATTRIBUTE);
+      const hostId = element.getAttribute(SIDEBAR_THREAD_HOST_ID_ATTRIBUTE);
+      if (!threadId || !hostId) return "thread-id-missing";
+      const key = threadKey(hostId, threadId);
+      if (seenThreads.has(key)) return "duplicate-thread";
+      seenThreads.add(key);
+      rows.push({
+        element,
+        threadId,
+        hostId,
+        pinned: element.getAttribute(SIDEBAR_THREAD_PINNED_ATTRIBUTE) === "true",
+      });
+    }
+    return rows;
+  };
   for (const unit of units) {
-    const project = unit.querySelector<HTMLElement>(
-      `div[${SIDEBAR_PROJECT_CONTAINER_ATTRIBUTE}^="project:"]`,
-    );
-    if (!project) return { ok: false, reason: "project-missing" };
+    if (!unit.project) {
+      const rows = readRows(unit.element);
+      if (!Array.isArray(rows)) return { ok: false, reason: rows };
+      stray.push(...rows);
+      strayUnits.push(unit.element);
+      continue;
+    }
+    const project = unit.project;
     const headerRow = project.querySelector<HTMLElement>(`[${SIDEBAR_PROJECT_ROW_ATTRIBUTE}]`);
     if (!headerRow) return { ok: false, reason: "project-header-missing" };
     if (headerRow.getAttribute(SIDEBAR_PROJECT_COLLAPSED_ATTRIBUTE) !== "false") {
@@ -159,23 +203,8 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
     // false flag without an expander means the full project list is mounted.
     const showAll = showAllValue === "true" || !toggle;
 
-    const rows: SidebarSectionRow[] = [];
-    for (const element of rowList.querySelectorAll<HTMLElement>(
-      `[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`,
-    )) {
-      const threadId = element.getAttribute(SIDEBAR_THREAD_ID_ATTRIBUTE);
-      const hostId = element.getAttribute(SIDEBAR_THREAD_HOST_ID_ATTRIBUTE);
-      if (!threadId || !hostId) return { ok: false, reason: "thread-id-missing" };
-      const key = threadKey(hostId, threadId);
-      if (seenThreads.has(key)) return { ok: false, reason: "duplicate-thread" };
-      seenThreads.add(key);
-      rows.push({
-        element,
-        threadId,
-        hostId,
-        pinned: element.getAttribute(SIDEBAR_THREAD_PINNED_ATTRIBUTE) === "true",
-      });
-    }
+    const rows = readRows(rowList);
+    if (!Array.isArray(rows)) return { ok: false, reason: rows };
 
     const hidden = [...project.children].filter(
       (child): child is HTMLElement =>
@@ -185,14 +214,20 @@ export function readSectionSnapshot(container: HTMLElement): SidebarSectionReadR
     projects.push({ container: project, rows, hidden, showAll, toggle });
   }
 
-  const owned = new Set(projects.flatMap((project) => project.rows.map((row) => row.element)));
+  const owned = new Set([
+    ...projects.flatMap((project) => project.rows.map((row) => row.element)),
+    ...stray.map((row) => row.element),
+  ]);
   for (const element of section.querySelectorAll<HTMLElement>(
     `[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`,
   )) {
     if (!owned.has(element)) return { ok: false, reason: "stray-thread" };
   }
 
-  return { ok: true, snapshot: { sectionId, container, section, list, projects } };
+  return {
+    ok: true,
+    snapshot: { sectionId, container, section, list, projects, stray, strayUnits },
+  };
 }
 
 /** Native row identity used by the catalog: host id plus the conversation UUID. */

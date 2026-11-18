@@ -15,6 +15,7 @@ import {
   SIDEBAR_SECTION_CONTAINER_SELECTOR,
   MERGED_MORE_ATTRIBUTE,
   SIDEBAR_THREAD_ID_ATTRIBUTE,
+  SIDEBAR_THREAD_PINNED_ATTRIBUTE,
   SIDEBAR_THREAD_ROW_ATTRIBUTE,
   findSectionElement,
   readRowThreadId,
@@ -33,7 +34,6 @@ import {
 } from "./renderer-sidebar-sections-control.js";
 import {
   MERGED_SECTION_STATE_ATTRIBUTE,
-  MERGE_ORDER_ATTRIBUTE,
   SidebarSectionsStyle,
   applyMergeMarks,
   clearMergeMarks,
@@ -130,11 +130,15 @@ function mergedOrder(
   );
   const merged = mergeSidebarThreads(groups);
   const orderByRow = new Map<HTMLElement, number>();
-  merged.forEach((key, index) => {
+  // Section-level rows (Desktop's new-chat draft) keep the native lead position
+  // above the project list; they have no catalog recency to sort by yet.
+  let index = 0;
+  for (const row of snapshot.stray) orderByRow.set(row.element, index++);
+  for (const key of merged) {
     const element = elementsByKey.get(key);
-    if (element) orderByRow.set(element, index);
-  });
-  return { orderByRow, maxOrder: Math.max(merged.length - 1, 0) };
+    if (element) orderByRow.set(element, index++);
+  }
+  return { orderByRow, maxOrder: Math.max(index - 1, 0) };
 }
 
 export function installRendererSidebarSections(
@@ -319,9 +323,9 @@ export function installRendererSidebarSections(
       }
       const { orderByRow, maxOrder: sectionMaxOrder } = mergedOrder(result.snapshot, recency);
       maxOrder = Math.max(maxOrder, sectionMaxOrder);
-      for (const project of result.snapshot.projects) {
-        for (const row of project.rows) row.element.removeAttribute(MERGE_ORDER_ATTRIBUTE);
-      }
+      // Drop every previous mark first so a re-render that moved a node cannot
+      // keep a stale order or flatten/hidden flag from the last layout.
+      clearMergeMarks(container);
       applyMergeMarks(result.snapshot, orderByRow);
       ensureMergedMore(result.snapshot);
       container.setAttribute(MERGED_SECTION_STATE_ATTRIBUTE, "merged");
@@ -346,9 +350,11 @@ export function installRendererSidebarSections(
     attributeFilter: [
       SIDEBAR_THREAD_ROW_ATTRIBUTE,
       SIDEBAR_THREAD_ID_ATTRIBUTE,
+      SIDEBAR_THREAD_PINNED_ATTRIBUTE,
       SIDEBAR_PROJECT_ROW_ATTRIBUTE,
       SIDEBAR_PROJECT_COLLAPSED_ATTRIBUTE,
       SIDEBAR_PROJECT_SHOW_ALL_ATTRIBUTE,
+      "data-app-action-sidebar-section-collapsed",
     ],
   });
   target.addEventListener("storage", schedule);

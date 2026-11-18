@@ -34,33 +34,36 @@ export function applyMergeMarks(
   snapshot: SidebarSectionSnapshot,
   orderByRow: ReadonlyMap<HTMLElement, number>,
 ): void {
+  const flatten = (row: HTMLElement): void => {
+    const order = orderByRow.get(row);
+    if (order !== undefined) row.setAttribute(MERGE_ORDER_ATTRIBUTE, String(order));
+    // Rows reserve a leading slot for a project indent. Without a project
+    // header above the merged list, that slot reads as a stray left margin.
+    const trigger = row.querySelector("[data-thread-title-trigger]");
+    const lead = trigger?.previousElementSibling;
+    if (
+      lead instanceof HTMLElement &&
+      lead.tagName === "DIV" &&
+      !lead.textContent?.trim() &&
+      lead.querySelector("svg, img") === null
+    ) {
+      lead.setAttribute(MERGE_LEAD_ATTRIBUTE, "");
+    }
+    let ancestor = row.parentElement;
+    while (ancestor && ancestor !== snapshot.list) {
+      ancestor.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
+      ancestor = ancestor.parentElement;
+    }
+  };
   snapshot.container.setAttribute(MERGED_SECTION_ATTRIBUTE, snapshot.sectionId);
   snapshot.list.setAttribute(MERGE_LIST_ATTRIBUTE, "");
+  for (const unit of snapshot.strayUnits) unit.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
+  for (const row of snapshot.stray) flatten(row.element);
   for (const project of snapshot.projects) {
     project.container.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
     for (const hidden of project.hidden) hidden.setAttribute(MERGE_HIDDEN_ATTRIBUTE, "");
     project.toggle?.container.setAttribute(MERGE_HIDDEN_ATTRIBUTE, "");
-    for (const row of project.rows) {
-      const order = orderByRow.get(row.element);
-      if (order !== undefined) row.element.setAttribute(MERGE_ORDER_ATTRIBUTE, String(order));
-      // Project rows reserve a leading slot for the project indent. Without a
-      // project header above it, that slot reads as a stray left margin.
-      const trigger = row.element.querySelector("[data-thread-title-trigger]");
-      const lead = trigger?.previousElementSibling;
-      if (
-        lead instanceof HTMLElement &&
-        lead.tagName === "DIV" &&
-        !lead.textContent?.trim() &&
-        lead.querySelector("svg, img") === null
-      ) {
-        lead.setAttribute(MERGE_LEAD_ATTRIBUTE, "");
-      }
-      let ancestor = row.element.parentElement;
-      while (ancestor && ancestor !== snapshot.list) {
-        ancestor.setAttribute(MERGE_FLATTEN_ATTRIBUTE, "");
-        ancestor = ancestor.parentElement;
-      }
-    }
+    for (const row of project.rows) flatten(row.element);
   }
 }
 
