@@ -53,11 +53,12 @@
 
 ## 自动分区
 
-- 镜像项目与源项目放进同一个 Desktop 原生分区，使用 `appServices.savedCustomSections.applySavedCustomSectionCommand`：
-  - 源项目已在某分区时，把远程项目的 `codex:project:<remoteProjectId>` 移入该分区；否则新建以项目名命名的分区，同时包含两个项目。
-  - 命令返回的 transition 在 `local` 和目标 Host 上补齐分区副本（`createSection` + `saveReplica`，已有 `hostSectionIds` 时跳过）。
-  - 分区状态由 Desktop 自己持久化和广播；codexhost 不直接写全局状态文件。
-- 分区服务不可用或副本创建失败时，提示「项目已创建，但未能自动加入同一分区」，新对话仍照常打开。
+- 镜像项目与源项目放进同一个 Desktop 原生分区。运行期按窗口实际暴露的接口选路径：
+  - 有 `appServices.savedCustomSections` 时，使用 `applySavedCustomSectionCommand`：源项目已在某分区就把远程项目的 `codex:project:<remoteProjectId>` 移入该分区，否则新建以项目名命名的分区并同时包含两个项目；命令返回的 transition 在 `local` 和目标 Host 上补齐分区副本（`createSection` + `saveReplica`，已有 `hostSectionIds` 时跳过）。
+  - 没有该服务时（当前 Desktop），分区只存在持久化 atom `sidebar-custom-sections-v3` 中。此时调用侧栏模块导出的原生命令：`Jn(scope, name, itemKeys)` 对应「新建分区…」，`f2(scope, sectionId, itemKey)` 对应「移到分区」，两者与项目 `···` 菜单及拖拽共用同一代码路径；当前分区的读取走同一模块导出的 `QV` atom。`scope` 是已提交 React 树里 Sidebar 组件的 AppScope。
+  - 原生命令模块按导出形状发现，AppScope 按 `AppScope` 标记发现；不写死 chunk 文件名或 module id。
+  - 分区状态由 Desktop 自己持久化和广播；codexhost 不直接写 atom、全局状态文件或 app-server 分区状态。
+- 分区服务不可用、原生命令未产生预期变更或副本创建失败时，提示「项目已创建，但未能自动加入同一分区」，新对话仍照常打开；不留下半写入的侧栏状态。
 
 ## Harness 预选
 

@@ -1,4 +1,4 @@
-import { loadCodexNativeServices } from "./codex-native-services.js";
+import { isCodexServiceRegistry, loadCodexNativeServices } from "./codex-native-services.js";
 
 /** Native SSH service signatures consumed by the SSH Adapter. */
 export interface CodexSshServices {
@@ -12,19 +12,16 @@ export interface CodexSshServices {
   };
 }
 
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 function isSshServices(value: unknown): value is CodexSshServices {
   if (
-    !record(value) ||
+    !isCodexServiceRegistry(value) ||
     !Object.hasOwn(value, "sshConnections") ||
     !Object.hasOwn(value, "remoteConnections")
   )
     return false;
   const ssh = value.sshConnections;
   const remote = value.remoteConnections;
-  // Native RPC stubs are callable proxies, so they need not be plain objects.
+  // Native RPC stubs are callable proxies, so the individual services need not be plain objects.
   return (
     ssh != null &&
     remote != null &&

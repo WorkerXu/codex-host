@@ -1,4 +1,4 @@
-import { loadCodexNativeServices } from "./codex-native-services.js";
+import { isCodexServiceRegistry, loadCodexNativeServices } from "./codex-native-services.js";
 
 const RPC_MODULE = /\/rpc-[^/]+\.js$/u;
 
@@ -43,7 +43,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 function isServices(value: unknown): value is ProjectMirrorDesktopServices {
-  if (!record(value)) return false;
+  if (!isCodexServiceRegistry(value)) return false;
   try {
     const projects = value.projects as { createRemote?: unknown } | undefined;
     const workspaceFiles = value.workspaceFiles as { createDirectory?: unknown } | undefined;

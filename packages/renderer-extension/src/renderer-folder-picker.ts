@@ -1,4 +1,4 @@
-import { loadCodexNativeServices } from "./codex-native-services.js";
+import { isCodexServiceRegistry, loadCodexNativeServices } from "./codex-native-services.js";
 
 interface FolderPickerServices {
   fileAttachments: {
@@ -13,16 +13,18 @@ interface FolderPickerServices {
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-/** Desktop services are RPC stubs; a stubbed service object is callable. */
-const serviceObject = (value: unknown): value is object =>
+/** Individual Desktop services are callable RPC stubs; only the registry itself must be plain. */
+const serviceStub = (value: unknown): value is object =>
   (typeof value === "object" || typeof value === "function") && value !== null;
 
 function isFolderPickerServices(value: unknown): value is FolderPickerServices {
-  if (!serviceObject(value)) return false;
+  // The RPC transport root answers every property read with a function, so accepting a
+  // callable container would match both it and the real registry.
+  if (!isCodexServiceRegistry(value)) return false;
   try {
-    const fileAttachments = (value as { fileAttachments?: unknown }).fileAttachments;
+    const fileAttachments = value.fileAttachments;
     return (
-      serviceObject(fileAttachments) &&
+      serviceStub(fileAttachments) &&
       typeof (fileAttachments as { pickFiles?: unknown }).pickFiles === "function"
     );
   } catch {

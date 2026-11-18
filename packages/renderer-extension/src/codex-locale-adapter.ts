@@ -1,4 +1,4 @@
-import { loadCodexNativeServices } from "./codex-native-services.js";
+import { isCodexServiceRegistry, loadCodexNativeServices } from "./codex-native-services.js";
 
 const DEFAULT_LOCALE_REQUEST_TIMEOUT_MS = 750;
 
@@ -7,9 +7,9 @@ interface NativeLocaleServices {
 }
 
 function isNativeLocaleServices(value: unknown): value is NativeLocaleServices {
-  if (!isRecord(value) || !Object.hasOwn(value, "appInfo")) return false;
+  if (!isCodexServiceRegistry(value) || !Object.hasOwn(value, "appInfo")) return false;
   const appInfo = value.appInfo;
-  // Native RPC stubs may be callable proxies rather than plain objects.
+  // Native service stubs may be callable proxies; only the registry must be plain.
   return (
     appInfo != null &&
     typeof (appInfo as NativeLocaleServices["appInfo"]).getLocaleInfo === "function"
@@ -25,8 +25,8 @@ interface NativeSettingsServices {
 
 function isNativeSettingsServices(value: unknown): value is NativeSettingsServices {
   // The transport root also synthesizes arbitrary callable paths. Only the
-  // service registry owns settings; its settings stub itself may be callable.
-  if (!isRecord(value) || !Object.hasOwn(value, "settings")) return false;
+  // plain service registry owns settings; its settings stub itself may be callable.
+  if (!isCodexServiceRegistry(value) || !Object.hasOwn(value, "settings")) return false;
   const settings = value.settings as NativeSettingsServices["settings"] | null | undefined;
   return typeof settings?.read === "function" && typeof settings?.write === "function";
 }

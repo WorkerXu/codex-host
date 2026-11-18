@@ -1,5 +1,6 @@
 const MAX_RUNTIME_MODULES = 32_768;
 const MAX_RUNTIME_EXPORTS = 131_072;
+const MAX_RUNTIME_CONTAINERS = 65_536;
 const RUNTIME_SCAN_SLICE = 2_048;
 /** Compiler-generated live bindings and re-exports: property reads only, never a call. */
 const COMPILED_EXPORT_GETTER =
@@ -7,6 +8,19 @@ const COMPILED_EXPORT_GETTER =
 
 const objectLike = (value: unknown): value is object =>
   (typeof value === "object" || typeof value === "function") && value !== null;
+
+/** Desktop publishes its service registry as a plain object. The RPC transport root and
+ * individual service stubs are callable proxies, so a function that answers every property
+ * read with another function must never be mistaken for the registry itself. */
+export function isCodexServiceRegistry(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  try {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
 
 /** The already-instantiated module table of a bundled entry. Bundled Desktop exposes only its
  * runtime from the entry namespace. Only `.c` is read: the runtime function and its `.m`
@@ -55,6 +69,100 @@ export async function loadCodexNativeServices<T>(
   importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
 ): Promise<T | null> {
   if (!ownerWindow.document || !ownerWindow.location) return null;
+  const { catalog, urls } = loadedModuleCatalog(ownerWindow);
+  // Preserve legacy shared-first ordering; still check every eligible module.
+  const candidates = [...urls].sort(
+    (a, b) => Number(b.includes("/app-shared-")) - Number(a.includes("/app-shared-")),
+  );
+  const matches = new Set<T>();
+  const addMatch = (value: unknown): void => {
+    if (matchesServices(value)) matches.add(value);
+    if (matches.size > 1) throw new Error("Codex native services are unavailable in this window");
+  };
+  const runtimes = new Set<object>();
+  for (const url of candidates) {
+    let module: Record<string, unknown>;
+    try {
+      module = await importModule(url);
+    } catch {
+      continue;
+    }
+    Object.values(module).forEach(addMatch);
+    const runtime = instantiatedModules(module);
+    if (runtime) runtimes.add(runtime);
+  }
+  let scannedExports = 0;
+  for (const runtime of runtimes) {
+    const modules = Object.values(runtime);
+    if (modules.length > MAX_RUNTIME_MODULES)
+      throw new Error("Codex native services are unavailable in this window");
+    for (const [index, module] of modules.entries()) {
+      if (index > 0 && index % RUNTIME_SCAN_SLICE === 0)
+        await new Promise((resolve) => setTimeout(resolve));
+      const values = compiledExportValues(module);
+      scannedExports += values.length;
+      if (scannedExports > MAX_RUNTIME_EXPORTS)
+        throw new Error("Codex native services are unavailable in this window");
+      values.forEach(addMatch);
+    }
+  }
+  assertCatalogUnchanged(ownerWindow, catalog);
+  return [...matches][0] ?? null;
+}
+
+/** Discover the exports object of one already-instantiated native module. Feature modules
+ * sometimes expose a set of commands rather than a single service value, so the predicate
+ * inspects the module's exports container. Ambiguity fails closed. */
+export async function loadCodexNativeModule<T>(
+  ownerWindow: Window,
+  matchesModule: (value: unknown) => value is T,
+  importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+): Promise<T | null> {
+  if (!ownerWindow.document || !ownerWindow.location) return null;
+  const { catalog, urls } = loadedModuleCatalog(ownerWindow);
+  const matches = new Set<T>();
+  const addMatch = (value: unknown): void => {
+    if (matchesModule(value)) matches.add(value);
+    if (matches.size > 1) throw new Error("Codex native services are unavailable in this window");
+  };
+  const runtimes = new Set<object>();
+  for (const url of urls) {
+    let module: Record<string, unknown>;
+    try {
+      module = await importModule(url);
+    } catch {
+      continue;
+    }
+    const runtime = instantiatedModules(module);
+    if (runtime) runtimes.add(runtime);
+  }
+  let scannedModules = 0;
+  for (const runtime of runtimes) {
+    const modules = Object.entries(runtime);
+    if (modules.length > MAX_RUNTIME_MODULES)
+      throw new Error("Codex native services are unavailable in this window");
+    for (const [index, [, module]] of modules.entries()) {
+      if (index > 0 && index % RUNTIME_SCAN_SLICE === 0)
+        await new Promise((resolve) => setTimeout(resolve));
+      scannedModules += 1;
+      if (scannedModules > MAX_RUNTIME_CONTAINERS)
+        throw new Error("Codex native services are unavailable in this window");
+      if (!objectLike(module) || Object.hasOwn(module, "error")) continue;
+      addMatch(Object.getOwnPropertyDescriptor(module, "exports")?.value);
+    }
+  }
+  assertCatalogUnchanged(ownerWindow, catalog);
+  return [...matches][0] ?? null;
+}
+
+interface LoadedModuleCatalog {
+  catalog: unknown;
+  urls: string[];
+}
+
+/** Validate the Controller catalog (or the legacy preload list) and return same-origin script
+ * URLs. An incomplete or stale catalog fails closed instead of scanning a partial window. */
+function loadedModuleCatalog(ownerWindow: Window): LoadedModuleCatalog {
   const page = new URL(ownerWindow.location.href);
   const urls = new Set<string>();
   const catalog: unknown = Reflect.get(ownerWindow, "__codexhostLoadedModulesV1");
@@ -95,43 +203,10 @@ export async function loadCodexNativeServices<T>(
     )
       urls.add(url.href);
   }
-  // Preserve legacy shared-first ordering; still check every eligible module.
-  const candidates = [...urls].sort(
-    (a, b) => Number(b.includes("/app-shared-")) - Number(a.includes("/app-shared-")),
-  );
-  const matches = new Set<T>();
-  const addMatch = (value: unknown): void => {
-    if (matchesServices(value)) matches.add(value);
-    if (matches.size > 1) throw new Error("Codex native services are unavailable in this window");
-  };
-  const runtimes = new Set<object>();
-  for (const url of candidates) {
-    let module: Record<string, unknown>;
-    try {
-      module = await importModule(url);
-    } catch {
-      continue;
-    }
-    Object.values(module).forEach(addMatch);
-    const runtime = instantiatedModules(module);
-    if (runtime) runtimes.add(runtime);
-  }
-  let scannedExports = 0;
-  for (const runtime of runtimes) {
-    const modules = Object.values(runtime);
-    if (modules.length > MAX_RUNTIME_MODULES)
-      throw new Error("Codex native services are unavailable in this window");
-    for (const [index, module] of modules.entries()) {
-      if (index > 0 && index % RUNTIME_SCAN_SLICE === 0)
-        await new Promise((resolve) => setTimeout(resolve));
-      const values = compiledExportValues(module);
-      scannedExports += values.length;
-      if (scannedExports > MAX_RUNTIME_EXPORTS)
-        throw new Error("Codex native services are unavailable in this window");
-      values.forEach(addMatch);
-    }
-  }
+  return { catalog, urls: [...urls] };
+}
+
+function assertCatalogUnchanged(ownerWindow: Window, catalog: unknown): void {
   if (catalog !== undefined && Reflect.get(ownerWindow, "__codexhostLoadedModulesV1") !== catalog)
     throw new Error("Codex loaded module catalog changed during discovery. Try again once ready.");
-  return [...matches][0] ?? null;
 }

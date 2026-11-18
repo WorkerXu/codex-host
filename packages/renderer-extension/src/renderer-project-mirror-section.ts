@@ -1,3 +1,10 @@
+import {
+  findCodexAppScope,
+  loadCodexNativeSections,
+  type NativeSectionApi,
+  type NativeSectionScope,
+} from "./codex-native-sections.js";
+
 const SECTIONS_ATOM = "electron-persisted-atom-state";
 const SECTIONS_KEY = "sidebar-custom-sections-v3";
 const PROJECT_ITEM_PREFIX = "codex:project:";
@@ -24,13 +31,15 @@ interface MirrorSectionTransition {
   complete(): Promise<unknown>;
 }
 
+interface SavedSectionService {
+  applySavedCustomSectionCommand(input: unknown): Promise<unknown>;
+}
+
 export interface MirrorSectionServices {
   applicationState?: {
     read(key: string): Promise<unknown>;
   };
-  savedCustomSections?: {
-    applySavedCustomSectionCommand(input: unknown): Promise<unknown>;
-  };
+  savedCustomSections?: SavedSectionService;
 }
 
 export interface MirrorSectionInput {
@@ -39,14 +48,21 @@ export interface MirrorSectionInput {
   remoteProjectId: string;
   projectName: string;
   targetHostId: string;
+  /** The window whose sidebar owns the section state; defaults to the global window. */
+  ownerWindow?: Window;
+}
+
+/** Native section commands are injectable so tests can drive the same shape the bundle exposes. */
+export interface MirrorSectionNativeDeps {
+  loadSections?: (ownerWindow: Window) => Promise<NativeSectionApi | null>;
+  findScope?: (ownerWindow: Window) => NativeSectionScope | null;
 }
 
 export type MirrorSectionOutcome = "created" | "joined" | "unchanged";
 
-function savedSections(value: unknown): SavedSection[] | null {
-  if (!record(value) || !Array.isArray(value.sections)) return null;
+function sectionEntries(entries: unknown[]): SavedSection[] | null {
   const sections: SavedSection[] = [];
-  for (const entry of value.sections) {
+  for (const entry of entries) {
     if (!record(entry) || typeof entry.id !== "string" || !Array.isArray(entry.itemKeys))
       return null;
     const hostSectionIds: Record<string, string> = {};
@@ -63,6 +79,11 @@ function savedSections(value: unknown): SavedSection[] | null {
     });
   }
   return sections;
+}
+
+function savedSections(value: unknown): SavedSection[] | null {
+  if (!record(value) || !Array.isArray(value.sections)) return null;
+  return sectionEntries(value.sections);
 }
 
 async function atomAccountStates(
@@ -89,12 +110,24 @@ function saveOutcome(value: unknown): "applied" | "unchanged" | "conflict" | nul
  * Desktop's `savedCustomSections` command owns the sidebar state and the
  * per-Host section replicas; this module only builds the command and drives
  * the returned transition for the two machines that now own the project.
+ *
+ * Builds without that command keep the state in the persisted
+ * `sidebar-custom-sections-v3` atom, so they are driven through the same native
+ * create/move functions the sidebar menu calls. No state is written here.
  */
 export async function joinMirroredProjectSection(
   input: MirrorSectionInput,
+  deps: MirrorSectionNativeDeps = {},
 ): Promise<MirrorSectionOutcome> {
   const saved = input.services.savedCustomSections;
-  if (!saved) throw new Error("分区服务不可用");
+  if (saved) return joinSavedSection(input, saved);
+  return joinNativeSection(input, deps);
+}
+
+async function joinSavedSection(
+  input: MirrorSectionInput,
+  saved: SavedSectionService,
+): Promise<MirrorSectionOutcome> {
   const accounts = await atomAccountStates(input.services);
   const sourceKey = `${PROJECT_ITEM_PREFIX}${input.sourceProjectId}`;
   const remoteKey = `${PROJECT_ITEM_PREFIX}${input.remoteProjectId}`;
@@ -154,4 +187,55 @@ export async function joinMirroredProjectSection(
     if (typeof disposeReceipt === "function") disposeReceipt.call(receipt);
   }
   return existing ? "joined" : "created";
+}
+
+function nativeSections(scope: NativeSectionScope, api: NativeSectionApi): SavedSection[] | null {
+  let value: unknown;
+  try {
+    value = scope.get(api.QV);
+  } catch {
+    return null;
+  }
+  return Array.isArray(value) ? sectionEntries(value) : null;
+}
+
+async function joinNativeSection(
+  input: MirrorSectionInput,
+  deps: MirrorSectionNativeDeps,
+): Promise<MirrorSectionOutcome> {
+  const ownerWindow = input.ownerWindow ?? (typeof window === "undefined" ? null : window);
+  if (!ownerWindow) throw new Error("分区服务不可用");
+  const api = await (deps.loadSections ?? loadCodexNativeSections)(ownerWindow);
+  if (!api) throw new Error("分区服务不可用");
+  const scope = (deps.findScope ?? findCodexAppScope)(ownerWindow);
+  if (!scope) throw new Error("分区服务不可用");
+  const sections = nativeSections(scope, api);
+  if (!sections) throw new Error("无法读取侧栏分区");
+  const sourceKey = `${PROJECT_ITEM_PREFIX}${input.sourceProjectId}`;
+  const remoteKey = `${PROJECT_ITEM_PREFIX}${input.remoteProjectId}`;
+  const existing = sections.find((section) => section.itemKeys.includes(sourceKey));
+  if (existing) {
+    if (existing.itemKeys.includes(remoteKey)) return "unchanged";
+    api.f2(scope, existing.id, remoteKey);
+    if (!placedInSection(scope, api, existing.id, remoteKey)) throw new Error("分区服务不可用");
+    return "joined";
+  }
+  const name = input.projectName.trim() || "项目";
+  const sectionId = api.Jn(scope, name, [sourceKey, remoteKey]);
+  if (typeof sectionId !== "string" || !sectionId) throw new Error("分区创建失败");
+  if (!placedInSection(scope, api, sectionId, remoteKey)) throw new Error("分区创建失败");
+  return "created";
+}
+
+function placedInSection(
+  scope: NativeSectionScope,
+  api: NativeSectionApi,
+  sectionId: string,
+  itemKey: string,
+): boolean {
+  return (
+    nativeSections(scope, api)?.some(
+      (section) => section.id === sectionId && section.itemKeys.includes(itemKey),
+    ) ?? false
+  );
 }

@@ -12,7 +12,63 @@ const ownerWindow = () =>
     },
   }) as unknown as Window;
 
+/** Mirrors the bundled runtime: values live on instantiated module exports, not the namespace. */
+function bundledModule(values: Record<string, unknown>) {
+  const cache: Record<string, unknown> = {};
+  for (const [id, value] of Object.entries(values)) {
+    const exports: Record<string, unknown> = {};
+    for (const [name, entry] of Object.entries(value as Record<string, unknown>)) {
+      Object.defineProperty(exports, name, { enumerable: true, value: entry });
+    }
+    cache[id] = { exports };
+  }
+  const runtime = Object.assign(
+    () => {
+      throw new Error("The bundled runtime must not be called during discovery");
+    },
+    { c: cache },
+  );
+  return { __webpack_require__: runtime };
+}
+
+/** capnweb's transport root: a function whose every property read returns the same stub, so
+ * `appHost.fileAttachments.pickFiles` also looks callable. */
+function transportRoot() {
+  const host: unknown = new Proxy(function appHost() {}, { get: () => host });
+  return host;
+}
+
+function appServices(pickFiles: () => Promise<unknown>) {
+  return {
+    // Individual services are callable RPC stubs.
+    fileAttachments: Object.assign(() => undefined, { pickFiles }),
+  };
+}
+
 describe("Desktop native folder picker", () => {
+  it("selects the plain service registry when the callable transport root also matches", async () => {
+    const pickFiles = vi.fn(async () => [{ fsPath: "/Users/lin/One" }]);
+    const picked = transportRoot();
+    await expect(
+      pickDesktopFolders(ownerWindow(), async () =>
+        bundledModule({ GaA7: { appHost: picked, appServices: appServices(pickFiles) } }),
+      ),
+    ).resolves.toEqual(["/Users/lin/One"]);
+    expect(pickFiles).toHaveBeenCalledExactlyOnceWith({
+      kind: "directory",
+      allowMultiple: true,
+      pickerTitle: "选择工作文件夹",
+    });
+  });
+
+  it("ignores the callable transport root when no plain registry is present", async () => {
+    await expect(
+      pickDesktopFolders(ownerWindow(), async () =>
+        bundledModule({ GaA7: { appHost: transportRoot() } }),
+      ),
+    ).resolves.toBeNull();
+  });
+
   it("requests directory-only multi-selection and returns deduplicated filesystem paths", async () => {
     const fileAttachments = {
       pickFiles: vi.fn(async function (this: unknown) {

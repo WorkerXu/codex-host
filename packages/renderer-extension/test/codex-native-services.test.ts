@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isNativeProjectThreadCreator } from "@codexhost/desktop-control/renderer-bindings";
-import { loadCodexNativeServices } from "../src/codex-native-services.js";
+import {
+  isCodexServiceRegistry,
+  loadCodexNativeModule,
+  loadCodexNativeServices,
+} from "../src/codex-native-services.js";
 
 async function creator({
   startWithoutFirstTurn: empty,
@@ -260,5 +264,73 @@ describe("loaded native service discovery", () => {
     Reflect.set(f.owner, "__codexhostLoadedModulesV1", catalog(["app://-/now-loaded.js"]));
     f.imported.mockResolvedValue({ creator });
     expect(await f.load()).toBe(creator);
+  });
+});
+
+describe("native module command discovery", () => {
+  const api = { run() {}, atom: {} };
+  const matchesApi = (value: unknown): value is typeof api =>
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { run?: unknown }).run === "function" &&
+    typeof (value as { atom?: unknown }).atom === "object";
+  const bundled = (exportsById: Record<string, unknown>) => {
+    const cache: Record<string, { exports: unknown }> = {};
+    for (const [id, value] of Object.entries(exportsById)) cache[id] = { exports: value };
+    return {
+      __webpack_require__: Object.assign(
+        () => {
+          throw new Error("The bundled runtime must not be called");
+        },
+        { c: cache },
+      ),
+    };
+  };
+
+  it("matches an instantiated module's exports container", async () => {
+    const f = fixture(catalog(["app://-/entry.js"]));
+    f.imported.mockResolvedValue(bundled({ first: { other: true }, target: api }));
+    expect(await loadCodexNativeModule(f.owner as unknown as Window, matchesApi, f.imported)).toBe(
+      api,
+    );
+  });
+
+  it("rejects two distinct matching module containers", async () => {
+    const f = fixture(catalog(["app://-/entry.js"]));
+    f.imported.mockResolvedValue(bundled({ first: { run() {}, atom: {} }, second: api }));
+    await expect(
+      loadCodexNativeModule(f.owner as unknown as Window, matchesApi, f.imported),
+    ).rejects.toThrow("native services are unavailable");
+  });
+
+  it("does not match namespace values or failed modules", async () => {
+    const f = fixture(catalog(["app://-/entry.js"]));
+    f.imported.mockResolvedValue({
+      ...bundled({ failed: { error: new Error("boom"), exports: api } }),
+      namespaceValue: api,
+    });
+    expect(
+      await loadCodexNativeModule(f.owner as unknown as Window, matchesApi, f.imported),
+    ).toBeNull();
+  });
+});
+
+describe("service registry predicate", () => {
+  it("accepts plain and null-prototype registries", () => {
+    expect(isCodexServiceRegistry({})).toBe(true);
+    expect(isCodexServiceRegistry(Object.create(null))).toBe(true);
+  });
+
+  it("rejects callable transport roots and other objects", () => {
+    const transport = new Proxy(function transport() {}, {
+      get: () => function stub() {},
+    });
+    expect(isCodexServiceRegistry(transport)).toBe(false);
+    expect(isCodexServiceRegistry([])).toBe(false);
+    class Registry {
+      service = true;
+    }
+    expect(isCodexServiceRegistry(new Registry())).toBe(false);
+    expect(isCodexServiceRegistry(null)).toBe(false);
   });
 });

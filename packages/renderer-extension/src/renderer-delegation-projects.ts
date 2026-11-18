@@ -6,7 +6,7 @@ import {
   desktopProjectsCatalogSchema,
   type ThreadProjectAssignment,
 } from "@codexhost/shared-contracts";
-import { loadCodexNativeServices } from "./codex-native-services.js";
+import { isCodexServiceRegistry, loadCodexNativeServices } from "./codex-native-services.js";
 
 export interface AssignmentServices {
   threadProjectAssignments: {
@@ -26,7 +26,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && (typeof value === "object" || typeof value === "function");
 export function isAssignmentServices(value: unknown): value is AssignmentServices {
   return (
-    record(value) &&
+    isCodexServiceRegistry(value) &&
     Object.hasOwn(value, "threadProjectAssignments") &&
     record(value.threadProjectAssignments) &&
     typeof value.threadProjectAssignments.readMemberships === "function" &&
