@@ -361,7 +361,7 @@ describe("dws CLI output", () => {
   it("removes media markers and raw ids everywhere", () => {
     expect(
       sanitizeDingTalkText(
-        "[图片消息](mediaId=@abc) 图片内容：\n<imageContent> 11 </imageContent>\n【云监控】告警 <font color='#fff'>卡片样式</font>",
+        "[图片消息](mediaId=@abc) 图片内容：\n<imageContent> 11 </imageContent>\n注意：如需下载使用dws chat message download-media命令下载\n【云监控】告警 <font color='#fff'>卡片样式</font>",
       ),
     ).toBe("【云监控】告警 卡片样式");
   });
