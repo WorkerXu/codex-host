@@ -23,6 +23,8 @@ type SyncRequest = Extract<
     op: "sync-plan";
   }
 >;
+/** The last inventory paints before the Host's cached status answers. */
+let cachedMachines: SkillMachine[] | null = null;
 export function createSkillsSettingsPage(
   options: RendererSkillsSettingsOptions,
 ): RendererSettingsPageDefinition {
@@ -84,6 +86,7 @@ export function createSkillsSettingsPage(
           return;
         }
         machines = await client.status();
+        cachedMachines = machines;
         if (!context.signal.aborted) render();
       }
       const refresh = button("", () => void perform(load, () => {}));
@@ -350,7 +353,11 @@ export function createSkillsSettingsPage(
         });
       }
       matrix.append(node("div", "", "skills-skeleton"));
-      if (client) void perform(load, () => {});
+      if (client && cachedMachines) {
+        machines = cachedMachines;
+        render();
+        void perform(load, () => {});
+      } else if (client) void perform(load, () => {});
       else {
         matrix.replaceChildren();
         notice.textContent = "连接失败";

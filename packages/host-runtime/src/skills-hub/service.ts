@@ -17,6 +17,7 @@ import { requestPeerRoute } from "../peer-transport.js";
 import { codexhostUserDirectory } from "../runtime-control-file.js";
 import { fail } from "./files.js";
 import { LocalSkillsHub, type SkillPeerOperation } from "./local.js";
+import { installedHarnessIds } from "../installed-harness-plugins.js";
 import { planSync } from "./sync.js";
 export type SkillTransport = (
   hostId: string,
@@ -82,15 +83,19 @@ export class SkillsHubService {
           name: string;
         }[]
       >;
+      installedHarnessIds?: () => Promise<ReadonlySet<string>>;
     } = {},
   ) {
     this.local =
       options.local ??
-      new LocalSkillsHub({
-        home: homedir(),
-        state: path.join(codexhostUserDirectory(environment), "skills-hub"),
-        searchPath: environment.PATH ?? "",
-      });
+      new LocalSkillsHub(
+        {
+          home: homedir(),
+          state: path.join(codexhostUserDirectory(environment), "skills-hub"),
+          searchPath: environment.PATH ?? "",
+        },
+        options.installedHarnessIds ? { installedHarnessIds: options.installedHarnessIds } : {},
+      );
     this.#canonicalHost = async (hostId) => {
       if (hostId === "local" || options.hosts) return hostId;
       const target = resolvePeerTarget(await readPeerConfig(environment), hostId);
@@ -287,7 +292,9 @@ export function getSkillsHub(environment: NodeJS.ProcessEnv): SkillsHubService {
   const key = codexhostUserDirectory(environment);
   let service = services.get(key);
   if (!service) {
-    service = new SkillsHubService(environment);
+    service = new SkillsHubService(environment, {
+      installedHarnessIds: () => installedHarnessIds(environment),
+    });
     services.set(key, service);
   }
   return service;

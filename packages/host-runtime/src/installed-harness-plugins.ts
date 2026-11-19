@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLocalPageOpener } from "@codexhost/desktop-control";
+import { discoverHarnessPlugins } from "@codexhost/harness-plugin-files";
 
 import type { HarnessPluginContext } from "@codexhost/harness-adapter/plugin";
 
@@ -36,4 +37,20 @@ export function installedHarnessPluginOptions(
       ...(openLocalPage ? { openLocalPage } : {}),
     },
   };
+}
+
+const installedIdsByRoots = new Map<string, Promise<ReadonlySet<string>>>();
+/** Installed Harnesses change about monthly; read the plugin directory once per Host. */
+export function installedHarnessIds(environment: NodeJS.ProcessEnv): Promise<ReadonlySet<string>> {
+  const key = [
+    environment[HARNESS_PLUGIN_DIRECTORY_ENV] ?? "",
+    environment.CODEXHOST_DATA_DIR ?? environment.HOME ?? "",
+  ].join("|");
+  const cached = installedIdsByRoots.get(key);
+  if (cached) return cached;
+  const value = discoverHarnessPlugins(installedHarnessPluginOptions(environment).pluginRoots)
+    .then((discovery) => discovery.enabledIds)
+    .catch(() => new Set<string>());
+  installedIdsByRoots.set(key, value);
+  return value;
 }

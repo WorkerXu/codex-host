@@ -12,7 +12,7 @@ import {
   type SkillLinkPlan,
 } from "@codexhost/shared-contracts";
 import { exists, fail, fingerprint, inventoryEntry, readSkillFiles, safePath } from "./files.js";
-import { inventory, library, type SkillPaths } from "./inventory.js";
+import { inventory, library, SkillsInventoryCache, type SkillPaths } from "./inventory.js";
 import { applyLinks, planLinks, saveManifest, undoChanges } from "./links.js";
 import { packSkill, unpackSkill } from "./archive.js";
 import { reinstallSource } from "./source.js";
@@ -50,8 +50,12 @@ export class LocalSkillsHub {
     }
   >();
   readonly #transfers = new SkillTransfers();
+  readonly #inventory = new SkillsInventoryCache();
   #tail: Promise<unknown> = Promise.resolve();
-  constructor(readonly paths: SkillPaths) {}
+  constructor(
+    readonly paths: SkillPaths,
+    readonly options: { installedHarnessIds?: () => Promise<ReadonlySet<string>> } = {},
+  ) {}
   /** Serialize mutations and previews within a machine, including requests arriving over peers. */
   request(op: SkillPeerOperation, body: unknown): Promise<unknown> {
     const operation = this.#tail.then(() => this.#request(op, body));
@@ -65,7 +69,7 @@ export class LocalSkillsHub {
     if (op === "import-finish") return this.#import(this.#transfers.finish(body));
     if (op === "inventory") {
       empty.parse(body);
-      return inventory(this.paths);
+      return this.#inventory.inventory(this.paths, await this.options.installedHarnessIds?.());
     }
     if (op === "link-plan") {
       const { adopt } = adoptionInput.parse(body);

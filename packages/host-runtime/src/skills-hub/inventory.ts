@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_SKILL_EXCLUSIONS,
@@ -7,7 +7,7 @@ import {
   type SkillInventory,
   type SkillSource,
 } from "@codexhost/shared-contracts";
-import { discoverAgents } from "./agents.js";
+import { agentCandidates, countAgent, type AgentCandidate } from "./agents.js";
 import { exists, inventoryEntry, readSkillFiles, safePath } from "./files.js";
 
 export interface SkillPaths {
@@ -63,7 +63,10 @@ async function sources(paths: SkillPaths): Promise<Record<string, SkillSource | 
   }
   return result;
 }
-export async function inventory(paths: SkillPaths): Promise<SkillInventory> {
+async function buildInventory(
+  paths: SkillPaths,
+  candidates: AgentCandidate[],
+): Promise<SkillInventory> {
   const root = library(paths);
   await safePath(paths.home, root);
   const skills: SkillInventory["skills"] = [],
@@ -94,8 +97,59 @@ export async function inventory(paths: SkillPaths): Promise<SkillInventory> {
   const excluded = await exclusions(paths);
   return {
     skills,
-    agents: await discoverAgents(paths.home, paths.searchPath, excluded, skills),
+    agents: (
+      await Promise.all(
+        candidates.map(({ skillsDir, rule }) =>
+          countAgent(paths.home, skillsDir, rule, excluded, skills),
+        ),
+      )
+    ).sort((a, b) => a.name.localeCompare(b.name)),
     exclusions: excluded,
     warnings,
   };
+}
+async function stamp(file: string): Promise<string> {
+  try {
+    const value = await stat(file);
+    return `${value.mtimeMs}:${value.size}`;
+  } catch {
+    return "missing";
+  }
+}
+/** Only mtimes and sizes: unchanged directories never trigger a content scan. */
+async function inventoryKey(paths: SkillPaths, candidates: AgentCandidate[]): Promise<string> {
+  const root = library(paths);
+  const names = await readdir(root).catch(() => [] as string[]);
+  const parts = [await stamp(root), await stamp(path.join(paths.home, ".agents/.skill-lock.json"))];
+  for (const name of names.sort()) parts.push(`${name}:${await stamp(path.join(root, name))}`);
+  for (const { skillsDir } of candidates) parts.push(`${skillsDir}:${await stamp(skillsDir)}`);
+  for (const file of ["exclusions.json", "sources.json"])
+    parts.push(`${file}:${await stamp(path.join(paths.state, file))}`);
+  return parts.join("|");
+}
+export class SkillsInventoryCache {
+  #key: string | null = null;
+  #value: SkillInventory | null = null;
+  #candidates: Promise<AgentCandidate[]> | null = null;
+  #installedKey = "";
+  async inventory(paths: SkillPaths, installed?: ReadonlySet<string>): Promise<SkillInventory> {
+    const installedKey = installed ? [...installed].sort().join(",") : "";
+    if (installedKey !== this.#installedKey) {
+      this.#installedKey = installedKey;
+      this.#candidates = null;
+      this.#key = null;
+      this.#value = null;
+    }
+    this.#candidates ??= agentCandidates(paths.home, paths.searchPath, installed);
+    const candidates = await this.#candidates;
+    const key = await inventoryKey(paths, candidates);
+    if (this.#value && key === this.#key) return this.#value;
+    const value = await buildInventory(paths, candidates);
+    this.#key = key;
+    this.#value = value;
+    return value;
+  }
+}
+export async function inventory(paths: SkillPaths): Promise<SkillInventory> {
+  return new SkillsInventoryCache().inventory(paths);
 }
