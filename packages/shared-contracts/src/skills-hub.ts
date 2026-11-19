@@ -4,7 +4,8 @@ export const SKILLS_HUB_METHOD = "codexhost/skills/request";
 export const skillKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u);
 const host = z.string().min(1).max(256);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
-export const DEFAULT_SKILL_EXCLUSIONS = ["github-copilot", "qoder", "qoder-cn"] as const;
+export const skillHostSchema = z.object({ hostId: host, name: z.string() }).strict();
+export type SkillHost = z.infer<typeof skillHostSchema>;
 export const skillSourceSchema = z
   .object({
     source: z.string().max(8192),
@@ -42,7 +43,6 @@ export const skillAgentSchema = z.object({
   skillsDir: z.string(),
   native: z.boolean().nullable(),
   evidence: z.string(),
-  excluded: z.boolean(),
   linked: z.number(),
   conflicts: z.number(),
   managed: z.number(),
@@ -54,7 +54,6 @@ export type SkillAgent = z.infer<typeof skillAgentSchema>;
 export const skillInventorySchema = z.object({
   skills: z.array(skillInventoryEntrySchema),
   agents: z.array(skillAgentSchema),
-  exclusions: z.array(z.string()),
   warnings: z.array(z.string()),
 });
 export type SkillInventory = z.infer<typeof skillInventorySchema>;
@@ -101,6 +100,7 @@ export const skillSyncPlanSchema = z.object({
 });
 export type SkillSyncPlan = z.infer<typeof skillSyncPlanSchema>;
 export const skillsHubRequestSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("hosts") }).strict(),
   z.object({ op: z.literal("status"), hostId: host.optional() }).strict(),
   z
     .object({
@@ -119,13 +119,6 @@ export const skillsHubRequestSchema = z.discriminatedUnion("op", [
     .strict(),
   z.object({ op: z.literal("link-apply"), hostId: host, id: z.string().uuid() }).strict(),
   z.object({ op: z.literal("undo"), hostId: host, id: z.string().uuid() }).strict(),
-  z
-    .object({
-      op: z.literal("exclusions"),
-      hostId: host,
-      agents: z.array(z.string().regex(/^[a-zA-Z0-9._-]+$/u)).max(100),
-    })
-    .strict(),
   z
     .object({
       op: z.literal("sync-plan"),

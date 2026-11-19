@@ -47,7 +47,7 @@ async function fixture() {
   };
 }
 
-it("limits inventory, previews, apply, export, import and exclusions to available Agents", async () => {
+it("limits inventory, previews, apply, export and import to available Agents", async () => {
   const { home, hub } = await fixture();
   vi.clearAllMocks();
   const inventory = skillInventorySchema.parse(await hub.request("inventory", {}));
@@ -62,8 +62,6 @@ it("limits inventory, previews, apply, export, import and exclusions to availabl
     }),
   );
   await hub.request("import", { bundle, expected: bundle.fingerprint });
-  const excluded = skillInventorySchema.parse(await hub.request("exclusions", { agents: [] }));
-  expect(excluded.agents.map((agent) => agent.id)).toEqual(["claude-code", "codex"]);
   for (const operation of [fs.lstat, fs.stat, fs.readdir, fs.readFile]) {
     const reads = vi.mocked(operation).mock.calls.map(([file]) => String(file));
     expect(reads).not.toContain(home);

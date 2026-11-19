@@ -1,11 +1,13 @@
 import {
   SKILLS_HUB_METHOD,
+  skillHostSchema,
   skillMachineSchema,
   skillLinkPlanSchema,
   skillSyncPlanSchema,
   skillChangeResultSchema,
   skillSyncResultSchema,
   type SkillsHubRequest,
+  type SkillHost,
   type SkillMachine,
   type SkillLinkPlan,
   type SkillSyncPlan,
@@ -16,43 +18,58 @@ export interface RendererLinkPlanOptions {
   unlink?: { agentId: string; skill: string }[];
   scope?: { agentId: string; skill: string };
 }
+/** Machine ids are peer names; each request goes to that machine's own Host. */
+export interface RendererSkillsTransport {
+  request(machineId: string, params: SkillsHubRequest): Promise<unknown>;
+}
 export interface RendererSkillsClient {
-  status(hostId?: string): Promise<SkillMachine[]>;
+  hosts(): Promise<SkillHost[]>;
+  status(hostId: string): Promise<SkillMachine>;
   linkPlan(hostId: string, options?: RendererLinkPlanOptions): Promise<SkillLinkPlan>;
   linkApply(hostId: string, id: string): Promise<{ id: string; changed: number }>;
   undo(hostId: string, id: string): Promise<{ id: string; changed: number }>;
-  exclusions(hostId: string, agents: string[]): Promise<void>;
   syncPlan(input: Extract<SkillsHubRequest, { op: "sync-plan" }>): Promise<SkillSyncPlan>;
   syncApply(id: string): Promise<z.infer<typeof skillSyncResultSchema>>;
 }
 export function createRendererSkillsClient(
-  request: (params: SkillsHubRequest) => Promise<unknown>,
+  transport: RendererSkillsTransport,
 ): RendererSkillsClient {
   return {
-    async status(hostId) {
+    async hosts() {
       return z
+        .object({ hosts: z.array(skillHostSchema) })
+        .parse(await transport.request("local", { op: "hosts" })).hosts;
+    },
+    async status(hostId) {
+      const machines = z
         .object({ machines: z.array(skillMachineSchema) })
-        .parse(await request({ op: "status", ...(hostId ? { hostId } : {}) })).machines;
+        .parse(await transport.request(hostId, { op: "status", hostId: "local" })).machines;
+      const machine = machines[0];
+      if (!machine) throw new Error("connection_failed");
+      return { ...machine, hostId };
     },
     async linkPlan(hostId, options) {
       return skillLinkPlanSchema.parse(
-        await request({ op: "link-plan", hostId, ...(options ?? {}) }),
+        await transport.request(hostId, { op: "link-plan", hostId, ...(options ?? {}) }),
       );
     },
     async linkApply(hostId, id) {
-      return skillChangeResultSchema.parse(await request({ op: "link-apply", hostId, id }));
+      return skillChangeResultSchema.parse(
+        await transport.request(hostId, { op: "link-apply", hostId, id }),
+      );
     },
     async undo(hostId, id) {
-      return skillChangeResultSchema.parse(await request({ op: "undo", hostId, id }));
-    },
-    async exclusions(hostId, agents) {
-      await request({ op: "exclusions", hostId, agents });
+      return skillChangeResultSchema.parse(
+        await transport.request(hostId, { op: "undo", hostId, id }),
+      );
     },
     async syncPlan(input) {
-      return skillSyncPlanSchema.parse(await request(input));
+      return skillSyncPlanSchema.parse(await transport.request("local", input));
     },
     async syncApply(id) {
-      return skillSyncResultSchema.parse(await request({ op: "sync-apply", id }));
+      return skillSyncResultSchema.parse(
+        await transport.request("local", { op: "sync-apply", id }),
+      );
     },
   };
 }

@@ -118,8 +118,8 @@ describe("skills inventory and discovery", () => {
     ).toEqual(["codex", "gemini", "opencode"]);
     expect(result.agents.find((a) => a.id === "grok")).toBeDefined();
     expect(result.agents.find((a) => a.id === "new-agent")?.native).toBeNull();
-    expect(result.agents.find((a) => a.id === "github-copilot")?.excluded).toBe(true);
-    expect(result.agents.find((a) => a.id === "qoder")?.excluded).toBe(true);
+    expect(result.agents.find((a) => a.id === "github-copilot")).toBeDefined();
+    expect(result.agents.find((a) => a.id === "qoder")).toBeDefined();
     await mkdir(path.join(paths.home, ".cursor"));
     expect((await inventory(paths)).agents.find((a) => a.id === "cursor")).toBeDefined();
   });
@@ -134,7 +134,7 @@ describe("skills inventory and discovery", () => {
   });
 });
 describe("link previews and reversals", () => {
-  it("plans relative links, dangling cleanup, real conflicts, exclusions and managed skills; dry-run writes nothing", async () => {
+  it("plans relative links, dangling cleanup, real conflicts and managed skills; dry-run writes nothing", async () => {
     const { paths, hub } = await fixture();
     await skill(paths.home);
     await skill(paths.home, ".agents/skills/codexhost-delegation");
@@ -147,7 +147,7 @@ describe("link previews and reversals", () => {
     expect(plan.actions.some((a) => a.skill === "gone" && a.kind === "remove-dangling")).toBe(true);
     expect(plan.actions.find((a) => a.skill === "foreign")?.kind).toBe("conflict");
     expect(plan.actions.find((a) => a.skill === "local-only")?.kind).toBe("conflict");
-    expect(plan.actions.some((a) => ["github-copilot", "qoder"].includes(a.agentId))).toBe(false);
+    expect(plan.actions.some((a) => ["github-copilot", "qoder"].includes(a.agentId))).toBe(true);
     expect(
       plan.actions.some((a) => a.agentId === "claude-code" && a.skill === "codexhost-delegation"),
     ).toBe(false);
@@ -156,7 +156,9 @@ describe("link previews and reversals", () => {
     expect(await readlink(path.join(paths.home, ".claude/skills/example"))).toBe(
       "../../.agents/skills/example",
     );
-    expect(await lstat(path.join(paths.home, ".qoder/skills")).catch(() => null)).toBeNull();
+    expect(await readlink(path.join(paths.home, ".qoder/skills/example"))).toBe(
+      "../../.agents/skills/example",
+    );
     await hub.request("undo", { id: applied.id });
     expect(await readlink(path.join(paths.home, ".claude/skills/gone"))).toBe(
       "../../.agents/skills/gone",

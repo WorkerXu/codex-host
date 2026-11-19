@@ -14,7 +14,6 @@ export const PEER_EXEC_ROUTES = [
   "/v1/skills/link-plan",
   "/v1/skills/link-apply",
   "/v1/skills/undo",
-  "/v1/skills/exclusions",
   "/v1/skills/export",
   "/v1/skills/import",
   "/v1/harness/list",

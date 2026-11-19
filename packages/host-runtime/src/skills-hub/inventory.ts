@@ -1,7 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import {
-  DEFAULT_SKILL_EXCLUSIONS,
   skillKeySchema,
   skillSourceSchema,
   type SkillInventory,
@@ -17,19 +16,6 @@ export interface SkillPaths {
 }
 export function library(paths: SkillPaths): string {
   return path.join(paths.home, ".agents/skills");
-}
-export async function exclusions(paths: SkillPaths): Promise<string[]> {
-  try {
-    const value: unknown = JSON.parse(
-      await readFile(path.join(paths.state, "exclusions.json"), "utf8"),
-    );
-    if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
-      throw new Error("invalid_exclusions");
-    return value as string[];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [...DEFAULT_SKILL_EXCLUSIONS];
-    throw error;
-  }
 }
 async function sources(paths: SkillPaths): Promise<Record<string, SkillSource | null>> {
   const result = Object.create(null) as Record<string, SkillSource | null>;
@@ -94,17 +80,13 @@ async function buildInventory(
       }
     }
   }
-  const excluded = await exclusions(paths);
   return {
     skills,
     agents: (
       await Promise.all(
-        candidates.map(({ skillsDir, rule }) =>
-          countAgent(paths.home, skillsDir, rule, excluded, skills),
-        ),
+        candidates.map(({ skillsDir, rule }) => countAgent(paths.home, skillsDir, rule, skills)),
       )
     ).sort((a, b) => a.name.localeCompare(b.name)),
-    exclusions: excluded,
     warnings,
   };
 }
@@ -123,8 +105,7 @@ async function inventoryKey(paths: SkillPaths, candidates: AgentCandidate[]): Pr
   const parts = [await stamp(root), await stamp(path.join(paths.home, ".agents/.skill-lock.json"))];
   for (const name of names.sort()) parts.push(`${name}:${await stamp(path.join(root, name))}`);
   for (const { skillsDir } of candidates) parts.push(`${skillsDir}:${await stamp(skillsDir)}`);
-  for (const file of ["exclusions.json", "sources.json"])
-    parts.push(`${file}:${await stamp(path.join(paths.state, file))}`);
+  parts.push(`sources.json:${await stamp(path.join(paths.state, "sources.json"))}`);
   return parts.join("|");
 }
 export class SkillsInventoryCache {

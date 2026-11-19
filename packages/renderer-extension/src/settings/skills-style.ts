@@ -41,8 +41,6 @@ const classes: Record<string, string> = {
   "skills-badges": "skills-badges flex flex-wrap items-center gap-1 pt-0.5",
   "skills-badge":
     "skills-badge inline-flex size-6 items-center justify-center rounded-full border border-settings-border bg-settings-panel opacity-40 transition-opacity hover:opacity-100 data-[linked=true]:border-settings-focus/50 data-[linked=true]:opacity-100 data-[native=true]:border-settings-success/40 [&_span]:text-[10px]",
-  "skills-footer":
-    "skills-footer flex flex-wrap items-center gap-2 border-t border-settings-divider pt-3",
   "skills-machine-group": "skills-machine-group flex flex-col gap-3",
   "skills-machine-heading":
     "skills-machine-heading flex flex-wrap items-center gap-2 [&_h3]:m-0 [&_h3]:text-sm [&_h3]:font-semibold",
@@ -99,16 +97,12 @@ const classes: Record<string, string> = {
   "skills-agent-scroll": "skills-agent-scroll overflow-x-auto",
   "skills-agent-row":
     "skills-agent-row grid min-w-[608px] grid-cols-[160px_200px_minmax(180px,1fr)] items-center gap-4 border-b border-settings-divider px-4 py-3 last:border-b-0",
-  "skills-agent-excluded":
-    "skills-agent-row grid min-w-[608px] grid-cols-[160px_200px_minmax(180px,1fr)] items-center gap-4 border-b border-settings-divider px-4 py-3 text-settings-subtle last:border-b-0",
   "skills-path": "skills-path min-w-0 truncate text-xs text-settings-muted",
   "skills-agent-progress":
     "skills-agent-progress flex items-center gap-2 whitespace-nowrap text-xs text-settings-muted",
   "skills-agent-linked": "skills-agent-linked inline-flex items-center gap-2 text-settings-success",
   "skills-conflict-badge":
     "skills-conflict-badge inline-flex items-center gap-1 rounded-md bg-settings-warning/10 px-2 py-0.5 text-xs text-settings-warning",
-  "skills-exclusions":
-    "skills-exclusions flex flex-wrap items-center gap-2 border-t border-settings-divider pt-4",
   "skills-notice": "skills-notice text-settings-danger empty:hidden",
   "skills-empty": "skills-empty m-0 px-4 py-5 text-xs text-settings-muted",
   "skills-skeleton": "skills-skeleton h-40 rounded-lg bg-settings-hover",

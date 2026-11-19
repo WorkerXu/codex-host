@@ -202,7 +202,6 @@ export async function countAgent(
   home: string,
   skillsDir: string,
   rule: Pick<AgentRule, "id" | "name" | "native" | "evidence">,
-  exclusions: string[],
   skills: SkillInventoryEntry[],
 ): Promise<SkillAgent> {
   let linked = 0,
@@ -243,7 +242,6 @@ export async function countAgent(
     skillsDir: rule.native === true ? path.join(home, ".agents/skills") : skillsDir,
     native: rule.native,
     evidence: rule.evidence,
-    excluded: exclusions.includes(rule.id),
     linked,
     conflicts,
     managed,
@@ -254,13 +252,12 @@ export async function countAgent(
 export async function discoverAgents(
   home: string,
   searchPath: string,
-  exclusions: string[],
   skills: SkillInventoryEntry[],
   installed?: ReadonlySet<string>,
 ): Promise<SkillAgent[]> {
   const candidates = await agentCandidates(home, searchPath, installed);
   const result = await Promise.all(
-    candidates.map(({ skillsDir, rule }) => countAgent(home, skillsDir, rule, exclusions, skills)),
+    candidates.map(({ skillsDir, rule }) => countAgent(home, skillsDir, rule, skills)),
   );
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }

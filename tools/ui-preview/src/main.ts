@@ -1849,14 +1849,6 @@ scenarios["skills-badge-unlink"] = async () => {
   await previewClick(badge!);
   await waitFor(() => shadow.querySelector(".skills-link-row"));
 };
-scenarios["skills-exclusions"] = async () => {
-  const shadow = await openSkillsAgents();
-  const manage = [...shadow.querySelectorAll("button")].find(
-    (button) => button.textContent === "管理排除…",
-  );
-  await previewClick(manage!);
-  await waitFor(() => shadow.querySelector("dialog[open] select"));
-};
 scenarios["skills-link-choice"] = async () => {
   await scenarios["skills-link-preview"]();
   const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
