@@ -90,6 +90,7 @@ describe("Jarvis Gemini structured query", () => {
       responseMimeType: "application/json",
       temperature: 0,
       maxOutputTokens: 2_048,
+      thinkingConfig: { thinkingLevel: "minimal" },
     });
     expect(request.generationConfig.responseSchema).toMatchObject({
       type: "OBJECT",

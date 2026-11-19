@@ -116,7 +116,11 @@ export function createJarvisProviderQuery(
   const client = createStructuredQueryClient({ ...options, timeoutMs: JARVIS_QUERY_TIMEOUT_MS });
   const now = options.now ?? Date.now;
   const interpret = async (query: string, at: number, signal?: AbortSignal) =>
-    client.query(buildJarvisQueryRequest(query, at), jarvisBugQuerySchema, signal);
+    client.query(
+      { ...buildJarvisQueryRequest(query, at), thinkingLevel: "minimal" },
+      jarvisBugQuerySchema,
+      signal,
+    );
   return {
     interpret,
     async test() {
