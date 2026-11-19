@@ -1751,11 +1751,35 @@ const scenarios: Record<string, () => Promise<void>> = {
 
 scenarios["skills-matrix"] = async () => {
   const shadow = mountSkillsPreview();
-  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  await waitFor(() => shadow.querySelector(".skills-card"));
+};
+async function openSkillsAgents() {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  const tab = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "按 Agent",
+  );
+  await previewClick(tab!);
+  await waitFor(() => shadow.querySelector(".skills-agent-card"));
+  return shadow;
+}
+scenarios["skills-list"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  await previewClick(shadow.querySelector<HTMLElement>('[aria-label="列表视图"]')!);
+  await waitFor(() => shadow.querySelector(".skills-card-list"));
+};
+scenarios["skills-filter"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  await previewClick(
+    [...shadow.querySelectorAll("button")].find((button) => button.textContent === "已链接")!,
+  );
+  await waitFor(() => shadow.querySelector(".skills-card"));
 };
 scenarios["skills-conflict"] = async () => {
   const shadow = mountSkillsPreview();
-  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  await waitFor(() => shadow.querySelector(".skills-card"));
   const fill = [...shadow.querySelectorAll("button")].find(
     (button) => button.textContent === "全部补齐",
   );
@@ -1767,8 +1791,7 @@ scenarios["skills-conflict"] = async () => {
   await previewInputOn(shadow.querySelector<HTMLElement>("dialog h2")!, "hover");
 };
 scenarios["skills-link-preview"] = async () => {
-  const shadow = mountSkillsPreview();
-  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  const shadow = await openSkillsAgents();
   const link = [...shadow.querySelectorAll("button")].find(
     (button) => button.textContent === "一键链接",
   );
@@ -1779,22 +1802,59 @@ scenarios["skills-link-preview"] = async () => {
 scenarios["skills-hover"] = scenarios["skills-matrix"];
 scenarios["skills-focus"] = async () => {
   const shadow = mountSkillsPreview();
-  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  await waitFor(() => shadow.querySelector(".skills-card"));
   await previewInputOn(shadow.querySelector<HTMLElement>("[data-skills-refresh]")!, "key", {
     key: "Tab",
   });
 };
 scenarios["skills-agents"] = async () => {
+  await openSkillsAgents();
+};
+scenarios["skills-agent-detail"] = async () => {
+  const shadow = await openSkillsAgents();
+  const card = [...shadow.querySelectorAll<HTMLElement>(".skills-agent-card")].find((item) =>
+    item.textContent?.includes("Claude Code"),
+  );
+  await previewClick(card!);
+  await waitFor(() => shadow.querySelector(".skills-skill-card"));
+};
+scenarios["skills-agent-native"] = async () => {
+  const shadow = await openSkillsAgents();
+  const card = [...shadow.querySelectorAll<HTMLElement>(".skills-agent-card")].find((item) =>
+    item.textContent?.includes("Codex"),
+  );
+  await previewClick(card!);
+  await waitFor(() => shadow.querySelector(".skills-skill-card"));
+};
+scenarios["skills-badge-undo"] = async () => {
   const shadow = mountSkillsPreview();
-  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
-  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-machine")!, "wheel", {
-    deltaY: 600,
-  });
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  const badge = [...shadow.querySelectorAll<HTMLElement>(".skills-badge")].find((item) =>
+    item.getAttribute("aria-label")?.startsWith("Cursor 未链接"),
+  );
+  await previewClick(badge!);
+  await waitFor(() => shadow.querySelector(".skills-link-row"));
+  const apply = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "应用",
+  );
+  await previewClick(apply!);
+  await waitFor(() => shadow.querySelector(".skills-undo button"));
+};
+scenarios["skills-badge-unlink"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  const badge = [...shadow.querySelectorAll<HTMLElement>(".skills-badge")].find((item) =>
+    item.getAttribute("aria-label")?.startsWith("Cursor 已链接"),
+  );
+  await previewClick(badge!);
+  await waitFor(() => shadow.querySelector(".skills-link-row"));
 };
 scenarios["skills-exclusions"] = async () => {
-  await scenarios["skills-agents"]();
-  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
-  await previewClick(shadow.querySelector<HTMLElement>(".skills-exclusions button")!);
+  const shadow = await openSkillsAgents();
+  const manage = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "管理排除…",
+  );
+  await previewClick(manage!);
   await waitFor(() => shadow.querySelector("dialog[open] select"));
 };
 scenarios["skills-link-choice"] = async () => {
@@ -1821,9 +1881,8 @@ scenarios["skills-link-checked-focus"] = async () => {
   await waitFor(() => shadow.querySelector<HTMLInputElement>("[data-skill-adoption]")?.checked);
 };
 scenarios["skills-agents-focus"] = async () => {
-  await scenarios["skills-agents"]();
-  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
-  const buttons = shadow.querySelectorAll<HTMLElement>(".skills-machine-head button");
+  const shadow = await openSkillsAgents();
+  const buttons = shadow.querySelectorAll<HTMLElement>(".skills-machine-heading button");
   await previewInputOn(buttons[0]!, "key", { key: "Tab" });
 };
 scenarios["skills-conflict-files"] = async () => {
@@ -1843,10 +1902,10 @@ scenarios["skills-conflict-files-focus"] = async () => {
   await waitFor(() => shadow.querySelector("details[open]"));
 };
 scenarios["skills-sync-selection"] = async () => {
-  await scenarios["skills-matrix"]();
-  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
-  const sync = [...shadow.querySelectorAll(".skills-machine button")].find(
-    (button) => button.textContent === "同步到其他机器…",
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-card"));
+  const sync = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "同步…",
   );
   await previewClick(sync!);
   await waitFor(() => shadow.querySelector("dialog[open]"));

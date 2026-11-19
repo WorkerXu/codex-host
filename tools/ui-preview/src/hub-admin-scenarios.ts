@@ -13,6 +13,7 @@ export const hubScenarioNames = [
   "hub-connection-empty",
   "hub-connection-connect",
   "hub-connection-test-error",
+  "hub-connection-scoped-error",
   "hub-connection-saved",
   "hub-connection-menu",
   "hub-connection-replace",
@@ -96,6 +97,7 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
             "hub-connection-empty",
             "hub-connection-connect",
             "hub-connection-test-error",
+            "hub-connection-scoped-error",
             "hub-connection-saved",
           ].includes(name)
         ) {
@@ -106,12 +108,18 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
               required('.hub-dialog input[type="password"]'),
               "mcphub_preview_fake_key_5678",
             );
-            if (name === "hub-connection-test-error" || name === "hub-connection-saved") {
+            if (
+              name === "hub-connection-test-error" ||
+              name === "hub-connection-scoped-error" ||
+              name === "hub-connection-saved"
+            ) {
               await click(button("测试并保存", ".hub-dialog"));
               await waitFor(() =>
                 name === "hub-connection-test-error"
-                  ? query(".hub-dialog .hub-status")?.textContent === "密钥无效或权限不足"
-                  : query(".hub-server"),
+                  ? query(".hub-dialog .hub-status")?.textContent === "密钥不正确"
+                  : name === "hub-connection-scoped-error"
+                    ? Boolean(query(".hub-dialog .hub-status")?.textContent)
+                    : query(".hub-server"),
               );
             }
           }

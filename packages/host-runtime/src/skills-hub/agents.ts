@@ -209,22 +209,33 @@ export async function countAgent(
     conflicts = 0,
     managed = 0,
     missing = 0;
+  const states: SkillAgent["states"] = {};
   for (const skill of skills) {
     const file = path.join(skillsDir, skill.key);
+    if (rule.native === true) {
+      states[skill.key] = "native";
+      continue;
+    }
     if (isManagedSkill(rule.id, skill.key)) {
+      states[skill.key] = "managed";
       managed++;
       continue;
     }
     if (!(await exists(file))) {
+      states[skill.key] = "missing";
       missing++;
       continue;
     }
     if (
       (await lstat(file)).isSymbolicLink() &&
       path.resolve(skillsDir, await readlink(file)) === path.join(home, ".agents/skills", skill.key)
-    )
+    ) {
+      states[skill.key] = "linked";
       linked++;
-    else conflicts++;
+    } else {
+      states[skill.key] = "conflict";
+      conflicts++;
+    }
   }
   return {
     id: rule.id,
@@ -237,6 +248,7 @@ export async function countAgent(
     conflicts,
     managed,
     missing,
+    states,
   };
 }
 export async function discoverAgents(

@@ -32,12 +32,17 @@ export const SKILL_PEER_OPERATIONS = [
 export type SkillPeerOperation = (typeof SKILL_PEER_OPERATIONS)[number];
 const empty = z.object({}).strict();
 const idInput = z.object({ id: z.string().uuid() }).strict();
-const adoptionInput = z
+const linkPlanInput = z
   .object({
     adopt: z
       .array(z.object({ agentId: z.string(), skill: skillKeySchema }).strict())
       .max(100)
       .optional(),
+    unlink: z
+      .array(z.object({ agentId: z.string(), skill: skillKeySchema }).strict())
+      .max(100)
+      .optional(),
+    scope: z.object({ agentId: z.string(), skill: skillKeySchema }).strict().optional(),
   })
   .strict();
 export class LocalSkillsHub {
@@ -47,6 +52,7 @@ export class LocalSkillsHub {
       plan: SkillLinkPlan;
       snapshot: string;
       created: number;
+      request: z.infer<typeof linkPlanInput>;
     }
   >();
   readonly #transfers = new SkillTransfers();
@@ -54,7 +60,7 @@ export class LocalSkillsHub {
   #tail: Promise<unknown> = Promise.resolve();
   constructor(
     readonly paths: SkillPaths,
-    readonly options: { installedHarnessIds?: () => Promise<ReadonlySet<string>> } = {},
+    readonly options: { availableHarnessIds?: () => Promise<ReadonlySet<string>> } = {},
   ) {}
   /** Serialize mutations and previews within a machine, including requests arriving over peers. */
   request(op: SkillPeerOperation, body: unknown): Promise<unknown> {
@@ -69,17 +75,17 @@ export class LocalSkillsHub {
     if (op === "import-finish") return this.#import(this.#transfers.finish(body));
     if (op === "inventory") {
       empty.parse(body);
-      return this.#inventory.inventory(this.paths, await this.options.installedHarnessIds?.());
+      return this.#inventory.inventory(this.paths, await this.options.availableHarnessIds?.());
     }
     if (op === "link-plan") {
-      const { adopt } = adoptionInput.parse(body);
-      const plan = await planLinks(this.paths, adopt);
+      const request = linkPlanInput.parse(body);
+      const plan = await planLinks(this.paths, request);
       // Fingerprints, exclusions, and every agent path participate in preview freshness.
       const snapshot = await this.#snapshot(plan);
       for (const [id, value] of this.plans)
         if (Date.now() - value.created > 600000) this.plans.delete(id);
       if (this.plans.size >= 100) fail("too_many_plans");
-      this.plans.set(plan.id, { plan, snapshot, created: Date.now() });
+      this.plans.set(plan.id, { plan, snapshot, created: Date.now(), request });
       return plan;
     }
     if (op === "link-apply") {
@@ -87,10 +93,7 @@ export class LocalSkillsHub {
         stored = this.plans.get(id);
       this.plans.delete(id);
       if (!stored || Date.now() - stored.created > 600000) fail("expired_plan");
-      const adopt = stored.plan.actions
-        .filter((a) => a.kind === "adopt")
-        .map((a) => ({ agentId: a.agentId, skill: a.skill }));
-      const fresh = await planLinks(this.paths, adopt);
+      const fresh = await planLinks(this.paths, stored.request);
       if ((await this.#snapshot(fresh)) !== stored.snapshot) fail("stale_plan");
       await this.#safeState();
       return applyLinks(this.paths, stored.plan);

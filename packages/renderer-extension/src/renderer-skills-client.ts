@@ -11,9 +11,14 @@ import {
   type SkillSyncPlan,
 } from "@codexhost/shared-contracts";
 import { z } from "zod";
+export interface RendererLinkPlanOptions {
+  adopt?: { agentId: string; skill: string }[];
+  unlink?: { agentId: string; skill: string }[];
+  scope?: { agentId: string; skill: string };
+}
 export interface RendererSkillsClient {
   status(hostId?: string): Promise<SkillMachine[]>;
-  linkPlan(hostId: string, adopt?: { agentId: string; skill: string }[]): Promise<SkillLinkPlan>;
+  linkPlan(hostId: string, options?: RendererLinkPlanOptions): Promise<SkillLinkPlan>;
   linkApply(hostId: string, id: string): Promise<{ id: string; changed: number }>;
   undo(hostId: string, id: string): Promise<{ id: string; changed: number }>;
   exclusions(hostId: string, agents: string[]): Promise<void>;
@@ -29,9 +34,9 @@ export function createRendererSkillsClient(
         .object({ machines: z.array(skillMachineSchema) })
         .parse(await request({ op: "status", ...(hostId ? { hostId } : {}) })).machines;
     },
-    async linkPlan(hostId, adopt) {
+    async linkPlan(hostId, options) {
       return skillLinkPlanSchema.parse(
-        await request({ op: "link-plan", hostId, ...(adopt ? { adopt } : {}) }),
+        await request({ op: "link-plan", hostId, ...(options ?? {}) }),
       );
     },
     async linkApply(hostId, id) {

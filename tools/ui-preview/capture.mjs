@@ -15,6 +15,12 @@ const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
   "skills-matrix",
+  "skills-list",
+  "skills-filter",
+  "skills-agent-detail",
+  "skills-agent-native",
+  "skills-badge-undo",
+  "skills-badge-unlink",
   "skills-hover",
   "skills-focus",
   "skills-agents",
@@ -662,13 +668,28 @@ for (const scenario of scenarios) {
             "hub-connection-connect",
             "hub-connection-replace",
             "hub-connection-test-error",
+            "hub-connection-scoped-error",
           ].includes(scenario)
         ) {
           const input = query('.hub-dialog input[type="password"]');
           check("hub-key-masked", input && input.autocomplete === "off");
-          if (scenario === "hub-connection-test-error")
+          if (
+            scenario === "hub-connection-test-error" ||
+            scenario === "hub-connection-scoped-error"
+          )
             check("hub-failed-key-cleared", input?.value === "");
         }
+        if (scenario === "hub-connection-test-error")
+          check(
+            "hub-invalid-key-message",
+            query(".hub-dialog .hub-status")?.textContent === "密钥不正确",
+          );
+        if (scenario === "hub-connection-scoped-error")
+          check(
+            "hub-scoped-key-message",
+            query(".hub-dialog .hub-status")?.textContent ===
+              "这个密钥只能访问部分服务器，管理需要“全部访问”类型的密钥",
+          );
         if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
           check(
             "hub-unconfigured-state",
@@ -768,109 +789,104 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario?.startsWith("skills-"))
         check("skills-page-visible", visible(query(".skills-hub")));
       if (query(".skills-hub")) {
-        check("skills-matrix-rows", queryAll(".skills-matrix tbody tr").length === 3);
-        check("skills-machine-sections", queryAll(".skills-machine").length === 3);
         const hub = query(".skills-hub");
-        const native = getComputedStyle(hub);
-        const primary = query(
-          ".skills-head .skills-button:not(.settings-command-button--secondary)",
-        );
+        const library = Boolean(query(".skills-search"));
+        check("skills-tabs", queryAll(".skills-tab").length === 2);
         check(
-          "skills-native-primary",
-          getComputedStyle(primary).backgroundColor !== "rgba(0, 0, 0, 0)",
-          getComputedStyle(primary).backgroundColor,
+          "skills-tab-selected",
+          query(".skills-tab[aria-selected=true]")?.textContent ===
+            (library ? "技能库" : "按 Agent"),
         );
-        check(
-          "skills-native-theme",
-          getComputedStyle(query(".skills-machine")).backgroundColor ===
-            (document.body.dataset.theme === "dark" ? "rgb(24, 24, 24)" : "rgb(255, 255, 255)"),
-          native.getPropertyValue("--app-color-background-surface"),
-        );
-        check(
-          "skills-semantic-status",
-          queryAll(".skills-status").length === 9 && queryAll(".skills-status svg").length === 6,
-        );
-        const warning = query(".skills-status.text-settings-warning");
-        const focusProbe = document.createElement("span");
-        focusProbe.style.color = "var(--settings-focus)";
-        hub.append(focusProbe);
-        check(
-          "skills-warning-color",
-          getComputedStyle(warning).color !== getComputedStyle(focusProbe).color,
-          getComputedStyle(warning).color,
-        );
-        focusProbe.remove();
-        const consistent = queryAll(".skills-matrix tbody tr").find((row) =>
-          row.textContent.includes("project-search"),
-        );
-        check("skills-consistent-no-action", consistent && !consistent.querySelector("button"));
-        check(
-          "skills-writing-description",
-          queryAll(".skills-description")[1]?.textContent !==
-            queryAll(".skills-description")[2]?.textContent,
-        );
-        const rows = queryAll(".skills-agent-row");
-        check(
-          "skills-single-agent-status",
-          rows.every((row) => row.children.length === 3) &&
-            !query(".skills-machines")?.textContent.includes("需链接") &&
-            !query(".skills-machines")?.textContent.includes("直接读取中央库"),
-        );
-        check(
-          "skills-native-agent-status",
-          query('[data-agent="codex"] .skills-agent-progress')?.textContent === "原生支持",
-        );
-        check(
-          "skills-fully-linked",
-          query('[data-agent="codebuddy"] .skills-agent-linked')?.textContent === "已链接" &&
-            Boolean(query('[data-agent="codebuddy"] .skills-agent-linked svg')),
-        );
-        const columnPositions = rows.map((row) =>
-          [...row.children].map((cell) => Math.round(cell.getBoundingClientRect().x)),
-        );
-        check(
-          "skills-agent-alignment",
-          columnPositions.every(
-            (positions) => JSON.stringify(positions) === JSON.stringify(columnPositions[0]),
-          ),
-          JSON.stringify(columnPositions),
-        );
-        const excluded = query('[data-agent="github-copilot"]');
-        check(
-          "skills-excluded-only",
-          excluded?.textContent.includes("已排除") &&
-            !excluded.textContent.includes("需链接") &&
-            !excluded.textContent.includes("已链接"),
-        );
-        check(
-          "skills-linked-denominator",
-          query('[data-agent="claude-code"]')?.textContent.includes("已链接 1/3"),
-        );
-        check(
-          "skills-one-exclusion-footer",
-          queryAll(".skills-exclusions").length === 1 &&
-            query(".skills-exclusions")?.textContent.includes("GitHub Copilot、Qoder"),
-        );
+        if (library) {
+          check(
+            "skills-toolbar",
+            Boolean(query(".skills-search")) &&
+              queryAll(".skills-filter").length === 3 &&
+              Boolean(query(".skills-select")) &&
+              queryAll(".skills-layout-button").length === 2,
+          );
+          const cards = queryAll(".skills-card");
+          check("skills-library-cards", cards.length === 3, String(cards.length));
+          check(
+            "skills-card-fields",
+            cards.every(
+              (card) =>
+                Boolean(card.querySelector(".skills-card-name")) &&
+                Boolean(card.querySelector(".skills-card-description")) &&
+                Boolean(card.querySelector(".skills-source")) &&
+                card.querySelectorAll(".skills-chip").length >= 3 &&
+                card.querySelectorAll(".skills-badge").length >= 3,
+            ),
+          );
+          check(
+            "skills-card-badges-installed",
+            !query(".skills-badges")?.textContent?.includes("GitHub Copilot") &&
+              !query(".skills-badges")?.textContent?.includes("Qoder"),
+          );
+          const native = query('.skills-badge[data-native="true"]');
+          const faded = query('.skills-badge[data-linked="false"]');
+          check(
+            "skills-badge-native",
+            Boolean(native) && native.getAttribute("aria-disabled") === "true",
+          );
+          check(
+            "skills-badge-faded-opacity",
+            Boolean(faded) && getComputedStyle(faded).opacity !== "1",
+          );
+          check(
+            "skills-machine-chips",
+            queryAll(".skills-chips")[0]?.textContent?.includes("MacBook Pro") &&
+              queryAll(".skills-chips")[0]?.textContent?.includes("oracle-main"),
+          );
+          if (document.body.dataset.scenario === "skills-list")
+            check("skills-list-layout", queryAll(".skills-card-list").length === 3);
+          else check("skills-grid-layout", Boolean(query(".skills-grid")));
+        } else {
+          const groups = queryAll(".skills-machine-group");
+          if (!query(".skills-detail-head"))
+            check("skills-machine-sections", groups.length >= 3, String(groups.length));
+          if (query(".skills-detail-head")) {
+            check("skills-detail-path", Boolean(query(".skills-detail-head .skills-path")));
+            check("skills-detail-stats", Boolean(query(".skills-detail-stats")));
+            check("skills-detail-skills", queryAll(".skills-skill-card").length >= 2);
+            check("skills-detail-status", queryAll(".skills-state").length >= 2);
+            if (document.body.dataset.scenario === "skills-agent-native")
+              check(
+                "skills-detail-native",
+                query(".skills-detail-stats")?.textContent?.includes("原生支持"),
+              );
+          } else {
+            check("skills-agent-cards", queryAll(".skills-agent-card").length >= 3);
+            check(
+              "skills-agent-native-tag",
+              [...queryAll(".skills-agent-card")].some(
+                (card) =>
+                  card.textContent.includes("Codex") && card.textContent.includes("原生支持"),
+              ),
+            );
+          }
+        }
         check(
           "skills-no-developer-data",
-          !/a{12}|b{12}|c{12}|claude-code|github-copilot/.test(hub.textContent),
-        );
-        check(
-          "skills-one-machine-primary",
-          queryAll(".skills-machine-head").every(
-            (head) =>
-              head.querySelectorAll(".skills-button:not(.settings-command-button--secondary)")
-                .length === 1,
-          ),
+          !/[a-f0-9]{32,}|github-copilot|claude-code/.test(hub.textContent),
         );
         if (document.body.dataset.scenario === "skills-focus")
-          check("skills-keyboard-focus", primary.matches(":focus-visible"));
+          check("skills-keyboard-focus", Boolean(query(":focus-visible")));
         if (document.body.dataset.scenario === "skills-agents-focus")
+          check("skills-agent-keyboard-focus", Boolean(query(":focus-visible")));
+        if (document.body.dataset.scenario === "skills-badge-undo")
           check(
-            "skills-agent-keyboard-focus",
-            query(
-              ".skills-machine-head .skills-button:not(.settings-command-button--secondary)",
-            )?.matches(":focus-visible"),
+            "skills-badge-undo",
+            Boolean(query(".skills-undo button")) &&
+              query(".skills-undo")?.textContent?.includes("撤销"),
+          );
+        const surface =
+          query(".skills-card") ?? query(".skills-agent-card") ?? query(".skills-skill-card");
+        if (surface)
+          check(
+            "skills-native-theme",
+            getComputedStyle(surface).backgroundColor ===
+              (document.body.dataset.theme === "dark" ? "rgb(24, 24, 24)" : "rgb(255, 255, 255)"),
           );
         const dialog = query("dialog[open]");
         if (dialog) {

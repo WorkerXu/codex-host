@@ -22,13 +22,16 @@ import {
 import { exists, fail, fingerprint, inside, readSkillFiles, safePath } from "./files.js";
 import { inventory, library, type SkillPaths } from "./inventory.js";
 import { isManagedSkill } from "./agents.js";
+export interface SkillLinkPlanOptions {
+  adopt?: { agentId: string; skill: string }[] | undefined;
+  unlink?: { agentId: string; skill: string }[] | undefined;
+  scope?: { agentId: string; skill: string } | undefined;
+}
 export async function planLinks(
   paths: SkillPaths,
-  adopt: {
-    agentId: string;
-    skill: string;
-  }[] = [],
+  options: SkillLinkPlanOptions = {},
 ): Promise<SkillLinkPlan> {
+  const { adopt = [], unlink = [], scope } = options;
   const current = await inventory(paths);
   const actions: SkillLinkAction[] = [];
   const root = library(paths);
@@ -84,10 +87,36 @@ export async function planLinks(
       }
     }
   }
+  for (const request of unlink) {
+    const agent = current.agents.find((entry) => entry.id === request.agentId);
+    if (!agent || agent.excluded || agent.native === true) continue;
+    const file = path.join(agent.skillsDir, request.skill),
+      target = path.join(root, request.skill);
+    if (!(await exists(file))) continue;
+    const info = await lstat(file);
+    if (!info.isSymbolicLink()) continue;
+    const previousLink = await readlink(file);
+    const resolved = path.resolve(agent.skillsDir, previousLink);
+    if (!inside(root, resolved)) continue;
+    actions.push({
+      kind: "unlink",
+      agentId: request.agentId,
+      skill: request.skill,
+      path: file,
+      target,
+      fingerprint: null,
+      previousLink,
+    });
+  }
+  const filtered = scope
+    ? actions.filter((action) => action.agentId === scope.agentId && action.skill === scope.skill)
+    : actions;
   // Only one real directory may win for each central name in a single confirmation.
-  const adopted = actions.filter((action) => action.kind === "adopt").map((action) => action.skill);
+  const adopted = filtered
+    .filter((action) => action.kind === "adopt")
+    .map((action) => action.skill);
   if (new Set(adopted).size !== adopted.length) fail("duplicate_adoption");
-  return { id: randomUUID(), hostId: "local", actions, warnings: current.warnings };
+  return { id: randomUUID(), hostId: "local", actions: filtered, warnings: current.warnings };
 }
 interface Change {
   action: SkillLinkAction;
@@ -139,7 +168,8 @@ export async function applyLinks(
   for (const change of manifest.changes) {
     const action = change.action;
     await mkdir(path.dirname(action.path), { recursive: true });
-    if (action.kind === "remove-dangling") {
+    if (action.kind === "remove-dangling" || action.kind === "unlink") {
+      if (!(await lstat(action.path)).isSymbolicLink()) fail("stale_plan");
       if ((await readlink(action.path)) !== action.previousLink) fail("stale_plan");
       await unlink(action.path);
     } else if (action.kind === "adopt") {
@@ -192,7 +222,7 @@ export async function undoChanges(
       if (change.stage === "done" && fingerprint(await readSkillFiles(a.path)) !== a.fingerprint)
         fail("undo_conflict");
       if (change.stage === "backed-up" && (await exists(a.path))) fail("undo_conflict");
-    } else if (a.kind === "remove-dangling") {
+    } else if (a.kind === "remove-dangling" || a.kind === "unlink") {
       if (await exists(a.path)) fail("undo_conflict");
     } else {
       if (
@@ -217,7 +247,8 @@ export async function undoChanges(
       if (change.stage === "done")
         await rename(a.path, path.join(paths.state, `${id}.undone-skill`));
       if (change.backup) await rename(change.backup, a.path);
-    } else if (a.kind === "remove-dangling") await symlink(required(a.previousLink), a.path, "dir");
+    } else if (a.kind === "remove-dangling" || a.kind === "unlink")
+      await symlink(required(a.previousLink), a.path, "dir");
     else {
       if (change.stage === "done") await unlink(a.path);
       if (a.kind === "adopt") {

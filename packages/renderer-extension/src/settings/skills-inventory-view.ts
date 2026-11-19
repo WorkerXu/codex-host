@@ -1,149 +1,420 @@
-import type { SkillMachine } from "@codexhost/shared-contracts";
+import type { SkillAgent, SkillInventoryEntry, SkillMachine } from "@codexhost/shared-contracts";
+import { createRendererAgentIcon } from "../renderer-agent-icon.js";
 import { skillsErrorText } from "../renderer-skills-client.js";
+import { createRendererSettingsIcon, type RendererSettingsIconName } from "./icons.js";
 import { skillButton, skillNode } from "./skills-dialog.js";
-import { createRendererSettingsIcon } from "./icons.js";
-import { skillDirectory, skillStatus } from "./skills-presentation.js";
-export function renderSkillsInventory(options: {
-  matrix: HTMLElement;
-  agents: HTMLElement;
+import { skillDirectory } from "./skills-presentation.js";
+import { skillsClass } from "./skills-style.js";
+
+export interface SkillsViewState {
+  tab: "library" | "agents";
+  search: string;
+  link: "all" | "linked" | "unlinked";
+  machine: string;
+  layout: "grid" | "list";
+  agent: { hostId: string; agentId: string } | null;
+}
+export interface SkillsInventoryOptions {
+  container: HTMLElement;
   machines: SkillMachine[];
   progress: Map<string, string>;
-  changes: Map<string, string[]>;
+  state: SkillsViewState;
+  onState(patch: Partial<SkillsViewState>): void;
   sync(skill: string, source?: string): void;
-  link(hostId: string): void;
-  undo(hostId: string, id: string): void;
+  linkAll(hostId: string): void;
+  toggle(hostId: string, agentId: string, skill: string, linked: boolean): void;
   refresh(): void;
-}): void {
-  const { matrix, agents, machines } = options,
-    document = matrix.ownerDocument;
-  const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") =>
-    skillNode(document, tag, text, className);
-  matrix.replaceChildren();
-  agents.replaceChildren();
-  const keys = [
-    ...new Set(
-      machines.flatMap((machine) => machine.inventory?.skills.map((skill) => skill.key) ?? []),
+  editExclusions(): void;
+}
+type NodeFn = (tag: string, text?: string, className?: string) => HTMLElement;
+type AgentState = SkillAgent["states"][string];
+const STATUS: Record<AgentState, { label: string; className: string }> = {
+  linked: { label: "已链接", className: "skills-status-linked" },
+  missing: { label: "未链接", className: "skills-status-missing" },
+  conflict: { label: "冲突", className: "skills-status-conflict" },
+  native: { label: "原生支持", className: "skills-status-native" },
+  managed: { label: "由 codexhost 管理", className: "skills-status-managed" },
+};
+function setClass(element: HTMLElement, name: string): void {
+  element.className = skillsClass(name);
+}
+function agentMonogram(agent: SkillAgent, document: Document, size = 18): Node {
+  if (agent.id === "codex") return createRendererAgentIcon(agent.id, size, document) as HTMLElement;
+  const parts = agent.name.split(/\s+/u).filter(Boolean);
+  const initials =
+    parts.length > 1
+      ? parts
+          .map((part) => part[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase()
+      : (parts[0]?.slice(0, 2) ?? "?").replace(/^./u, (letter) => letter.toUpperCase());
+  return document.createTextNode(initials);
+}
+function ownIconButton(
+  document: Document,
+  label: string,
+  icon: RendererSettingsIconName,
+  pressed: boolean,
+  run: () => void,
+): HTMLButtonElement {
+  const button = skillButton(document, "", run);
+  setClass(button, "skills-layout-button");
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.setAttribute("aria-pressed", String(pressed));
+  button.append(createRendererSettingsIcon(icon, 15));
+  return button;
+}
+export function renderSkillsInventory(options: SkillsInventoryOptions): void {
+  const { container, machines, state } = options;
+  const document = container.ownerDocument;
+  const node: NodeFn = (tag, text = "", className = "") =>
+    skillNode(document, tag as keyof HTMLElementTagNameMap, text, className);
+  const focused = document.activeElement as HTMLElement | null;
+  const focusKey = focused?.dataset.skillsFocus;
+  const selection =
+    focused instanceof HTMLInputElement ? (focused.selectionStart ?? focused.value.length) : null;
+  container.replaceChildren();
+  const tabs = node("div", "", "skills-tabs");
+  tabs.setAttribute("role", "tablist");
+  for (const [value, label] of [
+    ["library", "技能库"],
+    ["agents", "按 Agent"],
+  ] as const) {
+    const button = skillButton(document, label, () => options.onState({ tab: value, agent: null }));
+    setClass(button, "skills-tab");
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(state.tab === value));
+    tabs.append(button);
+  }
+  container.append(tabs);
+  const progress = [...options.progress.values()].filter(Boolean).at(-1);
+  if (progress) {
+    const line = node("p", progress, "skills-muted");
+    line.setAttribute("role", "status");
+    container.append(line);
+  }
+  if (state.tab === "library") renderLibrary(options, container, node);
+  else if (state.agent) {
+    const machine = machines.find((item) => item.hostId === state.agent?.hostId);
+    const agent = machine?.inventory?.agents.find((item) => item.id === state.agent?.agentId);
+    if (machine && agent) renderAgentDetail(options, container, node, machine, agent);
+    else options.onState({ agent: null });
+  } else renderAgents(options, container, node);
+  if (focusKey) {
+    const target = container.querySelector<HTMLElement>(`[data-skills-focus="${focusKey}"]`);
+    target?.focus();
+    if (target instanceof HTMLInputElement && selection !== null)
+      target.setSelectionRange(selection, selection);
+  }
+}
+function renderLibrary(
+  options: SkillsInventoryOptions,
+  container: HTMLElement,
+  node: NodeFn,
+): void {
+  const document = container.ownerDocument;
+  const { machines, state } = options;
+  const toolbar = node("div", "", "skills-toolbar");
+  const search = node("input", "", "skills-search") as HTMLInputElement;
+  search.type = "search";
+  search.placeholder = "搜索技能";
+  search.setAttribute("aria-label", "搜索技能");
+  search.dataset.skillsFocus = "search";
+  search.value = state.search;
+  search.addEventListener("input", () => options.onState({ search: search.value }));
+  const filters = node("div", "", "skills-segmented");
+  for (const [value, label] of [
+    ["all", "全部"],
+    ["linked", "已链接"],
+    ["unlinked", "未链接"],
+  ] as const) {
+    const button = skillButton(document, label, () => options.onState({ link: value }));
+    setClass(button, "skills-filter");
+    button.setAttribute("aria-pressed", String(state.link === value));
+    filters.append(button);
+  }
+  const machine = node("select", "", "skills-select") as HTMLSelectElement;
+  machine.setAttribute("aria-label", "筛选机器");
+  machine.dataset.skillsFocus = "machine";
+  machine.append(new Option("全部机器", ""));
+  for (const item of machines) machine.append(new Option(item.name, item.hostId));
+  machine.value = state.machine;
+  machine.addEventListener("change", () => options.onState({ machine: machine.value }));
+  const layouts = node("div", "", "skills-layout-toggle");
+  layouts.append(
+    ownIconButton(document, "卡片视图", "dashboard", state.layout === "grid", () =>
+      options.onState({ layout: "grid" }),
     ),
-  ].sort();
-  if (!keys.length) matrix.append(node("p", "中央库中还没有技能", "skills-empty"));
-  else {
-    const table = node("table"),
-      thead = node("thead"),
-      heading = node("tr");
-    heading.append(node("th", "技能"));
-    for (const machine of machines) heading.append(node("th", machine.name));
-    const actionHeading = node("th");
-    actionHeading.setAttribute("aria-label", "操作");
-    heading.append(actionHeading);
-    thead.append(heading);
-    table.append(thead);
-    const body = node("tbody");
-    for (const key of keys) {
-      const entries = machines.flatMap(
-        (machine) => machine.inventory?.skills.filter((entry) => entry.key === key) ?? [],
-      );
-      const different = new Set(entries.map((entry) => entry.fingerprint)).size > 1;
-      const missing = machines.some(
-        (machine) =>
-          machine.inventory && !machine.inventory.skills.some((entry) => entry.key === key),
-      );
-      const row = node("tr"),
-        name = node("td");
-      name.append(node("strong", key));
-      const description = node("span", entries[0]?.description ?? "", "skills-description");
-      description.title = description.textContent ?? "";
-      name.append(description);
-      row.append(name);
-      for (const machine of machines) {
-        const entry = machine.inventory?.skills.find((skill) => skill.key === key),
-          cell = node("td");
-        if (machine.inventory)
-          cell.append(skillStatus(document, !entry ? "missing" : different ? "different" : "same"));
-        else cell.append(node("span", skillsErrorText(machine.error), "skills-muted"));
-        row.append(cell);
-      }
-      const actions = node("td");
-      if (different || missing)
-        actions.append(skillButton(document, "同步…", () => options.sync(key)));
-      row.append(actions);
-      body.append(row);
+    ownIconButton(document, "列表视图", "logs", state.layout === "list", () =>
+      options.onState({ layout: "list" }),
+    ),
+  );
+  toolbar.append(search, filters, machine, layouts);
+  container.append(toolbar);
+
+  const skills = new Map<
+    string,
+    {
+      key: string;
+      name: string;
+      description: string;
+      source: string | null;
+      entries: Map<string, SkillInventoryEntry>;
     }
-    table.append(body);
-    matrix.append(table);
+  >();
+  for (const item of machines) {
+    for (const entry of item.inventory?.skills ?? []) {
+      const existing = skills.get(entry.key);
+      if (existing) {
+        existing.entries.set(item.hostId, entry);
+        if (!existing.description) existing.description = entry.description;
+        existing.source ??= entry.source?.source ?? null;
+      } else
+        skills.set(entry.key, {
+          key: entry.key,
+          name: entry.name,
+          description: entry.description,
+          source: entry.source?.source ?? null,
+          entries: new Map([[item.hostId, entry]]),
+        });
+    }
+  }
+  const badgeMachine =
+    (state.machine ? machines.find((item) => item.hostId === state.machine) : undefined) ??
+    machines.find((item) => item.hostId === "local" && item.inventory) ??
+    machines.find((item) => item.inventory);
+  const badgeAgents = badgeMachine?.inventory?.agents.filter((agent) => !agent.excluded) ?? [];
+  const rows = [...skills.values()]
+    .filter((skill) => {
+      const text = `${skill.key} ${skill.name} ${skill.description}`.toLowerCase();
+      if (state.search && !text.includes(state.search.toLowerCase())) return false;
+      if (state.machine && !skill.entries.has(state.machine)) return false;
+      if (state.link === "all") return true;
+      const linked = badgeAgents.some((agent) => {
+        const status = agent.states[skill.key];
+        return status === "linked" || status === "native";
+      });
+      return state.link === "linked" ? linked : !linked;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!rows.length) {
+    container.append(node("p", "中央库中还没有匹配的技能", "skills-empty"));
+    return;
+  }
+  const grid = node("div", "", state.layout === "grid" ? "skills-grid" : "skills-list");
+  for (const skill of rows) {
+    const fingerprints = new Set([...skill.entries.values()].map((entry) => entry.fingerprint));
+    const differs = fingerprints.size > 1;
+    const missing = machines.some((item) => item.inventory && !skill.entries.has(item.hostId));
+    const card = node(
+      "article",
+      "",
+      state.layout === "grid" ? "skills-card" : "skills-card skills-card-list",
+    );
+    const head = node("div", "", "skills-card-head");
+    head.append(node("h3", skill.name, "skills-card-name"));
+    const version = [...skill.entries.values()].find((entry) => entry.version)?.version;
+    if (version) head.append(node("span", version, "skills-version-chip"));
+    card.append(head, node("p", skill.description || "暂无描述", "skills-card-description"));
+    const meta = node("div", "", "skills-card-meta");
+    meta.append(node("span", skill.source ? `git · ${skill.source}` : "本地", "skills-source"));
+    card.append(meta);
+    const chips = node("div", "", "skills-chips");
+    for (const item of machines) {
+      if (!item.inventory) {
+        chips.append(node("span", `${item.name} 离线`, "skills-chip"));
+        continue;
+      }
+      const entry = skill.entries.get(item.hostId);
+      const stateName = !entry ? "缺失" : differs ? "版本不同" : "✓";
+      const chip = node("span", `${item.name} ${stateName}`, "skills-chip");
+      chip.dataset.state = !entry ? "missing" : differs ? "different" : "same";
+      chips.append(chip);
+    }
+    if ((differs || missing) && machines.filter((item) => item.inventory).length > 1) {
+      const sync = skillButton(document, "同步…", () => options.sync(skill.key));
+      setClass(sync, "skills-chip-action");
+      chips.append(sync);
+    }
+    card.append(chips);
+    if (badgeMachine?.inventory) {
+      const badges = node("div", "", "skills-badges");
+      badges.setAttribute("aria-label", `${badgeMachine.name} 的 Agent 链接状态`);
+      for (const agent of badgeAgents) {
+        const status = agent.states[skill.key] ?? "missing";
+        const linked = status === "linked";
+        const native = status === "native";
+        const managed = status === "managed";
+        const button = skillButton(document, "", () => {
+          if (native || managed) return;
+          options.toggle(badgeMachine.hostId, agent.id, skill.key, linked);
+        });
+        setClass(button, "skills-badge");
+        button.dataset.linked = String(linked || native);
+        button.dataset.native = String(native);
+        button.dataset.managed = String(managed);
+        button.title = `${agent.name} · ${STATUS[status]?.label ?? "未链接"}`;
+        button.setAttribute(
+          "aria-label",
+          `${agent.name} ${STATUS[status]?.label ?? "未链接"}${
+            native || managed ? "" : linked ? "，点击解除链接" : "，点击建立链接"
+          }`,
+        );
+        if (native || managed) button.setAttribute("aria-disabled", "true");
+        button.append(agentMonogram(agent, document));
+        badges.append(button);
+      }
+      card.append(badges);
+    }
+    grid.append(card);
+  }
+  container.append(grid);
+  const excluded = machines.flatMap((item) =>
+    (item.inventory?.agents ?? [])
+      .filter((agent) => agent.excluded)
+      .map((agent) => `${item.name} · ${agent.name}`),
+  );
+  if (excluded.length) {
+    const footer = node("div", "", "skills-footer");
+    footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
+    footer.append(skillButton(document, "管理排除…", options.editExclusions));
+    container.append(footer);
+  }
+}
+function renderAgents(options: SkillsInventoryOptions, container: HTMLElement, node: NodeFn): void {
+  const document = container.ownerDocument;
+  const { machines } = options;
+  let sections = 0;
+  for (const machine of machines) {
+    if (!machine.inventory) continue;
+    sections++;
+    const section = node("section", "", "skills-machine-group");
+    const head = node("div", "", "skills-machine-heading");
+    head.append(node("h3", machine.name), node("span", "已安装", "skills-chip"));
+    const linkAll = skillButton(document, "一键链接", () => options.linkAll(machine.hostId));
+    setClass(linkAll, "skills-chip-action");
+    head.append(linkAll);
+    section.append(head);
+    const progress = options.progress.get(machine.hostId);
+    if (progress) {
+      const status = node("p", progress, "skills-muted");
+      status.setAttribute("role", "status");
+      section.append(status);
+    }
+    const grid = node("div", "", "skills-agent-grid");
+    for (const agent of machine.inventory.agents) {
+      const card = node("button", "", "skills-agent-card") as HTMLButtonElement;
+      card.type = "button";
+      card.addEventListener("click", () =>
+        options.onState({ agent: { hostId: machine.hostId, agentId: agent.id } }),
+      );
+      const icon = node("span", "", "skills-agent-icon");
+      icon.append(agentMonogram(agent, document, 22));
+      const info = node("div", "", "skills-agent-info");
+      const title = node("div", "", "skills-agent-title");
+      title.append(
+        node("strong", agent.name),
+        node("span", `${Object.keys(agent.states).length} 个技能`, "skills-muted"),
+      );
+      info.append(title, node("span", skillDirectory(agent.skillsDir), "skills-path"));
+      const tags = node("div", "", "skills-agent-tags");
+      if (agent.native === true) tags.append(node("span", "原生支持", "skills-chip"));
+      if (agent.excluded) tags.append(node("span", "已排除", "skills-chip"));
+      if (agent.conflicts)
+        tags.append(node("span", `${agent.conflicts} 个冲突`, "skills-status-conflict"));
+      info.append(tags);
+      card.append(icon, info);
+      grid.append(card);
+    }
+    if (!machine.inventory.agents.length)
+      grid.append(node("p", "这台机器上没有已安装的 Agent", "skills-empty"));
+    section.append(grid);
+    if (machine.inventory.warnings.length)
+      section.append(
+        node(
+          "p",
+          `${machine.inventory.warnings.length} 个技能或目录无法读取，请检查文件与权限`,
+          "skills-empty",
+        ),
+      );
+    container.append(section);
   }
   for (const machine of machines) {
-    const section = node("section", "", "skills-machine"),
-      head = node("div", "", "skills-machine-head"),
-      title = node("div", "", "skills-machine-title");
-    const online = node("span", "", machine.inventory ? "skills-online" : "skills-offline");
-    online.setAttribute("aria-label", machine.inventory ? "在线" : "离线");
-    online.title = machine.inventory ? "在线" : "离线";
-    title.append(node("h2", machine.name), online);
-    head.append(title);
-    const message =
-      options.progress.get(machine.hostId) ??
-      (machine.inventory ? "" : skillsErrorText(machine.error));
-    if (message) {
-      const status = node("span", message, "skills-muted");
-      status.setAttribute("role", "status");
-      head.append(status);
-    }
-    if (machine.inventory) {
-      head.append(
-        skillButton(document, "同步到其他机器…", () => options.sync("--all", machine.hostId)),
-        skillButton(document, "一键链接", () => options.link(machine.hostId), true),
-      );
-      const previous = options.changes.get(machine.hostId)?.at(-1);
-      if (previous)
-        head.append(
-          skillButton(document, "撤销上次更改", () => options.undo(machine.hostId, previous)),
-        );
-    } else head.append(skillButton(document, "重试", options.refresh));
-    section.append(head);
-    if (machine.inventory) {
-      const rows = node("div", "", "skills-agent-scroll");
-      rows.setAttribute("role", "table");
-      rows.setAttribute("aria-label", `${machine.name} 的 Agent`);
-      for (const agent of machine.inventory.agents) {
-        const row = node("div", "", agent.excluded ? "skills-agent-excluded" : "skills-agent-row");
-        row.setAttribute("role", "row");
-        row.dataset.agent = agent.id;
-        const name = node("span", agent.name);
-        name.title = agent.evidence;
-        const directory = node("span", skillDirectory(agent.skillsDir), "skills-path");
-        directory.title = skillDirectory(agent.skillsDir);
-        const progress = node("span", "", "skills-agent-progress");
-        if (agent.excluded) progress.textContent = "已排除";
-        else if (agent.native === true) progress.textContent = "原生支持";
-        else {
-          const total = agent.linked + agent.missing + agent.conflicts;
-          if (total > 0 && agent.linked === total) {
-            const linked = node("span", "", "skills-agent-linked");
-            const check = createRendererSettingsIcon("check", 14);
-            check.setAttribute("aria-hidden", "true");
-            linked.append(check, document.createTextNode("已链接"));
-            progress.append(linked);
-          } else progress.append(document.createTextNode(`已链接 ${agent.linked}/${total}`));
-          if (agent.conflicts)
-            progress.append(node("span", `${agent.conflicts} 个冲突`, "skills-conflict-badge"));
-        }
-        for (const cell of [name, directory, progress]) {
-          cell.setAttribute("role", "cell");
-          row.append(cell);
-        }
-        rows.append(row);
-      }
-      if (!machine.inventory.agents.length) rows.append(node("p", "未发现 Agent", "skills-empty"));
-      section.append(rows);
-      if (machine.inventory.warnings.length)
-        section.append(
-          node(
-            "p",
-            `${machine.inventory.warnings.length} 个技能或目录无法读取，请检查文件与权限`,
-            "skills-empty",
-          ),
-        );
-    }
-    agents.append(section);
+    if (machine.inventory) continue;
+    const section = node("section", "", "skills-machine-group");
+    section.append(
+      node("h3", machine.name),
+      node("p", skillsErrorText(machine.error), "skills-muted"),
+      skillButton(document, "重试", options.refresh),
+    );
+    container.append(section);
   }
+  if (!sections) container.append(node("p", "没有可用的机器", "skills-empty"));
+  const excluded = machines.flatMap((machine) =>
+    (machine.inventory?.agents ?? [])
+      .filter((agent) => agent.excluded)
+      .map((agent) => `${machine.name} · ${agent.name}`),
+  );
+  const footer = node("div", "", "skills-footer");
+  if (excluded.length)
+    footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
+  footer.append(skillButton(document, "管理排除…", options.editExclusions));
+  container.append(footer);
+}
+function renderAgentDetail(
+  options: SkillsInventoryOptions,
+  container: HTMLElement,
+  node: NodeFn,
+  machine: SkillMachine,
+  agent: SkillAgent,
+): void {
+  const document = container.ownerDocument;
+  const head = node("div", "", "skills-detail-head");
+  const back = skillButton(document, "", () => options.onState({ agent: null }));
+  setClass(back, "skills-back");
+  back.setAttribute("aria-label", "返回所有 Agent");
+  back.append(createRendererSettingsIcon("chevron-left", 16));
+  const title = node("div", "", "skills-detail-title");
+  const icon = node("span", "", "skills-agent-icon");
+  icon.append(agentMonogram(agent, document, 24));
+  const info = node("div", "", "skills-agent-info");
+  const line = node("div", "", "skills-agent-title");
+  line.append(node("h3", agent.name));
+  if (agent.native === true) line.append(node("span", "原生支持", "skills-chip"));
+  if (agent.excluded) line.append(node("span", "已排除", "skills-chip"));
+  info.append(line, node("span", skillDirectory(agent.skillsDir), "skills-path"));
+  title.append(icon, info);
+  head.append(back, title);
+  container.append(head);
+  const skills = machine.inventory?.skills ?? [];
+  const linked = Object.values(agent.states).filter((item) => item === "linked").length;
+  const conflicts = Object.values(agent.states).filter((item) => item === "conflict").length;
+  container.append(
+    node(
+      "p",
+      agent.native === true
+        ? `${skills.length} 个技能 · 原生支持`
+        : `${skills.length} 个技能 · ${linked} 已链接 · ${conflicts} 冲突`,
+      "skills-detail-stats",
+    ),
+  );
+  if (!skills.length) {
+    container.append(node("p", "中央库中还没有技能", "skills-empty"));
+    return;
+  }
+  const grid = node("div", "", "skills-skill-grid");
+  for (const entry of skills) {
+    const state = agent.states[entry.key] ?? "missing";
+    const card = node("article", "", "skills-skill-card");
+    const top = node("div", "", "skills-skill-top");
+    top.append(
+      node("strong", entry.name),
+      node("span", STATUS[state].label, `skills-state ${STATUS[state].className}`),
+    );
+    card.append(top, node("p", entry.description || "暂无描述", "skills-card-description"));
+    grid.append(card);
+  }
+  container.append(grid);
 }

@@ -35,6 +35,7 @@ export const skillInventoryEntrySchema = z.object({
 });
 export type SkillInventoryEntry = z.infer<typeof skillInventoryEntrySchema>;
 export type SkillSource = z.infer<typeof skillSourceSchema>;
+export const skillAgentStateSchema = z.enum(["linked", "missing", "conflict", "managed", "native"]);
 export const skillAgentSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -46,6 +47,8 @@ export const skillAgentSchema = z.object({
   conflicts: z.number(),
   managed: z.number(),
   missing: z.number(),
+  /** Per-skill state for the library badges and the Agent page. */
+  states: z.record(z.string(), skillAgentStateSchema),
 });
 export type SkillAgent = z.infer<typeof skillAgentSchema>;
 export const skillInventorySchema = z.object({
@@ -63,7 +66,7 @@ export const skillMachineSchema = z.object({
 });
 export type SkillMachine = z.infer<typeof skillMachineSchema>;
 export const skillLinkActionSchema = z.object({
-  kind: z.enum(["link", "remove-dangling", "conflict", "adopt"]),
+  kind: z.enum(["link", "unlink", "remove-dangling", "conflict", "adopt"]),
   agentId: z.string(),
   skill: skillKeySchema,
   path: z.string(),
@@ -107,6 +110,11 @@ export const skillsHubRequestSchema = z.discriminatedUnion("op", [
         .array(z.object({ agentId: z.string(), skill: skillKeySchema }))
         .max(100)
         .optional(),
+      unlink: z
+        .array(z.object({ agentId: z.string(), skill: skillKeySchema }))
+        .max(100)
+        .optional(),
+      scope: z.object({ agentId: z.string(), skill: skillKeySchema }).strict().optional(),
     })
     .strict(),
   z.object({ op: z.literal("link-apply"), hostId: host, id: z.string().uuid() }).strict(),

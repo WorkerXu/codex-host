@@ -18,14 +18,19 @@ export function showSkillLinks(options: {
   const { root, machines, plan } = options,
     document = root.ownerDocument;
   const name = machines.find((machine) => machine.hostId === plan.hostId)?.name ?? "当前机器";
-  const dialog = skillsDialog(root, `${name} · 链接预览`);
+  const dialog = skillsDialog(root, `${name} · 链接变更预览`);
   const count = (kind: string) => plan.actions.filter((action) => action.kind === kind).length;
   const conflicts = count("conflict") + count("adopt");
+  const changes = [
+    count("link") ? `新建 ${count("link")} 个链接` : "",
+    count("unlink") ? `解除 ${count("unlink")} 个链接` : "",
+    count("remove-dangling") ? `清理 ${count("remove-dangling")} 个失效链接` : "",
+  ].filter(Boolean);
   dialog.body.append(
     skillNode(
       document,
       "p",
-      `将新建 ${count("link")} 个链接、清理 ${count("remove-dangling")} 个失效链接${conflicts ? `，${conflicts} 个冲突${count("adopt") ? "已选择" : "需要你选择"}` : ""}`,
+      `${changes.join("、") || "没有链接变更"}${conflicts ? `，${conflicts} 个冲突${count("adopt") ? "已选择" : "需要你选择"}` : ""}`,
       "skills-summary",
     ),
   );
@@ -53,9 +58,11 @@ export function showSkillLinks(options: {
           "span",
           action.kind === "link"
             ? "新建链接"
-            : action.kind === "remove-dangling"
-              ? "清理失效链接"
-              : "冲突",
+            : action.kind === "unlink"
+              ? "解除链接"
+              : action.kind === "remove-dangling"
+                ? "清理失效链接"
+                : "冲突",
           action.kind === "conflict" || action.kind === "adopt"
             ? "skills-conflict-badge"
             : "skills-action-tag",
@@ -85,7 +92,7 @@ export function showSkillLinks(options: {
     skillNode(
       document,
       "p",
-      "未选择的冲突会保留。收进中央库会移动目录、备份同名版本并留下链接，可撤销。",
+      "解除链接只移除符号链接，不删除中央库技能。未选择的冲突会保留；收进中央库会移动目录、备份同名版本并留下链接。所有更改均可撤销。",
       "skills-muted",
     ),
   );
