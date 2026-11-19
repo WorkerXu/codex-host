@@ -6,8 +6,19 @@ const { outputFiles } = await build({
   stdin: {
     contents: `
       import { createMcpAdminPage } from "./packages/renderer-extension/src/settings/mcp-admin-page.ts";
+      import hubCss from "./packages/renderer-extension/src/settings/hub-admin.css";
 
       globalThis.setupMcpPage = (config = {}) => {
+        if (!document.querySelector("style[data-hub-admin-css]")) {
+          const style = document.createElement("style");
+          style.dataset.hubAdminCss = "";
+          // The fixture has no Desktop theme tokens; the switch needs a box to stay clickable.
+          style.textContent =
+            ":root{--switch-track-width:32px;--switch-track-height:20px;" +
+            "--switch-thumb-size:16px;--switch-thumb-offset:2px;}" +
+            hubCss;
+          document.head.append(style);
+        }
         const ops = [];
         const servers = (config.servers ?? []).map((server) => ({
           version: "1.0.0",
@@ -166,6 +177,33 @@ test("shows exactly twelve servers without a pager and a second page for thirtee
   await expect(page.locator(".hub-server")).toHaveCount(1);
   await expect(pager(page)).toContainText("第 2 / 2 页");
   await expect(pager(page).getByRole("button", { name: "下一页" })).toBeDisabled();
+});
+
+test("keeps a single card at one column width", async ({ page }) => {
+  await setup(page, { servers: serverNames(13) });
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(page.locator(".hub-server")).toHaveCount(12);
+  const first = await page.locator(".hub-server").nth(0).boundingBox();
+  const second = await page.locator(".hub-server").nth(1).boundingBox();
+  if (!first || !second) throw new Error("Two-column server cards are missing");
+  expect(Math.abs(first.y - second.y)).toBeLessThan(1);
+  expect(second.x).toBeGreaterThan(first.x + first.width);
+  const column = first.width;
+
+  await pager(page).getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".hub-server")).toHaveCount(1);
+  const single = await page.locator(".hub-server").first().boundingBox();
+  if (!single) throw new Error("Single server card is missing");
+  expect(single.width).toBeCloseTo(column, 0);
+  const list = await page.locator(".hub-server-list").boundingBox();
+  if (!list) throw new Error("Server grid is missing");
+  expect(single.width).toBeLessThan(list.width * 0.75);
+
+  await page.getByRole("searchbox", { name: "搜索服务器" }).fill("服务器13");
+  await expect(page.locator(".hub-server")).toHaveCount(1);
+  const searched = await page.locator(".hub-server").first().boundingBox();
+  if (!searched) throw new Error("Filtered server card is missing");
+  expect(searched.width).toBeCloseTo(column, 0);
 });
 
 test("resets to the first page when the search or status filter changes", async ({ page }) => {

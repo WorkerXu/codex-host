@@ -56,6 +56,7 @@ export const hubScenarioNames = [
   "hub-memory-focus",
   "hub-mcp-servers",
   "hub-mcp-page-2",
+  "hub-mcp-search-single",
   "hub-mcp-keys",
   "hub-mcp-keys-page-2",
   "hub-mcp-tab-hover",
@@ -135,6 +136,10 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
           const previous = () => pageButton("上一页");
           if (name === "hub-mcp-page-2" || name === "hub-mcp-pager-hover") {
             await click(await waitFor(next));
+          }
+          if (name === "hub-mcp-search-single") {
+            await type(required('.hub-page input[type="search"]'), "翻译");
+            await waitFor(() => queryAll(".hub-server").length === 1);
           }
           if (["hub-mcp-keys", "hub-mcp-keys-tab-hover", "hub-mcp-keys-page-2"].includes(name)) {
             await click(required("#hub-mcp-tab-keys"));
