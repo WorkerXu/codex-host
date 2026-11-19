@@ -352,24 +352,16 @@ export async function runHostRuntime(input: {
           accountControl: official.accountControl,
         };
         if (!remoteControlPlan) {
-          const modelSettings = new ModelServiceSettingsStore({
-            environment: delegationEnvironment,
-          });
+          const modelSettings = new ModelServiceSettingsStore({});
           const jarvis = createJarvisService({
-            environment: delegationEnvironment,
             isLocalHost: true,
           });
           const dingtalk = createDingTalkService({
-            environment: delegationEnvironment,
             isLocalHost: true,
           });
           const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
-          const dingTalkDispatch = new DingTalkDispatchSettingsStore({
-            environment: delegationEnvironment,
-          });
-          const dingTalkState = new DingTalkDispatchStateStore({
-            environment: delegationEnvironment,
-          });
+          const dingTalkDispatch = new DingTalkDispatchSettingsStore({});
+          const dingTalkState = new DingTalkDispatchStateStore({});
           let host: AppServerHost | undefined;
           const dispatcher = new DingTalkDispatcher({
             service: dingtalk,
@@ -381,7 +373,6 @@ export async function runHostRuntime(input: {
               if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
               return host.startDingTalkAgentRun(input);
             },
-            environment: delegationEnvironment,
             diagnose: (error) =>
               process.stderr.write(`codexhost DingTalk dispatch: ${String(error)}\n`),
           });
@@ -409,10 +400,7 @@ export async function runHostRuntime(input: {
                 : {}),
               stockCodexPath,
               arguments: input.arguments,
-              environment: delegationEnvironment,
-              desktopProjects: new DesktopProjectCatalogReader({
-                environment: delegationEnvironment,
-              }),
+              desktopProjects: new DesktopProjectCatalogReader({}),
               projectMirror: new ProjectMirrorService({
                 directory: defaultProjectMirrorDirectory(delegationEnvironment),
               }),
@@ -463,7 +451,6 @@ export async function runHostRuntime(input: {
           await mappingStore.initialize();
           const common = {
             stockCodexPath,
-            environment: delegationEnvironment,
             jarvis,
             modelService: new ModelService(
               new ModelServiceSettingsStore({ environment: delegationEnvironment }),
@@ -476,9 +463,7 @@ export async function runHostRuntime(input: {
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
             closeMappingStoreOnExit: false,
-            desktopProjects: new DesktopProjectCatalogReader({
-              environment: delegationEnvironment,
-            }),
+            desktopProjects: new DesktopProjectCatalogReader({}),
             projectMirror: new ProjectMirrorService({
               directory: defaultProjectMirrorDirectory(delegationEnvironment),
             }),
@@ -633,7 +618,6 @@ export async function runHostRuntime(input: {
             }),
             stockCodexPath,
             arguments: [],
-            environment: delegationEnvironment,
             desktopInput,
             desktopOutput,
             diagnosticOutput,

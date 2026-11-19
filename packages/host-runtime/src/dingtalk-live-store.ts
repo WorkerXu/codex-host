@@ -277,6 +277,13 @@ export class DingTalkLiveStore {
     return this.#page(entry, limit);
   }
 
+  /** One stored message; manual dispatch needs the exact row the page shows. */
+  message(conversationId: string, messageId: string): DingTalkMessage | null {
+    const entry = this.#entries.get(conversationId);
+    const found = entry?.messages.find((message) => message.messageId === messageId);
+    return found ? { ...found } : null;
+  }
+
   members(conversationId: string, now: number): DingTalkLiveMemberList | null {
     const entry = this.#entries.get(conversationId);
     if (!entry || entry.members === null || entry.membersAt === null) return null;

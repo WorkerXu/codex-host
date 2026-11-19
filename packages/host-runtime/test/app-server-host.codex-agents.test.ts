@@ -82,25 +82,34 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 4))).toMatchObject({
-        result: { threshold: 0.7, agents: {} },
+        result: { agents: {} },
       });
 
       writeRequest(fixture.desktopInput, {
         id: 5,
         method: "codexhost/dingtalk-dispatch/set",
         params: {
-          threshold: 0.9,
           agents: {
             [savedRecord.fileName]: {
               enabled: true,
-              eventTypes: ["mention_me", "approval_pending"],
               replyScope: "direct",
+              sectionId: "section-1",
+              projectId: "project-1",
+              projectPath: "/Users/me/project",
             },
           },
         },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 5))).toMatchObject({
-        result: { threshold: 0.9, agents: { [savedRecord.fileName]: { enabled: true } } },
+        result: {
+          agents: {
+            [savedRecord.fileName]: {
+              enabled: true,
+              replyScope: "direct",
+              projectId: "project-1",
+            },
+          },
+        },
       });
 
       writeRequest(fixture.desktopInput, {
@@ -119,7 +128,7 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 7))).toMatchObject({
-        result: { threshold: 0.9, agents: {} },
+        result: { agents: {} },
       });
     } finally {
       await stopFixture(fixture);

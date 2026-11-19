@@ -81,6 +81,7 @@ import {
   DINGTALK_VIEWED_METHOD,
   DINGTALK_PREFETCH_METHOD,
   DINGTALK_DIAGNOSTICS_METHOD,
+  DINGTALK_TIMING_METHOD,
   DINGTALK_CHANGED_METHOD,
   dingtalkStatusParamsSchema,
   dingtalkConversationsParamsSchema,
@@ -95,6 +96,7 @@ import {
   dingtalkViewedParamsSchema,
   dingtalkPrefetchParamsSchema,
   dingtalkDiagnosticsParamsSchema,
+  dingtalkTimingParamsSchema,
   dingtalkSettingsSetParamsSchema,
   CODEX_AGENT_LIST_METHOD,
   CODEX_AGENT_READ_METHOD,
@@ -110,9 +112,14 @@ import {
   DINGTALK_DISPATCH_GET_METHOD,
   DINGTALK_DISPATCH_SET_METHOD,
   DINGTALK_DISPATCH_STATUS_METHOD,
-  DINGTALK_DISPATCH_PROJECT_READY_METHOD,
+  DINGTALK_DISPATCH_SCORE_METHOD,
+  DINGTALK_DISPATCH_RUN_METHOD,
   dingtalkDispatchSettingsSchema,
   dingtalkDispatchStatusSchema,
+  dingtalkDispatchMessageParamsSchema,
+  dingtalkDispatchRunParamsSchema,
+  dingtalkDispatchScoreResultSchema,
+  dingtalkDispatchRunResultSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
@@ -526,7 +533,7 @@ export interface AppServerHostOptions {
   /** Local-only DingTalk dispatch settings read by the separate listener runtime. */
   dingTalkDispatch?: DingTalkDispatchSettingsStore;
   /** Local-only runtime that listens, matches and starts dispatched Threads. */
-  dingTalkDispatcher?: Pick<DingTalkDispatcher, "status">;
+  dingTalkDispatcher?: Pick<DingTalkDispatcher, "status" | "score" | "run">;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -860,9 +867,8 @@ export class AppServerHost {
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
   #unsubscribeDingTalk: (() => void) | undefined;
-  readonly #dingTalkNativeRunner = new DingTalkNativeRunner(
-    (method, params) => this.#requestOfficial(method, params),
-    (message) => this.#writer.json(message),
+  readonly #dingTalkNativeRunner = new DingTalkNativeRunner((method, params) =>
+    this.#requestOfficial(method, params),
   );
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
@@ -3982,6 +3988,13 @@ export class AppServerHost {
       }
       return await service.diagnostics(parsed.data);
     }
+    if (request.method === DINGTALK_TIMING_METHOD) {
+      const parsed = dingtalkTimingParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk timing request");
+      }
+      return await service.recordTiming(parsed.data);
+    }
     throw new DingTalkServiceError("unknown_method", "Unknown DingTalk method");
   }
 
@@ -4159,9 +4172,28 @@ export class AppServerHost {
       let result: unknown;
       if (request.method === DINGTALK_DISPATCH_GET_METHOD) {
         result = await store.read(await this.#dingTalkDispatchAgents());
-      } else if (request.method === DINGTALK_DISPATCH_PROJECT_READY_METHOD) {
-        this.#dingTalkNativeRunner.projectReady(request.params);
-        result = {};
+      } else if (request.method === DINGTALK_DISPATCH_SCORE_METHOD) {
+        const params = dingtalkDispatchMessageParamsSchema.safeParse(request.params);
+        const dispatcher = this.#options.dingTalkDispatcher;
+        if (!params.success || !dispatcher) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch score request");
+        }
+        result = dingtalkDispatchScoreResultSchema.parse(
+          await dispatcher.score(params.data.conversationId, params.data.messageId),
+        );
+      } else if (request.method === DINGTALK_DISPATCH_RUN_METHOD) {
+        const params = dingtalkDispatchRunParamsSchema.safeParse(request.params);
+        const dispatcher = this.#options.dingTalkDispatcher;
+        if (!params.success || !dispatcher) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch request");
+        }
+        result = dingtalkDispatchRunResultSchema.parse(
+          await dispatcher.run(
+            params.data.conversationId,
+            params.data.messageId,
+            params.data.agents,
+          ),
+        );
       } else if (request.method === DINGTALK_DISPATCH_STATUS_METHOD) {
         result = dingtalkDispatchStatusSchema.parse(
           (await this.#options.dingTalkDispatcher?.status()) ?? {},

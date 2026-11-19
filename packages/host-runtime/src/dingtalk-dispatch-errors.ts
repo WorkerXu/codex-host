@@ -11,10 +11,6 @@ export function dingtalkMatchError(code: string | null): string {
 
 export function dingtalkRunError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  if (
-    /Desktop (?:did not confirm the DingTalk project|project preparation timed out)/iu.test(message)
-  )
-    return "需要在 Desktop 确认「钉钉智能体」文件夹，未派发";
   if (/Host connection closed/iu.test(message)) return "与 Desktop 的连接已断开";
   if (/no Thread identity/iu.test(message)) return "未能创建智能体对话";
   if (/no Turn identity/iu.test(message)) return "未能启动智能体处理";

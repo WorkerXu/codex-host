@@ -1,9 +1,4 @@
-import { randomUUID } from "node:crypto";
 import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
-import {
-  DINGTALK_DISPATCH_PROJECT_METHOD,
-  dingtalkDispatchProjectReadySchema,
-} from "@codexhost/shared-contracts";
 import type {
   DingTalkDispatchRun,
   DingTalkDispatchRunResult,
@@ -16,20 +11,10 @@ const isRecord = (value: unknown): value is JsonObject =>
 /** Native Thread RPC and completion tracking for the local dispatch runtime. */
 export class DingTalkNativeRunner {
   #closed = false;
-  constructor(
-    readonly request: (method: string, params: JsonObject) => Promise<JsonObject>,
-    readonly notify: (message: JsonObject) => Promise<void>,
-  ) {}
+  constructor(readonly request: (method: string, params: JsonObject) => Promise<JsonObject>) {}
   #request(method: string, params: JsonObject): Promise<JsonObject> {
     return this.request(method, params);
   }
-  #notify(message: JsonObject): Promise<void> {
-    return this.notify(message);
-  }
-  readonly #dingTalkProjectWaiters = new Map<
-    string,
-    { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
-  >();
   readonly #dingTalkTurnWaiters = new Map<
     string,
     {
@@ -43,7 +28,6 @@ export class DingTalkNativeRunner {
   >();
   async start(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
     if (this.#closed) throw new Error("Host connection closed");
-    await this.#prepareDingTalkProject(input.cwd);
     const config: JsonObject = {
       ...(input.readOnlySummary ? await this.#dingTalkSummaryConfig(input.cwd) : {}),
       [`shell_environment_policy.set.${DINGTALK_DISPATCH_ENV}`]: "1",
@@ -51,6 +35,7 @@ export class DingTalkNativeRunner {
     if (this.#closed) throw new Error("Host connection closed");
     const started = await this.#request("thread/start", {
       cwd: input.cwd,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       config,
       ...(input.model ? { model: input.model } : {}),
       developerInstructions: input.developerInstructions,
@@ -85,29 +70,6 @@ export class DingTalkNativeRunner {
       throw error;
     }
     return { threadId, turnId, completed: completion };
-  }
-
-  async #prepareDingTalkProject(cwd: string): Promise<void> {
-    const requestId = randomUUID();
-    const ready = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#dingTalkProjectWaiters.delete(requestId);
-        reject(new Error("Desktop project preparation timed out"));
-      }, 30_000);
-      timer.unref?.();
-      this.#dingTalkProjectWaiters.set(requestId, { resolve, reject, timer });
-    });
-    await Promise.all([
-      ready,
-      this.#notify({
-        method: DINGTALK_DISPATCH_PROJECT_METHOD,
-        params: { requestId, cwd },
-      }),
-    ]).finally(() => {
-      const waiter = this.#dingTalkProjectWaiters.get(requestId);
-      if (waiter) clearTimeout(waiter.timer);
-      this.#dingTalkProjectWaiters.delete(requestId);
-    });
   }
 
   async #dingTalkSummaryConfig(cwd: string): Promise<JsonObject> {
@@ -242,23 +204,8 @@ export class DingTalkNativeRunner {
     });
   }
 
-  projectReady(input: unknown): void {
-    const params = dingtalkDispatchProjectReadySchema.parse(input);
-    const waiter = this.#dingTalkProjectWaiters.get(params.requestId);
-    if (!waiter) return;
-    clearTimeout(waiter.timer);
-    this.#dingTalkProjectWaiters.delete(params.requestId);
-    if (params.error) waiter.reject(new Error(params.error));
-    else waiter.resolve();
-  }
-
   dispose(): void {
     this.#closed = true;
     for (const id of this.#dingTalkTurnWaiters.keys()) this.#cancelDingTalkTurn(id);
-    for (const waiter of this.#dingTalkProjectWaiters.values()) {
-      clearTimeout(waiter.timer);
-      waiter.reject(new Error("Host connection closed"));
-    }
-    this.#dingTalkProjectWaiters.clear();
   }
 }
