@@ -322,6 +322,57 @@ export interface JarvisMessageAction {
   onClick(opener: HTMLElement): void;
 }
 
+/**
+ * A one-line notice above the current rows, used when a parse failed but the
+ * title preview is still worth keeping on screen.
+ */
+export function renderJarvisNotice(
+  document: Document,
+  results: HTMLElement,
+  message: string,
+  action: JarvisMessageAction,
+): void {
+  const scroller = jarvisResultsScroller(results);
+  clearJarvisNotice(results);
+  const notice = document.createElement("div");
+  notice.setAttribute("data-jarvis-notice", "true");
+  style(notice, {
+    display: "flex",
+    "align-items": "center",
+    gap: "8px",
+    padding: "8px 12px",
+    "border-radius": "6px",
+    background: HOVER,
+    color: TEXT_PRIMARY,
+    font: "400 12px/18px system-ui, sans-serif",
+  });
+  const messageText = document.createElement("span");
+  messageText.textContent = message;
+  style(messageText, { "min-width": "0", flex: "1 1 auto" });
+  const link = document.createElement("button");
+  link.type = "button";
+  link.setAttribute("data-jarvis-action", "true");
+  link.textContent = action.label;
+  link.style.cssText =
+    "flex:0 0 auto;border:0;background:transparent;color:" +
+    TEXT_TERTIARY +
+    ";font:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer;padding:0";
+  keepEditorFocusOnPress(link);
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    action.onClick(link);
+  });
+  notice.append(messageText, link);
+  scroller.prepend(notice);
+}
+
+export function clearJarvisNotice(results: HTMLElement): void {
+  jarvisResultsScroller(results)
+    .querySelectorAll("[data-jarvis-notice]")
+    .forEach((notice) => notice.remove());
+}
+
 /** Empty and error states share one calm, native-density block. */
 export function renderJarvisMessage(
   document: Document,
