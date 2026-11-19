@@ -86,6 +86,27 @@ describe("per-thread working folders", () => {
     expect(await reloaded.store.recent()).toEqual(roots);
     expect(await b.folders.store.get("same")).toBeNull();
   });
+  it("keeps Desktop worktrees out of recently used folders", async () => {
+    const { directory } = await service();
+    const codexHome = path.join(directory, "codex-home");
+    const folders = new ThreadFolders({
+      CODEXHOST_DATA_DIR: directory,
+      CODEX_HOME: codexHome,
+    });
+    await folders.select("worktree", [
+      path.join(codexHome, "worktrees", "6c05", "service.stock.java"),
+    ]);
+    await folders.select("real", roots);
+    expect(await folders.store.recent()).toHaveLength(3);
+    expect(await folders.recent()).toEqual(roots);
+  });
+  it("treats a missing CODEX_HOME as ~/.codex for worktree filtering", async () => {
+    const { folders } = await service();
+    await folders.select("worktree", [
+      path.join(os.homedir(), ".codex", "worktrees", "6c05", "service.stock.java"),
+    ]);
+    expect(await folders.recent()).toEqual([]);
+  });
   it("retains the change note after an error and consumes it only after acceptance", async () => {
     const { folders } = await service();
     await folders.select("t", roots);

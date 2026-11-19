@@ -1540,7 +1540,7 @@ export class AppServerHost {
             rpcEnvelope(request, {
               result: jsonValueSchema.parse({
                 selection: threadId ? await this.#threadFolders.store.get(threadId) : null,
-                recent: await this.#threadFolders.store.recent(),
+                recent: await this.#threadFolders.recent(),
                 additionalDirectories:
                   harnessId === "codex" ||
                   this.#externalAdapters.get(harnessId as ExternalHarnessId)
