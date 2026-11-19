@@ -225,7 +225,6 @@ interface ModeState {
   previewError: string | null;
   parse: "idle" | "pending" | "done" | "failed";
   parseText: string;
-  parseError: string | null;
   parseGeneration: number;
   parseRequest: AbortController | null;
   /** Debounce for the automatic parse after the user stops typing. */
@@ -430,7 +429,6 @@ export function installRendererJarvisMention(
       previewError: null,
       parse: "idle",
       parseText: "",
-      parseError: null,
       parseGeneration: 0,
       parseRequest: null,
       parseTimer: null,
@@ -712,7 +710,6 @@ export function installRendererJarvisMention(
    */
   const failParse = (state: ModeState, errorCode: string | null): void => {
     state.parse = "failed";
-    state.parseError = errorCode;
     setBusy(state, false);
     renderBugChips(state, []);
     state.bugChrome.summary.textContent = "";
@@ -743,7 +740,6 @@ export function installRendererJarvisMention(
       return;
     }
     state.parse = "done";
-    state.parseError = null;
     state.previewError = null;
     setBusy(state, false);
     state.bugChrome.summary.textContent =
@@ -867,7 +863,6 @@ export function installRendererJarvisMention(
     state.parseRequest = new AbortController();
     state.parse = "pending";
     state.parseText = text;
-    state.parseError = null;
     setBusy(state, true);
     clearJarvisNotice(state.bugChrome.results);
     state.bugChrome.summary.textContent =
@@ -909,7 +904,6 @@ export function installRendererJarvisMention(
       state.parseRequest = null;
       state.parse = "idle";
       state.parseText = "";
-      state.parseError = null;
       state.previewError = null;
       state.omit.clear();
       renderBugChips(state, []);
@@ -968,7 +962,6 @@ export function installRendererJarvisMention(
     state.parseTimer = null;
     state.parse = "idle";
     state.parseText = "";
-    state.parseError = null;
     state.omit.clear();
     setBusy(state, false);
     openProjectStep(state, state.projectChrome.input.value, true);
@@ -983,7 +976,6 @@ export function installRendererJarvisMention(
     state.parseTimer = null;
     state.parse = "idle";
     state.parseText = "";
-    state.parseError = null;
     state.previewText = "";
     state.previewError = null;
     const chrome = state.bugChrome;
