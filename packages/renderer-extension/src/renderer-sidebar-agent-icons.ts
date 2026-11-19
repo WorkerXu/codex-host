@@ -13,6 +13,8 @@ import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
 import { createRendererAgentIcon, rendererAgentLabel } from "./renderer-agent-icon.js";
 import type { RendererModelClient } from "./renderer-model-client.js";
 import { RendererMethodUnavailableError } from "./renderer-request-sender.js";
+import type { SidebarOwnershipStore } from "./renderer-sidebar-ownership-cache.js";
+import type { RendererStartupTrace } from "./renderer-startup-trace.js";
 
 export const SIDEBAR_THREAD_ROW_ATTRIBUTE = "data-app-action-sidebar-thread-row";
 export const SIDEBAR_THREAD_ROW_SELECTOR = `[${SIDEBAR_THREAD_ROW_ATTRIBUTE}]`;
@@ -197,7 +199,8 @@ class BrowserSidebarAgentIconRow implements SidebarAgentIconRow {
         )
       : titleTrigger?.querySelector<HTMLElement>("[data-thread-title]");
     if (!titleTrigger || !title) {
-      this.clear();
+      // The title subtree is briefly replaced while Desktop re-renders a row.
+      // Keep the icon the row already shows instead of blinking it out.
       return;
     }
     const anchor = sidebarAgentIconAnchor(titleTrigger, title);
@@ -311,16 +314,24 @@ class BrowserSidebarAgentIconDom implements SidebarAgentIconDom {
   }
 }
 
-export function installRendererSidebarAgentIcons(options: {
+export interface RendererSidebarAgentIconsOptions {
   getClient(hostId: string): RendererModelClient | null;
   getPlugins?(hostId: string): readonly HarnessPluginDescriptor[] | undefined;
+  /** Last known artwork, used only until the Host reports its plugin directory. */
+  getCachedPlugins?(hostId: string): readonly HarnessPluginDescriptor[] | undefined;
   getLocalAgent?(input: {
     hostId: string;
     threadId: string | null;
     draftId: string | null;
   }): RendererAgent | null;
+  ownershipStore?: SidebarOwnershipStore;
+  trace?: RendererStartupTrace;
   dom?: SidebarAgentIconDom;
-}): RendererSidebarAgentIcons {
+}
+
+export function installRendererSidebarAgentIcons(
+  options: RendererSidebarAgentIconsOptions,
+): RendererSidebarAgentIcons {
   const dom = options.dom ?? new BrowserSidebarAgentIconDom(document);
   const ownershipByThread = new Map<string, { agent: RendererAgent; stale: boolean }>();
   const pending = new Set<string>();
@@ -333,8 +344,33 @@ export function installRendererSidebarAgentIcons(options: {
   // Thread, including duplicate rows, without retaining stale recycled identities.
   const rowsByThread = new Map<string, Set<SidebarAgentIconRow>>();
   const threadByRow = new WeakMap<SidebarAgentIconRow, string>();
+  const lastPresentation = new WeakMap<
+    SidebarAgentIconRow,
+    { hostId: string; agent: RendererAgent }
+  >();
+  const liveRows = new Set<SidebarAgentIconRow>();
+  const persistedByHost = new Map<string, ReadonlyMap<string, string>>();
   let disposed = false;
   let scanScheduled = false;
+
+  const persistedOwnership = (hostId: string): ReadonlyMap<string, string> => {
+    let entries = persistedByHost.get(hostId);
+    if (!entries) {
+      entries = options.ownershipStore?.read(hostId) ?? new Map<string, string>();
+      persistedByHost.set(hostId, entries);
+    }
+    return entries;
+  };
+
+  const renderRow = (
+    row: SidebarAgentIconRow,
+    hostId: string,
+    agent: RendererAgent,
+    plugin?: HarnessPluginDescriptor,
+  ): void => {
+    row.render(agent, plugin);
+    lastPresentation.set(row, { hostId, agent });
+  };
 
   const ownershipKey = (hostId: string, threadId: string): string =>
     JSON.stringify([hostId, threadId]);
@@ -406,16 +442,24 @@ export function installRendererSidebarAgentIcons(options: {
     for (const threadId of threadIds) pending.add(ownershipKey(hostId, threadId));
     let succeeded = false;
     let retryable = true;
+    const request = () => client.listThreadOwnership({ threadIds });
     void Promise.resolve()
-      .then(() => client.listThreadOwnership({ threadIds }))
+      .then(() =>
+        options.trace
+          ? options.trace.measureRequest(
+              { method: "thread/ownership/list", hostId, priority: "interactive" },
+              request,
+            )
+          : request(),
+      )
       .then(({ threads }) => {
         if (disposed) return;
+        const fresh = new Map<string, string>();
         for (const ownership of threads) {
           const key = ownershipKey(hostId, ownership.threadId);
-          ownershipByThread.set(key, {
-            agent: rendererAgentForThreadOwnership(ownership),
-            stale: false,
-          });
+          const agent = rendererAgentForThreadOwnership(ownership);
+          ownershipByThread.set(key, { agent, stale: false });
+          fresh.set(ownership.threadId, agent);
           failed.delete(key);
           if (ownership.owner === "codex") {
             provisionalCodex.add(key);
@@ -424,6 +468,7 @@ export function installRendererSidebarAgentIcons(options: {
             clearOwnershipRetry(key);
           }
         }
+        options.ownershipStore?.write(hostId, fresh);
         succeeded = true;
       })
       .catch((error) => {
@@ -454,17 +499,26 @@ export function installRendererSidebarAgentIcons(options: {
     const pluginsByHost = new Map<string, readonly HarnessPluginDescriptor[] | undefined>();
     const getPlugin = (hostId: string, agent: string): HarnessPluginDescriptor | undefined => {
       if (agent === "codex") return undefined;
-      if (!pluginsByHost.has(hostId)) pluginsByHost.set(hostId, options.getPlugins?.(hostId));
+      if (!pluginsByHost.has(hostId)) {
+        pluginsByHost.set(
+          hostId,
+          options.getPlugins?.(hostId) ?? options.getCachedPlugins?.(hostId),
+        );
+      }
       return pluginsByHost.get(hostId)?.find(({ id }) => id === agent);
     };
     for (const row of rows) {
       if (!row.isConnected()) {
         trackRowThread(row);
+        liveRows.delete(row);
         row.clear();
         continue;
       }
+      liveRows.add(row);
       const hostId = row.hostId();
       if (!hostId) {
+        // The row no longer belongs to any Host (for example an unsupported
+        // scheduled item); nothing owns this icon any more.
         trackRowThread(row);
         row.clear();
         continue;
@@ -482,27 +536,39 @@ export function installRendererSidebarAgentIcons(options: {
           ownershipByThread.set(key, { agent: localAgent, stale: false });
           clearOwnershipRetry(key);
         }
-        row.render(localAgent, getPlugin(hostId, localAgent));
+        renderRow(row, hostId, localAgent, getPlugin(hostId, localAgent));
         continue;
       }
       if (!threadId.success) {
-        row.clear();
+        // The Fiber identity is briefly unreadable while Desktop re-renders a row.
+        // Removing a correct icon there is the flicker users see, so only a row
+        // with no known owner is cleared.
+        if (!lastPresentation.has(row)) row.clear();
         continue;
       }
       const key = ownershipKey(hostId, threadId.data);
-      const cached = ownershipByThread.get(key);
+      let cached = ownershipByThread.get(key);
+      if (!cached) {
+        const persisted = persistedOwnership(hostId).get(threadId.data);
+        if (persisted !== undefined) {
+          // Show the persisted owner immediately, then revalidate it in the same pass.
+          cached = { agent: persisted, stale: true };
+          ownershipByThread.set(key, cached);
+        }
+      }
       if (cached) {
         // Revalidation must not remove a known icon while its reply is pending.
-        row.render(cached.agent, getPlugin(hostId, cached.agent));
-        if (!cached.stale) continue;
+        renderRow(row, hostId, cached.agent, getPlugin(hostId, cached.agent));
       } else row.clear();
-      if (!pending.has(key) && !failed.has(key)) {
-        let unresolved = unresolvedByHost.get(hostId);
-        if (!unresolved) {
-          unresolved = new Set();
-          unresolvedByHost.set(hostId, unresolved);
+      if (!cached || cached.stale) {
+        if (!pending.has(key) && !failed.has(key)) {
+          let unresolved = unresolvedByHost.get(hostId);
+          if (!unresolved) {
+            unresolved = new Set();
+            unresolvedByHost.set(hostId, unresolved);
+          }
+          unresolved.add(threadId.data);
         }
-        unresolved.add(threadId.data);
       }
     }
     for (const [hostId, unresolved] of unresolvedByHost) {
@@ -523,6 +589,12 @@ export function installRendererSidebarAgentIcons(options: {
           client,
         );
       }
+    }
+    if (options.trace) {
+      options.trace.firstRows(liveRows.size);
+      let decorated = 0;
+      for (const row of liveRows) if (lastPresentation.has(row)) decorated += 1;
+      options.trace.iconsRendered(decorated, liveRows.size);
     }
   };
 
@@ -556,6 +628,8 @@ export function installRendererSidebarAgentIcons(options: {
       pending.clear();
       failed.clear();
       provisionalCodex.clear();
+      liveRows.clear();
+      persistedByHost.clear();
       for (const timer of ownershipRetryTimers.values()) clearTimeout(timer);
       ownershipRetryTimers.clear();
       ownershipRetryAttempts.clear();
