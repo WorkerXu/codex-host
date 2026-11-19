@@ -209,7 +209,7 @@ export async function runProjectMirror(
     const route = input.routing?.forHost(hostId) ?? null;
     if (!route) return fail(`${selection.machine.label} 当前离线`);
     // The card is already visible when this runs; every awaited step follows it.
-    progress.step("create");
+    progress.step("prepare");
     const registryPromise = rpc.list();
     let projectId: string | null;
     let chosenPath: string;
@@ -233,6 +233,8 @@ export async function runProjectMirror(
         projectId = existing.id;
         chosenPath = existing.rootPaths[0] ?? "";
       } else {
+        // Desktop only creates a folder here, but this is still the real create.
+        progress.step("create");
         const created = await services.projects.createLocal({
           appearance: null,
           initializeDefaultWorkspaceGitRepository: false,
@@ -276,6 +278,9 @@ export async function runProjectMirror(
       projectId = destination.projectId;
 
       if (!projectId) {
+        // Trust is only asked by `createRemote`, and only when the project does
+        // not exist yet; the hint belongs to this step, not to preparation.
+        progress.step("create");
         // `chooseMirrorDestination` already probed this path; only create when
         // it reported the folder missing instead of probing it a second time.
         if (destination.state === "missing") {

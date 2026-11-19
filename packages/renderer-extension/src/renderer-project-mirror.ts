@@ -5,6 +5,7 @@ import {
 } from "@codexhost/shared-contracts";
 
 import type { RendererAgentPickerControl } from "./renderer-agent-picker.js";
+import { CODEX_COMPOSER_SELECTOR } from "./renderer-composer-dom.js";
 import {
   loadCrossHostHarnessCatalog,
   type CrossHostHarnessCatalog,
@@ -205,6 +206,30 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
   let disposed = false;
 
   let activeProgress: ProjectMirrorProgressControl | null = null;
+  /** The Composer may be rebuilt while the run waits on Desktop; re-find it. */
+  const currentComposer = (): Element | null => {
+    for (const candidate of document.querySelectorAll<HTMLElement>(CODEX_COMPOSER_SELECTOR)) {
+      if (candidate.isConnected && candidate.getClientRects().length > 0) return candidate;
+    }
+    return null;
+  };
+  const showProgress = (
+    composer: Element,
+    selection: CrossHostAgentSelection,
+  ): ProjectMirrorProgressControl => {
+    activeProgress?.dispose();
+    const progress = createProjectMirrorProgress({
+      document,
+      anchor: composer,
+      resolveAnchor: currentComposer,
+      text: projectMirrorProgressText({
+        machineLabel: selection.machine.label,
+        local: selection.machine.hostId === "local",
+      }),
+    });
+    activeProgress = progress;
+    return progress;
+  };
   const startMirror = (
     composer: Element,
     context: ProjectMirrorContext,
@@ -216,16 +241,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       showProjectMirrorNotice(document, "正在添加这台机器，请稍候。");
       return;
     }
-    activeProgress?.dispose();
-    const progress = createProjectMirrorProgress({
-      document,
-      anchor: composer,
-      text: projectMirrorProgressText({
-        machineLabel: selection.machine.label,
-        local: selection.machine.hostId === "local",
-      }),
-    });
-    activeProgress = progress;
+    const progress = showProgress(composer, selection);
     void runProjectMirror({
       document,
       routing: window.__codexhostHostRoutingV1,
@@ -277,17 +293,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         onSelect: (selection) => {
           input.picker.close();
           if (!services) {
-            activeProgress?.dispose();
-            const progress = createProjectMirrorProgress({
-              document,
-              anchor: input.composer,
-              text: projectMirrorProgressText({
-                machineLabel: selection.machine.label,
-                local: selection.machine.hostId === "local",
-              }),
-            });
-            activeProgress = progress;
-            progress.fail("Desktop 项目服务尚未就绪，请稍后重试");
+            showProgress(input.composer, selection).fail("Desktop 项目服务尚未就绪，请稍后重试");
             return;
           }
           startMirror(input.composer, context, selection, services, rpc);

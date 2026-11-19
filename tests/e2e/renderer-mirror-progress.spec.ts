@@ -65,6 +65,8 @@ const LIGHT = `
     --color-border: rgba(0, 0, 0, 0.12);
     --color-chart-green: #17a34a;
     --color-chart-red: #e5484d;
+    --max-app-overlay-z-index: 2147480000;
+    --toast-z-index: calc(2147480000 - 1);
     background: #f7f7f8;
     color: #1a1a1a;
   }
@@ -78,6 +80,8 @@ const DARK = `
     --color-border: rgba(255, 255, 255, 0.14);
     --color-chart-green: #3fb950;
     --color-chart-red: #f85149;
+    --max-app-overlay-z-index: 2147480000;
+    --toast-z-index: calc(2147480000 - 1);
     background: #1b1b1b;
     color: #f2f2f2;
   }
@@ -97,14 +101,17 @@ const setup = async (page: Page, theme: string, machineLabel: string): Promise<v
   }, machineLabel);
 };
 
-test("shows the creating step with the trust hint, then confirms the open chat", async ({
+test("prepares, then shows the trust hint only while creating, and ends upright", async ({
   page,
 }) => {
   await setup(page, LIGHT, "甲骨文新加坡");
   const card = page.locator("[data-codexhost-project-mirror-progress]");
   await expect(card).toBeVisible();
-  await expect(card).toContainText("正在 甲骨文新加坡 上创建项目…");
-  await expect(card).toContainText("接下来 Desktop 会请你确认信任这个文件夹");
+  await expect(card).toContainText("正在 甲骨文新加坡 上准备项目…");
+  await expect(card).not.toContainText("信任这个文件夹");
+
+  const zIndex = await card.evaluate((element) => Number(getComputedStyle(element).zIndex));
+  expect(zIndex).toBeLessThan(2_147_480_000);
 
   const [cardBox, composerBox] = await Promise.all([
     card.boundingBox(),
@@ -114,15 +121,24 @@ test("shows the creating step with the trust hint, then confirms the open chat",
   expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(composerBox.y - 8);
   expect(cardBox.x).toBeGreaterThanOrEqual(8);
   expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(1_280 - 8);
+
+  await page.evaluate(() => Reflect.get(globalThis, "advanceMirrorProgress")("create"));
+  await expect(card).toContainText("正在 甲骨文新加坡 上创建项目…");
+  await expect(card).toContainText("接下来 Desktop 会请你确认信任这个文件夹");
   await page.screenshot({ path: test.info().outputPath("mirror-progress-light-creating.png") });
 
   await page.evaluate(() => Reflect.get(globalThis, "advanceMirrorProgress")("section"));
   await expect(card).toContainText("加入分区…");
+  await expect(card).not.toContainText("信任这个文件夹");
   await page.evaluate(() => Reflect.get(globalThis, "advanceMirrorProgress")("open"));
   await expect(card).toContainText("打开新对话…");
   await page.evaluate(() => Reflect.get(globalThis, "finishMirrorProgress")());
   await expect(card).toContainText("已在新对话中打开");
-  await expect(card).not.toContainText("信任这个文件夹");
+
+  const mark = card.locator(":scope > span").first();
+  await expect(mark).toHaveText("✓");
+  expect(await mark.evaluate((element) => element.getAnimations().length)).toBe(0);
+  expect(await mark.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
   await page.screenshot({ path: test.info().outputPath("mirror-progress-light-done.png") });
 });
 
@@ -130,6 +146,8 @@ test("keeps the creating and error states readable in dark mode", async ({ page 
   await setup(page, DARK, "甲骨文新加坡");
   const card = page.locator("[data-codexhost-project-mirror-progress]");
   await expect(card).toBeVisible();
+  await expect(card).toContainText("正在 甲骨文新加坡 上准备项目…");
+  await page.evaluate(() => Reflect.get(globalThis, "advanceMirrorProgress")("create"));
   await expect(card).toContainText("正在 甲骨文新加坡 上创建项目…");
   await page.screenshot({ path: test.info().outputPath("mirror-progress-dark-creating.png") });
 
@@ -139,5 +157,9 @@ test("keeps the creating and error states readable in dark mode", async ({ page 
   await expect(card).toContainText("项目已创建，但未能自动加入同一分区");
   const color = await card.evaluate((element) => getComputedStyle(element).color);
   expect(color).toBe("rgb(242, 242, 242)");
+  const mark = card.locator(":scope > span").first();
+  await expect(mark).toHaveText("!");
+  expect(await mark.evaluate((element) => element.getAnimations().length)).toBe(0);
+  expect(await mark.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
   await page.screenshot({ path: test.info().outputPath("mirror-progress-dark-error.png") });
 });

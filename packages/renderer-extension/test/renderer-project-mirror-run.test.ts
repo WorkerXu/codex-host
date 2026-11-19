@@ -8,6 +8,10 @@ import type {
 } from "@codexhost/shared-contracts";
 
 import type { CrossHostAgentSelection } from "../src/renderer-cross-host-agent-section.js";
+import {
+  projectMirrorProgressText,
+  projectMirrorTrustHint,
+} from "../src/renderer-project-mirror-progress.js";
 import type { ProjectMirrorRpc } from "../src/renderer-project-mirror-rpc.js";
 import { runProjectMirror } from "../src/renderer-project-mirror-run.js";
 
@@ -201,7 +205,7 @@ describe("project mirror run", () => {
     });
 
     expect(result).toEqual({ ok: true, message: null });
-    expect(steps).toEqual(["create", "section", "open", "done"]);
+    expect(steps).toEqual(["prepare", "create", "section", "open", "done"]);
     expect(joinSection).toHaveBeenCalledOnce();
     expect(openChat).toHaveBeenCalledOnce();
     expect(events.indexOf("join")).toBeLessThan(events.indexOf("open"));
@@ -235,7 +239,7 @@ describe("project mirror run", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(steps).toEqual(["create", "section", "open", "done"]);
+    expect(steps).toEqual(["prepare", "create", "section", "open", "done"]);
     expect(onBackgroundError).toHaveBeenCalledOnce();
     const notice = (
       document.body as unknown as { children: Array<{ getAttribute(name: string): string | null }> }
@@ -268,9 +272,19 @@ describe("project mirror run", () => {
     expect(openChat).not.toHaveBeenCalled();
   });
 
-  it("uses Desktop's local project creation for this Mac and keeps the chat unblocked", async () => {
+  it("reuses this Mac's project without the create step or trust hint", async () => {
     const desktop = services({ localId: "local-alpha" });
-    const { steps, progress } = recorder();
+    const steps: string[] = [];
+    const hints: Array<string | null> = [];
+    const text = projectMirrorProgressText({ machineLabel: "甲骨文新加坡", local: false });
+    const progress = {
+      step: (stage: "prepare" | "create" | "section" | "open") => {
+        steps.push(stage);
+        hints.push(projectMirrorTrustHint(stage, text));
+      },
+      done: () => steps.push("done"),
+      fail: (message: string) => steps.push(`fail:${message}`),
+    };
     const openChat = vi.fn(async () => ({ ok: true as const }));
 
     const result = await runProjectMirror({
@@ -295,7 +309,8 @@ describe("project mirror run", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(steps).toEqual(["create", "section", "open", "done"]);
+    expect(steps).toEqual(["prepare", "section", "open", "done"]);
+    expect(hints.filter((hint) => hint !== null)).toEqual([]);
     expect(desktop.projects.createLocal).not.toHaveBeenCalled();
     expect(desktop.projects.createRemote).not.toHaveBeenCalled();
     expect(desktop.executionPaths.readHomeDirectory).not.toHaveBeenCalled();
@@ -304,7 +319,7 @@ describe("project mirror run", () => {
 
   it("creates the local project when no same-name project exists", async () => {
     const desktop = services({ localId: "local-alpha" });
-    const { progress } = recorder();
+    const { steps, progress } = recorder();
 
     const result = await runProjectMirror({
       document: fakeDocument(),
@@ -321,6 +336,7 @@ describe("project mirror run", () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(steps).toEqual(["prepare", "create", "section", "open", "done"]);
     expect(desktop.projects.createLocal).toHaveBeenCalledWith({
       appearance: null,
       initializeDefaultWorkspaceGitRepository: false,

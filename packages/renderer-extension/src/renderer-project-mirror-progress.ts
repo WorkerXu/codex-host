@@ -5,10 +5,11 @@ const CARD_MAX_WIDTH = 360;
 const SUCCESS_MS = 1_600;
 const ERROR_MS = 8_000;
 
-export type ProjectMirrorProgressStage = "create" | "section" | "open";
+export type ProjectMirrorProgressStage = "prepare" | "create" | "section" | "open";
 
 /** Copy for the steps of one mirror run. */
 export interface ProjectMirrorProgressText {
+  prepare: string;
   create: string;
   section: string;
   open: string;
@@ -22,14 +23,23 @@ export function projectMirrorProgressText(input: {
   local: boolean;
 }): ProjectMirrorProgressText {
   return {
+    prepare: input.local ? "正在本机准备项目…" : `正在 ${input.machineLabel} 上准备项目…`,
     create: input.local ? "正在本机创建项目…" : `正在 ${input.machineLabel} 上创建项目…`,
     section: "加入分区…",
     open: "打开新对话…",
     done: "已在新对话中打开",
-    // `createRemote` asks Desktop to trust the new remote folder, so the
-    // dialog is expected while this card is still on the creating step.
+    // Only `createRemote` asks Desktop to trust a new remote folder; reusing an
+    // existing project never shows that dialog, so the hint belongs to creation.
     trustHint: input.local ? null : "接下来 Desktop 会请你确认信任这个文件夹",
   };
+}
+
+/** Only the create step can open Desktop's folder-trust dialog. */
+export function projectMirrorTrustHint(
+  stage: ProjectMirrorProgressStage,
+  text: ProjectMirrorProgressText,
+): string | null {
+  return stage === "create" ? text.trustHint : null;
 }
 
 export interface ProjectMirrorProgressAnchor {
@@ -82,6 +92,8 @@ export interface ProjectMirrorProgressControl extends ProjectMirrorProgress {
 export interface ProjectMirrorProgressOptions {
   document: Document;
   anchor: Element;
+  /** Resolve the Composer again if the original node was replaced. */
+  resolveAnchor?(): Element | null;
   text: ProjectMirrorProgressText;
   successMs?: number;
   errorMs?: number;
@@ -110,7 +122,8 @@ export function createProjectMirrorProgress(
   element.setAttribute("aria-atomic", "true");
   Object.assign(element.style, {
     position: "fixed",
-    zIndex: "2147483647",
+    // Desktop keeps modals in the overlay layer; stay below it and beside toasts.
+    zIndex: "var(--toast-z-index, calc(var(--max-app-overlay-z-index, 2147480000) - 1))",
     display: "flex",
     alignItems: "flex-start",
     gap: "10px",
@@ -145,11 +158,7 @@ export function createProjectMirrorProgress(
     fontWeight: "700",
     lineHeight: "14px",
   });
-  const spin =
-    leading.animate?.([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
-      duration: 800,
-      iterations: Infinity,
-    }) ?? null;
+  let spin: Animation | null = null;
 
   const body = document.createElement("div");
   Object.assign(body.style, {
@@ -175,14 +184,37 @@ export function createProjectMirrorProgress(
   body.append(title, hint);
   element.append(leading, body);
 
+  let anchor = options.anchor;
   let timer: number | null = null;
   let disposed = false;
   const clearTimer = (): void => {
     if (timer !== null) view?.clearTimeout(timer);
     timer = null;
   };
+  const startSpin = (): void => {
+    if (spin?.playState === "running") return;
+    spin?.cancel();
+    spin =
+      leading.animate?.([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
+        duration: 800,
+        iterations: Infinity,
+      }) ?? null;
+  };
+  const stopSpin = (): void => {
+    spin?.cancel();
+    spin = null;
+    leading.style.transform = "";
+  };
+
   const position = (): void => {
-    const rect = options.anchor.getBoundingClientRect();
+    if (anchor.isConnected === false) {
+      const next = options.resolveAnchor?.();
+      // A replaced Composer is re-resolved; without one the card keeps its place
+      // instead of collapsing onto the viewport origin.
+      if (!next) return;
+      anchor = next;
+    }
+    const rect = anchor.getBoundingClientRect();
     const card = element.getBoundingClientRect();
     const placement = projectMirrorProgressPlacement({
       anchor: {
@@ -202,6 +234,7 @@ export function createProjectMirrorProgress(
 
   const setSpinner = (): void => {
     leading.textContent = "";
+    startSpin();
     leading.style.border = "2px solid currentColor";
     leading.style.borderTopColor = "transparent";
     leading.style.color = TERTIARY_COLOR;
@@ -209,6 +242,7 @@ export function createProjectMirrorProgress(
     leading.style.fontWeight = "700";
   };
   const setMark = (mark: string, color: string): void => {
+    stopSpin();
     leading.textContent = mark;
     leading.style.border = "0";
     leading.style.color = color;
@@ -227,14 +261,14 @@ export function createProjectMirrorProgress(
     title.style.color = "inherit";
     title.textContent = options.text[stage];
     // The dialog belongs to project creation; once it resolved the hint is stale.
-    setHint(stage === "create" ? options.text.trustHint : null);
+    setHint(projectMirrorTrustHint(stage, options.text));
     position();
   };
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     clearTimer();
-    spin?.cancel?.();
+    stopSpin();
     view?.removeEventListener("resize", onViewportChange);
     view?.removeEventListener("scroll", onViewportChange, true);
     element.remove();
@@ -252,7 +286,7 @@ export function createProjectMirrorProgress(
   view?.addEventListener("resize", onViewportChange);
   view?.addEventListener("scroll", onViewportChange, true);
   // Rendered and measured before the caller can await the first step.
-  show("create");
+  show("prepare");
 
   return {
     element,
