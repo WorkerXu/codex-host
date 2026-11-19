@@ -271,3 +271,20 @@ describe("MemHub token rotation", () => {
     expect(headers).toEqual(["Bearer old", "Bearer new"]);
   });
 });
+
+describe("MCP page overview", () => {
+  it("returns the connection, servers and keys in one request", async () => {
+    const f = service((url) =>
+      url.endsWith("/servers") || url.endsWith("/auth/keys")
+        ? success([])
+        : success({ systemConfig: { routing: {} } }),
+    );
+    await expect(f.service.request({ op: "mcpOverview" })).resolves.toMatchObject({
+      configured: true,
+      last4: secret.slice(-4),
+      servers: [],
+      keys: { headerName: "Authorization", keys: [] },
+    });
+    expect(f.fetcher.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
