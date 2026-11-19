@@ -926,11 +926,11 @@ describe("DingTalk live in-memory state", () => {
     const cli = fakeCli(fake);
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
     try {
-      for (let index = 0; index < 70; index += 1) {
+      for (let index = 0; index < 210; index += 1) {
         await service.messages({ conversationId: "a", limit: 30, includeConversation: false });
       }
       const diagnostics = await service.diagnostics({ limit: 200 });
-      expect(diagnostics.entries).toHaveLength(60);
+      expect(diagnostics.entries).toHaveLength(200);
       expect(diagnostics.entries[0]).toMatchObject({
         kind: "messages",
         conversationId: "a",
