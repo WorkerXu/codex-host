@@ -265,6 +265,47 @@ it.each([false, true])(
   },
 );
 
+it("hands the draft's working folders to native creation in the requested order", async () => {
+  const seen: Record<string, unknown>[] = [];
+  const pool = {
+    hasPrewarmedThread: () => false,
+    consumePrewarmedThread: vi.fn(),
+    deletePrewarmedThread: vi.fn(),
+  };
+  const creation = {
+    params: { prewarmedThreadManager: pool },
+    async createConversation(input: Record<string, unknown>) {
+      seen.push(input);
+      return null;
+    },
+  };
+  const policy = isolateRendererPrewarmConsumption(
+    { threadCreation: creation, startConversation: vi.fn() },
+    vi.fn(),
+  );
+  const collaborationMode = mode("gpt-5");
+  policy?.selectWorkingFolders(
+    "client-new-thread:a",
+    ["/colab", "/extra", "/downloads"],
+    [collaborationMode],
+  );
+  await creation.createConversation({
+    collaborationMode,
+    cwd: "/project",
+    workspaceRoots: ["/project"],
+    projectId: "keep-project",
+  });
+  expect(seen).toEqual([
+    {
+      collaborationMode,
+      cwd: "/colab",
+      workspaceRoots: ["/colab", "/extra", "/downloads"],
+      projectId: "keep-project",
+    },
+  ]);
+  policy?.dispose();
+});
+
 it("keeps concurrent native creations' folder requests separate across asynchronous preparation", async () => {
   const sent = vi.fn();
   const client = { sendRequest: sent };

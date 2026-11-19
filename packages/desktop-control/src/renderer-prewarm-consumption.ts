@@ -63,7 +63,7 @@ export function isolateRendererPrewarmConsumption(
           enumerable: true,
           value: identity,
         });
-      input = { ...input, cwd: folders[0], runtimeWorkspaceRoots: [...folders] };
+      input = { ...input, cwd: folders[0], workspaceRoots: [...folders] };
     }
     if (mode && record(mode.settings) && external(mode.settings.model))
       return originalStart.call(this, input, options, ...args);
@@ -140,7 +140,7 @@ export function isolateRendererPrewarmConsumption(
     }
     invocation.params = scopedParams;
     if (folders && record(input))
-      input = { ...input, cwd: folders[0], runtimeWorkspaceRoots: [...folders] };
+      input = { ...input, cwd: folders[0], workspaceRoots: [...folders] };
     return original.call(invocation, input, ...args);
   };
   creation.createConversation = wrapped;

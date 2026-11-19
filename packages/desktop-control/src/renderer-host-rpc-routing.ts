@@ -197,10 +197,12 @@ export function installRendererHostRpcRouting(
         [
           {
             ...input,
+            // The `startConversation` input carries `workspaceRoots`; `runtimeWorkspaceRoots`
+            // belongs to the `thread/start` params Desktop derives from it and is ignored here.
             // This object is already capnweb wire format: a plain array would be read as a
             // special value tag (`["/path"]` → "unknown special value"), so escape it as
             // capnweb does, by wrapping it in one more array.
-            ...(folders ? { cwd: folders[0], runtimeWorkspaceRoots: [[...folders]] } : {}),
+            ...(folders ? { cwd: folders[0], workspaceRoots: [[...folders]] } : {}),
             ...(model
               ? {
                   collaborationMode: {
