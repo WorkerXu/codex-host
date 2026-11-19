@@ -3,10 +3,14 @@ import {
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_MESSAGES_METHOD,
   DINGTALK_MEMBERS_METHOD,
+  DINGTALK_PREFETCH_METHOD,
   DINGTALK_PREVIEW_METHOD,
   DINGTALK_DETAILS_METHOD,
+  DINGTALK_MAX_PREFETCH,
   dingtalkDetailsSchema,
+  dingtalkPrefetchResultSchema,
   type DingTalkConversation,
+  type DingTalkPrefetchResult,
   DINGTALK_RESOURCE_METHOD,
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_SEARCH_METHOD,
@@ -74,6 +78,8 @@ export interface RendererDingTalkClient {
   details(conversations: readonly DingTalkConversation[]): Promise<DingTalkConversation[]>;
   preview(conversationId: string): Promise<DingTalkPreviewResult>;
   messages(params: DingTalkMessagesParams): Promise<DingTalkMessagesResult>;
+  /** Warms the Host live state for rows the list shows; fire and forget. */
+  prefetch(conversationIds: readonly string[]): Promise<DingTalkPrefetchResult>;
   members(conversationId: string): Promise<DingTalkMembersResult>;
   resource(params: DingTalkResourceParams): Promise<DingTalkResourceResult>;
   send(params: DingTalkSendParams): Promise<DingTalkSendResult>;
@@ -323,6 +329,13 @@ export function createRendererDingTalkClient(
     async messages(params) {
       return dingtalkMessagesResultSchema.parse(
         await request(DINGTALK_MESSAGES_METHOD, { ...params, includeConversation: false }),
+      );
+    },
+    async prefetch(conversationIds) {
+      const ids = [...new Set(conversationIds)].slice(0, DINGTALK_MAX_PREFETCH);
+      if (ids.length === 0) return { started: 0 };
+      return dingtalkPrefetchResultSchema.parse(
+        await request(DINGTALK_PREFETCH_METHOD, { conversationIds: ids }, 30_000, "background"),
       );
     },
     async members(conversationId) {
