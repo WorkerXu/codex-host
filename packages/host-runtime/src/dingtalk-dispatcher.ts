@@ -388,17 +388,26 @@ export class DingTalkDispatcher {
     const card = new DingTalkProgressCard(this.#options.service);
     this.#cards.add(card);
     if (
-      !(await card.create({
-        target: cardTarget,
-        ...(!direct
-          ? {
-              atOpenDingTalkIds: [senderId],
-              ...(message.senderName.trim()
-                ? { atNames: { [senderId]: message.senderName.trim() } }
-                : {}),
-            }
-          : {}),
-      }))
+      !(await card.create(
+        {
+          target: cardTarget,
+          ...(!direct
+            ? {
+                atOpenDingTalkIds: [senderId],
+                ...(message.senderName.trim()
+                  ? { atNames: { [senderId]: message.senderName.trim() } }
+                  : {}),
+              }
+            : {}),
+        },
+        {
+          id: "context",
+          kind: "context",
+          title: "读取会话上下文",
+          detail: `最多 ${MAX_CONTEXT_MESSAGES} 条更早消息`,
+          status: "running",
+        },
+      ))
     ) {
       this.#cards.delete(card);
       const error = "进度卡创建未确认，已停止派发，请检查钉钉";
@@ -414,6 +423,7 @@ export class DingTalkDispatcher {
       message.messageId,
       message.createdAt,
     );
+    card.contextRead(context.messages.length);
     if (this.#disposed) {
       return { fileName: agent.fileName, name: agent.name, threadId: null, error: "已停止" };
     }
@@ -423,7 +433,7 @@ export class DingTalkDispatcher {
         cwd: project.cwd,
         projectId: project.projectId,
         projectRoots: project.roots,
-        onProgress: (text) => card.progress(text),
+        onProgress: (event) => card.progress(event),
         title: `${agent.name} · ${label} · ${truncate(message.text || "钉钉消息", 40)}`,
         developerInstructions: this.#developerInstructions(agent),
         model: agent.model,
@@ -433,7 +443,7 @@ export class DingTalkDispatcher {
     } catch (error) {
       this.#diagnose(error);
       const reason = `处理失败：${dingtalkRunError(error)}`;
-      await this.#finish(agent.fileName, card, label, reason, false);
+      await this.#finish(agent.fileName, card, label, reason, "failed");
       return { fileName: agent.fileName, name: agent.name, threadId: null, error: reason };
     }
 
@@ -451,17 +461,27 @@ export class DingTalkDispatcher {
       .then(async (completed) => {
         if (this.#disposed) return;
         const answer = completed.answer.trim();
+        if (completed.status === "interrupted") {
+          await this.#finish(agent.fileName, card, label, "处理已中断，可重新派发", "cancelled");
+          return;
+        }
         if (completed.status !== "completed") {
           await this.#finish(
             agent.fileName,
             card,
             label,
             `处理失败：${dingtalkRunError(completed.errorMessage ?? completed.status)}`,
-            false,
+            "failed",
           );
           return;
         }
-        await this.#finish(agent.fileName, card, label, answer || "已完成，但没有返回文本。", true);
+        await this.#finish(
+          agent.fileName,
+          card,
+          label,
+          answer || "已完成，但没有返回文本。",
+          "completed",
+        );
       })
       .catch((error: unknown) => this.#diagnose(error));
     return { fileName: agent.fileName, name: agent.name, threadId: run.threadId, error: null };
@@ -472,15 +492,15 @@ export class DingTalkDispatcher {
     card: DingTalkProgressCard,
     label: string,
     content: string,
-    success: boolean,
+    outcome: "completed" | "failed" | "cancelled",
   ): Promise<void> {
-    const delivered = await card.finish(content, success);
+    const delivered = await card.finish(outcome, content);
     this.#cards.delete(card);
     await this.#setStatus(
       fileName,
-      delivered && success ? "replied" : "failed",
+      delivered && outcome === "completed" ? "replied" : "failed",
       delivered
-        ? success
+        ? outcome === "completed"
           ? label
           : `${label}；${content}`
         : `${label}；进度卡更新未确认，已停止更新，请检查钉钉`,

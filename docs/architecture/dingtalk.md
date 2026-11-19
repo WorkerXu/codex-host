@@ -121,6 +121,17 @@ Gemini 8 秒超时或失败时，面板仍按名称列出已启用智能体（�
 
 Mac 安装的 `codex-cli 0.169.1` 的实验协议 schema 明确声明 `ThreadStartParams.projectId`，持久 Thread 会保存归属，`runtimeWorkspaceRoots` 指定运行目录。只读探测确认 `QV` / AppScope 中的分区项目使用界面 ID；直接 `project/read` 这些 ID 会失败，而通过 Desktop 的迁移映射读取原生 ID 均成功且根目录一致。Desktop 的原生侧栏按 Thread 的项目归属分组，分区包含项目；Host 不移动项目、Thread 或分区。协议与分组核对不创建真实 Thread、不执行派发。
 
+### A2UI 进度卡
+
+每张进度卡遵循钉钉官方 Agent 执行模式（`skills/multi/dingtalk-aicard/references/patterns/progress.md`）：
+
+- 外层是 `variant: "reasoning"` 的 `CollapsiblePanel`，`children` 固定为 `executionTimeline`。运行中标题为「[AIGenerating]正在……」，带 `textEffect: "shimmer"`；只在创建时设 `defaultExpanded: true`，后续更新不再发送该字段，因此尊重用户自己的展开/收起。
+- `executionTimeline` 是 `Column`，按发生顺序列出本轮真实步骤，不编造步骤。每个步骤是 `indented` 的 `CollapsiblePanel`，标题为「读取会话上下文」「执行命令」「调用工具」「修改文件」「搜索资料」「撰写回答」，详情是一行 `Text`。运行中的步骤使用官方 loading GIF（`icon` 与 `darkIcon`），完成的步骤换成 `Check_L_outlined`，失败的步骤换成 `Error_L_outlined`；被终态终止但未完成的步骤不带图标，也不显示成功勾。颜色与字号用 `common_level2_base_color` 和 `common_action_text_style__font_size`。
+- 步骤来源是 Host 实际观察到的 Turn 事件：创建卡片时先显示 Host 正在读取上下文；`item/started` / `item/completed` 的 `commandExecution`、`mcpToolCall` / `dynamicToolCall` / `toolExecution`、`fileChange`、`webSearch` 映射为对应步骤；非 commentary 的 `agentMessage` 映射为「撰写回答」。`reasoning`、工具参数和工具输出从不进入卡片。命令只取第一行并截断，工具、文件和搜索只显示名称、路径或查询；凭证样式（`--token`、`API_KEY`、`Bearer`、常见 Key 前缀）在发送前脱敏。commentary 与计划步骤只作为当前操作标题，且只接受包含中文的短文本。
+- 完成时标题变为「已完成 · N 步」，去掉生成标记、`textEffect` 和所有 loading 图标，所有完成步骤显示勾。最终答案是一个顶层 `Markdown` 组件，放在面板之后、面板之外，不点开也能看到；`--a2ui-annotations` 指向该 `answer` 组件，供会话摘要使用。
+- 失败或取消时标题分别是「处理失败」「已取消」，不带 `textEffect`，失败步骤不显示成功勾；面板外显示中文原因（例如「处理失败：智能体处理失败，请在 Desktop 查看对话」「处理已中断，可重新派发」）。Host 发给钉钉的状态、标题和原因均为中文，不发送原始英文错误、推理或工具输出。
+- 所有更新保持同一 `surfaceId` 和组件 ID；新增步骤时同步更新 `executionTimeline.children`。标题、图标、`textEffect` 和步骤定义通过 `updateComponents` 提交，最终答案通过 `updateDataModel` 写入 `/answer/displayText`。写入仍串行并保持 5 秒节流，步骤突发不会超过该频率；单次更新结果未知即停止后续写入。60 分钟上限、回复位置、发送人 @ 和只读 dws 规则不变。
+
 ### A2UI 参数核对
 
-在 DingTalk Host 上分别读取 `dws schema --cli-path "chat message send-a2ui-card" --compact -f json` 和 `update-a2ui-card` 的同名 schema。创建目标使用群 `--conversation-id` 或个人 `--open-dingtalk-id`，群通知另带 `--at-open-dingtalk-ids`；`--content` 为 JSON 字符串数组。校验使用从只读结果取得的真实目标 ID，并在每条写命令中加入 `--dry-run`，核对 `dry_run: true`、`executed: false`。覆盖群创建、单聊创建、`INPUTTING` 和携带 `--a2ui-annotations` 的 `FINISH`。dry-run 只能确认命令参数与请求结构；桌面和手机的真实展示、通知及摘要需要用户自行验收。
+在 DingTalk Host 上分别读取 `dws schema --cli-path "chat message send-a2ui-card" --compact -f json` 和 `update-a2ui-card` 的同名 schema。创建目标使用群 `--conversation-id` 或个人 `--open-dingtalk-id`，群通知另带 `--at-open-dingtalk-ids`；`--content` 为 JSON 字符串数组。校验使用从只读结果取得的真实目标 ID，并在每条写命令中加入 `--dry-run`，核对 `dry_run: true`、`executed: false`。覆盖群创建、单聊创建、运行中 `INPUTTING` 和携带 `--a2ui-annotations` 的 `FINISH`；运行中批次应含步骤时间线且不含 `answer`，`FINISH` 批次应把 `answer` 放在 `executionPanel` 之后。dry-run 只能确认命令参数与请求结构；桌面和手机的真实展示、通知及摘要需要用户自行验收。

@@ -3,8 +3,14 @@ import type {
   DingTalkDispatchRun,
   DingTalkDispatchRunResult,
   DingTalkDispatchThreadInput,
+  DingTalkProgressEvent,
 } from "./dingtalk-dispatch-types.js";
 import { DINGTALK_DISPATCH_ENV } from "./dingtalk-dispatch-types.js";
+import {
+  dingtalkProgressStatus,
+  dingtalkProgressStep,
+  dingtalkStatusText,
+} from "./dingtalk-progress-steps.js";
 const isRecord = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -23,7 +29,7 @@ export class DingTalkNativeRunner {
       reminder: ReturnType<typeof setInterval>;
       texts: Map<string, string>;
       turnId?: string;
-      onProgress?: (text: string) => void;
+      onProgress?: (event: DingTalkProgressEvent) => void;
     }
   >();
   async start(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
@@ -112,7 +118,7 @@ export class DingTalkNativeRunner {
 
   #watchDingTalkTurn(
     threadId: string,
-    onProgress?: (text: string) => void,
+    onProgress?: (event: DingTalkProgressEvent) => void,
   ): Promise<DingTalkDispatchRunResult> {
     return new Promise((resolve) => {
       const startedAt = Date.now();
@@ -125,7 +131,7 @@ export class DingTalkNativeRunner {
       }, 60 * 60_000);
       const reminder = setInterval(() => {
         const minutes = Math.floor((Date.now() - startedAt) / 60_000);
-        onProgress?.(`仍在处理，已用时 ${minutes} 分钟`);
+        onProgress?.({ type: "status", text: `仍在处理，已用时 ${minutes} 分钟` });
       }, 10 * 60_000);
       reminder.unref?.();
       timer.unref?.();
@@ -158,15 +164,15 @@ export class DingTalkNativeRunner {
     if (!waiter) return;
     const turnId = isRecord(params.turn) ? params.turn.id : params.turnId;
     if (waiter.turnId && typeof turnId === "string" && turnId !== waiter.turnId) return;
-    if (value.method === "item/completed" && isRecord(params.item)) {
+    if (value.method === "item/started" || value.method === "item/completed") {
+      if (!isRecord(params.item)) return;
       const item = params.item;
-      if (
-        item.type === "agentMessage" &&
-        item.phase === "commentary" &&
-        typeof item.text === "string"
-      ) {
-        waiter.onProgress?.(item.text);
-      }
+      const completed = value.method === "item/completed";
+      const step = dingtalkProgressStep(item, completed);
+      if (step) waiter.onProgress?.({ type: "step", step });
+      if (!completed) return;
+      const status = dingtalkProgressStatus(item);
+      if (status) waiter.onProgress?.({ type: "status", text: status });
       if (item.type === "agentMessage" && item.phase !== "commentary") {
         const id = typeof item.id === "string" ? item.id : String(waiter.texts.size);
         if (typeof item.text === "string") waiter.texts.set(id, item.text);
@@ -175,7 +181,10 @@ export class DingTalkNativeRunner {
     }
     if (value.method === "turn/plan/updated" && Array.isArray(params.plan)) {
       const current = params.plan.find((step) => isRecord(step) && step.status === "in_progress");
-      if (isRecord(current) && typeof current.step === "string") waiter.onProgress?.(current.step);
+      if (isRecord(current) && typeof current.step === "string") {
+        const text = dingtalkStatusText(current.step);
+        if (text) waiter.onProgress?.({ type: "status", text });
+      }
       return;
     }
     if (value.method !== "turn/completed") return;
