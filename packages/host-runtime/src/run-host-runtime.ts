@@ -2,6 +2,7 @@ import { createDingTalkDispatchMatcher } from "./dingtalk-dispatch-matcher.js";
 import { ModelService } from "./model-service.js";
 import { CodeRepositories } from "./code-repositories.js";
 import { ModelServiceSettingsStore } from "./model-service-settings.js";
+import { getSkillsHub } from "./skills-hub/service.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -179,6 +180,7 @@ async function prepareDelegationRuntime(input: {
     token,
     api: registry,
     watchApi: registry,
+    skills: getSkillsHub(input.environment).local,
     dingtalkDws: {
       async runDingTalkDws(args) {
         const raw = await runDwsRaw(args, {

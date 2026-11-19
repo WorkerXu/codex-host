@@ -5,6 +5,7 @@ import type { RendererModelServiceClient } from "../../../packages/renderer-exte
 import { mountThreadFoldersPreview } from "./thread-folders.js";
 import { mountSidebarSectionsPreview } from "./sidebar-sections.js";
 import { createRepositoryPreviewClient } from "./code-repositories.js";
+import { mountSkillsPreview } from "./skills.js";
 import previewCss from "./preview.css";
 import { applyDesktopTheme } from "./desktop-theme.js";
 import {
@@ -1595,6 +1596,109 @@ const scenarios: Record<string, () => Promise<void>> = {
     await waitFor(() => document.querySelector('[data-jarvis-chip="status:1"]') === null, 4_000);
     await delay(120);
   },
+};
+
+scenarios["skills-matrix"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+};
+scenarios["skills-conflict"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  const fill = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "全部补齐",
+  );
+  await previewClick(fill!);
+  await waitFor(() => shadow.querySelector(".skills-version"));
+  const radio = shadow.querySelector<HTMLInputElement>(".skills-version input");
+  await previewClick(radio!);
+  await previewInputOn(radio!, "key", { key: "ArrowDown" });
+  await previewInputOn(shadow.querySelector<HTMLElement>("dialog h2")!, "hover");
+};
+scenarios["skills-link-preview"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  const link = [...shadow.querySelectorAll("button")].find(
+    (button) => button.textContent === "一键链接",
+  );
+  await previewClick(link!);
+  await waitFor(() => shadow.querySelector(".skills-link-row"));
+};
+
+scenarios["skills-hover"] = scenarios["skills-matrix"];
+scenarios["skills-focus"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  await previewInputOn(shadow.querySelector<HTMLElement>("[data-skills-refresh]")!, "key", {
+    key: "Tab",
+  });
+};
+scenarios["skills-agents"] = async () => {
+  const shadow = mountSkillsPreview();
+  await waitFor(() => shadow.querySelector(".skills-matrix tbody tr"));
+  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-machine")!, "wheel", {
+    deltaY: 600,
+  });
+};
+scenarios["skills-exclusions"] = async () => {
+  await scenarios["skills-agents"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewClick(shadow.querySelector<HTMLElement>(".skills-exclusions button")!);
+  await waitFor(() => shadow.querySelector("dialog[open] select"));
+};
+scenarios["skills-link-choice"] = async () => {
+  await scenarios["skills-link-preview"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewClick(shadow.querySelector<HTMLElement>("[data-skill-adoption]")!);
+  await waitFor(() => shadow.querySelector<HTMLInputElement>("[data-skill-adoption]")?.checked);
+  await previewInputOn(shadow.querySelector<HTMLElement>("[data-skill-adoption]")!, "key", {
+    key: "Tab",
+  });
+};
+scenarios["skills-link-focus"] = async () => {
+  await scenarios["skills-link-preview"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>("dialog")!, "key", { key: "Tab" });
+  await waitFor(() => shadow.activeElement === shadow.querySelector("[data-skill-adoption]"));
+};
+scenarios["skills-link-checked-focus"] = async () => {
+  await scenarios["skills-link-focus"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>("[data-skill-adoption]")!, "key", {
+    key: "Space",
+  });
+  await waitFor(() => shadow.querySelector<HTMLInputElement>("[data-skill-adoption]")?.checked);
+};
+scenarios["skills-agents-focus"] = async () => {
+  await scenarios["skills-agents"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  const buttons = shadow.querySelectorAll<HTMLElement>(".skills-machine-head button");
+  await previewInputOn(buttons[0]!, "key", { key: "Tab" });
+};
+scenarios["skills-conflict-files"] = async () => {
+  await scenarios["skills-conflict"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewClick(shadow.querySelector<HTMLElement>("dialog summary")!);
+};
+scenarios["skills-conflict-files-focus"] = async () => {
+  await scenarios["skills-conflict"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-version input:checked")!, "key", {
+    key: "Tab",
+  });
+  await previewInputOn(shadow.querySelector<HTMLElement>(".skills-file-summary")!, "key", {
+    key: "Enter",
+  });
+  await waitFor(() => shadow.querySelector("details[open]"));
+};
+scenarios["skills-sync-selection"] = async () => {
+  await scenarios["skills-matrix"]();
+  const shadow = document.querySelector("[data-codexhost-settings-shell]")!.shadowRoot!;
+  const sync = [...shadow.querySelectorAll(".skills-machine button")].find(
+    (button) => button.textContent === "同步到其他机器…",
+  );
+  await previewClick(sync!);
+  await waitFor(() => shadow.querySelector("dialog[open]"));
 };
 
 async function main() {

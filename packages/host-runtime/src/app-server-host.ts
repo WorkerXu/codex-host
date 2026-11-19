@@ -13,6 +13,8 @@ import {
   threadFoldersGetParamsSchema,
   threadFoldersSetParamsSchema,
 } from "@codexhost/shared-contracts";
+import { SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
+import { getSkillsHub, skillsError, type SkillsHubService } from "./skills-hub/service.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -498,6 +500,8 @@ export interface AppServerHostOptions {
   /** Desktop-local shared model credentials and structured connection tests. */
   modelService?: ModelService;
   codeRepositories?: CodeRepositories;
+  /** Central skills inventory, agent discovery and per-skill sync. */
+  skillsHub?: Pick<SkillsHubService, "request">;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1649,6 +1653,19 @@ export class AppServerHost {
           await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
         } catch {
           await this.#writer.json(rpcError(request, -32602, "invalid_params"));
+        }
+      });
+      return;
+    }
+    if (request.method === SKILLS_HUB_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service =
+            this.#options.skillsHub ?? getSkillsHub(this.#options.environment ?? process.env);
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32096, skillsError(error)));
         }
       });
       return;

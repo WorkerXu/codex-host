@@ -8,6 +8,19 @@
   --color-*: initial;
   --color-white: #ffffff;
   --color-black: #000000;
+  --color-settings-checkbox-border: light-dark(
+    var(--gray-200, var(--settings-border)),
+    var(--gray-500, var(--settings-border))
+  );
+  --color-settings-checkbox-border-hover: light-dark(
+    var(--gray-300, var(--settings-border)),
+    var(--gray-600, var(--settings-border))
+  );
+  --color-settings-checkbox-checked: var(
+    --checkbox-checked-background-color,
+    var(--settings-primary)
+  );
+  --color-settings-checkbox-mark: var(--checkbox-checked-mark-color, var(--settings-primary-text));
   --color-settings-bg: var(--settings-bg);
   --color-settings-panel: var(--settings-panel);
   --color-settings-surface: var(--settings-surface);

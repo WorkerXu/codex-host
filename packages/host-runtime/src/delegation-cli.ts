@@ -1,3 +1,4 @@
+import { runSkillsCli } from "./skills-hub/cli.js";
 import path from "node:path";
 import type { Writable } from "node:stream";
 
@@ -318,6 +319,9 @@ export async function runDelegationCli(input: {
     // it reads a JSON envelope from stdin instead of command-line options.
     if (input.arguments[0] === "peer-exec") {
       return await runPeerExec({ environment, output });
+    }
+    if (input.arguments[0] === "skills") {
+      return runSkillsCli({ arguments: input.arguments.slice(1), environment, output });
     }
     if (input.arguments[0] === "peer") {
       return await runPeerCli({

@@ -1,5 +1,6 @@
 import type { CodeRepositoriesClient } from "../code-repositories-client.js";
 import type { RendererModelServiceClient } from "../model-service-client.js";
+import { createSkillsSettingsPage, type RendererSkillsSettingsOptions } from "./skills-page.js";
 import {
   createUsageStatisticsPage,
   type RendererUsageStatisticsHostsProvider,
@@ -92,6 +93,7 @@ export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "remote-connections",
   "accounts",
   "usage-statistics",
+  "skills",
   "jarvis",
   "dingtalk",
   "codex-agents",
@@ -686,6 +688,7 @@ export function createDefaultRendererSettingsPages(
   codexAgents?: RendererCodexAgentsSettingsOptions,
   modelService: RendererModelServiceClient | null = null,
   codeRepositories: CodeRepositoriesClient | null = null,
+  skills?: RendererSkillsSettingsOptions,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -697,6 +700,7 @@ export function createDefaultRendererSettingsPages(
       messages.locale,
       usageStatisticsHosts,
     ),
+    createSkillsSettingsPage(skills ?? { createClient: () => null }),
     createJarvisSettingsPage(messages, jarvis ?? { createClient: () => null }),
     createDingTalkSettingsPage(
       messages,

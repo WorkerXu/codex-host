@@ -1,5 +1,6 @@
 import type { CodeRepositoriesClient } from "./code-repositories-client.js";
 import type { RendererModelServiceClient } from "./model-service-client.js";
+import type { RendererSkillsSettingsOptions } from "./settings/skills-page.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
@@ -49,6 +50,7 @@ export interface RendererSettingsLifecycleOptions {
   codeRepositories?: CodeRepositoriesClient;
   dingtalk?: RendererDingTalkPageOptions;
   codexAgents?: RendererCodexAgentsSettingsOptions;
+  skills?: RendererSkillsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
   onLocaleChange?(locale: RendererSettingsLocale): void;
 }
@@ -113,6 +115,7 @@ export function installRendererSettingsLifecycle(
       options.codexAgents,
       options.modelService,
       options.codeRepositories,
+      options.skills,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {
