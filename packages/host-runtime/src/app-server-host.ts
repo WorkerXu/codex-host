@@ -68,6 +68,8 @@ import {
   DINGTALK_SEARCH_METHOD,
   DINGTALK_RESOLVE_METHOD,
   DINGTALK_VIEWED_METHOD,
+  DINGTALK_PREFETCH_METHOD,
+  DINGTALK_DIAGNOSTICS_METHOD,
   DINGTALK_CHANGED_METHOD,
   dingtalkStatusParamsSchema,
   dingtalkConversationsParamsSchema,
@@ -80,6 +82,8 @@ import {
   dingtalkSearchParamsSchema,
   dingtalkResolveParamsSchema,
   dingtalkViewedParamsSchema,
+  dingtalkPrefetchParamsSchema,
+  dingtalkDiagnosticsParamsSchema,
   dingtalkSettingsSetParamsSchema,
   CODEX_AGENT_LIST_METHOD,
   CODEX_AGENT_READ_METHOD,
@@ -3916,6 +3920,20 @@ export class AppServerHost {
         throw new DingTalkServiceError("invalid_params", "Invalid DingTalk settings");
       }
       return await service.updateSettings(parsed.data);
+    }
+    if (request.method === DINGTALK_PREFETCH_METHOD) {
+      const parsed = dingtalkPrefetchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk prefetch request");
+      }
+      return await service.prefetch(parsed.data);
+    }
+    if (request.method === DINGTALK_DIAGNOSTICS_METHOD) {
+      const parsed = dingtalkDiagnosticsParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk diagnostics request");
+      }
+      return await service.diagnostics(parsed.data);
     }
     throw new DingTalkServiceError("unknown_method", "Unknown DingTalk method");
   }

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
 
-import type { DingTalkCli } from "../src/dingtalk-cli.js";
+import type { DingTalkCli, DwsEventRecord } from "../src/dingtalk-cli.js";
 import { DingTalkService } from "../src/dingtalk-service.js";
 
 const RECENT_BASE = Date.now() - 60 * 60_000;
@@ -567,7 +567,11 @@ describe("DingTalk change notifications", () => {
     for (let i = 0; i < 5; i += 1) fake.onRecord?.(event);
     expect(dispatch).toHaveBeenCalledTimes(1);
     cli.unreadConversations = async () => ({ conversations: [], errorCode: "offline" });
-    expect((await service.conversations()).conversations).toEqual([]);
+    // The live state is what the workbench already shows; a failed reconcile
+    // must not blank the list.
+    const stale = await service.conversations();
+    expect(stale.refreshing).toBe(true);
+    expect(stale.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
     service.dispose();
   });
   it("notifies every Desktop session that shares the service", async () => {
@@ -715,7 +719,7 @@ it.each([
   }
 });
 
-it("reads rows and labels fresh and never serves old rows after a read error", async () => {
+it("reconciles rows in the background and keeps them when a read fails", async () => {
   const env = await environment();
   const fake = state({ unread: [conversation("a", 100)] });
   const cli = fakeCli(fake);
@@ -725,20 +729,276 @@ it("reads rows and labels fresh and never serves old rows after a read error", a
     errorCode: null,
   }));
   const unread = vi.spyOn(cli, "unreadConversations");
+  const changes: { conversationId: string | null }[] = [];
   const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+  service.addNotifier((event) => changes.push(event));
   try {
     const first = await service.conversations();
     expect((await service.details(first.conversations)).conversations[0]?.memberCount).toBe(2);
     members = 7;
     fake.unread[0] = { ...conversation("a", 100), title: "新标题" };
     const second = await service.conversations();
-    expect(second.conversations[0]?.title).toBe("新标题");
-    expect((await service.details(second.conversations)).conversations[0]?.memberCount).toBe(7);
+    expect(second.refreshing).toBe(true);
+    await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0));
+    const third = await service.conversations();
+    expect(third.conversations[0]?.title).toBe("新标题");
+    expect((await service.details(third.conversations)).conversations[0]?.memberCount).toBe(7);
     expect(directory).toHaveBeenCalledTimes(2);
-    expect(unread).toHaveBeenCalledTimes(2);
+    expect(unread.mock.calls.length).toBeGreaterThanOrEqual(2);
     unread.mockResolvedValue({ conversations: [], errorCode: "offline" });
-    expect((await service.conversations()).conversations).toEqual([]);
+    const offline = await service.conversations();
+    expect(offline.refreshing).toBe(true);
+    expect(offline.conversations.map(({ conversationId }) => conversationId)).toEqual(["a"]);
   } finally {
     service.dispose();
   }
+});
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function messageRow(
+  messageId: string,
+  conversationId: string,
+  createdAt: number,
+  text = "预算表我改完第二版了，你看一下。",
+): DingTalkMessage {
+  return {
+    messageId,
+    conversationId,
+    senderName: "林晓",
+    createdAt,
+    text,
+    unsupported: false,
+    mine: false,
+  };
+}
+
+describe("DingTalk live in-memory state", () => {
+  it("answers the second list from memory while one live dws read runs", async () => {
+    const env = await environment();
+    const fake = state({ unread: [conversation("a", 200), conversation("b", 100)] });
+    const cli = fakeCli(fake);
+    const unread = cli.unreadConversations.bind(cli);
+    let calls = 0;
+    // Real dws `+unread-chats` is about 0.8–1.3 s; keep the shape, shorten the wait.
+    cli.unreadConversations = async (count) => {
+      calls += 1;
+      await sleep(700);
+      return await unread(count);
+    };
+    const changes: { conversationId: string | null }[] = [];
+    const service = new DingTalkService({
+      environment: env,
+      isLocalHost: true,
+      cli,
+    });
+    service.addNotifier((event) => changes.push(event));
+    try {
+      const coldStart = Date.now();
+      const cold = await service.conversations();
+      const coldMs = Date.now() - coldStart;
+      expect(coldMs).toBeGreaterThanOrEqual(650);
+      expect(cold.refreshing).toBe(false);
+      expect(cold.cachedAt).not.toBeNull();
+
+      fake.unread = [conversation("b", 400), conversation("a", 300)];
+      const warmStart = Date.now();
+      const warm = await service.conversations();
+      const warmMs = Date.now() - warmStart;
+      expect(warmMs).toBeLessThan(120);
+      expect(warm).toMatchObject({ available: true, refreshing: true, source: "unread" });
+      expect(warm.conversations.map(({ conversationId }) => conversationId)).toEqual(["a", "b"]);
+
+      await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0), { timeout: 4_000 });
+      const fresh = await service.conversations();
+      expect(fresh.conversations.map(({ conversationId }) => conversationId)).toEqual(["b", "a"]);
+      expect(calls).toBe(3);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("returns the stored transcript at once and folds the live read back in", async () => {
+    const env = await environment();
+    const first = messageRow("m1", "a", RECENT_BASE);
+    const fake = state({ unread: [conversation("a", 200)], messages: [first] });
+    const cli = fakeCli(fake);
+    const read = cli.messages.bind(cli);
+    let calls = 0;
+    cli.messages = async (input) => {
+      calls += 1;
+      await sleep(600);
+      return await read(input);
+    };
+    const changes: { conversationId: string | null }[] = [];
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    service.addNotifier((event) => changes.push(event));
+    try {
+      const cold = await service.messages({
+        conversationId: "a",
+        limit: 30,
+        includeConversation: false,
+      });
+      expect(cold.refreshing).toBe(false);
+      expect(cold.messages.map(({ messageId }) => messageId)).toEqual(["m1"]);
+
+      fake.messages = [messageRow("m2", "a", RECENT_BASE + 60_000), first];
+      const callsBefore = calls;
+      const warmStart = Date.now();
+      const warm = await service.messages({
+        conversationId: "a",
+        limit: 30,
+        includeConversation: false,
+      });
+      const warmMs = Date.now() - warmStart;
+      expect(warmMs).toBeLessThan(120);
+      expect(warm.refreshing).toBe(true);
+      expect(warm.messages.map(({ messageId }) => messageId)).toEqual(["m1"]);
+      expect(calls).toBe(callsBefore + 1);
+
+      await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0), { timeout: 4_000 });
+      const reconciled = await service.messages({
+        conversationId: "a",
+        limit: 30,
+        includeConversation: false,
+      });
+      expect(reconciled.messages.map(({ messageId }) => messageId)).toEqual(["m2", "m1"]);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("applies a flattened Stream event before the next read and notifies the page", async () => {
+    const env = await environment();
+    const first = messageRow("m1", "g1", RECENT_BASE);
+    const fake = state({ unread: [conversation("g1", 200)], messages: [first] });
+    const cli = fakeCli(fake);
+    let deliver: ((record: DwsEventRecord) => void) | null = null;
+    cli.openEvents = async (input) => {
+      deliver = input.onRecord;
+      return { stop: () => undefined };
+    };
+    const changes: { conversationId: string | null }[] = [];
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    service.addNotifier((event) => changes.push(event));
+    try {
+      await service.conversations();
+      await service.messages({ conversationId: "g1", limit: 30, includeConversation: false });
+      await service.startListening();
+      await vi.waitFor(() => expect(deliver).not.toBeNull(), { timeout: 2_000 });
+      const callsBefore = fake.messageCalls;
+      deliver?.({
+        messageId: "e1",
+        conversationId: "g1",
+        senderName: "林晓",
+        text: "上线时间改到周五，请确认",
+        createdAt: RECENT_BASE + 120_000,
+        kind: "group",
+        atMe: true,
+        atAll: false,
+        conversationTitle: "项目群",
+      });
+      await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0), { timeout: 2_000 });
+
+      const list = await service.conversations();
+      expect(list.conversations[0]).toMatchObject({
+        conversationId: "g1",
+        unreadCount: 2,
+        preview: "林晓：上线时间改到周五，请确认",
+        atMe: true,
+      });
+      const page = await service.messages({
+        conversationId: "g1",
+        limit: 30,
+        includeConversation: false,
+      });
+      expect(page.messages.map(({ messageId }) => messageId)).toEqual(["e1", "m1"]);
+      // The event arrived before the live read, so the read is the background one.
+      expect(fake.messageCalls).toBe(callsBefore + 1);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("keeps message content out of the diagnostics and bounds the record", async () => {
+    const env = await environment();
+    const fake = state({ unread: [conversation("a", 200)], messages: [messageRow("m1", "a", 1)] });
+    const cli = fakeCli(fake);
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    try {
+      for (let index = 0; index < 70; index += 1) {
+        await service.messages({ conversationId: "a", limit: 30, includeConversation: false });
+      }
+      const diagnostics = await service.diagnostics({ limit: 200 });
+      expect(diagnostics.entries).toHaveLength(60);
+      expect(diagnostics.entries[0]).toMatchObject({
+        kind: "messages",
+        conversationId: "a",
+        memoryHit: true,
+      });
+      expect(diagnostics.entries[0]?.waitedMs).toBeLessThan(120);
+      expect(JSON.stringify(diagnostics)).not.toContain("预算表");
+      expect(diagnostics.storeBytes).toBeLessThanOrEqual(5 * 1024 * 1024);
+      expect(diagnostics.peakStoreBytes).toBeGreaterThan(0);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("drops the whole live state on logout", async () => {
+    const env = await environment();
+    const fake = state({ unread: [conversation("a", 200)], messages: [messageRow("m1", "a", 1)] });
+    const cli = fakeCli(fake);
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    try {
+      await service.conversations();
+      await service.messages({ conversationId: "a", limit: 30, includeConversation: false });
+      expect((await service.diagnostics()).storeBytes).toBeGreaterThan(0);
+
+      cli.authStatus = async () => ({
+        installed: true,
+        authenticated: false,
+        userId: null,
+        userName: null,
+        corpName: null,
+        errorCode: "not_logged_in",
+      });
+      await service.status();
+      const diagnostics = await service.diagnostics();
+      expect(diagnostics.storeBytes).toBe(0);
+      expect(diagnostics.conversations).toBe(0);
+      expect(diagnostics.messageConversations).toBe(0);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("prefetches the rows the list shows, deduplicated per conversation", async () => {
+    const env = await environment();
+    const fake = state({
+      unread: [conversation("a", 200), conversation("b", 100)],
+      messages: [messageRow("m1", "a", RECENT_BASE)],
+    });
+    const cli = fakeCli(fake);
+    const read = cli.messages.bind(cli);
+    cli.messages = async (input) => {
+      await sleep(30);
+      return await read(input);
+    };
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    try {
+      await service.conversations();
+      const before = fake.messageCalls;
+      const started = await service.prefetch({ conversationIds: ["a", "b", "a"] });
+      expect(started.started).toBe(2);
+      const overlapping = await service.prefetch({ conversationIds: ["a", "b"] });
+      expect(overlapping.started).toBe(0);
+      await vi.waitFor(() => expect(fake.messageCalls).toBe(before + 2), { timeout: 2_000 });
+      const diagnostics = await service.diagnostics();
+      expect(diagnostics.messageConversations).toBe(2);
+      expect(diagnostics.entries.some(({ kind }) => kind === "prefetch")).toBe(true);
+    } finally {
+      service.dispose();
+    }
+  });
 });

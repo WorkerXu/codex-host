@@ -44,6 +44,9 @@ const INITIAL_MESSAGE_LIMIT = 30;
 const OLDER_MESSAGE_LIMIT = 30;
 const MAX_MESSAGE_WINDOW = 200;
 const PREVIEW_CONCURRENCY = 3;
+const PREFETCH_LIMIT = 3;
+/** A memory-backed open answers in a few milliseconds; only a miss shows a skeleton. */
+const SKELETON_DELAY_MS = 150;
 const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation.unread";
 const LEGACY_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation";
 
@@ -99,6 +102,10 @@ export function createDingTalkSettingsPage(
       let searchExpanded = { conversations: false, messages: false };
       let searchCursor = -1;
       let loadingOlderRequest = false;
+      let loadedOlderPages = false;
+      let prefetchedList = false;
+      let skeletonVisible = false;
+      let skeletonTimer: number | null = null;
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
       const previewAttempted = new Set<string>();
@@ -365,6 +372,37 @@ export function createDingTalkSettingsPage(
               { root: conversationList, rootMargin: "48px" },
             );
 
+      /** A memory hit paints before this fires; only a live miss shows a skeleton. */
+      const beginSkeleton = (): void => {
+        if (skeletonTimer !== null) view.clearTimeout(skeletonTimer);
+        skeletonVisible = false;
+        skeletonTimer = view.setTimeout(() => {
+          skeletonTimer = null;
+          if (disposed || !state.loadingMessages) return;
+          skeletonVisible = true;
+          renderMessages();
+        }, SKELETON_DELAY_MS);
+      };
+
+      const clearSkeleton = (): void => {
+        if (skeletonTimer !== null) {
+          view.clearTimeout(skeletonTimer);
+          skeletonTimer = null;
+        }
+        skeletonVisible = false;
+      };
+
+      /** Warms the next rows the user is likely to open, once per page visit. */
+      const warmTopConversations = (): void => {
+        if (!client || prefetchedList || state.conversations.length === 0) return;
+        prefetchedList = true;
+        const ids = state.conversations
+          .filter((row) => row.conversationId !== state.selectedId && !row.preview)
+          .slice(0, PREFETCH_LIMIT)
+          .map((row) => row.conversationId);
+        if (ids.length > 0) void client.prefetch(ids).catch(() => undefined);
+      };
+
       const renderList = (): void => {
         if (state.listError) {
           conversationRows.clear();
@@ -462,6 +500,11 @@ export function createDingTalkSettingsPage(
         }
         if (state.loadingMessages) {
           messageListView.clear();
+          if (!skeletonVisible) {
+            renderMainState(null);
+            renderPill();
+            return;
+          }
           renderMainState(createMessageSkeleton(document));
           renderPill();
           return;
@@ -552,14 +595,17 @@ export function createDingTalkSettingsPage(
         state.messagesError = false;
         state.loadMoreError = false;
         state.pendingNewCount = 0;
+        loadedOlderPages = false;
         composer.reset();
         updateHeader();
         renderList();
+        beginSkeleton();
         renderMessages();
         const generation = ++messageGeneration;
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
           .catch(() => null);
+        clearSkeleton();
         if (disposed || generation !== messageGeneration || state.selectedId !== conversationId)
           return;
         state.loadingMessages = false;
@@ -587,6 +633,11 @@ export function createDingTalkSettingsPage(
         renderMessages({ scroll: "bottom" });
         const newest = state.messages.at(-1);
         if (newest) void client.markViewed(conversationId, newest.createdAt, true);
+        // The @ picker is the only member consumer; warm it after the transcript
+        // paints so the first picker opens without a live read.
+        if (state.currentConversation?.singleChat === false) {
+          void client.members(conversationId).catch(() => null);
+        }
       };
 
       const loadOlder = async (force = false): Promise<void> => {
@@ -622,6 +673,7 @@ export function createDingTalkSettingsPage(
           renderMessages({ distance });
           return;
         }
+        loadedOlderPages = true;
         const known = new Set(state.messages.map((message) => message.messageId));
         const older = mergeDingTalkMessages([], result.messages)
           .filter((message) => !known.has(message.messageId))
@@ -665,6 +717,11 @@ export function createDingTalkSettingsPage(
           .filter((message) => !known.has(message.messageId))
           .sort((left, right) => left.createdAt - right.createdAt);
         state.messages = mergeDingTalkMessages(state.messages, result.messages);
+        if (!loadedOlderPages) {
+          // The window is still the latest page, so its cursor is authoritative.
+          state.hasMore = result.hasMore;
+          state.nextCursor = result.nextCursor;
+        }
         const overflow = Math.max(0, state.messages.length - MAX_MESSAGE_WINDOW);
         if (overflow > 0) {
           state.messages = state.messages.slice(overflow);
@@ -795,9 +852,11 @@ export function createDingTalkSettingsPage(
           renderMessages();
           renderList();
           if (target) void selectConversation(target);
+          warmTopConversations();
           return;
         }
         renderList();
+        warmTopConversations();
         if (state.conversations.length === 0) {
           if (state.selectedId) {
             void client.markViewed(
@@ -1123,6 +1182,7 @@ export function createDingTalkSettingsPage(
 
       return () => {
         disposed = true;
+        clearSkeleton();
         poll.stop();
         document.removeEventListener("visibilitychange", onVisibility);
         lightbox.dispose();

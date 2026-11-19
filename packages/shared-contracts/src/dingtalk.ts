@@ -240,6 +240,10 @@ export const DINGTALK_SEND_METHOD = "codexhost/dingtalk/send";
 export const DINGTALK_SEARCH_METHOD = "codexhost/dingtalk/search";
 export const DINGTALK_RESOLVE_METHOD = "codexhost/dingtalk/resolve";
 export const DINGTALK_VIEWED_METHOD = "codexhost/dingtalk/viewed";
+/** Warms the Host's in-memory live state for the conversations the list shows. */
+export const DINGTALK_PREFETCH_METHOD = "codexhost/dingtalk/prefetch";
+/** Bounded open timings for acceptance; never carries message content. */
+export const DINGTALK_DIAGNOSTICS_METHOD = "codexhost/dingtalk/diagnostics";
 
 /** Host → Renderer notification: reread current DingTalk state. */
 export const DINGTALK_CHANGED_METHOD = "codexhost/dingtalk/changed";
@@ -249,6 +253,14 @@ export const DINGTALK_MAX_MESSAGES = 100;
 export const DINGTALK_MAX_CONVERSATIONS = 50;
 export const DINGTALK_MAX_MEMBERS = 500;
 export const DINGTALK_MAX_AT_MEMBERS = 100;
+export const DINGTALK_MAX_PREFETCH = 6;
+
+/** The Host keeps at most this many newest messages per opened conversation. */
+export const DINGTALK_LIVE_MESSAGE_LIMIT = 50;
+/** Opened conversations whose transcript stays in the live state. */
+export const DINGTALK_LIVE_CONVERSATION_LIMIT = 20;
+/** Hard cap for the whole live state; it is memory only and never persisted. */
+export const DINGTALK_LIVE_MAX_BYTES = 5 * 1024 * 1024;
 
 export const dingtalkStatusParamsSchema = z.object({ refresh: z.boolean().optional() }).strict();
 
@@ -300,7 +312,9 @@ export const dingtalkConversationsResultSchema = z
     available: z.boolean(),
     source: z.enum(["unread", "empty"]),
     conversations: z.array(dingtalkConversationSchema).max(DINGTALK_MAX_CONVERSATIONS),
+    /** When the Host live state was last reconciled from dws, or null. */
     cachedAt: z.number().int().nonnegative().nullable(),
+    /** Rows came from the live state and one live dws read is in flight. */
     refreshing: z.boolean(),
     errorCode: z.string().max(64).nullable(),
   })
@@ -345,7 +359,10 @@ export const dingtalkMessagesResultSchema = z
     messages: z.array(dingtalkMessageSchema).max(DINGTALK_MAX_MESSAGES),
     hasMore: z.boolean(),
     nextCursor: z.number().int().nonnegative().nullable(),
+    /** When the Host live state for this conversation was last reconciled. */
     cachedAt: z.number().int().nonnegative().nullable(),
+    /** The messages came from the live state and one live dws read is in flight. */
+    refreshing: z.boolean().optional(),
     errorCode: z.string().max(64).nullable(),
   })
   .strict();
@@ -465,3 +482,52 @@ export const dingtalkViewedParamsSchema = z
   })
   .strict();
 export type DingTalkViewedParams = z.infer<typeof dingtalkViewedParamsSchema>;
+
+export const dingtalkPrefetchParamsSchema = z
+  .object({
+    conversationIds: z.array(z.string().trim().min(1).max(512)).min(1).max(DINGTALK_MAX_PREFETCH),
+  })
+  .strict();
+export type DingTalkPrefetchParams = z.infer<typeof dingtalkPrefetchParamsSchema>;
+
+export const dingtalkPrefetchResultSchema = z
+  .object({ started: z.number().int().nonnegative() })
+  .strict();
+export type DingTalkPrefetchResult = z.infer<typeof dingtalkPrefetchResultSchema>;
+
+export const dingtalkDiagnosticsParamsSchema = z
+  .object({ limit: z.number().int().min(1).max(200).optional() })
+  .strict();
+export type DingTalkDiagnosticsParams = z.infer<typeof dingtalkDiagnosticsParamsSchema>;
+
+/** One workbench open: ids and timings only, never message content. */
+export const dingtalkOpenTimingSchema = z
+  .object({
+    at: z.number().int().nonnegative(),
+    kind: z.enum(["conversations", "messages", "members", "prefetch"]),
+    conversationId: z.string().max(512).nullable(),
+    /** True when the response came from the live state without waiting for dws. */
+    memoryHit: z.boolean(),
+    /** Milliseconds the workbench waited for the response. */
+    waitedMs: z.number().int().nonnegative(),
+    /** Duration of the background live read, or null while it runs. */
+    liveMs: z.number().int().nonnegative().nullable(),
+    liveError: z.string().max(64).nullable(),
+    storeBytes: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DingTalkOpenTiming = z.infer<typeof dingtalkOpenTimingSchema>;
+
+export const dingtalkDiagnosticsResultSchema = z
+  .object({
+    available: z.boolean(),
+    entries: z.array(dingtalkOpenTimingSchema).max(200),
+    storeBytes: z.number().int().nonnegative(),
+    peakStoreBytes: z.number().int().nonnegative(),
+    conversations: z.number().int().nonnegative(),
+    messageConversations: z.number().int().nonnegative(),
+    messages: z.number().int().nonnegative(),
+    members: z.number().int().nonnegative(),
+  })
+  .strict();
+export type DingTalkDiagnosticsResult = z.infer<typeof dingtalkDiagnosticsResultSchema>;

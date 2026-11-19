@@ -5,6 +5,7 @@ import {
   DINGTALK_CONVERSATIONS_METHOD,
   DINGTALK_MEMBERS_METHOD,
   DINGTALK_MESSAGES_METHOD,
+  DINGTALK_PREFETCH_METHOD,
   DINGTALK_PREVIEW_METHOD,
   DINGTALK_STATUS_METHOD,
   DINGTALK_VIEWED_METHOD,
@@ -66,6 +67,7 @@ function manager(
           errorCode: null,
         };
       }
+      if (method === DINGTALK_PREFETCH_METHOD) return { started: 0 };
       return {};
     },
     addNotificationCallback(
@@ -101,6 +103,26 @@ describe("DingTalk renderer routing", () => {
     await client.preview("cid");
     expect(priorities).toContainEqual([DINGTALK_MESSAGES_METHOD, "interactive"]);
     expect(priorities).toContainEqual([DINGTALK_PREVIEW_METHOD, "background"]);
+  });
+
+  it("prefetches the visible rows at background priority", async () => {
+    const calls: { method: string; params: unknown; priority?: string }[] = [];
+    const target = manager([], { status: status({ defaultHost: "local", defaultHostId: null }) });
+    const original = target.sendRequest.bind(target);
+    target.sendRequest = async (method, params, options) => {
+      calls.push({ method, params, priority: options?.priority });
+      if (method === DINGTALK_PREFETCH_METHOD) return { started: 6 };
+      return original(method, params, options);
+    };
+    const client = createRendererDingTalkClient({ forHost: () => route("local", target) });
+    await client.prefetch(["a", "b", "a", "c", "d", "e", "f", "g"]);
+    expect(calls.filter((call) => call.method === DINGTALK_PREFETCH_METHOD)).toEqual([
+      {
+        method: DINGTALK_PREFETCH_METHOD,
+        params: { conversationIds: ["a", "b", "c", "d", "e", "f"] },
+        priority: "background",
+      },
+    ]);
   });
   it("sends data requests to the Host that owns the DingTalk login", async () => {
     const localCalls: string[] = [];
