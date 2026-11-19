@@ -142,7 +142,7 @@ describe("MCPHub connection RPCs", () => {
         .request({ op: "mcpConnect", key: replacement })
         .catch((error: unknown) => error);
       expect(error).toMatchObject({
-        code: status === 401 || status === 403 ? "mcp-auth" : "failed",
+        code: status === 401 ? "mcp-key-invalid" : status === 403 ? "mcp-key-scoped" : "failed",
       });
       expect(String(error)).not.toContain(replacement);
       expect(f.connection.write).not.toHaveBeenCalled();
