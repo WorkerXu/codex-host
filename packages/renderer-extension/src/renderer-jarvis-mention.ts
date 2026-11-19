@@ -7,10 +7,10 @@
  *
  *   1. projects — 「我的项目」 paints from a short-lived local cache while the
  *      Host revalidates it; typing searches visible projects;
- *   2. bugs — the chosen project becomes a removable chip. Typing only runs a
- *      title preview inside that project; pressing Enter asks the existing
- *      Gemini parser for the remaining conditions. A slow or failed parse keeps
- *      the title result and says so, so the panel never waits on the model.
+ *   2. bugs — the chosen project becomes a removable chip. Typing paints a
+ *      title preview, then runs the Gemini condition parse on its own 800 ms
+ *      debounce. The pending panel says 「正在识别条件…」 and only the parse can
+ *      replace it; a timeout or failure keeps the preview and offers 「重试」.
  *
  * Choosing a bug inserts the native mention chip whose
  * `jarvis://bug/<projectId>/<bugId>` path the Host expands on submit.
@@ -38,9 +38,11 @@ import {
   JARVIS_MODE_ATTRIBUTE,
   TEXT_PRIMARY,
   type JarvisStepChrome,
+  clearJarvisNotice,
   createJarvisStepChrome,
   renderJarvisLoading,
   renderJarvisMessage,
+  renderJarvisNotice,
 } from "./renderer-jarvis-panel-view.js";
 import { renderJarvisProjectRows } from "./renderer-jarvis-project-view.js";
 import {
@@ -84,7 +86,7 @@ export { findNativeSuggestionList } from "./renderer-native-at-menu.js";
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
-const PARSE_TIMEOUT_MS = 8_000;
+const PARSE_DEBOUNCE_MS = 800;
 const MAX_QUERY_LENGTH = 64;
 
 export interface RendererJarvisTrigger {
@@ -220,11 +222,11 @@ interface ModeState {
   previewText: string;
   previewGeneration: number;
   previewRequest: AbortController | null;
-  previewError: string | null;
   parse: "idle" | "pending" | "done" | "failed";
   parseText: string;
   parseGeneration: number;
   parseRequest: AbortController | null;
+  /** Debounce for the automatic parse after the user stops typing. */
   parseTimer: number | null;
   generation: number;
   hiddenPanel: { element: HTMLElement; visibility: string } | null;
@@ -423,7 +425,6 @@ export function installRendererJarvisMention(
       previewText: "",
       previewGeneration: 0,
       previewRequest: null,
-      previewError: null,
       parse: "idle",
       parseText: "",
       parseGeneration: 0,
@@ -497,38 +498,21 @@ export function installRendererJarvisMention(
     return state.locale === "zh-CN" ? `共 ${result.total} 条` : `${result.total} bugs`;
   };
 
-  const previewSummary = (state: ModeState, result: JarvisBugSearchResult): string => {
-    const count = resultCount(state, result);
-    if (state.locale === "zh-CN") {
-      return state.previewText ? `${count} · 回车识别条件` : count;
-    }
-    return state.previewText ? `${count} · Enter reads conditions` : count;
-  };
-
-  const unparsedNotice = (state: ModeState): string =>
-    state.locale === "zh-CN"
-      ? "条件未识别，已按标题搜索"
-      : "Conditions were not recognized; searched titles instead";
-
-  const failureMessage = (state: ModeState, errorCode: string | null): string =>
-    jarvisStepErrorText(errorCode, state.locale);
-
   const emptyMessage = (state: ModeState, kind: StepState["kind"]): string =>
     kind === "project"
       ? state.locale === "zh-CN"
         ? "无结果，换个项目名试试。"
         : "No matching projects. Try another name."
-      : state.locale === "zh-CN"
-        ? state.bugChrome.input.value.trim()
-          ? state.parse === "done"
-            ? "无结果。换个说法，或点掉一个条件。"
-            : "无结果。按回车让 Jarvis 识别条件，或换个关键词。"
-          : "无结果。这个项目里没有指派给你的 Bug。"
-        : state.parse === "done"
-          ? "No results. Rephrase the search or remove a condition."
-          : state.bugChrome.input.value.trim()
-            ? "No results. Press Enter to read conditions, or change the keyword."
-            : "No results. No bugs in this project are assigned to you.";
+      : state.bugChrome.input.value.trim()
+        ? state.locale === "zh-CN"
+          ? "没有符合条件的 Bug。换个说法，或点掉一个条件。"
+          : "No bugs match these conditions. Rephrase the search or remove a condition."
+        : state.locale === "zh-CN"
+          ? "无结果。这个项目里没有指派给你的 Bug。"
+          : "No results. No bugs in this project are assigned to you.";
+
+  const failureMessage = (state: ModeState, errorCode: string | null): string =>
+    jarvisStepErrorText(errorCode, state.locale);
 
   const failureAction = (
     state: ModeState,
@@ -686,7 +670,7 @@ export function installRendererJarvisMention(
       chips.append(
         createJarvisConditionChip(ownerDocument, condition, () => {
           state.omit.add(condition.key);
-          void submitBugSearch(state);
+          void submitBugSearch(state, true);
         }),
       );
     }
@@ -718,36 +702,42 @@ export function installRendererJarvisMention(
     capped: false,
   });
 
-  /** Keep the current title preview visible and explain why conditions lost. */
-  const failParse = (state: ModeState): void => {
+  /**
+   * The parse failed: keep any title preview visible, but say what happened
+   * and offer a retry. This must never look like a completed empty search.
+   */
+  const failParse = (state: ModeState, errorCode: string | null): void => {
     state.parse = "failed";
     setBusy(state, false);
     renderBugChips(state, []);
-    if (state.previewError) return;
-    const hasRows = state.step.kind === "bug" && state.step.entries.length > 0;
-    if (hasRows) {
-      state.bugChrome.summary.textContent = unparsedNotice(state);
-      return;
-    }
     state.bugChrome.summary.textContent = "";
-    renderJarvisMessage(
-      ownerDocument,
-      state.bugChrome.results,
-      `${unparsedNotice(state)}。`,
-      failureAction(state, null, () => {
-        void submitBugSearch(state);
-      }),
-    );
+    const message =
+      errorCode === "unrecognized_query"
+        ? state.locale === "zh-CN"
+          ? "无法识别这些条件"
+          : "Those conditions were not understood"
+        : errorCode === "timeout"
+          ? state.locale === "zh-CN"
+            ? "识别条件超时"
+            : "Reading conditions timed out"
+          : state.locale === "zh-CN"
+            ? "条件识别失败"
+            : "Could not read the conditions";
+    renderJarvisNotice(ownerDocument, state.bugChrome.results, message, {
+      label: state.locale === "zh-CN" ? "重试" : "Retry",
+      onClick: () => {
+        void submitBugSearch(state, true);
+      },
+    });
   };
 
   const applyParsedResult = (state: ModeState, result: JarvisBugSearchResult): void => {
     if (state.step.kind !== "bug") return;
     if (!result.available || result.errorCode) {
-      failParse(state);
+      failParse(state, result.errorCode);
       return;
     }
     state.parse = "done";
-    state.previewError = null;
     setBusy(state, false);
     state.bugChrome.summary.textContent =
       result.bugs.length === 0 ? "" : resultCount(state, result);
@@ -770,14 +760,15 @@ export function installRendererJarvisMention(
     state.previewRequest?.abort();
     state.previewRequest = new AbortController();
     const hadRows = state.step.kind === "bug" && state.step.entries.length > 0;
+    const parsingNow = state.parse === "pending" && state.parseText === text;
     setBusy(state, true);
     if (!hadRows) {
       // Entering the step or typing after an empty state still needs a
       // skeleton, even when this preview was started silently.
       state.step = { kind: "bug", entries: [], selected: -1 };
-      state.bugChrome.summary.textContent = "";
+      if (!parsingNow) state.bugChrome.summary.textContent = "";
       renderJarvisLoading(ownerDocument, state.bugChrome.results);
-    } else {
+    } else if (!parsingNow) {
       state.bugChrome.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
     }
     const hostId = state.hostId;
@@ -806,10 +797,13 @@ export function installRendererJarvisMention(
     state.previewRequest = null;
     if (state.step.kind !== "bug") return;
     if (state.parse === "done" && state.parseText === text) return;
+    const parsing = state.parse === "pending" && state.parseText === text;
+    if (state.parse === "failed" && state.parseText === text) return;
     state.previewText = text;
     if (!result.available || result.errorCode) {
-      state.previewError = result.errorCode;
-      setBusy(state, state.parse === "pending");
+      // A pending parse owns the panel; its own failure path reports later.
+      if (parsing) return;
+      setBusy(state, false);
       state.bugChrome.summary.textContent = "";
       renderJarvisMessage(
         ownerDocument,
@@ -821,55 +815,58 @@ export function installRendererJarvisMention(
       );
       return;
     }
-    state.previewError = null;
-    setBusy(state, state.parse === "pending");
-    if (result.bugs.length === 0) {
-      if (state.parse === "failed") {
-        state.bugChrome.summary.textContent = unparsedNotice(state);
-      } else {
-        state.bugChrome.summary.textContent = "";
-      }
-      renderJarvisMessage(ownerDocument, state.bugChrome.results, emptyMessage(state, "bug"));
+    if (parsing) {
+      // Only the rows may update; the pending summary and skeleton stay.
+      if (result.bugs.length > 0) renderBugRows(state, result.bugs);
       return;
     }
-    state.bugChrome.summary.textContent =
-      state.parse === "failed" ? unparsedNotice(state) : previewSummary(state, result);
+    setBusy(state, false);
+    if (result.bugs.length === 0) {
+      if (text) {
+        // The automatic parse is queued (or already running): never turn this
+        // gap into 「无结果」.
+        state.bugChrome.summary.textContent =
+          state.locale === "zh-CN" ? "正在识别条件…" : "Reading conditions…";
+        renderJarvisLoading(ownerDocument, state.bugChrome.results);
+      } else {
+        state.bugChrome.summary.textContent = "";
+        renderJarvisMessage(ownerDocument, state.bugChrome.results, emptyMessage(state, "bug"));
+      }
+      return;
+    }
+    state.bugChrome.summary.textContent = resultCount(state, result);
     renderBugRows(state, result.bugs);
   };
 
   /**
-   * Enter runs the model interpretation once. The title preview is already on
-   * screen, so the 8 s deadline can only keep it, never leave a blank panel.
+   * Runs the model interpretation once for the current text. Typing schedules
+   * it automatically; Enter only forces it when no parse is pending or done.
    */
-  const submitBugSearch = async (state: ModeState): Promise<void> => {
+  const submitBugSearch = async (state: ModeState, force = false): Promise<void> => {
     if (!state.project) return;
     const text = state.bugChrome.input.value.trim();
     if (!text) return;
+    if (!force) {
+      if (state.parse === "pending" && state.parseText === text) return;
+      if (state.parse === "done" && state.parseText === text) return;
+    }
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = null;
     state.parseGeneration += 1;
     const generation = state.parseGeneration;
     state.parseRequest?.abort();
     state.parseRequest = new AbortController();
     state.parse = "pending";
     state.parseText = text;
-    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
-    state.parseTimer = view.setTimeout(() => {
-      state.parseTimer = null;
-      if (mode !== state || generation !== state.parseGeneration) return;
-      state.parseGeneration += 1;
-      state.parseRequest?.abort();
-      state.parseRequest = null;
-      failParse(state);
-    }, PARSE_TIMEOUT_MS);
     setBusy(state, true);
+    clearJarvisNotice(state.bugChrome.results);
     state.bugChrome.summary.textContent =
       state.locale === "zh-CN" ? "正在识别条件…" : "Reading conditions…";
     if (state.previewText !== text) void requestTitlePreview(state, text, true);
     const hostId = state.hostId;
     if (!hostId) {
-      if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
-      state.parseTimer = null;
       state.parseRequest = null;
-      failParse(state);
+      failParse(state, "jarvis_failed");
       return;
     }
     const params: JarvisProjectBugSearchParams = {
@@ -881,32 +878,40 @@ export function installRendererJarvisMention(
       .searchProjectBugs(hostId, params, state.parseRequest.signal)
       .catch(missingResult);
     if (mode !== state || generation !== state.parseGeneration) return;
-    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
-    state.parseTimer = null;
     state.parseRequest = null;
     applyParsedResult(state, result);
   };
 
   /**
-   * Typing only previews titles. Gemini runs on Enter, so the panel stays
-   * responsive and one slow interpretation cannot block the next keystroke.
+   * Typing paints the title preview immediately and schedules the condition
+   * parse 800 ms after the last keystroke. A changed text cancels the older
+   * parse; an unchanged text never asks Gemini twice.
    */
   const scheduleBugSearch = (state: ModeState): void => {
+    const text = state.bugChrome.input.value.trim();
     state.previewGeneration += 1;
     state.previewRequest?.abort();
     state.previewRequest = null;
-    state.parseGeneration += 1;
-    state.parseRequest?.abort();
-    state.parseRequest = null;
-    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
-    state.parseTimer = null;
-    state.parse = "idle";
-    state.parseText = "";
-    state.omit.clear();
-    state.previewError = null;
-    renderBugChips(state, []);
-    if (state.step.kind === "bug") {
-      state.bugChrome.summary.textContent = "";
+    const changed = text !== state.parseText;
+    if (changed) {
+      state.parseGeneration += 1;
+      state.parseRequest?.abort();
+      state.parseRequest = null;
+      state.parse = "idle";
+      state.parseText = "";
+      state.omit.clear();
+      renderBugChips(state, []);
+      if (state.step.kind === "bug") state.bugChrome.summary.textContent = "";
+      if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+      state.parseTimer = null;
+      if (text) {
+        state.parseTimer = view.setTimeout(() => {
+          state.parseTimer = null;
+          if (mode !== state) return;
+          if (state.bugChrome.input.value.trim() !== text) return;
+          void submitBugSearch(state);
+        }, PARSE_DEBOUNCE_MS);
+      }
     }
     if (state.timer !== null) view.clearTimeout(state.timer);
     state.timer = view.setTimeout(() => {
@@ -961,10 +966,11 @@ export function installRendererJarvisMention(
   const openBugStep = (state: ModeState, project: JarvisProject): void => {
     state.project = project;
     state.omit.clear();
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = null;
     state.parse = "idle";
     state.parseText = "";
     state.previewText = "";
-    state.previewError = null;
     const chrome = state.bugChrome;
     chrome.input.value = "";
     chrome.clear.style.display = "none";

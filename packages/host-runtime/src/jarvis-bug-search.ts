@@ -215,6 +215,9 @@ export class JarvisBugSearcher {
     signal?: AbortSignal,
   ): Promise<JarvisBugSearchResult> {
     if (!this.#isLocalHost) return failedSearch("local_only");
+    // The assigned list does not depend on the parse. Start it alongside the
+    // model so a small project is ready when the conditions arrive.
+    const prefetch = this.#prefetchAssigned(params.projectId, signal);
     let query: JarvisBugQuery;
     try {
       signal?.throwIfAborted();
@@ -237,6 +240,7 @@ export class JarvisBugSearcher {
       this.#conditions(plan, { tokens: [], targets: new Map() }, omit),
       signal,
       false,
+      await prefetch,
     );
   }
 
@@ -279,6 +283,42 @@ export class JarvisBugSearcher {
     };
   }
 
+  /** One unfiltered assigned page; null means the real query must run. */
+  async #prefetchAssigned(
+    projectId: number,
+    signal: AbortSignal | undefined,
+  ): Promise<FetchOutcome | null> {
+    if (signal?.aborted) return null;
+    try {
+      const result = await this.#cli.bugList(projectId, { page: 1, pageSize: PAGE_SIZE });
+      if (signal?.aborted || result.errorCode) return null;
+      return {
+        rows: result.list,
+        total: result.total,
+        capped: result.total > result.list.length,
+        failed: false,
+        errorCode: null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A complete first page is a superset of every filter the plan applies, so
+   * local filtering produces the same rows without a second CLI call. Larger
+   * projects fall back to the filtered, paged query.
+   */
+  #reusesPrefetch(outcome: FetchOutcome | null, plan: SearchPlan): outcome is FetchOutcome {
+    return (
+      outcome !== null &&
+      !outcome.failed &&
+      outcome.errorCode === null &&
+      outcome.total <= outcome.rows.length &&
+      plan.scope === "assigned"
+    );
+  }
+
   /** Shared execution: one or more project ids, one plan, one condition set. */
   async #execute(
     targets: readonly JarvisProjectRow[],
@@ -287,6 +327,7 @@ export class JarvisBugSearcher {
     conditions: JarvisBugCondition[],
     signal: AbortSignal | undefined,
     cappedByProjects: boolean,
+    prefetched: FetchOutcome | null = null,
   ): Promise<JarvisBugSearchResult> {
     const scopes: boolean[] = plan.scope === "both" ? [false, true] : [plan.scope === "created"];
     const titles = plan.titles.length > 0 ? plan.titles : [null];
@@ -306,7 +347,12 @@ export class JarvisBugSearcher {
         ),
       ),
     );
-    const outcomes = await mapWithConcurrency(tasks, this.#concurrency, (task) => task());
+    let outcomes: FetchOutcome[];
+    if (targets.length === 1 && !signal?.aborted && this.#reusesPrefetch(prefetched, plan)) {
+      outcomes = [prefetched];
+    } else {
+      outcomes = await mapWithConcurrency(tasks, this.#concurrency, (task) => task());
+    }
     const failed = outcomes.length > 0 && outcomes.every((outcome) => outcome.failed);
     const cappedByFetch = outcomes.some((outcome) => outcome.capped);
 

@@ -507,10 +507,70 @@ describe("Jarvis fixed-project search", () => {
     expect(interpret).toHaveBeenCalledOnce();
     expect(cli.projects).not.toHaveBeenCalled();
     expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(cli.bugList).toHaveBeenCalledOnce();
     expect(cli.bugList).toHaveBeenCalledWith(
       9001,
       expect.objectContaining({ createdByMe: true, statuses: [1], title: "发货" }),
+    );
+  });
+
+  it("starts the assigned list with the model and reuses a complete page", async () => {
+    let finish!: (value: JarvisBugQuery) => void;
+    const cli = fakeCli([
+      bug({ id: 91, projectId: 9001, status: 1 }),
+      bug({ id: 92, projectId: 9001, status: 2 }),
+      bug({ id: 93, projectId: 9001, status: 1 }),
+    ]);
+    const { api, interpret } = searcher(cli);
+    interpret.mockImplementation(
+      () =>
+        new Promise<JarvisBugQuery>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = api.searchInProject({ projectId: 9001, query: "没处理的" });
+    // The CLI call is not waiting for the model.
+    expect(cli.bugList).toHaveBeenCalledTimes(1);
+    expect(cli.bugList).toHaveBeenCalledWith(9001, { page: 1, pageSize: 100 });
+    finish({
+      scope: "assigned",
+      statuses: [1],
+      priorities: [],
+      severities: [],
+      order: "newest",
+      timeWindow: null,
+      titleKeywords: [],
+      projectNames: [],
+      unrecognized: null,
+    });
+    const result = await pending;
+    expect(result.bugs.map(({ id }) => id).sort()).toEqual([91, 93]);
+    expect(result.conditions).toEqual([
+      { key: "scope:assigned", kind: "scope", label: "指派给我" },
+      { key: "status:1", kind: "status", label: "未解决" },
+      { key: "order:newest", kind: "order", label: "最新" },
+    ]);
+    // A complete page already contains every match; no filtered second call.
+    expect(cli.bugList).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the filtered query when the assigned page is truncated", async () => {
+    const cli = fakeCli(
+      Array.from({ length: 150 }, (_, index) => bug({ id: index + 1, projectId: 9001 })),
+    );
+    const result = await searcher(cli, { statuses: [1] }).api.searchInProject({
+      projectId: 9001,
+      query: "没处理的",
+    });
+    expect(result.bugs).toHaveLength(150);
+    expect(result.total).toBe(150);
+    expect(cli.bugList).toHaveBeenCalledTimes(3);
+    expect(cli.bugList).toHaveBeenCalledWith(
+      9001,
+      expect.objectContaining({ statuses: [1], page: 1 }),
+    );
+    expect(cli.bugList).toHaveBeenCalledWith(
+      9001,
+      expect.objectContaining({ statuses: [1], page: 2 }),
     );
   });
 

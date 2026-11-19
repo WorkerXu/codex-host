@@ -40,10 +40,13 @@ const { outputFiles } = await build({
       });
       const result = (bugs, conditions = []) => ({ available: true, errorCode: null, conditions, bugs, total: bugs.length, capped: false });
       const bugs = (titles) => titles.map((title, index) => ({ id: 9101 + index, projectId: 9001, title }));
+      const last = bucket => bucket[bucket.length - 1];
       globalThis.finishProject = (index, projects) => calls.projects[index].resolve({ available: true, errorCode: null, projects: projects.map((name, i) => ({ id: 9001 + i, name })), complete: true, userId: 10058 });
       globalThis.finishPreview = (index, titles) => calls.previews[index].resolve(result(bugs(titles)));
+      globalThis.finishLastPreview = (titles) => last(calls.previews).resolve(result(bugs(titles)));
       globalThis.finishParse = (index, titles, conditions) => calls.parses[index].resolve(result(bugs(titles), conditions));
-      globalThis.failParse = (index) => calls.parses[index].resolve({ available: false, errorCode: "timeout", conditions: [], bugs: [], total: 0, capped: false });
+      globalThis.finishLastParse = (titles, conditions) => last(calls.parses).resolve(result(bugs(titles), conditions));
+      globalThis.failLastParse = () => last(calls.parses).resolve({ available: false, errorCode: "timeout", conditions: [], bugs: [], total: 0, capped: false });
       editor.focus();
       const range = document.createRange();
       range.setStart(editor.firstChild, 1);
@@ -95,6 +98,9 @@ async function seedCache(page: Page, projects: string[], lastProjectName?: strin
   );
 }
 
+const calls = (page: Page, bucket: "projects" | "previews" | "parses") =>
+  page.evaluate((name) => Reflect.get(globalThis, "jarvisCalls")[name], bucket);
+
 test.beforeEach(async ({ page }) => {
   await page.setContent("<!doctype html><html><body></body></html>");
   // `about:blank` denies the real Storage; the controller only needs the API.
@@ -121,9 +127,7 @@ test("paints cached projects immediately and revalidates in the background", asy
   await expect(page.locator("[data-codexhost-jarvis-step='project']")).toBeVisible();
   await expect(page.locator("[data-codexhost-jarvis-project]")).toHaveCount(2);
   await expect(page.locator("[data-codexhost-jarvis-skeleton]")).toHaveCount(0);
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects.length))
-    .toBe(1);
+  await expect.poll(() => calls(page, "projects").then((value) => value.length)).toBe(1);
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects[0].params),
   ).toEqual({});
@@ -131,14 +135,10 @@ test("paints cached projects immediately and revalidates in the background", asy
 
 test("typing cancels the superseded project search and shows the new rows", async ({ page }) => {
   await openPanel(page);
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects.length))
-    .toBe(1);
+  await expect.poll(() => calls(page, "projects").then((value) => value.length)).toBe(1);
   const input = page.locator("[data-codexhost-jarvis-step='project'] input");
   await input.pressSequentially("发货");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects.length))
-    .toBe(2);
+  await expect.poll(() => calls(page, "projects").then((value) => value.length)).toBe(2);
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects[0].aborted),
   ).toBe(true);
@@ -159,40 +159,104 @@ test("choosing a project keeps only that project and previews titles", async ({ 
   await page.locator("[data-codexhost-jarvis-project]").click();
   await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toBeVisible();
   await expect(page.locator("[data-jarvis-project-chip]")).toContainText("示例后台 · 迭代 B");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews.length))
-    .toBe(1);
+  await expect.poll(() => calls(page, "previews").then((value) => value.length)).toBe(1);
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews[0].params),
   ).toEqual({ projectId: 9001, title: "" });
   await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["示例：发货失败"]));
   await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
   await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toContainText("示例：发货失败");
-  expect(await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").projects.length)).toBe(1);
+  expect((await calls(page, "projects")).length).toBe(1);
 });
 
-test("Enter replaces the title preview with parsed conditions and chips", async ({ page }) => {
+test("typing auto-runs the parse and a pending search never reads 无结果", async ({ page }) => {
+  await page.clock.install();
   await seedCache(page, ["示例后台 · 迭代 B"]);
   await openPanel(page);
   await page.locator("[data-codexhost-jarvis-project]").click();
   await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题命中"]));
+  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+
+  const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
+  await input.pressSequentially("没处理的");
+  await page.clock.runFor(320);
+  expect((await calls(page, "previews")).length).toBe(2);
+
+  // No Enter: 800 ms after the last keystroke the parse starts on its own and
+  // aborts the still-pending title preview.
+  await page.clock.runFor(520);
+  expect((await calls(page, "parses")).length).toBe(1);
+  expect(
+    await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews[1].aborted),
+  ).toBe(true);
+  await expect(page.locator("[data-jarvis-summary]")).toHaveText("正在识别条件…");
+
+  // A late empty title preview must not replace the pending parse with 无结果.
+  await page.evaluate(() => Reflect.get(globalThis, "finishLastPreview")([]));
+  await page.clock.runFor(20);
+  await expect(page.locator("[data-jarvis-summary]")).toHaveText("正在识别条件…");
+  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).not.toContainText("无结果");
+  await expect(page.locator("[data-jarvis-message]")).toHaveCount(0);
+
+  await page.evaluate(() =>
+    Reflect.get(globalThis, "finishLastParse")(
+      ["条件命中"],
+      [
+        { key: "scope:assigned", kind: "scope", label: "指派给我" },
+        { key: "status:1", kind: "status", label: "未解决" },
+        { key: "order:newest", kind: "order", label: "最新" },
+      ],
+    ),
+  );
+  await expect(page.locator("[data-jarvis-chip]")).toHaveCount(3);
+  await expect(page.locator("[data-jarvis-summary]")).toHaveText("共 1 条");
+  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toContainText("条件命中");
+});
+
+test("typing during a pending parse cancels the superseded request", async ({ page }) => {
+  await page.clock.install();
+  await seedCache(page, ["示例后台 · 迭代 B"]);
+  await openPanel(page);
+  await page.locator("[data-codexhost-jarvis-project]").click();
+  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题命中"]));
+  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+
+  const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
+  await input.pressSequentially("没处理");
+  await page.clock.runFor(840);
+  expect((await calls(page, "parses")).length).toBe(1);
+
+  await input.pressSequentially("的");
+  expect(await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses[0].aborted)).toBe(
+    true,
+  );
+  await page.clock.runFor(840);
+  expect((await calls(page, "parses")).length).toBe(2);
+  expect(
+    await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses[1].params),
+  ).toMatchObject({ projectId: 9001, query: "没处理的" });
+});
+
+test("Enter runs the parse before the debounce and shows removable chips", async ({ page }) => {
+  await page.clock.install();
+  await seedCache(page, ["示例后台 · 迭代 B"]);
+  await openPanel(page);
+  await page.locator("[data-codexhost-jarvis-project]").click();
+  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题命中"]));
+  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+
   const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
   await input.pressSequentially("未解决的发货");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews.length))
-    .toBe(2);
-  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(1, ["标题命中"]));
-  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+  await page.clock.runFor(320);
+  await page.evaluate(() => Reflect.get(globalThis, "finishLastPreview")(["标题命中"]));
   await input.press("Enter");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses.length))
-    .toBe(1);
+  expect((await calls(page, "parses")).length).toBe(1);
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses[0].params),
   ).toMatchObject({ projectId: 9001, query: "未解决的发货" });
   await page.evaluate(() =>
-    Reflect.get(globalThis, "finishParse")(
-      0,
+    Reflect.get(globalThis, "finishLastParse")(
       ["条件命中"],
       [
         { key: "status:1", kind: "status", label: "未解决" },
@@ -206,65 +270,65 @@ test("Enter replaces the title preview with parsed conditions and chips", async 
 
   // Removing a chip re-parses with that condition omitted.
   await page.locator("[data-jarvis-chip='status:1']").click();
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses.length))
-    .toBe(2);
+  expect((await calls(page, "parses")).length).toBe(2);
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses[1].params),
   ).toMatchObject({ projectId: 9001, omit: ["status:1"] });
 });
 
-test("a failed parse keeps the title result and says conditions were not recognized", async ({
-  page,
-}) => {
-  await seedCache(page, ["示例后台 · 迭代 B"]);
-  await openPanel(page);
-  await page.locator("[data-codexhost-jarvis-project]").click();
-  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题结果"]));
-  const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
-  await input.pressSequentially("我还没处理的发货bug");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews.length))
-    .toBe(2);
-  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(1, ["标题结果"]));
-  await input.press("Enter");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses.length))
-    .toBe(1);
-  await page.evaluate(() => Reflect.get(globalThis, "failParse")(0));
-  await expect(page.locator("[data-jarvis-summary]")).toHaveText("条件未识别，已按标题搜索");
-  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
-  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toContainText("标题结果");
-  await expect(page.locator("[data-jarvis-chip]")).toHaveCount(0);
-});
-
-test("an 8 s parse timeout keeps the title result", async ({ page }) => {
+test("a timed-out parse says so, offers 重试, and keeps the title rows", async ({ page }) => {
   await page.clock.install();
   await seedCache(page, ["示例后台 · 迭代 B"]);
   await openPanel(page);
   await page.locator("[data-codexhost-jarvis-project]").click();
-  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["超时前的标题结果"]));
+  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题结果"]));
   await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+
   const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
-  await input.pressSequentially("未处理完的发货bug");
-  await page.clock.runFor(350);
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews.length))
-    .toBe(2);
-  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(1, ["超时前的标题结果"]));
-  await input.press("Enter");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses.length))
-    .toBe(1);
-  await page.clock.runFor(8_100);
-  await expect(page.locator("[data-jarvis-summary]")).toHaveText("条件未识别，已按标题搜索");
+  await input.pressSequentially("没处理的发货");
+  await page.clock.runFor(320);
+  await page.evaluate(() => Reflect.get(globalThis, "finishLastPreview")(["标题结果"]));
+  await page.clock.runFor(520);
+  expect((await calls(page, "parses")).length).toBe(1);
+  await page.evaluate(() => Reflect.get(globalThis, "failLastParse")());
+
+  const notice = page.locator("[data-jarvis-notice]");
+  await expect(notice).toContainText("识别条件超时");
+  await expect(notice.locator("[data-jarvis-action]")).toHaveText("重试");
   await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
-  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toContainText(
-    "超时前的标题结果",
+  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toContainText("标题结果");
+  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).not.toContainText("无结果");
+  await expect(page.locator("[data-codexhost-jarvis-step='bug']")).not.toContainText("条件未识别");
+
+  await notice.locator("[data-jarvis-action]").click();
+  expect((await calls(page, "parses")).length).toBe(2);
+  await expect(notice).toHaveCount(0);
+  await expect(page.locator("[data-jarvis-summary]")).toHaveText("正在识别条件…");
+});
+
+test("an unchanged query is not parsed again", async ({ page }) => {
+  await page.clock.install();
+  await seedCache(page, ["示例后台 · 迭代 B"]);
+  await openPanel(page);
+  await page.locator("[data-codexhost-jarvis-project]").click();
+  await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["标题命中"]));
+  await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
+
+  const input = page.locator("[data-codexhost-jarvis-step='bug'] input");
+  await input.pressSequentially("没处理的");
+  await page.clock.runFor(840);
+  expect((await calls(page, "parses")).length).toBe(1);
+  await page.evaluate(() =>
+    Reflect.get(globalThis, "finishLastParse")(
+      ["条件命中"],
+      [{ key: "status:1", kind: "status", label: "未解决" }],
+    ),
   );
-  expect(await page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").parses[0].aborted)).toBe(
-    true,
-  );
+  await expect(page.locator("[data-jarvis-chip]")).toHaveCount(1);
+
+  await input.press("Enter");
+  await page.clock.runFor(2_000);
+  expect((await calls(page, "parses")).length).toBe(1);
 });
 
 test("starts in the bug step from the remembered project", async ({ page }) => {
@@ -272,9 +336,7 @@ test("starts in the bug step from the remembered project", async ({ page }) => {
   await openPanel(page);
   await expect(page.locator("[data-codexhost-jarvis-step='bug']")).toBeVisible();
   await expect(page.locator("[data-jarvis-project-chip]")).toContainText("示例后台 · 迭代 B");
-  await expect
-    .poll(() => page.evaluate(() => Reflect.get(globalThis, "jarvisCalls").previews.length))
-    .toBe(1);
+  await expect.poll(() => calls(page, "previews").then((value) => value.length)).toBe(1);
   await page.evaluate(() => Reflect.get(globalThis, "finishPreview")(0, ["示例：发货失败"]));
   await expect(page.locator("[data-codexhost-jarvis-bug]")).toHaveCount(1);
 });

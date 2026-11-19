@@ -50,6 +50,11 @@ export interface StructuredQueryRequest {
   name: string;
   /** Bounds the reply for small probes such as the connection test. */
   maxTokens?: number;
+  /**
+   * Gemini 3 thinking depth. Gemini 3.5 Flash-Lite rejects `thinkingBudget`,
+   * so `minimal` is the cheapest setting it accepts.
+   */
+  thinkingLevel?: "minimal" | "low";
 }
 /** Convert strict JSON Schema back to Gemini's uppercase, nullable response schema. */
 function geminiSchema(value: unknown): unknown {
@@ -125,6 +130,9 @@ export function createStructuredQueryClient(options: StructuredQueryClientOption
                 responseSchema: geminiSchema(request.schema),
                 temperature: 0,
                 maxOutputTokens: request.maxTokens ?? 2_048,
+                ...(request.thinkingLevel
+                  ? { thinkingConfig: { thinkingLevel: request.thinkingLevel } }
+                  : {}),
               },
             };
         const response = await (options.fetchImpl ?? fetch)(endpoint, {

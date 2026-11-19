@@ -1597,16 +1597,29 @@ const scenarios: Record<string, () => Promise<void>> = {
     });
   },
 
-  async "jarvis-bugs-unparsed"() {
+  async "jarvis-bugs-parsing"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      bugQuery: "没处理的",
+      preview: { titles: [] },
+      parse: "pending",
+      ready: (step) =>
+        step.textContent?.includes("正在识别条件…") === true &&
+        step.querySelector("[data-codexhost-jarvis-skeleton]") !== null,
+    });
+  },
+
+  async "jarvis-bugs-timeout"() {
     await mountJarvisTwoStep({
       step: "bug",
       seedCache: jarvisPreviewProjects,
       seedLastProject: "示例后台 · 迭代 B",
       bugQuery: "发货",
-      pressEnter: true,
       preview: { titles: jarvisPreviewTitles.map((bug) => bug.title) },
       parse: "fail",
-      ready: (step) => step.textContent?.includes("条件未识别，已按标题搜索") === true,
+      ready: (step) => step.querySelector("[data-jarvis-notice]") !== null,
     });
   },
 
