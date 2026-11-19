@@ -1995,6 +1995,68 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     }
   });
 
+  it("inspects a locked Thread even when cached availability says unavailable", async () => {
+    installFakeBrowser();
+    const { writeCachedHarnessDirectory } =
+      await import("../src/renderer-harness-directory-cache.js");
+    const threadModel = harnessModelRefSchema.parse({ id: "claude-model-v1.b3B1cw" });
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins: [
+        harnessPluginDescriptorSchema.parse({
+          id: "claude-code",
+          name: "Claude Code",
+          version: "1",
+        }),
+      ],
+      availability: { "claude-code": "unavailable" },
+      webUi: {},
+    });
+    const host = {
+      listHarnessPlugins: vi.fn(async () => ({ unchanged: true, fingerprint: "fp-1" })),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({
+        owner: "external",
+        harnessId: "claude-code",
+        transportModelId: `codexhost/claude-code-native@${threadModel.id}@bypassPermissions@auto`,
+        effectiveModel: threadModel,
+        history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
+        locked: true,
+      })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      // The cached "unavailable" is stale. A locked Thread already names its
+      // Harness, so the live inspection must run and heal the shared cache.
+      await vi.waitFor(() =>
+        expect(host.inspectHarness).toHaveBeenCalledWith(
+          { harnessId: "claude-code" },
+          { priority: "interactive" },
+        ),
+      );
+      expect(testState.renderedModelViews).not.toContainEqual(
+        expect.objectContaining({ error: "claude-code runtime is unavailable" }),
+      );
+    } finally {
+      probe.dispose();
+    }
+  });
+
   it("keeps the loading state when no Thread presentation is cached", async () => {
     installFakeBrowser();
     const threadReply = Promise.withResolvers<Record<string, unknown>>();

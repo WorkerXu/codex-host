@@ -2083,7 +2083,9 @@ export function installRendererBindingProbe(
     // for its background discovery first would defeat interactive scheduling.
     // A prefetched inspection is already in flight at interactive priority; its
     // result, not a background sweep, decides this Thread's configuration.
-    if (!prefetchedForAgent && availability !== "ready" && availability !== "checking") {
+    // A locked Thread already names its owner: inspect it even when the cached
+    // answer is stale, and let the live result heal the shared cache.
+    if (!prefetchedForAgent && isDraft && availability !== "ready" && availability !== "checking") {
       // A silent refresh keeps the already-confirmed view; it must not turn a
       // background availability change into a visible configuration error.
       if (silent) return;
