@@ -86,7 +86,7 @@ describe("per-thread working folders", () => {
     expect(await reloaded.store.recent()).toEqual(roots);
     expect(await b.folders.store.get("same")).toBeNull();
   });
-  it("keeps Desktop worktrees out of recently used folders", async () => {
+  it("keeps Desktop's Codex home out of recently used folders", async () => {
     const { directory } = await service();
     const codexHome = path.join(directory, "codex-home");
     const folders = new ThreadFolders({
@@ -96,14 +96,22 @@ describe("per-thread working folders", () => {
     await folders.select("worktree", [
       path.join(codexHome, "worktrees", "6c05", "service.stock.java"),
     ]);
+    await folders.select("visualization", [
+      path.join(codexHome, "visualizations", "2026", "11", "04", "thread"),
+    ]);
     await folders.select("real", roots);
-    expect(await folders.store.recent()).toHaveLength(3);
-    expect(await folders.recent()).toEqual(roots);
+    await folders.select("lookalike", [`${codexHome}-other`]);
+    expect(await folders.store.recent()).toHaveLength(5);
+    const recent = await folders.recent();
+    expect([...recent].sort()).toEqual([...roots, `${codexHome}-other`].sort());
   });
-  it("treats a missing CODEX_HOME as ~/.codex for worktree filtering", async () => {
+  it("treats a missing CODEX_HOME as ~/.codex", async () => {
     const { folders } = await service();
     await folders.select("worktree", [
       path.join(os.homedir(), ".codex", "worktrees", "6c05", "service.stock.java"),
+    ]);
+    await folders.select("visualization", [
+      path.join(os.homedir(), ".codex", "visualizations", "2026", "11", "04", "thread"),
     ]);
     expect(await folders.recent()).toEqual([]);
   });

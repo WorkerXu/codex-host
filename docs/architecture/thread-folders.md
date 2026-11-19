@@ -4,7 +4,7 @@
 
 ## 选择与显示
 
-Composer 上方的「工作文件夹」显示主要目录的末级名称和额外目录数。弹窗显示当前目录、尚未选择的项目目录和该机器最近使用的目录。菜单对勾多选，选择即时保存；「设为主要」把目录移到第一位，始终保留至少一个目录。目录按顺序保存，第一项就是 `cwd`。最近使用来自各 Thread 保存的选择；Desktop worktree（`<CODEX_HOME>/worktrees/**`）是执行副本，不作为最近目录显示。
+Composer 上方的「工作文件夹」显示主要目录的末级名称和额外目录数。弹窗显示当前目录、尚未选择的项目目录和该机器最近使用的目录。菜单对勾多选，选择即时保存；「设为主要」把目录移到第一位，始终保留至少一个目录。目录按顺序保存，第一项就是 `cwd`。最近使用来自各 Thread 保存的选择；Desktop 的 Codex 内部目录（`<CODEX_HOME>/**`，缺省 `~/.codex`，含 worktrees、visualizations 等）是执行副本或缓存，不作为最近目录显示。
 
 本机点击「添加文件夹…」调用 Desktop 的 `appServices.fileAttachments.pickFiles({kind:"directory", allowMultiple:true, pickerTitle:"选择工作文件夹"})`，打开系统目录选择框，按返回的 `fsPath` 一次加入多个文件夹。通过已加载模块中的原生服务发现该接口，不直接访问 Electron；Desktop 把单个服务暴露为可调用的 RPC stub，但承载它们的 `appServices` 注册表必须是普通对象。可调用的 transport root（`appHost`）对任意属性读取都返回函数，不能当作注册表，否则同一窗口会匹配到两个服务对象并让发现失败。取消选择保留主列表；接口缺失、调用失败或返回格式不可用时退回目录浏览子视图。异步选择返回后，对话已切换或菜单已关闭时丢弃结果。此调用不创建或激活 Desktop 项目。
 

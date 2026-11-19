@@ -112,8 +112,8 @@ export function rewriteFolderTurn(
 export class ThreadFolders {
   readonly store: ThreadFoldersStore;
   readonly #pending = new Map<string | number, { threadId?: string; folders: string[] }>();
-  /** Desktop worktrees are execution copies of a project, never a folder the user picked. */
-  readonly #worktreeRoot: string;
+  /** Desktop's Codex home holds worktrees, visualizations and session data, never a chosen folder. */
+  readonly #codexHome: string;
   constructor(environment: NodeJS.ProcessEnv) {
     this.store = new ThreadFoldersStore(
       path.join(
@@ -121,17 +121,14 @@ export class ThreadFolders {
         "thread-folders",
       ),
     );
-    this.#worktreeRoot = path.join(
-      environment.CODEX_HOME || path.join(os.homedir(), ".codex"),
-      "worktrees",
-    );
+    this.#codexHome = environment.CODEX_HOME || path.join(os.homedir(), ".codex");
   }
-  #insideWorktree(folder: string): boolean {
-    const relative = path.relative(this.#worktreeRoot, folder);
+  #insideCodexHome(folder: string): boolean {
+    const relative = path.relative(this.#codexHome, folder);
     return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
   }
   async recent(): Promise<string[]> {
-    return (await this.store.recent()).filter((folder) => !this.#insideWorktree(folder));
+    return (await this.store.recent()).filter((folder) => !this.#insideCodexHome(folder));
   }
   async select(threadId: string, folders: string[]): Promise<ThreadFoldersSelection> {
     return this.store.update(threadId, (current) => {
