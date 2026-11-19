@@ -14,6 +14,7 @@ import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext }
 import type { RendererSettingsLocale, RendererSettingsMessages } from "./localization.js";
 import {
   conversationMention,
+  mergeDingTalkConversationRows,
   mergeDingTalkMessages,
   messagePreview,
   type DingTalkPageState,
@@ -124,7 +125,8 @@ export function createDingTalkSettingsPage(
       let skeletonTimer: number | null = null;
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
-      const previewAttempted = new Set<string>();
+      /** Row time the last preview attempt described; a newer message retries. */
+      const previewAttempted = new Map<string, number>();
       let previewActive = 0;
       const dispatchMarks = new Map<string, MessageDispatchedAgent[]>();
       const dispatchKey = (message: DingTalkMessage): string =>
@@ -451,34 +453,42 @@ export function createDingTalkSettingsPage(
         if (searchCursor >= 0) rows[searchCursor]?.scrollIntoView({ block: "nearest" });
       };
 
-      const applyPreview = (conversationId: string, preview: string | null): void => {
-        previewAttempted.add(conversationId);
+      const applyPreview = (conversationId: string, preview: string): void => {
         const row = state.conversations.find(
           (conversation) => conversation.conversationId === conversationId,
         );
-        if (row) row.preview = preview ?? undefined;
+        if (row) row.preview = preview;
         const target = conversationList.querySelector<HTMLElement>(
           `[data-conversation-id="${CSS.escape(conversationId)}"] .dingtalk-conversation-preview`,
         );
-        if (target) target.textContent = preview ?? "";
+        if (target) target.textContent = preview;
       };
 
       const pumpPreviews = (): void => {
         while (previewActive < PREVIEW_CONCURRENCY && previewQueue.length > 0) {
           const conversationId = previewQueue.shift();
-          if (
-            !conversationId ||
-            previewPending.has(conversationId) ||
-            previewAttempted.has(conversationId)
-          )
-            continue;
+          if (!conversationId || previewPending.has(conversationId)) continue;
+          const requested = state.conversations.find(
+            (conversation) => conversation.conversationId === conversationId,
+          );
+          const requestedAt = requested?.lastMessageAt ?? 0;
+          if ((previewAttempted.get(conversationId) ?? -1) >= requestedAt) continue;
           previewPending.add(conversationId);
+          previewAttempted.set(conversationId, requestedAt);
           previewActive += 1;
           void (async () => {
             const generation = listGeneration;
             const result = await client?.preview(conversationId).catch(() => null);
             if (disposed || generation !== listGeneration) return;
-            applyPreview(conversationId, result?.preview ?? null);
+            const preview = result?.preview?.trim();
+            // An empty or failed read never blanks a preview the row already
+            // shows, and a newer message keeps its newer preview.
+            if (!preview) return;
+            const current = state.conversations.find(
+              (conversation) => conversation.conversationId === conversationId,
+            );
+            if (current && (current.lastMessageAt ?? 0) > requestedAt && current.preview) return;
+            applyPreview(conversationId, preview);
           })().finally(() => {
             previewPending.delete(conversationId);
             previewActive -= 1;
@@ -491,8 +501,11 @@ export function createDingTalkSettingsPage(
       };
 
       const requestPreview = (conversationId: string): void => {
-        if (!client || previewPending.has(conversationId) || previewAttempted.has(conversationId))
-          return;
+        if (!client || previewPending.has(conversationId)) return;
+        const row = state.conversations.find(
+          (conversation) => conversation.conversationId === conversationId,
+        );
+        if ((previewAttempted.get(conversationId) ?? -1) >= (row?.lastMessageAt ?? 0)) return;
         previewQueue.push(conversationId);
         pumpPreviews();
       };
@@ -615,7 +628,8 @@ export function createDingTalkSettingsPage(
         conversationRows.render(state.conversations, state.selectedId);
         warmVisibleConversations();
         for (const conversation of state.conversations) {
-          if (previewAttempted.has(conversation.conversationId)) continue;
+          const attemptedAt = previewAttempted.get(conversation.conversationId) ?? -1;
+          if (attemptedAt >= (conversation.lastMessageAt ?? 0)) continue;
           const row = conversationRows.elementFor(conversation.conversationId);
           if (!row) continue;
           if (!conversation.preview && previewObserver) previewObserver.observe(row);
@@ -978,8 +992,12 @@ export function createDingTalkSettingsPage(
         }
         previewObserver?.disconnect();
         previewQueue.length = 0;
-        previewAttempted.clear();
-        state.conversations = result.conversations.map((row) => ({ ...row }));
+        // Rows keep what the page already learned; a list read that omits the
+        // preview must not blank the row and restart the queue.
+        state.conversations = mergeDingTalkConversationRows(
+          state.conversations,
+          result.conversations,
+        );
         // Keep only the row that is actually open; never reuse it after leaving the page.
         if (
           state.currentConversation &&

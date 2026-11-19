@@ -70,9 +70,15 @@ function mergeRow(
   incoming: DingTalkConversation,
 ): DingTalkConversation {
   const merged = normalizedRow({ ...previous, ...incoming });
+  // A stale list read may carry an older row time; the store keeps the newest.
+  merged.lastMessageAt = Math.max(previous.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || null;
   // A live unread row omits the preview, group metadata and @ flag; keep the
   // newer values the store already learned from messages, details or events.
-  if (incoming.preview === undefined && previous.preview !== undefined) {
+  // The preview belongs to the row's newest message, so an older row never
+  // replaces a preview the store already has.
+  const incomingIsNewer = (incoming.lastMessageAt ?? 0) >= (previous.lastMessageAt ?? 0);
+  const incomingPreview = incoming.preview?.trim() ? incoming.preview : undefined;
+  if (incomingPreview === undefined || (previous.preview !== undefined && !incomingIsNewer)) {
     merged.preview = previous.preview;
   }
   if (incoming.groupType === undefined && previous.groupType !== undefined) {
@@ -220,6 +226,35 @@ export class DingTalkLiveStore {
         ...(input.preview !== null ? { preview: input.preview } : {}),
       });
     }
+    return this.#commit(entry, before);
+  }
+
+  /**
+   * A newest-message preview learned by a one-message read. The row only moves
+   * forward: a preview for an older message never replaces a newer one.
+   */
+  applyPreview(input: {
+    conversationId: string;
+    preview: string;
+    lastMessageAt: number;
+    now: number;
+  }): boolean {
+    const entry = this.#entries.get(input.conversationId);
+    if (!entry) return false;
+    const preview = input.preview.trim();
+    if (!preview) return false;
+    if (input.lastMessageAt < (entry.row.lastMessageAt ?? 0)) return false;
+    if (entry.row.preview === preview) {
+      entry.touchedAt = input.now;
+      return false;
+    }
+    const before = this.#snapshot(entry);
+    this.#setRow(entry, {
+      ...entry.row,
+      lastMessageAt: Math.max(entry.row.lastMessageAt ?? 0, input.lastMessageAt),
+      preview,
+    });
+    entry.touchedAt = input.now;
     return this.#commit(entry, before);
   }
 

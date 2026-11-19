@@ -376,6 +376,17 @@ export class DingTalkService {
       const preview = newest
         ? `${newest.mine ? "我" : newest.senderName}：${dingtalkMessageSummary(newest)}`
         : null;
+      // Keep what this read learned so the next list pass already carries the
+      // preview instead of clearing it and asking again.
+      if (newest && preview) {
+        const changed = this.#live.applyPreview({
+          conversationId,
+          preview,
+          lastMessageAt: newest.createdAt,
+          now: this.#now(),
+        });
+        if (changed && !this.#disposed) this.#notify(null);
+      }
       return dingtalkPreviewResultSchema.parse({
         available: page?.errorCode === null,
         preview,

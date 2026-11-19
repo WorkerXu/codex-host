@@ -189,6 +189,38 @@ export function formatDingTalkFileSize(bytes: number | null | undefined): string
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * One conversation row reconciled against what the page already knows. The
+ * preview and row time only move forward: a list read that omits the preview
+ * or carries an older message must not blank a row the page has filled.
+ */
+export function mergeDingTalkConversationRow(
+  previous: DingTalkConversation,
+  incoming: DingTalkConversation,
+): DingTalkConversation {
+  const lastMessageAt = Math.max(previous.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || null;
+  const incomingIsNewer = (incoming.lastMessageAt ?? 0) >= (previous.lastMessageAt ?? 0);
+  const incomingPreview = incoming.preview?.trim() ? incoming.preview : undefined;
+  const preview =
+    incomingPreview && incomingIsNewer ? incomingPreview : (previous.preview ?? incomingPreview);
+  return {
+    ...incoming,
+    lastMessageAt,
+    ...(preview !== undefined ? { preview } : {}),
+  };
+}
+
+export function mergeDingTalkConversationRows(
+  current: readonly DingTalkConversation[],
+  incoming: readonly DingTalkConversation[],
+): DingTalkConversation[] {
+  const previous = new Map(current.map((row) => [row.conversationId, row]));
+  return incoming.map((row) => {
+    const old = previous.get(row.conversationId);
+    return old ? mergeDingTalkConversationRow(old, row) : { ...row };
+  });
+}
+
 export interface DingTalkPageState {
   source: "unread" | "empty";
   conversations: DingTalkConversation[];

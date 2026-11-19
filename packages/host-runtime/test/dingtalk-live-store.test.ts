@@ -289,6 +289,40 @@ describe("DingTalk live state", () => {
     });
   });
 
+  it("keeps the newest preview and row time across stale list reads and previews", () => {
+    const store = new DingTalkLiveStore();
+    store.applyConversations([row("a", 100)], { now: 1_000 });
+    expect(
+      store.applyPreview({
+        conversationId: "a",
+        preview: "林晓：预算表我改完第二版了",
+        lastMessageAt: 300,
+        now: 2_000,
+      }),
+    ).toBe(true);
+    expect(store.rows()[0]).toMatchObject({
+      preview: "林晓：预算表我改完第二版了",
+      lastMessageAt: 300,
+    });
+
+    // A list read without a preview or with an older row time must not regress.
+    store.applyConversations([row("a", 250, 4)], { now: 3_000 });
+    expect(store.rows()[0]).toMatchObject({
+      preview: "林晓：预算表我改完第二版了",
+      lastMessageAt: 300,
+    });
+    expect(
+      store.applyPreview({
+        conversationId: "a",
+        preview: "林晓：更早的一条",
+        lastMessageAt: 200,
+        now: 4_000,
+      }),
+    ).toBe(false);
+    expect(store.rows()[0]?.preview).toBe("林晓：预算表我改完第二版了");
+    expect(store.rows()[0]?.lastMessageAt).toBe(300);
+  });
+
   it("clears rows, transcripts and members on clear", () => {
     const store = new DingTalkLiveStore();
     store.applyConversations([row("a", 100)], { now: 1_000 });

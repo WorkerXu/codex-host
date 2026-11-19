@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { DingTalkMessage } from "@codexhost/shared-contracts";
+import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
 
 import {
   avatarTone,
@@ -12,6 +12,7 @@ import {
   formatDingTalkTime,
   highlightSegments,
   messagePreview,
+  mergeDingTalkConversationRow,
   mergeDingTalkMessages,
 } from "../src/settings/dingtalk-page-model.js";
 
@@ -110,6 +111,35 @@ describe("DingTalk page model", () => {
       messageIds: ["m1", "m2"],
       label: "线上群（2 条消息）",
     });
+  });
+
+  it("keeps the newer preview when a list row is reconciled", () => {
+    const previous: DingTalkConversation = {
+      conversationId: "cid",
+      title: "项目群",
+      singleChat: false,
+      unreadCount: 1,
+      lastMessageAt: 300,
+      muted: false,
+      preview: "林晓：预算表我改完第二版了",
+    };
+    expect(
+      mergeDingTalkConversationRow(previous, { ...previous, preview: undefined }),
+    ).toMatchObject({ preview: "林晓：预算表我改完第二版了", lastMessageAt: 300 });
+    expect(
+      mergeDingTalkConversationRow(previous, {
+        ...previous,
+        lastMessageAt: 200,
+        preview: "林晓：更早的一条",
+      }),
+    ).toMatchObject({ preview: "林晓：预算表我改完第二版了", lastMessageAt: 300 });
+    expect(
+      mergeDingTalkConversationRow(previous, {
+        ...previous,
+        lastMessageAt: 400,
+        preview: "林晓：新的",
+      }),
+    ).toMatchObject({ preview: "林晓：新的", lastMessageAt: 400 });
   });
 
   it("summarises unsupported messages without leaking bodies", () => {
