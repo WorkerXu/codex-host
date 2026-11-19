@@ -66,7 +66,9 @@ import {
   harnessConfigurationStateSchema,
   harnessInspectParamsSchema,
   harnessInspectionSchema,
+  harnessPluginListParamsSchema,
   harnessPluginListResultSchema,
+  type HarnessPluginListParams,
   type HarnessPluginListResult,
   harnessWebUiOpenParamsSchema,
   harnessWebUiOpenResultSchema,
@@ -215,7 +217,7 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   listLoadedSessions?(): Promise<LoadedSession[]>;
   currentHostId?(composer?: Element): string | null;
   knownHostIds?(): readonly string[];
-  listHarnessPlugins?(): Promise<HarnessPluginListResult>;
+  listHarnessPlugins?(input?: HarnessPluginListParams): Promise<HarnessPluginListResult>;
   clientForHost?(hostId: string): RendererModelClient | null;
   forkThread(input: ExternalThreadForkParams): Promise<ExternalThreadForkResult>;
   inspectHarness(
@@ -446,10 +448,20 @@ export function createRendererModelClient(
       return externalThreadForkResultSchema.parse(result);
     },
     inspectHarness,
-    async listHarnessPlugins(): Promise<HarnessPluginListResult> {
-      return harnessPluginListResultSchema.parse(
-        await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
-      );
+    async listHarnessPlugins(input?: HarnessPluginListParams): Promise<HarnessPluginListResult> {
+      const params = input ? harnessPluginListParamsSchema.parse(input) : {};
+      try {
+        return harnessPluginListResultSchema.parse(
+          await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, params),
+        );
+      } catch (error) {
+        // Hosts that predate conditional directory fetches reject the new params;
+        // fall back to the legacy empty request and its `{ plugins }` result.
+        if (!input || !isInvalidParams(error)) throw error;
+        return harnessPluginListResultSchema.parse(
+          await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
+        );
+      }
     },
     async openHarnessWebUi(input: HarnessWebUiOpenParams): Promise<void> {
       const params = harnessWebUiOpenParamsSchema.parse(input);

@@ -31,7 +31,7 @@ export function createConsoleConnectionDiagnostics(
         try {
           if (!client.listHarnessPlugins)
             throw new Error("This Host does not support Harness plugin discovery");
-          plugins = (await client.listHarnessPlugins()).plugins.filter(
+          plugins = ((await client.listHarnessPlugins()).plugins ?? []).filter(
             ({ kind }) => kind !== "usage",
           );
           directoryError = undefined;

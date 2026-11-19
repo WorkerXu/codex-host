@@ -309,7 +309,7 @@ export function createAccountsSettingsPage(
       const loadPlugins = async (state: AccountsHostState, client: RendererCodexAccountClient) => {
         if (!client.listHarnessPlugins) return;
         try {
-          const { plugins } = await client.listHarnessPlugins();
+          const { plugins = [] } = await client.listHarnessPlugins();
           if (state.client !== client || state.removed || context.signal.aborted) return;
           state.plugins.splice(0, state.plugins.length, ...plugins);
           render();

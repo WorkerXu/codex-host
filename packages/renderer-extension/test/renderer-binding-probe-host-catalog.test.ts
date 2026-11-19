@@ -2047,4 +2047,116 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
       probe.dispose();
     }
   });
+
+  it("paints a persisted directory and asks for one conditional plugin list", async () => {
+    installFakeBrowser();
+    const { writeCachedHarnessDirectory } =
+      await import("../src/renderer-harness-directory-cache.js");
+    const plugins = [
+      harnessPluginDescriptorSchema.parse({ id: "pi", name: "Pi", version: "1" }),
+      harnessPluginDescriptorSchema.parse({
+        id: "claude-code",
+        name: "Claude Code",
+        version: "1",
+      }),
+    ];
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins,
+      availability: { pi: "ready", "claude-code": "ready" },
+      webUi: {},
+    });
+    const host = {
+      listHarnessPlugins: vi.fn(async (input?: { ifNoneMatch?: string; refresh?: boolean }) =>
+        input?.ifNoneMatch === "fp-1" && input.refresh !== true
+          ? { unchanged: true, fingerprint: "fp-1" }
+          : { plugins, availability: { pi: "ready", "claude-code": "ready" }, fingerprint: "fp-1" },
+      ),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "pi", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      // The cached directory is readable synchronously, before the conditional
+      // request answers.
+      expect(probe.harnessDirectory("local")).toMatchObject({
+        plugins,
+        availability: { pi: "ready", "claude-code": "ready" },
+      });
+      await vi.waitFor(() => expect(host.listHarnessPlugins).toHaveBeenCalledOnce());
+      expect(host.listHarnessPlugins.mock.calls[0]?.[0]).toEqual({ ifNoneMatch: "fp-1" });
+      // No per-Harness availability sweep: only the directory request ran.
+      expect(
+        host.inspectHarness.mock.calls.filter(
+          ([params]) => (params as { purpose?: string }).purpose === "availability",
+        ),
+      ).toHaveLength(0);
+      expect(
+        probe.status().startup.requests.filter(({ method }) => method === "harness/inspect"),
+      ).toHaveLength(0);
+
+      // A manual refresh ignores the fingerprint and re-inspects availability.
+      await probe.refreshHarnessDirectory("local");
+      expect(host.listHarnessPlugins.mock.calls.at(-1)?.[0]).toEqual({ refresh: true });
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("falls back to the per-Harness availability sweep for a legacy Host", async () => {
+    installFakeBrowser();
+    const plugins = [harnessPluginDescriptorSchema.parse({ id: "pi", name: "Pi", version: "1" })];
+    const host = {
+      // `createRendererModelClient` already retried a rejected conditional
+      // request with the legacy empty params and returned this shape.
+      listHarnessPlugins: vi
+        .fn<(input?: unknown) => Promise<{ plugins: typeof plugins }>>()
+        .mockImplementation(async () => ({ plugins })),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "pi"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      await vi.waitFor(() => expect(probe.harnessDirectory("local").availability.pi).toBe("ready"));
+      expect(host.listHarnessPlugins.mock.calls.map(([input]) => input)).toEqual([
+        { ifNoneMatch: "" },
+      ]);
+      expect(host.inspectHarness).toHaveBeenCalledWith(
+        { harnessId: "pi", refresh: false, purpose: "availability" },
+        { priority: "background" },
+      );
+    } finally {
+      probe.dispose();
+    }
+  });
 });

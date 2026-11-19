@@ -22,6 +22,8 @@ export interface HarnessAvailabilityEntry {
 
 interface StoredAvailabilityFile {
   formatVersion: 1;
+  /** Increments whenever an availability entry is written or invalidated. */
+  generation?: number;
   entries: Record<string, unknown>;
 }
 
@@ -43,6 +45,7 @@ export class HarnessAvailabilityStore {
   readonly #entries = new Map<string, HarnessAvailabilityEntry>();
   #loaded: Promise<void> | undefined;
   #writeChain: Promise<void> = Promise.resolve();
+  #generation = 0;
 
   constructor(environment: NodeJS.ProcessEnv) {
     this.filePath = isUnisolatedTestUserDirectory(environment)
@@ -58,12 +61,22 @@ export class HarnessAvailabilityStore {
   async set(harnessId: string, entry: HarnessAvailabilityEntry): Promise<void> {
     await this.#ensureLoaded();
     this.#entries.set(harnessId, entry);
+    this.#generation += 1;
     await this.#persist();
   }
 
   async invalidate(harnessId: string): Promise<void> {
     await this.#ensureLoaded();
-    if (this.#entries.delete(harnessId)) await this.#persist();
+    if (this.#entries.delete(harnessId)) {
+      this.#generation += 1;
+      await this.#persist();
+    }
+  }
+
+  /** Monotonic per-file generation: an availability change or refresh changes it. */
+  async generation(): Promise<number> {
+    await this.#ensureLoaded();
+    return this.#generation;
   }
 
   async #ensureLoaded(): Promise<void> {
@@ -89,6 +102,9 @@ export class HarnessAvailabilityStore {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
     const file = parsed as Partial<StoredAvailabilityFile>;
     if (file.formatVersion !== FORMAT_VERSION) return;
+    if (typeof file.generation === "number" && Number.isFinite(file.generation)) {
+      this.#generation = Math.max(0, Math.trunc(file.generation));
+    }
     if (typeof file.entries !== "object" || file.entries === null) return;
     for (const [harnessId, value] of Object.entries(file.entries)) {
       const entry = parseEntry(value);
@@ -102,6 +118,7 @@ export class HarnessAvailabilityStore {
     const body = `${JSON.stringify(
       {
         formatVersion: FORMAT_VERSION,
+        generation: this.#generation,
         entries: Object.fromEntries(this.#entries),
       } satisfies StoredAvailabilityFile,
       null,

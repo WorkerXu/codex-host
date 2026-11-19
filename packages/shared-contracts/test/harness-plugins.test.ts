@@ -5,6 +5,8 @@ import {
   decodeHarnessPluginRoute,
   encodeHarnessPluginRoute,
   harnessPluginConfigurationSchema,
+  harnessPluginListParamsSchema,
+  harnessPluginListResultSchema,
   harnessPluginManifestSchema,
   harnessPluginRouteSchema,
 } from "../src/index.js";
@@ -131,6 +133,55 @@ describe("Harness plugin public contracts", () => {
     expect(harnessPluginManifestSchema.safeParse({ ...manifest, apiKey: "secret" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("Harness plugin directory contract", () => {
+  const plugin = {
+    id: "claude-code",
+    name: "Claude Code",
+    version: "1.0.0",
+  };
+
+  it("accepts the legacy empty request and result", () => {
+    expect(harnessPluginListParamsSchema.parse({})).toEqual({});
+    expect(harnessPluginListResultSchema.parse({ plugins: [plugin] })).toEqual({
+      plugins: [plugin],
+    });
+  });
+
+  it("accepts conditional requests and both conditional result shapes", () => {
+    expect(harnessPluginListParamsSchema.parse({ ifNoneMatch: "abc" })).toEqual({
+      ifNoneMatch: "abc",
+    });
+    expect(harnessPluginListParamsSchema.parse({ refresh: true })).toEqual({ refresh: true });
+    expect(
+      harnessPluginListResultSchema.parse({
+        plugins: [plugin],
+        fingerprint: "abc",
+        availability: { "claude-code": "ready" },
+      }),
+    ).toEqual({
+      plugins: [plugin],
+      fingerprint: "abc",
+      availability: { "claude-code": "ready" },
+    });
+    expect(harnessPluginListResultSchema.parse({ unchanged: true, fingerprint: "abc" })).toEqual({
+      unchanged: true,
+      fingerprint: "abc",
+    });
+  });
+
+  it("rejects unknown request fields and non-final availability statuses", () => {
+    expect(harnessPluginListParamsSchema.safeParse({ directory: "/untrusted" }).success).toBe(
+      false,
+    );
+    expect(
+      harnessPluginListResultSchema.safeParse({
+        plugins: [plugin],
+        availability: { "claude-code": "checking" },
+      }).success,
+    ).toBe(false);
   });
 });
 

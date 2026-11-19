@@ -318,11 +318,14 @@ export class HarnessDelegationCoordinator {
     activeOfficialParents(): string[];
     externalThreadBusy(thread: ExternalThread): boolean;
     pluginRoots?: readonly string[];
+    /** Share the Host's availability cache with the Desktop request path. */
+    availabilityStore?: HarnessAvailabilityStore;
   }) {
     this.#adapters = input.adapters;
     this.#environment = input.environment;
     this.#pluginRoots = input.pluginRoots ?? [];
-    this.#availabilityStore = new HarnessAvailabilityStore(input.environment);
+    this.#availabilityStore =
+      input.availabilityStore ?? new HarnessAvailabilityStore(input.environment);
     this.#externalRuntime = input.externalRuntime;
     this.#repository = input.repository;
     this.#registerExternalThread = input.registerExternalThread;
@@ -434,6 +437,11 @@ export class HarnessDelegationCoordinator {
 
   async invalidateAvailability(harnessId: RoutedHarnessId): Promise<void> {
     await this.#availabilityStore.invalidate(harnessId);
+  }
+
+  /** Generation of the Host's 24 h availability cache, used in directory fingerprints. */
+  availabilityGeneration(): Promise<number> {
+    return this.#availabilityStore.generation();
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {

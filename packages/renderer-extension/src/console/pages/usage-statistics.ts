@@ -1342,7 +1342,7 @@ export function createUsageStatisticsPage(
           const value = await request(HARNESS_PLUGIN_LIST_METHOD, {}, hostId);
           // A slower response for an earlier machine must not name this one's Harnesses.
           if (!isCurrent()) return;
-          for (const plugin of harnessPluginListResultSchema.parse(value).plugins) {
+          for (const plugin of harnessPluginListResultSchema.parse(value).plugins ?? []) {
             names.set(plugin.id, plugin.name);
           }
         } catch {

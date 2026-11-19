@@ -12,9 +12,9 @@ import {
 } from "../src/renderer-thread-presentation-cache.js";
 import {
   harnessArtworkKey,
-  readCachedHarnessArtwork,
-  writeCachedHarnessArtwork,
-} from "../src/renderer-harness-artwork-cache.js";
+  readCachedHarnessDirectory,
+  writeCachedHarnessDirectory,
+} from "../src/renderer-harness-directory-cache.js";
 import { createSidebarOwnershipStore } from "../src/renderer-sidebar-ownership-cache.js";
 import { createRendererStartupTrace } from "../src/renderer-startup-trace.js";
 
@@ -106,7 +106,7 @@ describe("Cached Thread footer presentation", () => {
   });
 });
 
-describe("Cached Harness artwork", () => {
+describe("Cached Harness directory", () => {
   const plugin = harnessPluginDescriptorSchema.parse({
     id: "claude-code",
     name: "Claude Code",
@@ -125,18 +125,39 @@ describe("Cached Harness artwork", () => {
     expect(harnessArtworkKey({ ...plugin })).toBe(harnessArtworkKey(plugin));
   });
 
-  it("round-trips per Host and drops a tampered key", () => {
-    writeCachedHarnessArtwork("local", [plugin]);
-    expect(readCachedHarnessArtwork("local")).toEqual([plugin]);
-    expect(readCachedHarnessArtwork("remote")).toEqual([]);
+  it("round-trips the directory, availability and fingerprint per Host", () => {
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fingerprint-1",
+      plugins: [plugin],
+      availability: {
+        "claude-code": "ready",
+        removed: "unavailable",
+      },
+      webUi: { "claude-code": true },
+    });
+    expect(readCachedHarnessDirectory("local")).toEqual({
+      fingerprint: "fingerprint-1",
+      plugins: [plugin],
+      availability: { "claude-code": "ready" },
+      webUi: { "claude-code": true },
+    });
+    expect(readCachedHarnessDirectory("remote")).toBeUndefined();
+  });
 
-    const stored = JSON.parse(storedValues.get("codexhost.harness-artwork.v1") ?? "{}") as {
+  it("drops a tampered artwork key", () => {
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fingerprint-1",
+      plugins: [plugin],
+      availability: {},
+      webUi: {},
+    });
+    const stored = JSON.parse(storedValues.get("codexhost.harness-directory.v1") ?? "{}") as {
       plugins: Array<{ key: string }>;
     };
     const first = stored.plugins[0];
     if (first) first.key = "claude-code@1#wrong";
-    storedValues.set("codexhost.harness-artwork.v1", JSON.stringify(stored));
-    expect(readCachedHarnessArtwork("local")).toEqual([]);
+    storedValues.set("codexhost.harness-directory.v1", JSON.stringify(stored));
+    expect(readCachedHarnessDirectory("local")).toBeUndefined();
   });
 
   it("keeps the name but not an oversized image", () => {
@@ -144,8 +165,13 @@ describe("Cached Harness artwork", () => {
       ...plugin,
       icon: `data:image/png;base64,${"A".repeat(70 * 1024)}`,
     };
-    writeCachedHarnessArtwork("local", [oversized]);
-    expect(readCachedHarnessArtwork("local")).toEqual([
+    writeCachedHarnessDirectory("local", {
+      fingerprint: null,
+      plugins: [oversized],
+      availability: {},
+      webUi: {},
+    });
+    expect(readCachedHarnessDirectory("local")?.plugins).toEqual([
       { id: plugin.id, name: plugin.name, version: plugin.version, iconStyle: plugin.iconStyle },
     ]);
   });
