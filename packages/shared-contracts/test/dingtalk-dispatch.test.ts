@@ -1,25 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DINGTALK_EVENT_TYPES,
-  DEFAULT_DINGTALK_MATCH_THRESHOLD,
+  DINGTALK_DISPATCH_DEFAULT_PICK_MIN,
   defaultDingTalkAgentDispatch,
   defaultDingTalkDispatchSettings,
   dingtalkAgentDispatchFor,
+  dingtalkAgentReadyForDispatch,
+  dingtalkDispatchRunParamsSchema,
+  dingtalkDispatchRunResultSchema,
+  dingtalkDispatchScoreResultSchema,
   dingtalkDispatchSettingsSchema,
-  dingtalkDispatchTargets,
 } from "../src/dingtalk-dispatch.js";
 
-describe("DingTalk dispatch settings contract", () => {
-  it("defaults to 0.7 with every agent off", () => {
-    const settings = defaultDingTalkDispatchSettings();
-    expect(settings).toEqual({ threshold: 0.7, agents: {} });
-    expect(DEFAULT_DINGTALK_MATCH_THRESHOLD).toBe(0.7);
+describe("DingTalk manual dispatch contract", () => {
+  it("defaults to an off agent with no automatic event types", () => {
+    expect(defaultDingTalkDispatchSettings()).toEqual({ agents: {} });
     expect(defaultDingTalkAgentDispatch()).toEqual({
       enabled: false,
-      eventTypes: [...DINGTALK_EVENT_TYPES],
       replyScope: "group",
+      sectionId: null,
+      projectId: null,
+      projectPath: null,
     });
+    expect(DINGTALK_DISPATCH_DEFAULT_PICK_MIN).toBe(0.3);
   });
 
   it("resolves a missing agent to off instead of throwing", () => {
@@ -28,122 +31,94 @@ describe("DingTalk dispatch settings contract", () => {
     );
   });
 
-  it("rejects out-of-range thresholds and unknown events", () => {
-    const valid = defaultDingTalkDispatchSettings();
-    expect(dingtalkDispatchSettingsSchema.safeParse(valid).success).toBe(true);
-    expect(
-      dingtalkDispatchSettingsSchema.safeParse({
-        ...valid,
-        agents: {
-          "terra-worker.toml": {
-            enabled: true,
-            eventTypes: ["mention_me", "approval_approved"],
-            replyScope: "group",
-          },
-        },
-      }).success,
-    ).toBe(false);
-    expect(dingtalkDispatchSettingsSchema.safeParse({ ...valid, threshold: 1.01 }).success).toBe(
-      false,
-    );
-    expect(dingtalkDispatchSettingsSchema.safeParse({ ...valid, threshold: -0.01 }).success).toBe(
-      false,
-    );
-    expect(
-      dingtalkDispatchSettingsSchema.safeParse({
-        ...valid,
-        agents: {
-          "terra-worker.toml": { enabled: true, eventTypes: [], replyScope: "email" },
-        },
-      }).success,
-    ).toBe(false);
-  });
-
-  it("rejects repeated events, invalid file names and the old global shape", () => {
-    const valid = defaultDingTalkDispatchSettings();
-    expect(
-      dingtalkDispatchSettingsSchema.safeParse({
-        ...valid,
-        agents: {
-          "terra-worker.toml": {
-            enabled: true,
-            eventTypes: ["mention_me", "mention_me"],
-            replyScope: "group",
-          },
-        },
-      }).success,
-    ).toBe(false);
-    expect(
-      dingtalkDispatchSettingsSchema.safeParse({
-        ...valid,
-        agents: {
-          "../escape.toml": { enabled: true, eventTypes: ["mention_me"], replyScope: "group" },
-        },
-      }).success,
-    ).toBe(false);
-    expect(
-      dingtalkDispatchSettingsSchema.safeParse({
-        enabled: true,
-        eventTypes: ["mention_me"],
-        matchThreshold: 0.85,
-        replyScope: "group",
-        participatingAgents: ["terra_worker"],
-      }).success,
-    ).toBe(false);
-  });
-
-  it("filters dispatchers by each agent's own event types and reply scope", () => {
-    const settings = {
+  it("ignores retired eventTypes and threshold keys while keeping enabled and replyScope", () => {
+    const parsed = dingtalkDispatchSettingsSchema.parse({
       threshold: 0.85,
       agents: {
-        "reviewer.toml": {
+        "old.toml": {
           enabled: true,
-          eventTypes: ["mention_me" as const],
-          replyScope: "group" as const,
-        },
-        "writer.toml": {
-          enabled: true,
-          eventTypes: ["mention_me" as const, "approval_pending" as const],
-          replyScope: "direct" as const,
-        },
-        "ops.toml": {
-          enabled: false,
-          eventTypes: [...DINGTALK_EVENT_TYPES],
-          replyScope: "group" as const,
+          eventTypes: ["mention_me", "approval_pending"],
+          replyScope: "direct",
         },
       },
-    };
-    expect(dingtalkDispatchTargets(settings, "mention_me")).toEqual([
-      { fileName: "reviewer.toml", replyScope: "group" },
-      { fileName: "writer.toml", replyScope: "direct" },
-    ]);
-    expect(dingtalkDispatchTargets(settings, "approval_pending")).toEqual([
-      { fileName: "writer.toml", replyScope: "direct" },
-    ]);
-    expect(dingtalkDispatchTargets(settings, "mention_all")).toEqual([]);
+    });
+    expect(parsed).toEqual({
+      agents: {
+        "old.toml": {
+          enabled: true,
+          replyScope: "direct",
+          sectionId: null,
+          projectId: null,
+          projectPath: null,
+        },
+      },
+    });
   });
-});
 
-it("includes private messages for new agents without expanding existing selections", () => {
-  expect(defaultDingTalkAgentDispatch().eventTypes).toContain("direct_message");
-  const migrated = dingtalkDispatchSettingsSchema.parse({
-    threshold: 0.85,
-    agents: {
-      "old.toml": {
-        enabled: true,
-        eventTypes: ["mention_me", "approval_pending"],
-        replyScope: "group",
-      },
-    },
+  it("rejects a bad reply scope and invalid file names", () => {
+    expect(
+      dingtalkDispatchSettingsSchema.safeParse({
+        agents: { "terra-worker.toml": { enabled: true, replyScope: "email" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      dingtalkDispatchSettingsSchema.safeParse({
+        agents: { "../escape.toml": { enabled: true, replyScope: "group" } },
+      }).success,
+    ).toBe(false);
   });
-  expect(migrated.agents["old.toml"]?.eventTypes).toEqual(["mention_me", "approval_pending"]);
-  expect(
-    dingtalkDispatchTargets(
-      {
-        threshold: 0.85,
-        agents: { "new.toml": { ...defaultDingTalkAgentDispatch(), enabled: true } },
-      },
-      "direct_message",
-    ),
-  ).toHaveLength(1);
+
+  it("requires the section, project and path before an agent can be dispatched", () => {
+    expect(dingtalkAgentReadyForDispatch(undefined)).toBe(false);
+    expect(
+      dingtalkAgentReadyForDispatch({ ...defaultDingTalkAgentDispatch(), enabled: true }),
+    ).toBe(false);
+    expect(
+      dingtalkAgentReadyForDispatch({
+        enabled: true,
+        replyScope: "group",
+        sectionId: "section",
+        projectId: "project",
+        projectPath: "/Users/me/project",
+      }),
+    ).toBe(true);
+    expect(
+      dingtalkAgentReadyForDispatch({
+        enabled: false,
+        replyScope: "group",
+        sectionId: "section",
+        projectId: "project",
+        projectPath: "/Users/me/project",
+      }),
+    ).toBe(false);
+  });
+
+  it("parses score and run results sorted by the panel", () => {
+    const score = dingtalkDispatchScoreResultSchema.parse({
+      failed: false,
+      agents: [
+        {
+          agent: {
+            fileName: "a.toml",
+            name: "A",
+            description: "duty",
+            ready: true,
+          },
+          score: 0.8,
+        },
+      ],
+    });
+    expect(score.agents[0]?.score).toBe(0.8);
+    expect(
+      dingtalkDispatchRunParamsSchema.safeParse({
+        conversationId: "cid",
+        messageId: "m1",
+        agents: ["a.toml"],
+      }).success,
+    ).toBe(true);
+    const run = dingtalkDispatchRunResultSchema.parse({
+      results: [{ fileName: "a.toml", name: "A", threadId: "thread-1", error: null }],
+    });
+    expect(run.results[0]?.threadId).toBe("thread-1");
+  });
 });

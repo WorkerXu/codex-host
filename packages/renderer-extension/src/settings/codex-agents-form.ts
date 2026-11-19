@@ -107,13 +107,7 @@ export function validateAgentDraft(draft: CodexAgentDraft): CodexAgentDraftProbl
   return null;
 }
 
-/** 0–1, or null when the field is empty or outside the accepted range. */
-export function parseDingTalkMatchThreshold(raw: string): number | null {
-  const value = raw.trim() ? Number(raw) : Number.NaN;
-  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
-}
-
-/** The editor starts from the saved choice, or from every type and group replies. */
+/** The editor starts from the saved choice, or from an off, group-reply agent. */
 export function agentDingTalkDraft(
   settings: DingTalkDispatchSettings,
   fileName: string | null,
@@ -124,8 +118,8 @@ export function agentDingTalkDraft(
 }
 
 /**
- * Applies one agent's DingTalk choice without touching other agents or the
- * threshold. A brand-new agent that is left off keeps no entry at all.
+ * Applies one agent's DingTalk choice without touching other agents. A
+ * brand-new agent that is left off keeps no entry at all.
  */
 export function withAgentDingTalk(
   settings: DingTalkDispatchSettings,
@@ -137,7 +131,7 @@ export function withAgentDingTalk(
     ...settings,
     agents: {
       ...settings.agents,
-      [fileName]: { ...draft, eventTypes: [...draft.eventTypes] },
+      [fileName]: { ...draft },
     },
   };
 }

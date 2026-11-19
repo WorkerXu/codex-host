@@ -1,7 +1,7 @@
 import {
-  DINGTALK_EVENT_TYPES,
   defaultDingTalkAgentDispatch,
   defaultDingTalkDispatchSettings,
+  dingtalkAgentReadyForDispatch,
   type CodexAgentCatalogResult,
   type CodexAgentListResult,
   type CodexAgentRecord,
@@ -9,7 +9,6 @@ import {
   type DingTalkAgentDispatch,
   type DingTalkDispatchAgentStatus,
   type DingTalkDispatchSettings,
-  type DingTalkEventType,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -31,7 +30,11 @@ import {
   type CodexAgentDraftField,
 } from "./codex-agents-form.js";
 import type { RendererSettingsMessages } from "./localization.js";
-import { createDingTalkDispatchSection } from "./dingtalk-dispatch-section.js";
+import {
+  readDingTalkAgentTargets,
+  resolveDingTalkAgentTarget,
+  type DingTalkAgentTargets,
+} from "./dingtalk-agent-targets.js";
 import { createAgentAvatar, type CodexAgentAvatarState } from "./codex-agent-avatar.js";
 import { openAgentMenu, type AgentMenuHandle } from "./agent-card-menu.js";
 import { deleteCodexAgent } from "./agent-delete.js";
@@ -106,7 +109,6 @@ export function createCodexAgentsSettingsPage(
           if (next === dispatchSettings) return dispatchSettings;
           const saved = await client.saveDispatchSettings(next);
           dispatchSettings = saved;
-          dingtalk.setThreshold(saved.threshold);
           if (loaded) renderRoutes();
           return saved;
         });
@@ -116,14 +118,15 @@ export function createCodexAgentsSettingsPage(
         );
         return run;
       };
-      const dingtalk = createDingTalkDispatchSection(document, text.dingtalk, {
-        onSave(threshold) {
-          void persistDispatch((current) => ({ ...current, threshold }))
-            .then(() => dingtalk.setStatus("saved"))
-            .catch(() => dingtalk.setStatus("failed"));
-        },
-      });
-      page.append(dingtalk.root);
+      let targets: DingTalkAgentTargets = { available: false, sections: [] };
+      const loadTargets = async (): Promise<void> => {
+        try {
+          targets = await readDingTalkAgentTargets(view);
+        } catch {
+          targets = { available: false, sections: [] };
+        }
+        if (!disposed) renderDingtalkTargetOptions();
+      };
 
       let idCounter = 0;
       let savingEditor = false;
@@ -276,6 +279,9 @@ export function createCodexAgentsSettingsPage(
           participating.textContent = text.participating;
           tags.append(participating);
         }
+        const targetMissing =
+          isParticipating(agent) &&
+          !dingtalkAgentReadyForDispatch(dispatchSettings.agents[agent.fileName]);
         if (typeof agent.lastDispatchedAt === "number") {
           const dispatched = document.createElement("span");
           dispatched.className = "agent-card-tag";
@@ -292,6 +298,12 @@ export function createCodexAgentsSettingsPage(
         dispatchLine.hidden = !last;
         dispatchLine.textContent = last ? dispatchStatusText(last) : "";
         card.append(top, name, description, tags, dispatchLine);
+        if (targetMissing) {
+          const warning = document.createElement("p");
+          warning.className = "agent-dingtalk-warning";
+          warning.textContent = text.dingtalk.agentNeedsTarget;
+          card.append(warning);
+        }
         const activate = (event: Event): void => {
           if (
             event.target instanceof Element &&
@@ -443,11 +455,9 @@ export function createCodexAgentsSettingsPage(
           if (disposed) return;
           const changed = dispatchSignature(next) !== dispatchSignature(dispatchSettings);
           dispatchSettings = next;
-          dingtalk.setThreshold(next.threshold);
-          dingtalk.setStatus("idle");
           if (changed) renderRoutes();
         } catch {
-          if (!disposed) dingtalk.setStatus("failed");
+          /* The list keeps working; saving opens the editor again. */
         }
       };
 
@@ -702,32 +712,36 @@ export function createCodexAgentsSettingsPage(
 
         const dingtalkBody = document.createElement("div");
         dingtalkBody.className = "agent-dingtalk-body";
-        const dingtalkEventsField = document.createElement("div");
-        dingtalkEventsField.className = "agent-field";
-        const dingtalkEventsTitle = document.createElement("span");
-        dingtalkEventsTitle.className = "agent-field-label";
-        dingtalkEventsTitle.textContent = text.dingtalk.agentEvents;
-        const dingtalkEventList = document.createElement("div");
-        dingtalkEventList.className = "dingtalk-check-list dingtalk-check-list--row";
-        const dingtalkEvents = new Map<DingTalkEventType, HTMLInputElement>();
-        const eventLabels: Record<DingTalkEventType, string> = {
-          mention_me: text.dingtalk.agentEventMentionMe,
-          mention_all: text.dingtalk.agentEventMentionAll,
-          approval_pending: text.dingtalk.agentEventApprovalPending,
-          direct_message: text.dingtalk.agentEventDirectMessage,
-        };
-        for (const eventType of DINGTALK_EVENT_TYPES) {
-          const label = document.createElement("label");
-          label.className = "dingtalk-check-row";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.className = "dingtalk-checkbox";
-          checkbox.value = eventType;
-          dingtalkEvents.set(eventType, checkbox);
-          label.append(checkbox, document.createTextNode(eventLabels[eventType]));
-          dingtalkEventList.append(label);
-        }
-        dingtalkEventsField.append(dingtalkEventsTitle, dingtalkEventList);
+        const dingtalkTargetField = document.createElement("div");
+        dingtalkTargetField.className = "agent-field";
+        const dingtalkTargetTitle = document.createElement("span");
+        dingtalkTargetTitle.className = "agent-field-label";
+        dingtalkTargetTitle.textContent = text.dingtalk.agentTarget;
+        const dingtalkSection = document.createElement("select");
+        dingtalkSection.className = "agent-input agent-select";
+        dingtalkSection.setAttribute("aria-label", text.dingtalk.agentSectionLabel);
+        const dingtalkProject = document.createElement("select");
+        dingtalkProject.className = "agent-input agent-select";
+        dingtalkProject.setAttribute("aria-label", text.dingtalk.agentProjectLabel);
+        const dingtalkTargetRow = document.createElement("div");
+        dingtalkTargetRow.className = "agent-target-fields";
+        const sectionField = document.createElement("label");
+        sectionField.className = "agent-target-field";
+        sectionField.append(
+          document.createTextNode(text.dingtalk.agentSectionLabel),
+          dingtalkSection,
+        );
+        const projectField = document.createElement("label");
+        projectField.className = "agent-target-field";
+        projectField.append(
+          document.createTextNode(text.dingtalk.agentProjectLabel),
+          dingtalkProject,
+        );
+        dingtalkTargetRow.append(sectionField, projectField);
+        const dingtalkTargetHint = document.createElement("p");
+        dingtalkTargetHint.className = "agent-field-hint";
+        dingtalkTargetHint.textContent = text.dingtalk.agentTargetHint;
+        dingtalkTargetField.append(dingtalkTargetTitle, dingtalkTargetRow, dingtalkTargetHint);
 
         const dingtalkReplyField = document.createElement("div");
         dingtalkReplyField.className = "agent-field";
@@ -761,7 +775,7 @@ export function createCodexAgentsSettingsPage(
         const dingtalkStatus = document.createElement("p");
         dingtalkStatus.className = "agent-dingtalk-status";
         dingtalkStatus.hidden = true;
-        dingtalkBody.append(dingtalkEventsField, dingtalkReplyField, dingtalkStatus);
+        dingtalkBody.append(dingtalkTargetField, dingtalkReplyField, dingtalkStatus);
         dingtalkGroup.append(dingtalkSwitchRow, dingtalkBody);
 
         const error = document.createElement("p");
@@ -809,7 +823,9 @@ export function createCodexAgentsSettingsPage(
           } satisfies Record<CodexAgentDraftField, HTMLElement>,
           dingtalkEnabled,
           dingtalkBody,
-          dingtalkEvents,
+          dingtalkSection,
+          dingtalkProject,
+          dingtalkTargetHint,
           dingtalkReply,
           dingtalkStatus,
           error,
@@ -952,6 +968,12 @@ export function createCodexAgentsSettingsPage(
       };
 
       let returnFocus: HTMLElement | null = null;
+      /** Kept while the native section catalog is unreadable, so saving keeps it. */
+      let editorDingtalkTarget = {
+        sectionId: null as string | null,
+        projectId: null as string | null,
+        projectPath: null as string | null,
+      };
 
       const renderDingtalkEnabled = (): void => {
         const on = editor.dingtalkEnabled.checked;
@@ -959,27 +981,95 @@ export function createCodexAgentsSettingsPage(
         editor.dingtalkBody.inert = !on;
       };
 
-      const setDingtalkDraft = (draft: DingTalkAgentDispatch): void => {
-        editor.dingtalkEnabled.checked = draft.enabled;
-        for (const [eventType, checkbox] of editor.dingtalkEvents) {
-          checkbox.checked = draft.eventTypes.includes(eventType);
+      const fillProjectOptions = (sectionId: string | null, preferred: string | null): void => {
+        const section = sectionId
+          ? (targets.sections.find((entry) => entry.id === sectionId) ?? null)
+          : null;
+        const projects = section?.projects ?? [];
+        editor.dingtalkProject.replaceChildren();
+        const placeholder = new Option(text.dingtalk.agentProjectPlaceholder, "");
+        editor.dingtalkProject.append(placeholder);
+        for (const project of projects) {
+          editor.dingtalkProject.append(new Option(project.name, project.id));
         }
+        const chosen =
+          preferred && projects.some((project) => project.id === preferred)
+            ? preferred
+            : projects.length === 1
+              ? (projects[0]?.id ?? "")
+              : "";
+        editor.dingtalkProject.value = chosen;
+        editor.dingtalkProject.disabled = projects.length <= 1;
+        if (!targets.available) {
+          editor.dingtalkTargetHint.textContent = text.dingtalk.agentTargetsUnavailable;
+        } else if (section && projects.length === 0) {
+          editor.dingtalkTargetHint.textContent = text.dingtalk.agentNoLocalProject;
+        } else {
+          editor.dingtalkTargetHint.textContent = text.dingtalk.agentTargetHint;
+        }
+      };
+
+      function renderDingtalkTargetOptions(
+        sectionId?: string | null,
+        projectId?: string | null,
+      ): void {
+        const chosenSection =
+          sectionId !== undefined ? sectionId : editor.dingtalkSection.value || null;
+        const chosenProject =
+          projectId !== undefined ? projectId : editor.dingtalkProject.value || null;
+        editor.dingtalkSection.replaceChildren();
+        editor.dingtalkSection.append(new Option(text.dingtalk.agentSectionPlaceholder, ""));
+        for (const section of targets.sections) {
+          const suffix = `（${section.projects.length}）`;
+          editor.dingtalkSection.append(new Option(`${section.name}${suffix}`, section.id));
+        }
+        editor.dingtalkSection.disabled = !targets.available || targets.sections.length === 0;
+        editor.dingtalkSection.value =
+          chosenSection && targets.sections.some((section) => section.id === chosenSection)
+            ? chosenSection
+            : "";
+        fillProjectOptions(editor.dingtalkSection.value || null, chosenProject);
+      }
+
+      const setDingtalkDraft = (draft: DingTalkAgentDispatch): void => {
+        editorDingtalkTarget = {
+          sectionId: draft.sectionId,
+          projectId: draft.projectId,
+          projectPath: draft.projectPath,
+        };
+        editor.dingtalkEnabled.checked = draft.enabled;
+        renderDingtalkTargetOptions(draft.sectionId, draft.projectId);
         for (const [scope, button] of editor.dingtalkReply) {
           button.setAttribute("aria-pressed", String(scope === draft.replyScope));
         }
         renderDingtalkEnabled();
       };
 
-      const readDingtalkDraft = (): DingTalkAgentDispatch => ({
-        enabled: editor.dingtalkEnabled.checked,
-        eventTypes: DINGTALK_EVENT_TYPES.filter(
-          (eventType) => editor.dingtalkEvents.get(eventType)?.checked,
-        ),
-        replyScope:
-          editor.dingtalkReply.get("direct")?.getAttribute("aria-pressed") === "true"
-            ? "direct"
-            : "group",
-      });
+      const readDingtalkDraft = (): DingTalkAgentDispatch => {
+        if (!targets.available) {
+          return {
+            enabled: editor.dingtalkEnabled.checked,
+            replyScope:
+              editor.dingtalkReply.get("direct")?.getAttribute("aria-pressed") === "true"
+                ? "direct"
+                : "group",
+            ...editorDingtalkTarget,
+          };
+        }
+        const sectionId = editor.dingtalkSection.value || null;
+        const projectId = editor.dingtalkProject.value || null;
+        const { project } = resolveDingTalkAgentTarget(targets, sectionId, projectId);
+        return {
+          enabled: editor.dingtalkEnabled.checked,
+          replyScope:
+            editor.dingtalkReply.get("direct")?.getAttribute("aria-pressed") === "true"
+              ? "direct"
+              : "group",
+          sectionId,
+          projectId: project?.id ?? null,
+          projectPath: project?.path ?? null,
+        };
+      };
 
       const openEditor = (
         mode: "create" | "edit" | "duplicate",
@@ -1195,6 +1285,9 @@ export function createCodexAgentsSettingsPage(
       editor.model.addEventListener("change", () => rebuildEffort(""));
       editor.modelInput.addEventListener("input", () => rebuildEffort(effortValue));
       editor.dingtalkEnabled.addEventListener("change", renderDingtalkEnabled);
+      editor.dingtalkSection.addEventListener("change", () => {
+        fillProjectOptions(editor.dingtalkSection.value || null, null);
+      });
       editor.root.addEventListener("click", (event) => {
         if (event.target === editor.root || event.target === editor.root.firstElementChild) {
           closeEditor();
@@ -1213,6 +1306,7 @@ export function createCodexAgentsSettingsPage(
       void loadAgents();
       void loadCatalog();
       void loadDispatch();
+      void loadTargets();
       void loadDispatchStatus();
       dispatchStatusTimer = view.setInterval(() => void loadDispatchStatus(), 10_000);
 
@@ -1224,7 +1318,6 @@ export function createCodexAgentsSettingsPage(
         dispatchStatusTimer = null;
         closeRowMenu();
         document.removeEventListener("keydown", onKey, true);
-        dingtalk.dispose();
       };
     },
   });

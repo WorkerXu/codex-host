@@ -244,6 +244,8 @@ export const DINGTALK_VIEWED_METHOD = "codexhost/dingtalk/viewed";
 export const DINGTALK_PREFETCH_METHOD = "codexhost/dingtalk/prefetch";
 /** Bounded open timings for acceptance; never carries message content. */
 export const DINGTALK_DIAGNOSTICS_METHOD = "codexhost/dingtalk/diagnostics";
+/** Renderer paint and image timings join the same bounded ring; content-free. */
+export const DINGTALK_TIMING_METHOD = "codexhost/dingtalk/timing";
 
 /** Host → Renderer notification: reread current DingTalk state. */
 export const DINGTALK_CHANGED_METHOD = "codexhost/dingtalk/changed";
@@ -253,7 +255,7 @@ export const DINGTALK_MAX_MESSAGES = 100;
 export const DINGTALK_MAX_CONVERSATIONS = 50;
 export const DINGTALK_MAX_MEMBERS = 500;
 export const DINGTALK_MAX_AT_MEMBERS = 100;
-export const DINGTALK_MAX_PREFETCH = 6;
+export const DINGTALK_MAX_PREFETCH = 50;
 
 /** The Host keeps at most this many newest messages per opened conversation. */
 export const DINGTALK_LIVE_MESSAGE_LIMIT = 50;
@@ -504,7 +506,7 @@ export type DingTalkDiagnosticsParams = z.infer<typeof dingtalkDiagnosticsParams
 export const dingtalkOpenTimingSchema = z
   .object({
     at: z.number().int().nonnegative(),
-    kind: z.enum(["conversations", "messages", "members", "prefetch"]),
+    kind: z.enum(["conversations", "messages", "members", "prefetch", "paint"]),
     conversationId: z.string().max(512).nullable(),
     /** True when the response came from the live state without waiting for dws. */
     memoryHit: z.boolean(),
@@ -514,9 +516,25 @@ export const dingtalkOpenTimingSchema = z
     liveMs: z.number().int().nonnegative().nullable(),
     liveError: z.string().max(64).nullable(),
     storeBytes: z.number().int().nonnegative(),
+    /** Click → first painted transcript frame, measured in the Renderer. */
+    paintMs: z.number().int().nonnegative().nullable().default(null),
+    /** Synchronous message list, markdown and mention build inside that open. */
+    renderMs: z.number().int().nonnegative().nullable().default(null),
+    /** Click → initial images settled (loaded or unavailable). */
+    imagesMs: z.number().int().nonnegative().nullable().default(null),
   })
   .strict();
 export type DingTalkOpenTiming = z.infer<typeof dingtalkOpenTimingSchema>;
+
+export const dingtalkTimingParamsSchema = z
+  .object({
+    conversationId: z.string().min(1).max(512),
+    paintMs: z.number().int().nonnegative(),
+    renderMs: z.number().int().nonnegative().nullable(),
+    imagesMs: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export type DingTalkTimingParams = z.infer<typeof dingtalkTimingParamsSchema>;
 
 export const dingtalkDiagnosticsResultSchema = z
   .object({

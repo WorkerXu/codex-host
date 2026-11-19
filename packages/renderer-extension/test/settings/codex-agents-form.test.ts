@@ -14,7 +14,6 @@ import {
   duplicateAgentDraft,
   effortOptionsForModel,
   emptyAgentDraft,
-  parseDingTalkMatchThreshold,
   validateAgentDraft,
   withAgentDingTalk,
 } from "../../src/settings/codex-agents-form.js";
@@ -143,92 +142,94 @@ describe("Codex agent form logic", () => {
     expect(duplicate.developerInstructions).toBe("Do the work.");
   });
 
-  it("parses the DingTalk threshold, rejecting empty and out-of-range input", () => {
-    expect(parseDingTalkMatchThreshold("0.85")).toBe(0.85);
-    expect(parseDingTalkMatchThreshold("0")).toBe(0);
-    expect(parseDingTalkMatchThreshold(" 1 ")).toBe(1);
-    expect(parseDingTalkMatchThreshold("")).toBeNull();
-    expect(parseDingTalkMatchThreshold("   ")).toBeNull();
-    expect(parseDingTalkMatchThreshold("-0.01")).toBeNull();
-    expect(parseDingTalkMatchThreshold("1.01")).toBeNull();
-    expect(parseDingTalkMatchThreshold("abc")).toBeNull();
-  });
-
-  it("states the approval rule without granting approval changes", () => {
-    expect(codexAgentsMessagesChinese.dingtalk.approvalNote).toContain(
-      "不会替你同意、拒绝或撤销审批",
-    );
-    expect(codexAgentsMessagesChinese.dingtalk.approvalNote).not.toMatch(/自动通过/);
+  it("states that an agent needs its section and project", () => {
+    expect(codexAgentsMessagesChinese.dingtalk.agentNeedsTarget).toBe("需要设置分区和工作项目");
+    expect(codexAgentsMessagesChinese.dingtalk.agentProjectLabel).toBe("工作项目");
   });
 
   it("edits one agent's DingTalk choice without touching the others", () => {
     const saved: DingTalkDispatchSettings = {
-      threshold: 0.9,
       agents: {
         "reviewer.toml": {
           enabled: true,
-          eventTypes: ["mention_me"],
           replyScope: "group",
+          sectionId: "section-1",
+          projectId: "project-1",
+          projectPath: "/Users/me/project",
         },
       },
     };
     const draft = agentDingTalkDraft(saved, "reviewer.toml");
     expect(draft).toEqual({
       enabled: true,
-      eventTypes: ["mention_me"],
       replyScope: "group",
+      sectionId: "section-1",
+      projectId: "project-1",
+      projectPath: "/Users/me/project",
     });
 
     const next = withAgentDingTalk(saved, "writer.toml", {
       enabled: true,
-      eventTypes: ["approval_pending"],
       replyScope: "direct",
+      sectionId: "section-2",
+      projectId: "project-2",
+      projectPath: "/Users/me/other",
     });
-    expect(next.threshold).toBe(0.9);
     expect(next.agents["reviewer.toml"]).toEqual(saved.agents["reviewer.toml"]);
     expect(next.agents["writer.toml"]).toEqual({
       enabled: true,
-      eventTypes: ["approval_pending"],
       replyScope: "direct",
+      sectionId: "section-2",
+      projectId: "project-2",
+      projectPath: "/Users/me/other",
     });
   });
 
   it("gives a new agent the default choice and keeps it out of the map while off", () => {
     expect(agentDingTalkDraft(defaultDingTalkDispatchSettings(), null)).toEqual({
       enabled: false,
-      eventTypes: ["mention_me", "mention_all", "approval_pending", "direct_message"],
       replyScope: "group",
+      sectionId: null,
+      projectId: null,
+      projectPath: null,
     });
     const saved = defaultDingTalkDispatchSettings();
     expect(
       withAgentDingTalk(saved, "new.toml", {
         enabled: false,
-        eventTypes: ["mention_me"],
         replyScope: "group",
+        sectionId: null,
+        projectId: null,
+        projectPath: null,
       }),
     ).toBe(saved);
   });
 
   it("keeps an entry when an existing agent turns listening off", () => {
     const saved: DingTalkDispatchSettings = {
-      threshold: 0.85,
       agents: {
         "reviewer.toml": {
           enabled: true,
-          eventTypes: ["mention_me"],
           replyScope: "direct",
+          sectionId: "section-1",
+          projectId: "project-1",
+          projectPath: "/Users/me/project",
         },
       },
     };
     const next = withAgentDingTalk(saved, "reviewer.toml", {
       enabled: false,
-      eventTypes: ["mention_me"],
       replyScope: "direct",
+      sectionId: "section-1",
+      projectId: "project-1",
+      projectPath: "/Users/me/project",
     });
     expect(next.agents["reviewer.toml"]).toEqual({
       enabled: false,
-      eventTypes: ["mention_me"],
       replyScope: "direct",
+      sectionId: "section-1",
+      projectId: "project-1",
+      projectPath: "/Users/me/project",
     });
   });
 });
