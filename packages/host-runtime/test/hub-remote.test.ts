@@ -133,6 +133,17 @@ describe("Hub SSH forward", () => {
     await instance.stop();
   });
 
+  it("never puts remote output in errors", async () => {
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error("remote failed"), { stderr: "secret-in-config" });
+    });
+    const { instance } = forward({ execFile });
+    const error = await instance.readToken("/token").catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "forbidden" });
+    expect(String(error)).not.toContain("secret-in-config");
+    await instance.stop();
+  });
+
   it("returns only MCPHub's routing fields", async () => {
     const execFile = vi.fn(async () => ({
       stdout: JSON.stringify({
