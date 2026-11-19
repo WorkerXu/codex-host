@@ -5,6 +5,7 @@ import type {
   CodexAccountUsageParams,
   CodexAccountUsageResult,
   HarnessPluginDescriptor,
+  HarnessPluginListParams,
   HarnessPluginListResult,
 } from "@codexhost/shared-contracts";
 
@@ -30,10 +31,19 @@ import { connectionHostName, type RendererConnectionDiagnostics } from "./connec
 import { configureHostScroller, createHostScrollButton } from "./connection-host-strip.js";
 import type { RendererSettingsMessages } from "./localization.js";
 import { shouldApplyCodexAccountSnapshot } from "../renderer-codex-account-state.js";
+import { recordRendererPageOpen } from "../renderer-page-timings.js";
+import {
+  readCachedHarnessDirectory,
+  writeCachedHarnessDirectory,
+} from "../renderer-harness-directory-cache.js";
+import {
+  readCachedAccountPresentation,
+  writeCachedAccountPresentation,
+} from "./account-presentation-cache.js";
 
 export interface RendererCodexAccountClient
   extends RendererHarnessAccountClient, RendererCredentialImportClient {
-  listHarnessPlugins?(): Promise<HarnessPluginListResult>;
+  listHarnessPlugins?(input?: HarnessPluginListParams): Promise<HarnessPluginListResult>;
   listCodexAccounts(): Promise<CodexAccountListResult>;
   refreshCodexAccounts?(): Promise<CodexAccountListResult>;
   inspectCodexAccountUsage?(input: CodexAccountUsageParams): Promise<CodexAccountUsageResult>;
@@ -70,6 +80,8 @@ interface AccountsHostState {
   readonly expandedResetAccounts: Set<string>;
   readonly plugins: HarnessPluginDescriptor[];
   readonly harness: ReturnType<typeof createHarnessAccounts>;
+  harnessUpdatedAt: number | null;
+  harnessFresh: boolean;
 }
 
 const HOST_PANEL_ID = "codexhost-settings-account-host-panel";
@@ -85,6 +97,7 @@ export function createAccountsSettingsPage(
     label: messages.pageLabels.accounts,
     icon: "accounts",
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
       const document = context.content.ownerDocument;
       const header = document.createElement("div");
       header.className = "settings-account-header";
@@ -253,20 +266,53 @@ export function createAccountsSettingsPage(
         return true;
       };
 
-      const loadUsage = (state: AccountsHostState): void => {
+      const persistAccounts = (state: AccountsHostState): void => {
+        writeCachedAccountPresentation(state.hostId, {
+          codex: state.hasAccountSnapshot
+            ? {
+                version: 2,
+                accounts: [...state.accounts],
+                currentAccountId: state.currentAccountId,
+                phase: state.accountPhase,
+                revision: state.accountRevision,
+                ...(state.accountInstanceId ? { instanceId: state.accountInstanceId } : {}),
+              }
+            : null,
+          harness:
+            state.harness.accounts.length > 0 && state.harnessUpdatedAt !== null
+              ? {
+                  accounts: [...state.harness.accounts],
+                  observedAt: state.harnessUpdatedAt,
+                }
+              : null,
+          usage: Object.fromEntries(
+            [...state.usageByAccountId.entries()].flatMap(([accountId, usage]) =>
+              usage.status === "ready"
+                ? [[accountId, { credits: usage.credits, observedAt: usage.observedAt }] as const]
+                : [],
+            ),
+          ),
+        });
+      };
+
+      const loadUsage = (state: AccountsHostState, refreshAll = false): void => {
         const inspect = state.client?.inspectCodexAccountUsage;
         const saved = [...state.accounts];
         const keep = new Set(saved.map((account) => account.accountId));
         for (const accountId of [...state.usageByAccountId.keys()]) {
           if (!keep.has(accountId)) state.usageByAccountId.delete(accountId);
         }
-        const pending = saved.filter((account) => !state.usageByAccountId.has(account.accountId));
+        const pending = refreshAll
+          ? saved
+          : saved.filter((account) => !state.usageByAccountId.has(account.accountId));
         if (!inspect || pending.length === 0) {
           render();
           return;
         }
         const requests = pending.map((account) => {
-          const loading: AccountUsageViewState = { status: "loading" };
+          // A cached value stays visible while its live replacement loads.
+          const existing = state.usageByAccountId.get(account.accountId);
+          const loading: AccountUsageViewState = existing ?? { status: "loading" };
           state.usageByAccountId.set(account.accountId, loading);
           return { account, loading };
         });
@@ -292,6 +338,7 @@ export function createAccountsSettingsPage(
                     }
                   : { status: "empty" },
               );
+              persistAccounts(state);
             } catch {
               if (
                 context.signal.aborted ||
@@ -299,7 +346,9 @@ export function createAccountsSettingsPage(
                 state.usageByAccountId.get(account.accountId) !== loading
               )
                 return;
-              state.usageByAccountId.set(account.accountId, { status: "error" });
+              if (loading.status !== "ready") {
+                state.usageByAccountId.set(account.accountId, { status: "error" });
+              }
             }
             render();
           }),
@@ -307,12 +356,42 @@ export function createAccountsSettingsPage(
       };
 
       const loadPlugins = async (state: AccountsHostState, client: RendererCodexAccountClient) => {
+        const apply = (plugins: readonly HarnessPluginDescriptor[]): void => {
+          state.plugins.splice(
+            0,
+            state.plugins.length,
+            ...plugins.filter(({ kind }) => kind !== "usage"),
+          );
+          render();
+        };
+        // The binding probe/console owns this Host's cached directory and its
+        // single conditional revalidation; never issue another 150 KB list here.
+        const diagnostics = getDiagnostics();
+        const directory = diagnostics?.harnessDirectory?.(state.hostId);
+        void diagnostics?.revalidateHarnessDirectory?.(state.hostId).catch(() => undefined);
+        if (diagnostics?.harnessDirectory) {
+          if (directory?.plugins) apply(directory.plugins);
+          return;
+        }
+        const cached = readCachedHarnessDirectory(state.hostId);
+        if (cached?.plugins) apply(cached.plugins);
         if (!client.listHarnessPlugins) return;
         try {
-          const { plugins } = await client.listHarnessPlugins();
+          const result = await client.listHarnessPlugins(
+            cached?.fingerprint ? { ifNoneMatch: cached.fingerprint } : {},
+          );
           if (state.client !== client || state.removed || context.signal.aborted) return;
-          state.plugins.splice(0, state.plugins.length, ...plugins);
-          render();
+          if (result.unchanged === true) return;
+          const plugins = result.plugins ?? [];
+          apply(plugins);
+          if (result.fingerprint !== undefined || result.availability) {
+            writeCachedHarnessDirectory(state.hostId, {
+              fingerprint: result.fingerprint ?? null,
+              plugins,
+              availability: result.availability ?? cached?.availability ?? {},
+              webUi: cached?.webUi ?? {},
+            });
+          }
         } catch {
           // Logos fall back to the Harness name; a missing directory is not an account failure.
         }
@@ -336,6 +415,7 @@ export function createAccountsSettingsPage(
             state.visible = hostVisible(state);
             if (!state.visible && selectedHostId === state.hostId) selectedHostId = "local";
             render();
+            // Account changes only add/remove rows; existing quota values stay cached.
             loadUsage(state);
           });
         } catch {
@@ -418,7 +498,7 @@ export function createAccountsSettingsPage(
           state.visible = hostVisible(state);
           if (!state.visible && selectedHostId === state.hostId) selectedHostId = "local";
           render();
-          if (!accountsFailed) loadUsage(state);
+          if (!accountsFailed) loadUsage(state, true);
         })();
         const pluginsRequest = loadPlugins(state, client);
         const harnessRequest = state.harness.refresh(options.refresh ?? false);
@@ -431,6 +511,15 @@ export function createAccountsSettingsPage(
         }
         state.visible = hostVisible(state);
         if (!state.visible && selectedHostId === state.hostId) selectedHostId = "local";
+        if (
+          !accountsFailed &&
+          state.harness.status === "ready" &&
+          state.harness.accounts.length > 0
+        ) {
+          state.harnessUpdatedAt = Date.now();
+          state.harnessFresh = true;
+          persistAccounts(state);
+        }
         render();
         if (!accountsFailed) {
           loadUsage(state);
@@ -440,33 +529,66 @@ export function createAccountsSettingsPage(
       };
 
       const createHostState = (hostId: string): AccountsHostState => {
+        const cached = readCachedAccountPresentation(hostId);
+        const directory =
+          getDiagnostics()?.harnessDirectory?.(hostId) ?? readCachedHarnessDirectory(hostId);
         const state: AccountsHostState = {
           hostId,
           client: null,
           subscribedClient: null,
-          status: "loading",
+          status: cached.codex ? "ready" : "loading",
           error: null,
-          visible: hostId === "local",
+          visible:
+            hostId === "local" ||
+            cached.codex !== null ||
+            (cached.harness?.accounts.length ?? 0) > 0,
           refreshing: false,
           loadGeneration: 0,
           removed: false,
-          accounts: [],
-          currentAccountId: null,
-          accountPhase: "unavailable",
-          accountRevision: 0,
-          accountInstanceId: undefined,
-          hasAccountSnapshot: false,
-          usageByAccountId: new Map(),
+          accounts: cached.codex?.accounts ?? [],
+          currentAccountId: cached.codex?.currentAccountId ?? null,
+          accountPhase: cached.codex?.phase ?? "unavailable",
+          accountRevision: cached.codex?.revision ?? 0,
+          accountInstanceId: cached.codex?.instanceId,
+          hasAccountSnapshot: cached.codex !== null,
+          usageByAccountId: new Map(
+            Object.entries(cached.usage).map(([accountId, usage]) => [
+              accountId,
+              {
+                status: "ready" as const,
+                credits: usage.credits,
+                freshness: "cached" as const,
+                observedAt: usage.observedAt,
+              },
+            ]),
+          ),
           expandedResetAccounts: new Set(),
-          plugins: [],
+          plugins: directory?.plugins
+            ? directory.plugins.filter(({ kind }) => kind !== "usage")
+            : [],
           harness: createHarnessAccounts(
             context.signal,
             () => state.client,
             () => {
               if (!state.removed && !context.signal.aborted) render();
             },
+            {
+              shouldInspect: (harnessId) => {
+                const current =
+                  getDiagnostics()?.harnessDirectory?.(hostId) ??
+                  readCachedHarnessDirectory(hostId);
+                return current?.availability[harnessId] !== "notInstalled";
+              },
+            },
           ),
+          harnessUpdatedAt: cached.harness?.observedAt ?? null,
+          harnessFresh: cached.harness === null,
         };
+        state.harness.seed(
+          (cached.harness?.accounts ?? []).filter(
+            (account) => directory?.availability[account.harnessId] !== "notInstalled",
+          ),
+        );
         return state;
       };
 
@@ -515,6 +637,14 @@ export function createAccountsSettingsPage(
           state = hostStates.get("local");
         }
         if (!state) return;
+        const directory = getDiagnostics()?.harnessDirectory?.(state.hostId);
+        if (directory?.plugins) {
+          state.plugins.splice(
+            0,
+            state.plugins.length,
+            ...directory.plugins.filter(({ kind }) => kind !== "usage"),
+          );
+        }
         const restoreFocus = accountListFocusRestorer(list, search);
         disposeHostScroller();
         disposeHostScroller = () => undefined;
@@ -686,6 +816,14 @@ export function createAccountsSettingsPage(
                 : null,
               hideEmails,
               pluginFor(account.harnessId),
+              state.harnessFresh
+                ? { freshness: "live", observedAt: null }
+                : state.harnessUpdatedAt
+                  ? {
+                      freshness: "cached",
+                      observedAt: new Date(state.harnessUpdatedAt).toISOString(),
+                    }
+                  : undefined,
             ),
           );
         }
@@ -700,6 +838,7 @@ export function createAccountsSettingsPage(
       });
       syncHosts();
       render();
+      recordRendererPageOpen("accounts", pageStartedAt, selectedHostId);
       void credentialImports.refresh();
       const connections = getRemoteConnections();
       void connections?.ssh.list(context.signal).then(

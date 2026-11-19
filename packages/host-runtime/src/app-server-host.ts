@@ -332,6 +332,8 @@ import {
   type OfficialDelegationStartInput,
 } from "./harness-delegation-coordinator.js";
 import { loadHarnessPlugins } from "./harness-plugin-loader.js";
+import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
+import { HarnessAvailabilityStore } from "./harness-availability-store.js";
 import type { HarnessPluginRegistry } from "./harness-plugin-registry.js";
 import {
   HARNESS_LAUNCH_SETTINGS_GET_METHOD,
@@ -840,6 +842,7 @@ export class AppServerHost {
   #nextApprovalRequestId = HOST_APPROVAL_REQUEST_ID_MAX;
   #nextQuestionRequestId = HOST_QUESTION_REQUEST_ID_MAX;
   #delegationCoordinator: HarnessDelegationCoordinator;
+  readonly #availabilityStore: HarnessAvailabilityStore;
   #sessionImportRequests: SessionImportRequests | undefined;
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
@@ -912,6 +915,7 @@ export class AppServerHost {
           .catch(() => undefined);
       }) ?? undefined;
     const environment = this.#options.environment ?? process.env;
+    this.#availabilityStore = new HarnessAvailabilityStore(environment);
     this.#launchSettings = new HarnessLaunchSettingsStore(
       this.#options.pluginContext?.environment ?? environment,
     );
@@ -1043,6 +1047,7 @@ export class AppServerHost {
       activeOfficialParents: () => [...this.#activeOfficialTurns.keys()],
       externalThreadBusy: (thread) => this.#externalThreadBusy(thread),
       ...(this.#options.pluginRoots ? { pluginRoots: this.#options.pluginRoots } : {}),
+      availabilityStore: this.#availabilityStore,
     });
     const maintenanceOperation = <T>(run: () => Promise<T>): Promise<T> =>
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
@@ -2060,15 +2065,7 @@ export class AppServerHost {
       return;
     }
     if (request.method === "codexhost/harness/plugins/list") {
-      this.#dispatchDesktopReply(request, async () => {
-        if (!harnessPluginListParamsSchema.safeParse(request.params).success) {
-          await this.#writer.json(rpcError(request, -32602, "Invalid Harness plugin list params"));
-          return;
-        }
-        await this.#waitForPlugins();
-        const result = harnessPluginListResultSchema.parse({ plugins: this.#pluginDescriptors });
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-      });
+      this.#dispatchDesktopReply(request, () => this.#harnessPluginsList(request));
       return;
     }
     if (isSessionImportRequest(request.method)) {
@@ -4174,6 +4171,131 @@ export class AppServerHost {
     }
   }
 
+  /**
+   * Conditional directory key: plugin identities, manifest/icon hashes, the 24 h
+   * availability generation and the running Host version. Any of them changing
+   * makes an `ifNoneMatch` request return the full directory again.
+   */
+  async #harnessDirectoryFingerprint(): Promise<string> {
+    const hash = createHash("sha256");
+    const roots = this.#options.pluginRoots ?? [];
+    const manifests =
+      roots.length > 0
+        ? await harnessPluginFingerprints(roots).catch(() => new Map<string, string>())
+        : new Map<string, string>();
+    for (const plugin of [...this.#pluginDescriptors].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )) {
+      hash.update(plugin.id).update("\u0000");
+      hash.update(plugin.version).update("\u0000");
+      hash.update(manifests.get(plugin.id) ?? "missing").update("\u0000");
+      hash
+        .update(
+          createHash("sha256")
+            .update(plugin.icon ?? "")
+            .update(JSON.stringify(plugin.iconStyle ?? null))
+            .digest("hex"),
+        )
+        .update("\u0000");
+    }
+    const generation = await this.#delegationCoordinator.availabilityGeneration();
+    const runningVersion = await this.#options.runtimeMaintenance
+      ?.status()
+      .then((status) => status.runningVersion)
+      .catch(() => null);
+    hash.update(`availability:${generation}\u0000host:${runningVersion ?? "unknown"}`);
+    return hash.digest("hex");
+  }
+
+  async #pluginAvailability(
+    pluginIds: readonly string[],
+    refresh: boolean,
+  ): Promise<Record<string, "ready" | "notInstalled" | "unavailable" | "error">> {
+    let availability: Partial<Record<string, string>> = {};
+    try {
+      const listed = await this.#delegationCoordinator.listHarnesses({
+        includeAvailability: true,
+        ...(refresh ? { refresh: true } : {}),
+      });
+      availability = listed.availability ?? {};
+    } catch {
+      // The directory still lets the Renderer show install state; an unanswered
+      // availability is reported as an error instead of hiding the plugins.
+    }
+    return Object.fromEntries(
+      pluginIds.map((id) => [
+        id,
+        availability[id] === "ready" ||
+        availability[id] === "notInstalled" ||
+        availability[id] === "unavailable" ||
+        availability[id] === "error"
+          ? availability[id]
+          : "error",
+      ]),
+    );
+  }
+
+  async #harnessPluginsList(request: JsonRpcRequest): Promise<void> {
+    const params = harnessPluginListParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      await this.#writer.json(rpcError(request, -32602, "Invalid Harness plugin list params"));
+      return;
+    }
+    await this.#waitForPlugins();
+    // An absent conditional field means an older Renderer: keep the exact
+    // legacy shape so its strict result schema keeps parsing.
+    if (params.data.ifNoneMatch === undefined && params.data.refresh === undefined) {
+      await this.#writer.json(
+        rpcEnvelope(request, {
+          result: jsonValueSchema.parse({ plugins: this.#pluginDescriptors }),
+        }),
+      );
+      return;
+    }
+    const sessionPluginIds = this.#pluginDescriptors
+      .filter(({ kind }) => kind !== "usage")
+      .map(({ id }) => id);
+    const availability = await this.#pluginAvailability(
+      sessionPluginIds,
+      params.data.refresh === true,
+    );
+    const fingerprint = await this.#harnessDirectoryFingerprint();
+    const unchanged = params.data.refresh !== true && params.data.ifNoneMatch === fingerprint;
+    const result = harnessPluginListResultSchema.parse(
+      unchanged
+        ? { unchanged: true, fingerprint }
+        : { plugins: this.#pluginDescriptors, availability, fingerprint },
+    );
+    await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+  }
+
+  /** Manifest/directory identity for one plugin, shared with availability entries. */
+  async #harnessPluginFingerprint(harnessId: string): Promise<string | undefined> {
+    const roots = this.#options.pluginRoots ?? [];
+    if (roots.length === 0) return undefined;
+    const fingerprints = await harnessPluginFingerprints(roots).catch(
+      () => new Map<string, string>(),
+    );
+    return fingerprints.get(harnessId) ?? "missing";
+  }
+
+  /** The interactive inspection is authoritative; keep the shared cache in step. */
+  async #recordHarnessAvailability(
+    harnessId: string,
+    status: "ready" | "notInstalled" | "unavailable" | "error",
+  ): Promise<void> {
+    try {
+      const fingerprint = await this.#harnessPluginFingerprint(harnessId);
+      await this.#availabilityStore.set(harnessId, {
+        status,
+        checkedAt: Date.now(),
+        ...(fingerprint ? { fingerprint } : {}),
+      });
+    } catch {
+      // Availability caching is best effort; the inspection result still answers.
+    }
+  }
+
   async #inspectHarness(request: JsonRpcRequest): Promise<void> {
     const params = harnessInspectParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -4185,7 +4307,11 @@ export class AppServerHost {
       ([harnessId]) => harnessId === params.data.harnessId,
     );
     const adapter = registered?.[1];
+    // Full interactive inspections are authoritative for the shared cache;
+    // availability-only probes are already cached by their own coordinator path.
+    const record = params.data.purpose !== "availability";
     if (!adapter) {
+      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "unavailable");
       await this.#writer.json(
         rpcError(request, -32077, `Harness '${params.data.harnessId}' is unavailable`),
       );
@@ -4199,6 +4325,7 @@ export class AppServerHost {
         ...(params.data.purpose ? { purpose: params.data.purpose } : {}),
       });
     } catch (error) {
+      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, `Harness inspection failed: ${errorMessage(error)}`),
       );
@@ -4206,10 +4333,14 @@ export class AppServerHost {
     }
     const validated = harnessInspectionSchema.safeParse(inspection);
     if (!validated.success) {
+      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, "Harness inspection returned an invalid result"),
       );
       return;
+    }
+    if (record) {
+      await this.#recordHarnessAvailability(params.data.harnessId, validated.data.status);
     }
     await this.#writer.json(
       rpcEnvelope(request, { result: jsonValueSchema.parse(validated.data) }),

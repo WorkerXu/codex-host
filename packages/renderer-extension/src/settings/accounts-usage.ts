@@ -241,6 +241,27 @@ function renderUsageWindow(
   return meter;
 }
 
+export function formatAccountUpdatedAgo(
+  observedAt: string | null,
+  locale: RendererSettingsMessages["locale"],
+  now: Date = new Date(),
+): string | null {
+  if (!observedAt) return null;
+  const time = new Date(observedAt).getTime();
+  if (Number.isNaN(time)) return null;
+  const minutes = Math.max(0, Math.floor((now.getTime() - time) / 60_000));
+  if (minutes < 1) return locale === "zh-CN" ? "更新于 刚刚" : "Updated just now";
+  const value =
+    minutes < 60
+      ? minutes
+      : minutes < 24 * 60
+        ? Math.floor(minutes / 60)
+        : Math.floor(minutes / (24 * 60));
+  const unit = minutes < 60 ? "minute" : minutes < 24 * 60 ? "hour" : "day";
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-value, unit);
+  return locale === "zh-CN" ? `更新于 ${relative}` : `Updated ${relative}`;
+}
+
 export function renderAccountUsage(
   document: Document,
   state: AccountUsageViewState | undefined,
@@ -313,6 +334,15 @@ export function renderAccountUsage(
     packed.push([cell]);
   }
   const [cells = [], ...continuationCells] = packed;
+  // Reserve one subtle line so a cached value never shifts the row when its
+  // live replacement arrives.
+  const updated = document.createElement("div");
+  updated.className = "settings-account-usage__updated";
+  updated.textContent =
+    state.freshness === "cached"
+      ? (formatAccountUpdatedAgo(state.observedAt, messages.locale) ?? "")
+      : "";
+  cells[0]?.append(updated);
   return { cells, continuationCells };
 }
 

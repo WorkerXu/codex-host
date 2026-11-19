@@ -7,6 +7,7 @@ vi.mock("../../src/settings/icons.js", () => ({
 
 import {
   accountUsageColumnLabel,
+  formatAccountUpdatedAgo,
   renderAccountResetCredits,
   renderAccountUsage as renderUsage,
   resetCreditDetailLine,
@@ -364,5 +365,44 @@ describe("Account reset-card details", () => {
     expect(text(result.details)).toContain("第 1 张");
     expect(text(result.details)).toContain("第 2 张");
     expect(elements(result.details).some((el) => el.tagName === "button")).toBe(false);
+  });
+});
+
+describe("cached account freshness", () => {
+  const now = new Date("2026-11-19T04:00:00.000Z");
+
+  it("formats a relative updated label without inventing a time", () => {
+    expect(formatAccountUpdatedAgo("2026-11-19T03:57:00.000Z", "zh-CN", now)).toBe(
+      "更新于 3分钟前",
+    );
+    expect(formatAccountUpdatedAgo("2026-11-19T01:00:00.000Z", "en", now)).toBe(
+      "Updated 3 hours ago",
+    );
+    expect(formatAccountUpdatedAgo(null, "zh-CN", now)).toBeNull();
+    expect(formatAccountUpdatedAgo("not-a-date", "zh-CN", now)).toBeNull();
+  });
+
+  it("marks cached values and keeps a reserved live line without layout copy", () => {
+    const observedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    const cached = renderAccountUsage(
+      document,
+      { status: "ready", credits, freshness: "cached", observedAt },
+      messages,
+      "used",
+      vi.fn(),
+    );
+    expect(text(cached)).toContain("更新于 ");
+
+    const live = renderAccountUsage(
+      document,
+      { status: "ready", credits, freshness: "live", observedAt: null },
+      messages,
+      "used",
+      vi.fn(),
+    );
+    expect(text(live)).not.toContain("更新于");
+    expect(
+      elements(live).some((element) => element.className === "settings-account-usage__updated"),
+    ).toBe(true);
   });
 });

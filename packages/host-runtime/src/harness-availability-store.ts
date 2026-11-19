@@ -10,6 +10,20 @@ const FORMAT_VERSION = 1;
 const CACHE_DIRECTORY = "cache";
 const CACHE_FILE = "harness-availability.json";
 
+/** A ready Harness stays valid for a day; its catalog follows upstream releases separately. */
+export const READY_AVAILABILITY_TTL_MS = 24 * 60 * 60_000;
+/** A missing CLI usually means the user has not installed it yet; the plugin fingerprint
+ * still invalidates this entry when the plugin itself changes. */
+export const NOT_INSTALLED_AVAILABILITY_TTL_MS = 24 * 60 * 60_000;
+/** A transient failure must not hide a working Harness for a day. */
+export const FAILURE_AVAILABILITY_TTL_MS = 10 * 60_000;
+
+export function harnessAvailabilityTtlMs(status: HarnessInspection["status"]): number {
+  if (status === "ready") return READY_AVAILABILITY_TTL_MS;
+  if (status === "notInstalled") return NOT_INSTALLED_AVAILABILITY_TTL_MS;
+  return FAILURE_AVAILABILITY_TTL_MS;
+}
+
 const STATUSES: ReadonlySet<string> = new Set(["ready", "notInstalled", "unavailable", "error"]);
 
 export interface HarnessAvailabilityEntry {
@@ -22,6 +36,8 @@ export interface HarnessAvailabilityEntry {
 
 interface StoredAvailabilityFile {
   formatVersion: 1;
+  /** Increments whenever an availability entry is written or invalidated. */
+  generation?: number;
   entries: Record<string, unknown>;
 }
 
@@ -43,6 +59,7 @@ export class HarnessAvailabilityStore {
   readonly #entries = new Map<string, HarnessAvailabilityEntry>();
   #loaded: Promise<void> | undefined;
   #writeChain: Promise<void> = Promise.resolve();
+  #generation = 0;
 
   constructor(environment: NodeJS.ProcessEnv) {
     this.filePath = isUnisolatedTestUserDirectory(environment)
@@ -57,13 +74,27 @@ export class HarnessAvailabilityStore {
 
   async set(harnessId: string, entry: HarnessAvailabilityEntry): Promise<void> {
     await this.#ensureLoaded();
+    // Two paths inspect the same Harness (interactive and background). The later
+    // observation wins even if the earlier one finishes last.
+    const existing = this.#entries.get(harnessId);
+    if (existing && existing.checkedAt > entry.checkedAt) return;
     this.#entries.set(harnessId, entry);
+    this.#generation += 1;
     await this.#persist();
   }
 
   async invalidate(harnessId: string): Promise<void> {
     await this.#ensureLoaded();
-    if (this.#entries.delete(harnessId)) await this.#persist();
+    if (this.#entries.delete(harnessId)) {
+      this.#generation += 1;
+      await this.#persist();
+    }
+  }
+
+  /** Monotonic per-file generation: an availability change or refresh changes it. */
+  async generation(): Promise<number> {
+    await this.#ensureLoaded();
+    return this.#generation;
   }
 
   async #ensureLoaded(): Promise<void> {
@@ -89,6 +120,9 @@ export class HarnessAvailabilityStore {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
     const file = parsed as Partial<StoredAvailabilityFile>;
     if (file.formatVersion !== FORMAT_VERSION) return;
+    if (typeof file.generation === "number" && Number.isFinite(file.generation)) {
+      this.#generation = Math.max(0, Math.trunc(file.generation));
+    }
     if (typeof file.entries !== "object" || file.entries === null) return;
     for (const [harnessId, value] of Object.entries(file.entries)) {
       const entry = parseEntry(value);
@@ -102,6 +136,7 @@ export class HarnessAvailabilityStore {
     const body = `${JSON.stringify(
       {
         formatVersion: FORMAT_VERSION,
+        generation: this.#generation,
         entries: Object.fromEntries(this.#entries),
       } satisfies StoredAvailabilityFile,
       null,

@@ -439,6 +439,94 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
+  it("rechecks a cached transient failure after ten minutes and recovers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const original = adapter.inspect.bind(adapter);
+    let failing = true;
+    const inspect = vi.spyOn(adapter, "inspect").mockImplementation(async (input) =>
+      failing
+        ? {
+            status: "unavailable" as const,
+            error: { code: "unavailable", message: "temporary", retryable: true },
+          }
+        : original(input),
+    );
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      // Inside the short failure window the cached answer is reused.
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(1_000_000 + 10 * 60_000 + 1);
+      failing = false;
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a cached failure when its recheck is slow and heals in the background", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const original = adapter.inspect.bind(adapter);
+    const slow = Promise.withResolvers<Awaited<ReturnType<typeof adapter.inspect>>>();
+    let inspections = 0;
+    const inspect = vi.spyOn(adapter, "inspect").mockImplementation(async (input) => {
+      inspections += 1;
+      if (inspections === 1) {
+        return {
+          status: "unavailable",
+          error: { code: "unavailable", message: "temporary", retryable: true },
+        };
+      }
+      if (inspections === 2) return slow.promise;
+      return original(input);
+    });
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      const generationBefore = await value.coordinator.availabilityGeneration();
+
+      vi.setSystemTime(1_000_000 + 10 * 60_000 + 1);
+      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(300);
+      // The slow check did not block the menu beyond its 300 ms budget.
+      await expect(pending).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(generationBefore);
+
+      slow.resolve(await original({}));
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBeGreaterThan(
+        generationBefore,
+      );
+      // The next conditional directory read sees the healed status and a new fingerprint.
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("bypasses the availability cache when refresh is requested", async () => {
     const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
     const inspect = vi.spyOn(adapter, "inspect");

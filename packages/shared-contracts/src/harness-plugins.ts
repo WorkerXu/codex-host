@@ -142,10 +142,34 @@ export const harnessPluginDescriptorSchema = z
   .strict();
 export type HarnessPluginDescriptor = z.infer<typeof harnessPluginDescriptorSchema>;
 
-export const harnessPluginListParamsSchema = z.object({}).strict();
+export const harnessPluginListParamsSchema = z
+  .object({
+    /** Last `fingerprint` the caller received; matching it returns only `{ unchanged: true }`. */
+    ifNoneMatch: z.string().max(128).optional(),
+    /** Re-inspect every Harness instead of trusting the Host's 24 h availability cache. */
+    refresh: z.boolean().optional(),
+  })
+  .strict();
+export type HarnessPluginListParams = z.infer<typeof harnessPluginListParamsSchema>;
+
+export const harnessPluginAvailabilitySchema = z.enum([
+  "ready",
+  "notInstalled",
+  "unavailable",
+  "error",
+]);
+export type HarnessPluginAvailability = z.infer<typeof harnessPluginAvailabilitySchema>;
+
 export const harnessPluginListResultSchema = z
   .object({
-    plugins: z.array(harnessPluginDescriptorSchema).max(HARNESS_PLUGIN_LIMIT),
+    /** Present on a full response; omitted from an `unchanged` reply. */
+    plugins: z.array(harnessPluginDescriptorSchema).max(HARNESS_PLUGIN_LIMIT).optional(),
+    /** Omitted by Hosts that predate conditional directory fetches. */
+    fingerprint: z.string().max(128).optional(),
+    /** Present only when the caller sent `ifNoneMatch`. */
+    unchanged: z.boolean().optional(),
+    /** Availability for every session plugin; omitted by older Hosts. */
+    availability: z.record(z.string().max(128), harnessPluginAvailabilitySchema).optional(),
   })
   .strict();
 export type HarnessPluginListResult = z.infer<typeof harnessPluginListResultSchema>;

@@ -75,6 +75,7 @@ export {
   HARNESS_PLUGIN_MANIFEST_MAX_BYTES,
   harnessPluginConfigurationSchema,
   harnessPluginDescriptorSchema,
+  harnessPluginAvailabilitySchema,
   harnessPluginIconSchema,
   harnessPluginIdSchema,
   harnessPluginListParamsSchema,
@@ -82,8 +83,10 @@ export {
   harnessPluginManifestSchema,
 } from "./harness-plugins.js";
 export type {
+  HarnessPluginAvailability,
   HarnessPluginConfiguration,
   HarnessPluginDescriptor,
+  HarnessPluginListParams,
   HarnessPluginListResult,
   HarnessPluginManifest,
 } from "./harness-plugins.js";

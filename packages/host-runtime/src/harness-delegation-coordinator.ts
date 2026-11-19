@@ -52,14 +52,18 @@ import {
   type ExternalThreadRepository,
 } from "./external-thread-repository.js";
 import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-runtime.js";
-import { HarnessAvailabilityStore } from "./harness-availability-store.js";
+import {
+  HarnessAvailabilityStore,
+  harnessAvailabilityTtlMs,
+} from "./harness-availability-store.js";
 import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
-const AVAILABILITY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
 const AVAILABILITY_CONCURRENCY = 6;
+/** A stale non-ready answer may wait this long before the cached value is returned. */
+const AVAILABILITY_LIMITED_WAIT_MS = 300;
 const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
 
 function isAvailabilityFailure(error: unknown): boolean {
@@ -288,7 +292,11 @@ export class HarnessDelegationCoordinator {
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
   readonly #pluginRoots: readonly string[];
   readonly #availabilityStore: HarnessAvailabilityStore;
-  readonly #availabilityRefreshing = new Set<RoutedHarnessId>();
+  /** One inspection per Harness, shared by the blocking and limited-wait paths. */
+  readonly #availabilityInspecting = new Map<
+    RoutedHarnessId,
+    Promise<HarnessInspection["status"]>
+  >();
 
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
@@ -318,11 +326,14 @@ export class HarnessDelegationCoordinator {
     activeOfficialParents(): string[];
     externalThreadBusy(thread: ExternalThread): boolean;
     pluginRoots?: readonly string[];
+    /** Share the Host's availability cache with the Desktop request path. */
+    availabilityStore?: HarnessAvailabilityStore;
   }) {
     this.#adapters = input.adapters;
     this.#environment = input.environment;
     this.#pluginRoots = input.pluginRoots ?? [];
-    this.#availabilityStore = new HarnessAvailabilityStore(input.environment);
+    this.#availabilityStore =
+      input.availabilityStore ?? new HarnessAvailabilityStore(input.environment);
     this.#externalRuntime = input.externalRuntime;
     this.#repository = input.repository;
     this.#registerExternalThread = input.registerExternalThread;
@@ -349,6 +360,7 @@ export class HarnessDelegationCoordinator {
       hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined;
     const availability: NonNullable<HarnessListResult["availability"]> = {};
     const pending: RoutedHarnessId[] = [];
+    const limited: RoutedHarnessId[] = [];
     const stale: RoutedHarnessId[] = [];
     for (const harnessId of harnesses) {
       if (harnessId === "codex") {
@@ -362,21 +374,58 @@ export class HarnessDelegationCoordinator {
         pending.push(harnessId);
         continue;
       }
-      availability[harnessId] = cached.status;
-      if (input.refresh) pending.push(harnessId);
-      else if (Date.now() - cached.checkedAt >= AVAILABILITY_CACHE_TTL_MS) stale.push(harnessId);
+      const expired = Date.now() - cached.checkedAt >= harnessAvailabilityTtlMs(cached.status);
+      if (input.refresh) {
+        availability[harnessId] = cached.status;
+        pending.push(harnessId);
+      } else if (!expired) {
+        availability[harnessId] = cached.status;
+      } else if (cached.status === "ready" || cached.status === "notInstalled") {
+        // A stale positive answer still paints immediately; revalidate behind it.
+        availability[harnessId] = cached.status;
+        stale.push(harnessId);
+      } else {
+        // A transient failure must recover, but a slow check must not delay every
+        // menu open; wait briefly, then keep the cached value while it finishes.
+        availability[harnessId] = cached.status;
+        limited.push(harnessId);
+      }
     }
     await forEachConcurrent(pending, AVAILABILITY_CONCURRENCY, async (harnessId) => {
-      availability[harnessId] = await this.#inspectAvailability(
+      availability[harnessId] = await this.#inspectAvailabilityOnce(
         harnessId,
         fingerprintFor(harnessId),
       );
     });
+    if (limited.length > 0) {
+      await Promise.all(
+        limited.map(async (harnessId) => {
+          const inspection = this.#inspectAvailabilityOnce(harnessId, fingerprintFor(harnessId));
+          const status = await withTimeout(inspection, AVAILABILITY_LIMITED_WAIT_MS);
+          if (status !== AVAILABILITY_TIMEOUT) availability[harnessId] = status;
+        }),
+      );
+    }
     if (stale.length > 0) {
       // Stale-while-revalidate: the menu gets the cached answer immediately.
       void this.#refreshAvailability(stale, fingerprints, hasFingerprints).catch(() => undefined);
     }
     return { harnesses, availability };
+  }
+
+  #inspectAvailabilityOnce(
+    harnessId: RoutedHarnessId,
+    fingerprint: string | undefined,
+  ): Promise<HarnessInspection["status"]> {
+    const existing = this.#availabilityInspecting.get(harnessId);
+    if (existing) return existing;
+    const promise = this.#inspectAvailability(harnessId, fingerprint).finally(() => {
+      if (this.#availabilityInspecting.get(harnessId) === promise) {
+        this.#availabilityInspecting.delete(harnessId);
+      }
+    });
+    this.#availabilityInspecting.set(harnessId, promise);
+    return promise;
   }
 
   async #inspectAvailability(
@@ -411,29 +460,21 @@ export class HarnessDelegationCoordinator {
     fingerprints: Map<string, string>,
     hasFingerprints: boolean,
   ): Promise<void> {
-    const targets = harnessIds.filter((harnessId) => {
-      if (this.#availabilityRefreshing.has(harnessId)) return false;
-      this.#availabilityRefreshing.add(harnessId);
-      return true;
+    await forEachConcurrent(harnessIds, AVAILABILITY_CONCURRENCY, async (harnessId) => {
+      await this.#inspectAvailabilityOnce(
+        harnessId,
+        hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined,
+      ).catch(() => undefined);
     });
-    try {
-      await forEachConcurrent(targets, AVAILABILITY_CONCURRENCY, async (harnessId) => {
-        try {
-          await this.#inspectAvailability(
-            harnessId,
-            hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined,
-          );
-        } finally {
-          this.#availabilityRefreshing.delete(harnessId);
-        }
-      });
-    } catch {
-      for (const harnessId of targets) this.#availabilityRefreshing.delete(harnessId);
-    }
   }
 
   async invalidateAvailability(harnessId: RoutedHarnessId): Promise<void> {
     await this.#availabilityStore.invalidate(harnessId);
+  }
+
+  /** Generation of the Host's 24 h availability cache, used in directory fingerprints. */
+  availabilityGeneration(): Promise<number> {
+    return this.#availabilityStore.generation();
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {
