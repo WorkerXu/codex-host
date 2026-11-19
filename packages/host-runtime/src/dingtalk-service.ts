@@ -2,8 +2,11 @@ import {
   DINGTALK_LIVE_MESSAGE_LIMIT,
   DINGTALK_MAX_MEMBERS,
   DINGTALK_MAX_PREFETCH,
+  compactDingTalkPreview,
   dingtalkConversationsResultSchema,
   dingtalkDiagnosticsResultSchema,
+  formatDingTalkCardSummary,
+  parseDingTalkCardSummary,
   dingtalkMembersResultSchema,
   dingtalkMessagesResultSchema,
   dingtalkPrefetchResultSchema,
@@ -123,7 +126,9 @@ export function dingtalkMessageSummary(message: DingTalkMessage): string {
   const file = message.resources?.find(({ kind }) => kind === "file");
   if (file) return file.name ? `[文件] ${file.name}` : "[文件]";
   if (message.cardTitle) return message.cardTitle;
-  if (message.text.trim()) return plainSnippet(message.text);
+  const card = parseDingTalkCardSummary(message.text);
+  if (card) return formatDingTalkCardSummary(card);
+  if (message.text.trim()) return compactDingTalkPreview(plainSnippet(message.text), 120);
   if (message.unsupported) return "[非文本消息]";
   return "";
 }

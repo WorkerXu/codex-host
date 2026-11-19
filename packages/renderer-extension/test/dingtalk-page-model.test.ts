@@ -14,6 +14,7 @@ import {
   messagePreview,
   mergeDingTalkConversationRow,
   mergeDingTalkMessages,
+  unsupportedSummary,
 } from "../src/settings/dingtalk-page-model.js";
 
 function message(overrides: Partial<DingTalkMessage> = {}): DingTalkMessage {
@@ -140,6 +141,18 @@ describe("DingTalk page model", () => {
         preview: "林晓：新的",
       }),
     ).toMatchObject({ preview: "林晓：新的", lastMessageAt: 400 });
+  });
+
+  it("summarises interactive cards instead of exposing their payload", () => {
+    const body = [
+      "chains",
+      "dingtalk://dingtalkclient/action/open_platform_link?pcLink=https%3A%2F%2Fn.example.com",
+      '[{"text":{"zh_Hans":"嗑瓜子大赛报名接龙"},"type":"TITLE"},{"text":{"zh_Hans":"陈忆莲发起，已有15人参加"},"type":"DESCRIPTION"}]',
+    ].join("\n");
+    const card = message({ text: body });
+    expect(messagePreview(card)).toBe("[群接龙] 嗑瓜子大赛报名接龙 · 已有15人参加");
+    expect(unsupportedSummary(card)).toBe("[群接龙] 嗑瓜子大赛报名接龙 · 已有15人参加");
+    expect(messagePreview(card)).not.toContain("dingtalk://");
   });
 
   it("summarises unsupported messages without leaking bodies", () => {

@@ -557,6 +557,12 @@ export {
   type DingTalkDiagnosticsResult,
   type DingTalkOpenTiming,
 } from "./dingtalk.js";
+export {
+  compactDingTalkPreview,
+  formatDingTalkCardSummary,
+  parseDingTalkCardSummary,
+  type DingTalkCardSummary,
+} from "./dingtalk-summary.js";
 
 export { desktopImageAttachmentPaths } from "./desktop-attachments.js";
 
