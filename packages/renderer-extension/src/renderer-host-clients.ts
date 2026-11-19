@@ -10,6 +10,7 @@ import {
 import { installRendererExternalQueue } from "./renderer-external-queue.js";
 import { installRendererExternalSteering } from "./renderer-external-steering.js";
 import { createRemoteAttachmentSender } from "./renderer-remote-attachments.js";
+import { createAgentSwitchTurnStarter } from "./renderer-agent-switch.js";
 import { restoreThreadReferenceCapability } from "./renderer-thread-reference-capability.js";
 import { createThreadReferenceContext } from "./renderer-thread-reference-context.js";
 import {
@@ -126,10 +127,15 @@ export function createRendererHostClients(
         () =>
           installRendererExternalSteering(
             target,
-            createRemoteAttachmentSender(
+            createAgentSwitchTurnStarter(
               target,
               route.hostId,
               () => !disposed && readRouting()?.forHost(route.hostId) === route,
+              createRemoteAttachmentSender(
+                target,
+                route.hostId,
+                () => !disposed && readRouting()?.forHost(route.hostId) === route,
+              ),
             ),
             createThreadReferenceContext(
               target,

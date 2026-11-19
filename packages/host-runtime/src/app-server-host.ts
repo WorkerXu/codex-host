@@ -3,6 +3,21 @@ import type { CodeRepositories } from "./code-repositories.js";
 import { RepositoryError } from "./code-repository-process.js";
 import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
 import {
+  ThreadHandoffStore,
+  defaultThreadHandoffDirectory,
+  withoutHandoffBlock,
+} from "./thread-agent-switch.js";
+import {
+  ThreadAgentSwitchError,
+  ThreadAgentSwitcher,
+  type ThreadAgentSwitchSource,
+} from "./thread-agent-switch-runner.js";
+import {
+  THREAD_AGENT_SWITCH_METHOD,
+  threadAgentSwitchParamsSchema,
+  threadAgentSwitchResultSchema,
+} from "@codexhost/shared-contracts";
+import {
   DELEGATION_PROJECTS_METHOD,
   DELEGATION_PROJECTS_CHANGED_METHOD,
 } from "@codexhost/shared-contracts";
@@ -883,6 +898,8 @@ export class AppServerHost {
   readonly #dingTalkNativeRunner = new DingTalkNativeRunner((method, params) =>
     this.#requestOfficial(method, params),
   );
+  readonly #threadHandoffs: ThreadHandoffStore;
+  readonly #agentSwitcher: ThreadAgentSwitcher;
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
@@ -1056,6 +1073,26 @@ export class AppServerHost {
           ) &&
           ![...this.#pendingDesktopQuestions.values()].some((pending) => pending.thread === thread),
       },
+    });
+    this.#threadHandoffs = new ThreadHandoffStore(
+      defaultThreadHandoffDirectory(this.#options.environment ?? process.env),
+    );
+    this.#agentSwitcher = new ThreadAgentSwitcher({
+      adapters: this.#externalAdapters,
+      repository: this.#repository,
+      externalRuntime: this.#externalRuntime,
+      handoffs: this.#threadHandoffs,
+      environment: this.#options.environment ?? process.env,
+      agentLabel: (agent) => this.#agentLabel(agent),
+      readSource: (threadId) => this.#readSwitchSource(threadId),
+      requestOfficial: (method, params) => this.#requestOfficial(method, params),
+      registerExternalThread: (input) => this.#registerExternalThread(input),
+      startExternalTurn: (thread, text, turnId, harnessPrefix) =>
+        this.#startDelegatedExternalTurn(thread, text, turnId, harnessPrefix),
+      notifyExternalThreadStarted: (thread) => this.#notifyExternalThreadStarted(thread),
+      notifyDesktop: (message) => this.#writer.json(message),
+      archiveSource: (source) => this.#archiveSwitchedSource(source),
+      diagnose: (error) => this.#diagnose(error),
     });
     this.#delegationCoordinator = new HarnessDelegationCoordinator({
       adapters: this.#externalAdapters,
@@ -2143,6 +2180,10 @@ export class AppServerHost {
       await this.#forkExternalThreadFromRenderer(request);
       return;
     }
+    if (request.method === THREAD_AGENT_SWITCH_METHOD) {
+      this.#dispatchDesktopReply(request, () => this.#switchThreadAgent(request));
+      return;
+    }
     if (request.method === "codexhost/thread/inspect") {
       await this.#inspectThread(request);
       return;
@@ -2811,6 +2852,7 @@ export class AppServerHost {
     frame: Buffer<ArrayBufferLike>;
     value: JsonValue;
   }): Promise<void> {
+    this.#agentSwitcher.observe(input.value);
     if (this.#options.externalOnly) {
       // Native children created through Delegation still have a native owner
       // and lifecycle. Their rendering stays on the GUI's native connection.
@@ -5476,6 +5518,118 @@ export class AppServerHost {
     await this.#notifyExternalThreadStarted(result.thread);
   }
 
+  async #switchThreadAgent(request: JsonRpcRequest): Promise<void> {
+    const parsed = threadAgentSwitchParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      await this.#writer.json(rpcError(request, -32602, "Agent 切换请求无效"));
+      return;
+    }
+    await this.#waitForPlugins();
+    try {
+      const result = await this.#agentSwitcher.switch(parsed.data);
+      await this.#writer.json(
+        rpcEnvelope(request, { result: threadAgentSwitchResultSchema.parse(result) }),
+      );
+    } catch (error) {
+      this.#diagnose(error);
+      const known = error instanceof ThreadAgentSwitchError;
+      await this.#writer.json(
+        rpcError(
+          request,
+          known ? error.code : -32076,
+          known ? error.message : "Agent 切换失败，请稍后重试",
+        ),
+      );
+    }
+  }
+
+  async #loadThreadHandoff(threadId: string): Promise<void> {
+    await this.#threadHandoffs.load(threadId).catch((error: unknown) => this.#diagnose(error));
+  }
+
+  #agentLabel(agent: string): string {
+    if (agent === "codex") return "Codex";
+    return this.#pluginDescriptors.find((plugin) => plugin.id === agent)?.name ?? agent;
+  }
+
+  /** The idle conversation an Agent switch moves, with all of its visible history. */
+  async #readSwitchSource(threadId: string): Promise<ThreadAgentSwitchSource> {
+    const resolution = await this.#resolveExternalThread(threadId);
+    if (resolution.kind === "error") {
+      throw new ThreadAgentSwitchError(resolution.error.code, resolution.error.message);
+    }
+    if (resolution.kind === "external") {
+      const thread = resolution.thread;
+      if (this.#externalThreadBusy(thread)) {
+        throw new ThreadAgentSwitchError(-32072, "这段对话还在运行，等它结束后再切换");
+      }
+      if (!resolution.historyFresh) {
+        const refreshed = await this.#refreshExternalThread(thread);
+        if (refreshed) throw new ThreadAgentSwitchError(refreshed.code, refreshed.message);
+      }
+      await this.#loadThreadHandoff(thread.id);
+      return {
+        threadId: thread.id,
+        agent: thread.harnessId,
+        title: thread.record.title,
+        cwd: thread.cwd,
+        projectId: thread.record.projectId ?? null,
+        turns: this.#externalHistoryTurns(thread),
+      };
+    }
+    const read = await this.#requestOfficial("thread/read", { threadId, includeTurns: false });
+    const thread =
+      isRecord(read.result) && isRecord(read.result.thread) ? read.result.thread : null;
+    if (!thread || typeof thread.cwd !== "string" || !thread.cwd) {
+      throw new ThreadAgentSwitchError(-32602, "找不到这段对话");
+    }
+    if (isRecord(thread.status) && thread.status.type === "active") {
+      throw new ThreadAgentSwitchError(-32072, "这段对话还在运行，等它结束后再切换");
+    }
+    const turns: JsonValue[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page === 0 || (cursor && page < 1_000); page += 1) {
+      const response = await this.#requestOfficial("thread/turns/list", {
+        threadId,
+        limit: 100,
+        sortDirection: "asc",
+        itemsView: "full",
+        ...(cursor ? { cursor } : {}),
+      });
+      const result = isRecord(response.result) ? response.result : null;
+      if (!result || !Array.isArray(result.data)) {
+        throw new ThreadAgentSwitchError(-32076, "读取这段对话的历史失败");
+      }
+      turns.push(...result.data);
+      cursor =
+        typeof result.nextCursor === "string" && result.nextCursor ? result.nextCursor : null;
+    }
+    return {
+      threadId,
+      agent: "codex",
+      title: typeof thread.name === "string" ? thread.name : "",
+      cwd: thread.cwd,
+      projectId: typeof thread.projectId === "string" && thread.projectId ? thread.projectId : null,
+      turns,
+    };
+  }
+
+  async #archiveSwitchedSource(source: ThreadAgentSwitchSource): Promise<void> {
+    if (source.agent === "codex") {
+      const response = await this.#requestOfficial("thread/archive", { threadId: source.threadId });
+      if (isRecord(response.error)) throw new Error("Switched Codex Thread could not be archived");
+      return;
+    }
+    const location = await this.#locateExternalThread(source.threadId);
+    if (location.kind !== "external") return;
+    const record = await this.#repository.setArchived(location.record.hostThreadId, true);
+    if (location.thread) this.#syncLoadedExternalThread(location.thread, record);
+    await this.#writer.json({
+      method: "thread/archived",
+      params: { threadId: record.hostThreadId },
+    });
+  }
+
   async #forkExternalThread(
     request: JsonRpcRequest,
     source: ExternalThread,
@@ -5677,6 +5831,7 @@ export class AppServerHost {
         return;
       }
     }
+    if (includeTurns) await this.#loadThreadHandoff(thread.id);
     const readTurns = includeTurns ? [...this.#externalHistoryTurns(thread)] : [];
     await this.#writer.json(
       rpcEnvelope(request, {
@@ -5712,6 +5867,7 @@ export class AppServerHost {
       }
     }
     try {
+      await this.#loadThreadHandoff(thread.id);
       const turns = this.#externalHistoryTurns(thread);
       const result =
         request.method === "thread/turns/list"
@@ -5747,6 +5903,7 @@ export class AppServerHost {
         return;
       }
     }
+    await this.#loadThreadHandoff(thread.id);
     const turns = [...this.#externalHistoryTurns(thread)];
     const responseThread = {
       ...(await this.#withExternalSection(thread.thread)),
@@ -5810,9 +5967,13 @@ export class AppServerHost {
 
   #externalHistoryTurns(thread: ExternalThread): JsonObject[] {
     const turns = this.#withOpenBackgroundCommands(thread, thread.turns);
-    if (!thread.activeTurnId) return turns;
-    const active = thread.projectedTurns.get(thread.activeTurnId);
-    return active ? [...turns, active.projector.pendingTurn()] : turns;
+    const active = thread.activeTurnId ? thread.projectedTurns.get(thread.activeTurnId) : undefined;
+    const own = active ? [...turns, active.projector.pendingTurn()] : turns;
+    // A Thread switched to from another Agent shows that conversation first.
+    const earlier = this.#threadHandoffs.cachedTurns(thread.id);
+    if (earlier.length === 0) return own;
+    const [first, ...rest] = own;
+    return [...earlier, ...(first ? [withoutHandoffBlock(first), ...rest] : [])];
   }
 
   /**
@@ -5886,6 +6047,8 @@ export class AppServerHost {
     thread: ExternalThread,
     text: string,
     requestedTurnId: string,
+    /** Sent to the Harness before the shown input, e.g. a conversation handed over. */
+    harnessPrefix = "",
   ): Promise<void> {
     if (this.#externalThreadBusy(thread)) {
       throw new Error("External Thread already has an active Turn");
@@ -5913,7 +6076,7 @@ export class AppServerHost {
     const result = await thread.session.execute({
       type: "turn.start",
       turnId,
-      input: [{ type: "text", text }],
+      input: [{ type: "text", text: harnessPrefix + text }],
     });
     if (!result.ok) {
       await this.#threadFolders.observe({ id: folderInput.id, error: result.error });
