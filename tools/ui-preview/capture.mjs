@@ -626,6 +626,38 @@ for (const scenario of scenarios) {
             !query(".hub-page")?.textContent.includes("调用 —"),
         );
         const scenario = document.body.dataset.scenario;
+        if (scenario?.startsWith("hub-mcp-")) {
+          check("hub-mcp-two-tabs", queryAll('.hub-page-tabs [role="tab"]').length === 2);
+          check(
+            "hub-mcp-tab-semantics",
+            query(".hub-page-tabs")?.getAttribute("role") === "tablist" &&
+              queryAll('.hub-page-tabs [role="tab"]').every(
+                (tab) => tab.hasAttribute("aria-controls") && tab.hasAttribute("aria-selected"),
+              ) &&
+              queryAll(".hub-tab-panel").every(
+                (panel) =>
+                  panel.getAttribute("role") === "tabpanel" &&
+                  panel.hasAttribute("aria-labelledby"),
+              ),
+          );
+          check("hub-mcp-one-visible-panel", queryAll(".hub-tab-panel:not([hidden])").length === 1);
+          const visiblePanel = query(".hub-tab-panel:not([hidden])");
+          check(
+            "hub-mcp-visible-panel-bounded",
+            queryAll(".hub-tab-panel:not([hidden]) .hub-server").length <= 12 &&
+              queryAll(".hub-tab-panel:not([hidden]) .hub-key").length <= 20,
+          );
+          if (
+            scenario === "hub-mcp-keys" ||
+            scenario === "hub-mcp-keys-page-2" ||
+            scenario === "hub-mcp-keys-tab-hover"
+          )
+            check(
+              "hub-mcp-keys-pager",
+              Boolean(visiblePanel?.querySelector(".hub-pagination")) &&
+                Boolean(visiblePanel?.querySelector(".hub-key")),
+            );
+        }
         if (scenario === "hub-servers") {
           const disabled = query('.hub-server[data-disabled="true"]');
           check(
