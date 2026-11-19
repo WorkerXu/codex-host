@@ -148,3 +148,29 @@ describe("HarnessAvailabilityStore", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("installed Harness ids", () => {
+  it("includes ready, unavailable and error, and excludes notInstalled", async () => {
+    const directory = await root();
+    await mkdir(path.join(directory, "cache"), { recursive: true });
+    await writeFile(
+      path.join(directory, "cache", "harness-availability.json"),
+      JSON.stringify({
+        formatVersion: 1,
+        generation: 4,
+        entries: {
+          "claude-code": { status: "ready", checkedAt: 1 },
+          codebuddy: { status: "unavailable", checkedAt: 2 },
+          grok: { status: "error", checkedAt: 3 },
+          "cursor-cli": { status: "notInstalled", checkedAt: 4 },
+        },
+      }),
+    );
+    const store = new HarnessAvailabilityStore({ CODEXHOST_USER_DIR: directory });
+    expect([...(await store.availableHarnessIds())].sort()).toEqual([
+      "claude-code",
+      "codebuddy",
+      "grok",
+    ]);
+  });
+});

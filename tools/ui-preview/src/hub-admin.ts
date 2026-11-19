@@ -97,6 +97,7 @@ export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
     "hub-connection-empty",
     "hub-connection-connect",
     "hub-connection-test-error",
+    "hub-connection-scoped-error",
     "hub-connection-saved",
   ].includes(scenario);
   let invalid = scenario === "hub-error" || scenario === "hub-auth-error";
@@ -118,7 +119,8 @@ export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
           result = { configured, last4: configured ? last4 : null };
           break;
         case "mcpConnect":
-          if (scenario === "hub-connection-test-error") throw new Error("mcp-auth");
+          if (scenario.includes("test-error")) throw new Error("mcp-key-invalid");
+          if (scenario.includes("scoped-error")) throw new Error("mcp-key-scoped");
           configured = true;
           invalid = false;
           last4 = params.key.slice(-4);

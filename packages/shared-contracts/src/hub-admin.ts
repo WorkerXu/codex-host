@@ -6,6 +6,8 @@ export const HUB_ERROR_MESSAGES = {
   connection: "连接失败",
   forbidden: "无权限",
   "mcp-auth": "密钥无效或权限不足",
+  "mcp-key-invalid": "密钥不正确",
+  "mcp-key-scoped": "这个密钥只能访问部分服务器，管理需要“全部访问”类型的密钥",
   unavailable: "服务未运行",
   invalid: "请检查输入内容",
   failed: "操作失败",

@@ -152,6 +152,7 @@ import {
   installRendererJarvisMention,
   type RendererJarvisMentionControl,
 } from "./renderer-jarvis-mention.js";
+import { localMachineLabel } from "./renderer-cross-host-harness-catalog.js";
 import { delegationPeerLabel, delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
 import { createDelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
@@ -1028,6 +1029,14 @@ export function installRendererBindingProbe(
     openImportedThread: (threadId, signal, hostId) =>
       openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     skills: {
+      resolveMachineName: async (hostId) => {
+        if (hostId === "local") return localMachineLabel(settingsLifecycle.locale);
+        await reconcileSshConnectionHosts();
+        const peer = peerDelegationCatalogs
+          .get("local")
+          ?.peers.find((peer) => peer.name === hostId || peer.hostIds.includes(hostId));
+        return desktopDisplayNameForPeer(peer ?? { hostIds: [hostId], ssh: hostId });
+      },
       createClient: () =>
         createRendererSkillsClient(async (params) => {
           const route = window.__codexhostHostRoutingV1?.forHost("local");
@@ -4084,7 +4093,9 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
-  const desktopDisplayNameForPeer = (peer: DelegationPeerCatalogEntry): string | undefined => {
+  const desktopDisplayNameForPeer = (
+    peer: Pick<DelegationPeerCatalogEntry, "hostIds" | "ssh">,
+  ): string | undefined => {
     for (const hostId of peer.hostIds) {
       const displayName = sshConnectionDisplayNames.get(hostId);
       if (displayName) return displayName;

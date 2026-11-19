@@ -224,3 +224,31 @@ describe("bounded tar transport", () => {
     expect(() => unpackSkill("bad payload")).toThrow();
   });
 });
+
+describe("targeted link and unlink", () => {
+  it("links one agent badge, unlinks it, and restores it through undo", async () => {
+    const { paths, hub } = await fixture();
+    await skill(paths.home);
+    await mkdir(path.join(paths.home, ".claude/skills"), { recursive: true });
+    const scope = { agentId: "claude-code", skill: "example" };
+    const link = skillLinkPlanSchema.parse(await hub.request("link-plan", { scope }));
+    expect(link.actions).toMatchObject([{ kind: "link", ...scope }]);
+    const applied = await hub.request("link-apply", { id: link.id });
+    const linkPath = path.join(paths.home, ".claude/skills/example");
+    expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+
+    const unlink = skillLinkPlanSchema.parse(
+      await hub.request("link-plan", { unlink: [scope], scope }),
+    );
+    expect(unlink.actions).toMatchObject([{ kind: "unlink", ...scope }]);
+    await hub.request("link-apply", { id: unlink.id });
+    await expect(lstat(linkPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const undo = skillChangeResultSchema.parse(
+      await hub.request("undo", { id: (unlink as { id: string }).id }),
+    );
+    expect(undo.changed).toBe(1);
+    expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+    expect(applied).toMatchObject({ changed: 1 });
+  });
+});

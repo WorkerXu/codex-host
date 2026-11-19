@@ -150,6 +150,9 @@ export class SkillsInventoryCache {
     return value;
   }
 }
-export async function inventory(paths: SkillPaths): Promise<SkillInventory> {
-  return new SkillsInventoryCache().inventory(paths);
+export async function inventory(
+  paths: SkillPaths,
+  installed?: ReadonlySet<string>,
+): Promise<SkillInventory> {
+  return new SkillsInventoryCache().inventory(paths, installed);
 }

@@ -26,7 +26,7 @@ export function createMcpConnectionUi(
         document,
         "p",
         "hub-muted",
-        "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在本机。",
+        "需要系统级、全部访问（accessType 为全部）的密钥。密钥只保存在本机。",
       ),
     );
     const submit = hubButton(
@@ -115,12 +115,12 @@ export function createMcpConnectionUi(
       icon.setAttribute("stroke-width", "1.5");
       const copy = hubElement(document, "div", "hub-connection-copy");
       copy.append(
-        hubElement(document, "h3", "", "尚未连接 MCPHub"),
+        hubElement(document, "h3", "", "连接 MCPHub"),
         hubElement(
           document,
           "p",
           "hub-muted",
-          "填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥",
+          "需要“全部访问”类型的密钥（MCPHub 设置 › 密钥 中 accessType 为全部的密钥，例如 admin）",
         ),
       );
       state.append(icon, copy);

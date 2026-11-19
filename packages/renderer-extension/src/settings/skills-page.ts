@@ -2,7 +2,7 @@ import { skillsNativeTokens } from "./skills-style.js";
 import { renderSkillsInventory } from "./skills-inventory-view.js";
 import { showSkillConflicts } from "./skills-conflicts.js";
 import { showSkillLinks } from "./skills-link-preview.js";
-import { editSkillExclusions, renderSkillExclusions } from "./skills-exclusions.js";
+import { editSkillExclusions } from "./skills-exclusions.js";
 import { createRendererSettingsIcon } from "./icons.js";
 import { required } from "./skills-dialog.js";
 import type {
@@ -11,11 +11,16 @@ import type {
   SkillsHubRequest,
   SkillLinkPlan,
 } from "@codexhost/shared-contracts";
-import { skillsErrorText, type RendererSkillsClient } from "../renderer-skills-client.js";
+import {
+  skillsErrorText,
+  type RendererLinkPlanOptions,
+  type RendererSkillsClient,
+} from "../renderer-skills-client.js";
 import type { RendererSettingsPageDefinition } from "./core.js";
 import { skillsDialog, skillButton, skillNode } from "./skills-dialog.js";
 export interface RendererSkillsSettingsOptions {
   createClient(): RendererSkillsClient | null;
+  resolveMachineName?(hostId: string): Promise<string | undefined>;
 }
 type SyncRequest = Extract<
   SkillsHubRequest,
@@ -41,19 +46,25 @@ export function createSkillsSettingsPage(
       head.append(skillNode(document, "h1", "技能"));
       const notice = skillNode(document, "div", "", "skills-notice");
       notice.setAttribute("role", "status");
-      const matrix = skillNode(document, "div", "", "skills-matrix");
-      const agents = skillNode(document, "div", "", "skills-machines");
-      const exclusions = skillNode(document, "div", "", "skills-exclusions");
+      const matrix = skillNode(document, "div", "", "skills-view");
+      const undoBar = skillNode(document, "div", "", "skills-undo");
       const client = options.createClient();
       let machines: SkillMachine[] = [],
         busy = false;
+      let tab: "library" | "agents" = "library";
+      let search = "";
+      let linkFilter: "all" | "linked" | "unlinked" = "all";
+      let machineFilter = "";
+      let layout: "grid" | "list" = "grid";
+      let openAgent: { hostId: string; agentId: string } | null = null;
       const progress = new Map<string, string>();
       const changes = new Map<string, string[]>();
       const button = (label: string, action: () => void, primary = false) =>
         skillButton(document, label, action, primary);
       const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") =>
         skillNode(document, tag, text, className);
-      const machineName = (id: string) => machines.find((m) => m.hostId === id)?.name ?? id;
+      const machineName = (id: string, fallback = id) =>
+        machines.find((m) => m.hostId === id)?.name ?? fallback;
       const remember = (hostId: string, id: string) =>
         changes.set(hostId, [...(changes.get(hostId) ?? []), id]);
       async function perform<T>(
@@ -85,8 +96,16 @@ export function createSkillsSettingsPage(
           notice.textContent = "连接失败";
           return;
         }
-        machines = await client.status();
+        machines = await Promise.all(
+          (await client.status()).map(async (machine) => ({
+            ...machine,
+            name:
+              (await options.resolveMachineName?.(machine.hostId).catch(() => undefined)) ??
+              machine.name,
+          })),
+        );
         cachedMachines = machines;
+        progress.clear();
         if (!context.signal.aborted) render();
       }
       const refresh = button("", () => void perform(load, () => {}));
@@ -133,35 +152,69 @@ export function createSkillsSettingsPage(
         true,
       );
       head.append(refreshWrap, fill);
-      root.append(head, notice, matrix, agents, exclusions);
+      root.append(head, notice, undoBar, matrix);
       context.content.append(root);
       function render(): void {
         fill.disabled = machines.filter((machine) => machine.inventory).length < 2;
+        undoBar.replaceChildren();
+        for (const [hostId, ids] of changes) {
+          const id = ids.at(-1);
+          if (!id) continue;
+          const label = machineName(hostId);
+          undoBar.append(
+            node("span", `${label} 已更新`, "skills-muted"),
+            button("撤销", () => confirmUndo(hostId, id)),
+          );
+        }
+        undoBar.hidden = !undoBar.childElementCount;
         renderSkillsInventory({
-          matrix,
-          agents,
+          container: matrix,
           machines,
           progress,
-          changes,
+          state: {
+            tab,
+            search,
+            link: linkFilter,
+            machine: machineFilter,
+            layout,
+            agent: openAgent,
+          },
+          onState(patch) {
+            if (patch.tab !== undefined) {
+              tab = patch.tab;
+              openAgent = null;
+            }
+            if (patch.search !== undefined) search = patch.search;
+            if (patch.link !== undefined) linkFilter = patch.link;
+            if (patch.machine !== undefined) machineFilter = patch.machine;
+            if (patch.layout !== undefined) layout = patch.layout;
+            if (patch.agent !== undefined) openAgent = patch.agent;
+            render();
+          },
           sync: syncSelection,
-          link: (hostId) => void linkPreview(hostId),
-          undo: confirmUndo,
+          linkAll: (hostId) => void linkPreview(hostId),
+          toggle: (hostId, agentId, skill, linked) =>
+            void linkPreview(
+              hostId,
+              linked
+                ? { unlink: [{ agentId, skill }], scope: { agentId, skill } }
+                : { scope: { agentId, skill } },
+            ),
           refresh: () => void perform(load, () => {}),
+          editExclusions: () =>
+            editSkillExclusions({
+              root,
+              machines,
+              save: (hostId, ids, close) =>
+                void perform(
+                  () => required(client).exclusions(hostId, ids),
+                  async () => {
+                    close();
+                    await load();
+                  },
+                ),
+            }),
         });
-        renderSkillExclusions(exclusions, machines, () =>
-          editSkillExclusions({
-            root,
-            machines,
-            save: (hostId, ids, close) =>
-              void perform(
-                () => required(client).exclusions(hostId, ids),
-                async () => {
-                  close();
-                  await load();
-                },
-              ),
-          }),
-        );
       }
       function confirmUndo(hostId: string, id: string): void {
         const dialog = skillsDialog(root, "撤销更改");
@@ -256,7 +309,16 @@ export function createSkillsSettingsPage(
         if (plan.conflicts.length) {
           showSkillConflicts({
             root,
-            plan,
+            plan: {
+              ...plan,
+              conflicts: plan.conflicts.map((conflict) => ({
+                ...conflict,
+                versions: conflict.versions.map((version) => ({
+                  ...version,
+                  name: machineName(version.hostId, version.name),
+                })),
+              })),
+            },
             choices: input.choices,
             continueWith: (choices) => void previewSync({ ...input, choices, basedOn: plan.id }),
           });
@@ -295,13 +357,14 @@ export function createSkillsSettingsPage(
                 const done = skillsDialog(root, "同步完成");
                 for (const host of hosts) {
                   const row = node("div", "", "skills-head");
-                  row.append(
-                    node("span", `${machineName(host)} · ${progress.get(host)}`),
-                    button("一键链接", () => {
-                      done.close();
-                      void linkPreview(host);
-                    }),
-                  );
+                  row.append(node("span", `${machineName(host)} · ${progress.get(host)}`));
+                  if (machines.find((machine) => machine.hostId === host)?.inventory?.agents.length)
+                    row.append(
+                      button("一键链接", () => {
+                        done.close();
+                        void linkPreview(host);
+                      }),
+                    );
                   done.body.append(row);
                 }
                 done.footer.append(button("完成", done.close, true));
@@ -315,31 +378,30 @@ export function createSkillsSettingsPage(
       }
       async function linkPreview(
         hostId: string,
-        adopt: {
-          agentId: string;
-          skill: string;
-        }[] = [],
+        planOptions: RendererLinkPlanOptions = {},
         focus?: string,
       ): Promise<void> {
         await perform(
-          () => required(client).linkPlan(hostId, adopt),
-          (plan) => showLinks(plan, adopt, focus),
+          () => required(client).linkPlan(hostId, planOptions),
+          (plan) => showLinks(plan, planOptions, focus),
         );
       }
       function showLinks(
         plan: SkillLinkPlan,
-        adopt: { agentId: string; skill: string }[],
+        planOptions: RendererLinkPlanOptions,
         focus?: string,
       ): void {
         showSkillLinks({
           root,
           machines,
           plan,
-          adopt,
+          adopt: planOptions.adopt ?? [],
           focus,
-          replan: (selected, focus) => void linkPreview(plan.hostId, selected, focus),
+          replan: (selected, focus) =>
+            void linkPreview(plan.hostId, { ...planOptions, adopt: selected }, focus),
           apply: () => {
-            progress.set(plan.hostId, "正在链接…");
+            const unlinking = plan.actions.some((action) => action.kind === "unlink");
+            progress.set(plan.hostId, unlinking ? "正在解除链接…" : "正在链接…");
             render();
             void perform(
               () => required(client).linkApply(plan.hostId, plan.id),

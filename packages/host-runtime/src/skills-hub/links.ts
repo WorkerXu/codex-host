@@ -21,17 +21,24 @@ import {
 } from "@codexhost/shared-contracts";
 import { exists, fail, fingerprint, inside, readSkillFiles, safePath } from "./files.js";
 import { inventory, library, type SkillPaths } from "./inventory.js";
-import { isManagedSkill } from "./agents.js";
+import { agentCandidates, isManagedSkill } from "./agents.js";
+export interface SkillLinkPlanOptions {
+  adopt?: { agentId: string; skill: string }[] | undefined;
+  unlink?: { agentId: string; skill: string }[] | undefined;
+  scope?: { agentId: string; skill: string } | undefined;
+}
 export async function planLinks(
   paths: SkillPaths,
-  adopt: {
-    agentId: string;
-    skill: string;
-  }[] = [],
+  options: SkillLinkPlanOptions = {},
+  installed?: ReadonlySet<string>,
 ): Promise<SkillLinkPlan> {
-  const current = await inventory(paths);
+  const { adopt = [], unlink = [], scope } = options;
+  const current = await inventory(paths, installed);
   const actions: SkillLinkAction[] = [];
   const root = library(paths);
+  const unlinks = new Map(
+    unlink.map((request) => [`${request.agentId}/${request.skill}`, request]),
+  );
   for (const agent of current.agents) {
     if (agent.excluded || agent.native === true) continue;
     try {
@@ -45,7 +52,7 @@ export async function planLinks(
       for (const entry of await readdir(agent.skillsDir))
         if (skillKeySchema.safeParse(entry).success) keys.add(entry);
     for (const key of keys) {
-      if (isManagedSkill(agent.id, key)) continue;
+      if (isManagedSkill(agent.id, key) || unlinks.has(`${agent.id}/${key}`)) continue;
       const file = path.join(agent.skillsDir, key),
         target = path.join(root, key);
       const base = {
@@ -84,10 +91,43 @@ export async function planLinks(
       }
     }
   }
+  for (const request of unlinks.values()) {
+    const agent = current.agents.find((entry) => entry.id === request.agentId);
+    if (
+      !agent ||
+      agent.excluded ||
+      agent.native === true ||
+      isManagedSkill(agent.id, request.skill)
+    )
+      continue;
+    await safePath(paths.home, agent.skillsDir);
+    const file = path.join(agent.skillsDir, request.skill),
+      target = path.join(root, request.skill);
+    if (!(await exists(file))) continue;
+    const info = await lstat(file);
+    if (!info.isSymbolicLink()) continue;
+    const previousLink = await readlink(file);
+    const resolved = path.resolve(agent.skillsDir, previousLink);
+    if (resolved !== target) continue;
+    actions.push({
+      kind: "unlink",
+      agentId: request.agentId,
+      skill: request.skill,
+      path: file,
+      target,
+      fingerprint: null,
+      previousLink,
+    });
+  }
+  const filtered = scope
+    ? actions.filter((action) => action.agentId === scope.agentId && action.skill === scope.skill)
+    : actions;
   // Only one real directory may win for each central name in a single confirmation.
-  const adopted = actions.filter((action) => action.kind === "adopt").map((action) => action.skill);
+  const adopted = filtered
+    .filter((action) => action.kind === "adopt")
+    .map((action) => action.skill);
   if (new Set(adopted).size !== adopted.length) fail("duplicate_adoption");
-  return { id: randomUUID(), hostId: "local", actions, warnings: current.warnings };
+  return { id: randomUUID(), hostId: "local", actions: filtered, warnings: current.warnings };
 }
 interface Change {
   action: SkillLinkAction;
@@ -113,12 +153,13 @@ export async function saveManifest(paths: SkillPaths, manifest: Manifest): Promi
 export async function applyLinks(
   paths: SkillPaths,
   plan: SkillLinkPlan,
+  installed?: ReadonlySet<string>,
 ): Promise<{
   id: string;
   changed: number;
 }> {
   const actions = plan.actions.filter((action) => action.kind !== "conflict");
-  const current = await inventory(paths);
+  const current = await inventory(paths, installed);
   const manifest: Manifest = { id: plan.id, kind: "links", undone: false, changes: [] };
   for (const [index, action] of actions.entries()) {
     await safePath(paths.home, path.dirname(action.path));
@@ -139,7 +180,8 @@ export async function applyLinks(
   for (const change of manifest.changes) {
     const action = change.action;
     await mkdir(path.dirname(action.path), { recursive: true });
-    if (action.kind === "remove-dangling") {
+    if (action.kind === "remove-dangling" || action.kind === "unlink") {
+      if (!(await lstat(action.path)).isSymbolicLink()) fail("stale_plan");
       if ((await readlink(action.path)) !== action.previousLink) fail("stale_plan");
       await unlink(action.path);
     } else if (action.kind === "adopt") {
@@ -169,6 +211,7 @@ export async function applyLinks(
 export async function undoChanges(
   paths: SkillPaths,
   id: string,
+  installed?: ReadonlySet<string>,
 ): Promise<{
   id: string;
   changed: number;
@@ -177,6 +220,12 @@ export async function undoChanges(
     await readFile(path.join(paths.state, `${id}.json`), "utf8"),
   ) as Manifest;
   if (manifest.id !== id || manifest.undone) fail("unknown_change");
+  if (manifest.kind === "links" && installed) {
+    const agents = new Set(
+      (await agentCandidates(paths.home, paths.searchPath, installed)).map(({ rule }) => rule.id),
+    );
+    if (manifest.changes.some(({ action }) => !agents.has(action.agentId))) fail("undo_conflict");
+  }
   // Validate the entire reversal before touching any skill.
   for (const change of manifest.changes) {
     if (change.stage === "pending") continue;
@@ -192,7 +241,7 @@ export async function undoChanges(
       if (change.stage === "done" && fingerprint(await readSkillFiles(a.path)) !== a.fingerprint)
         fail("undo_conflict");
       if (change.stage === "backed-up" && (await exists(a.path))) fail("undo_conflict");
-    } else if (a.kind === "remove-dangling") {
+    } else if (a.kind === "remove-dangling" || a.kind === "unlink") {
       if (await exists(a.path)) fail("undo_conflict");
     } else {
       if (
@@ -217,7 +266,8 @@ export async function undoChanges(
       if (change.stage === "done")
         await rename(a.path, path.join(paths.state, `${id}.undone-skill`));
       if (change.backup) await rename(change.backup, a.path);
-    } else if (a.kind === "remove-dangling") await symlink(required(a.previousLink), a.path, "dir");
+    } else if (a.kind === "remove-dangling" || a.kind === "unlink")
+      await symlink(required(a.previousLink), a.path, "dir");
     else {
       if (change.stage === "done") await unlink(a.path);
       if (a.kind === "adopt") {

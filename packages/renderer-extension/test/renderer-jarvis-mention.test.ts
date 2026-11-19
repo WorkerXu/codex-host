@@ -242,8 +242,9 @@ describe("Renderer Jarvis client", () => {
     expect(jarvisStepErrorText("not_logged_in", "zh-CN")).toBe("未登录 Jarvis");
     expect(jarvisStepErrorText("not_installed", "zh-CN")).toBe("未安装 Jarvis");
     expect(jarvisStepErrorText("timeout", "zh-CN")).toBe("网络失败，请稍后重试");
-    expect(jarvisStepErrorText("cli_failed", "zh-CN")).toBe("网络失败，请稍后重试");
-    expect(jarvisStepErrorText("unknown", "zh-CN")).toBe("Jarvis 请求失败，请稍后重试");
+    expect(jarvisStepErrorText("cli_failed", "zh-CN")).toBe("Jarvis 请求失败，请重试");
+    expect(jarvisStepErrorText("jarvis_failed", "zh-CN")).toBe("Jarvis 请求失败，请重试");
+    expect(jarvisStepErrorText("unknown", "zh-CN")).toBe("Jarvis 请求失败，请重试");
     expect(jarvisStepErrorText("not_logged_in", "en")).toBe("Not signed in to Jarvis");
   });
 

@@ -1,5 +1,77 @@
 /** Semantic classes are DOM hooks; styles compile into the settings Tailwind sheet. */
 const classes: Record<string, string> = {
+  "skills-view": "skills-view flex flex-col gap-4",
+  "skills-undo":
+    "skills-undo flex flex-wrap items-center gap-2 rounded-lg border border-settings-border bg-settings-surface px-3 py-2 text-xs",
+  "skills-tabs": "skills-tabs flex w-fit gap-1 rounded-lg bg-settings-hover/70 p-1",
+  "skills-tab":
+    "skills-tab rounded-md border-0 bg-transparent px-3 py-1.5 text-xs font-medium text-settings-muted transition-colors hover:text-settings-text aria-selected:bg-settings-panel aria-selected:text-settings-text aria-selected:shadow-sm",
+  "skills-toolbar": "skills-toolbar flex flex-wrap items-center gap-2",
+  "skills-search":
+    "skills-search h-9 min-w-[220px] flex-1 rounded-lg border border-settings-border bg-settings-panel px-3 text-sm text-settings-text outline-none placeholder:text-settings-subtle focus:border-settings-focus",
+  "skills-segmented": "skills-segmented inline-flex rounded-lg bg-settings-hover/70 p-0.5",
+  "skills-filter":
+    "skills-filter rounded-md border-0 bg-transparent px-2.5 py-1.5 text-xs text-settings-muted aria-pressed:bg-settings-panel aria-pressed:text-settings-text aria-pressed:shadow-sm",
+  "skills-select":
+    "skills-select h-9 rounded-lg border border-settings-border bg-settings-panel px-2 text-xs text-settings-text outline-none focus:border-settings-focus",
+  "skills-layout-toggle":
+    "skills-layout-toggle inline-flex rounded-lg border border-settings-border p-0.5",
+  "skills-layout-button":
+    "skills-layout-button inline-flex size-7 items-center justify-center rounded-md border-0 bg-transparent text-settings-muted hover:bg-settings-hover aria-pressed:bg-settings-hover aria-pressed:text-settings-text",
+  "skills-grid": "skills-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-3",
+  "skills-list": "skills-list flex flex-col gap-2",
+  "skills-card":
+    "skills-card min-w-0 flex flex-col gap-2.5 rounded-xl border border-settings-border bg-settings-panel p-4 transition-colors hover:border-settings-focus/40",
+  "skills-card-list":
+    "skills-card-list sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.8fr)_minmax(0,2fr)_auto] sm:items-center sm:gap-3",
+  "skills-card-head": "skills-card-head flex min-w-0 items-center gap-2",
+  "skills-card-name": "skills-card-name m-0 min-w-0 truncate text-sm font-semibold",
+  "skills-version-chip":
+    "skills-version-chip shrink-0 rounded bg-settings-hover px-1.5 py-0.5 text-[10px] font-normal text-settings-muted",
+  "skills-card-description":
+    "skills-card-description m-0 truncate text-xs leading-4 text-settings-muted",
+  "skills-card-meta":
+    "skills-card-meta min-w-0 truncate text-[11px] leading-4 text-settings-subtle",
+  "skills-source": "skills-source truncate",
+  "skills-chips": "skills-chips flex flex-wrap items-center gap-1.5 text-[11px] leading-4",
+  "skills-chip":
+    "skills-chip rounded-md bg-settings-hover px-1.5 py-0.5 text-[11px] leading-4 text-settings-muted data-[state=same]:text-settings-success data-[state=different]:text-settings-warning data-[state=missing]:text-settings-subtle",
+  "skills-chip-action":
+    "skills-chip-action rounded-md border border-settings-border bg-transparent px-2 py-0.5 text-[11px] leading-4 text-settings-muted hover:bg-settings-hover",
+  "skills-badges": "skills-badges flex flex-wrap items-center gap-1 pt-0.5",
+  "skills-badge":
+    "skills-badge inline-flex size-6 items-center justify-center rounded-full border border-settings-border bg-settings-panel opacity-40 transition-opacity hover:opacity-100 data-[linked=true]:border-settings-focus/50 data-[linked=true]:opacity-100 data-[native=true]:border-settings-success/40 [&_span]:text-[10px]",
+  "skills-footer":
+    "skills-footer flex flex-wrap items-center gap-2 border-t border-settings-divider pt-3",
+  "skills-machine-group": "skills-machine-group flex flex-col gap-3",
+  "skills-machine-heading":
+    "skills-machine-heading flex flex-wrap items-center gap-2 [&_h3]:m-0 [&_h3]:text-sm [&_h3]:font-semibold",
+  "skills-agent-grid": "skills-agent-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-3",
+  "skills-agent-card":
+    "skills-agent-card flex w-full items-center gap-3 rounded-xl border border-settings-border bg-settings-panel p-3 text-left transition-colors hover:bg-settings-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-settings-focus",
+  "skills-agent-icon":
+    "skills-agent-icon flex size-9 shrink-0 items-center justify-center rounded-lg bg-settings-hover text-[11px] font-medium",
+  "skills-agent-info": "skills-agent-info flex min-w-0 flex-1 flex-col gap-0.5",
+  "skills-agent-title":
+    "skills-agent-title flex min-w-0 items-center gap-2 text-sm [&_strong]:truncate [&_strong]:font-medium",
+  "skills-agent-tags": "skills-agent-tags mt-1 flex flex-wrap items-center gap-1.5",
+  "skills-detail-head": "skills-detail-head flex items-start gap-3",
+  "skills-back":
+    "skills-back inline-flex size-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-settings-muted hover:bg-settings-hover",
+  "skills-detail-title": "skills-detail-title flex items-center gap-3",
+  "skills-detail-stats": "skills-detail-stats m-0 text-xs text-settings-muted",
+  "skills-skill-grid": "skills-skill-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-3",
+  "skills-skill-card":
+    "skills-skill-card flex flex-col gap-1.5 rounded-lg border border-settings-border bg-settings-panel p-3",
+  "skills-skill-top":
+    "skills-skill-top flex items-start justify-between gap-2 [&_strong]:text-sm [&_strong]:font-medium",
+  "skills-state":
+    "skills-state inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] leading-4",
+  "skills-status-linked": "skills-status-linked bg-settings-success/10 text-settings-success",
+  "skills-status-missing": "skills-status-missing bg-settings-hover text-settings-subtle",
+  "skills-status-conflict": "skills-status-conflict bg-settings-warning/10 text-settings-warning",
+  "skills-status-native": "skills-status-native bg-settings-focus/10 text-settings-focus",
+  "skills-status-managed": "skills-status-managed bg-settings-hover text-settings-muted",
   "skills-hub":
     "skills-hub mx-auto flex max-w-[1100px] flex-col gap-6 text-sm leading-5 text-settings-text [&_h3]:m-0 [&_h3]:text-sm [&_h3]:font-semibold",
   "skills-head":
@@ -75,7 +147,11 @@ const classes: Record<string, string> = {
   "skills-link-choice": "skills-link-choice flex cursor-pointer items-center gap-2 text-xs",
 };
 export function skillsClass(name: string): string {
-  return classes[name] ?? name;
+  return name
+    .split(/\s+/u)
+    .filter(Boolean)
+    .map((token) => classes[token] ?? token)
+    .join(" ");
 }
 
 /** Page-local bindings use the same semantic tokens as the native Desktop controls. */

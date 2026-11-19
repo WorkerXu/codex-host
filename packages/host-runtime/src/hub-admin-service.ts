@@ -46,10 +46,10 @@ export class HubAdminService {
           else if (params.op === "mcpDisconnect") {
             await this.connection.write(null);
             result = state(null);
-          } else {
-            const key = params.op === "mcpConnect" ? params.key : await this.connection.read();
-            if (!key) throw new HubAdminError("mcp-auth");
-            if (params.op === "mcpOverview") {
+          } else if (params.op === "mcpOverview") {
+            const key = await this.connection.read();
+            if (!key) result = { ...state(null), servers: null, keys: null };
+            else {
               const endpoints = await this.remote.endpoints();
               const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
               const request = (path: string, method?: string, body?: unknown) =>
@@ -70,27 +70,51 @@ export class HubAdminService {
                 servers: (servers as { servers: unknown[] }).servers,
                 keys,
               };
-            } else {
-              const endpoints = await this.remote.endpoints();
-              const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
-              const request = (path: string, method?: string, body?: unknown) =>
-                hubJson(
-                  fetcher,
-                  endpoints.mcphub,
-                  path,
-                  { [header]: `Bearer ${key}` },
-                  method,
-                  body,
-                );
-              if (params.op === "mcpConnect") {
-                // This route is read-only and requires a system-level all-access key.
-                z.object({ success: z.literal(true), data: z.array(z.unknown()) }).parse(
-                  await request("/api/auth/keys"),
-                );
-                await this.connection.write(key);
-                result = state(key);
-              } else result = await runMcpAdmin(request, params);
             }
+          } else {
+            const key = params.op === "mcpConnect" ? params.key : await this.connection.read();
+            if (!key) throw new HubAdminError("mcp-auth");
+            const endpoints = await this.remote.endpoints();
+            const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
+            const request = (path: string, method?: string, body?: unknown) =>
+              hubJson(fetcher, endpoints.mcphub, path, { [header]: `Bearer ${key}` }, method, body);
+            if (params.op === "mcpConnect") {
+              // Read-only management call: reject a bad key or a scoped key before storing it.
+              const value = await hubJson(
+                fetcher,
+                endpoints.mcphub,
+                "/api/auth/keys",
+                { [header]: `Bearer ${key}` },
+                "GET",
+                undefined,
+                (response, text) => {
+                  if (response.status === 401) return new HubAdminError("mcp-key-invalid");
+                  if (
+                    response.status === 403 ||
+                    text.toLowerCase().includes("not a system-level all-access key")
+                  )
+                    return new HubAdminError("mcp-key-scoped");
+                  return null;
+                },
+              );
+              const check = z
+                .object({
+                  success: z.boolean(),
+                  data: z.unknown().optional(),
+                  message: z.string().optional(),
+                })
+                .parse(value);
+              if (!check.success) {
+                if (
+                  (check.message ?? "").toLowerCase().includes("not a system-level all-access key")
+                )
+                  throw new HubAdminError("mcp-key-scoped");
+                throw new HubAdminError("failed");
+              }
+              if (!Array.isArray(check.data)) throw new HubAdminError("failed");
+              await this.connection.write(key);
+              result = state(key);
+            } else result = await runMcpAdmin(request, params);
           }
         } catch (error) {
           if (error instanceof HubAdminError && error.code === "forbidden")

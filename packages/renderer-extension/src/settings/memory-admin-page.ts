@@ -4,6 +4,7 @@ import type { RendererSettingsPageDefinition } from "./core.js";
 import type { HubAdminPageOptions } from "./mcp-admin-page.js";
 import { HubCacheController, hubAgeLabel, type HubCacheView } from "./hub-cache.js";
 import { createHubPage, hubButton, hubDate, hubElement, hubSelect } from "./hub-admin-ui.js";
+import { MemoryPageStore, nextPageInput, type MemoryPage } from "./memory-page-cache.js";
 
 export function createMemoryAdminPage(
   options: HubAdminPageOptions,
@@ -70,57 +71,72 @@ export function createMemoryAdminPage(
         );
         return item;
       };
+      const store = new MemoryPageStore((input) =>
+        client.request(ui.hostId, {
+          op: "search",
+          query: input.query,
+          source: input.source,
+          offset: input.offset,
+          ...(input.windowId ? { windowId: input.windowId } : {}),
+        }),
+      );
+      const renderResults = (value: MemoryPage, input: { query: string; source: string }) => {
+        heading.textContent =
+          input.query.trim() || input.source ? `搜索结果 · ${value.total} 条` : "最近更新";
+        offset = value.offset;
+        windowId = value.windowId ?? undefined;
+        results.replaceChildren();
+        for (const memory of value.memories) results.append(row(memory));
+        if (!value.memories.length)
+          results.append(hubElement(document, "p", "hub-empty", "没有匹配的记忆"));
+        const pagination = hubElement(document, "div", "hub-row hub-pagination");
+        const previous = hubButton(document, "上一页", () => {
+          offset = Math.max(0, offset - 10);
+          void search();
+        });
+        previous.disabled = offset === 0;
+        const next = hubButton(document, "下一页", () => {
+          offset += 10;
+          void search();
+        });
+        next.disabled = offset + 10 >= value.total;
+        pagination.append(
+          hubElement(
+            document,
+            "span",
+            "hub-muted",
+            `共 ${value.total} 条 · 第 ${Math.floor(offset / 10) + 1} 页`,
+          ),
+          previous,
+          next,
+        );
+        results.append(pagination);
+      };
       const search = async (quiet = false) => {
         const host = ui.hostId;
         const revision = ui.revision();
         const generation = ++searchGeneration;
+        const input = { query, source, offset, windowId };
+        const cached = store.peek(input);
+        const current = () => ui.valid(host, revision) && generation === searchGeneration;
         const run = async () => {
-          const value = await client.request(host, {
-            op: "search",
-            query,
-            source,
-            offset,
-            ...(windowId ? { windowId } : {}),
-          });
-          if (!ui.valid(host, revision) || generation !== searchGeneration) return;
-          heading.textContent =
-            query.trim() || source ? `搜索结果 · ${value.total} 条` : "最近更新";
-          offset = value.offset;
-          windowId = value.windowId ?? undefined;
-          results.replaceChildren();
-          for (const memory of value.memories) results.append(row(memory));
-          if (!value.memories.length)
-            results.append(hubElement(document, "p", "hub-empty", "没有匹配的记忆"));
-          const pagination = hubElement(document, "div", "hub-row hub-pagination");
-          const previous = hubButton(document, "上一页", () => {
-            offset = Math.max(0, offset - 10);
-            void search();
-          });
-          previous.disabled = offset === 0;
-          const next = hubButton(document, "下一页", () => {
-            offset += 10;
-            void search();
-          });
-          next.disabled = offset + 10 >= value.total;
-          pagination.append(
-            hubElement(
-              document,
-              "span",
-              "hub-muted",
-              `共 ${value.total} 条 · 第 ${Math.floor(offset / 10) + 1} 页`,
-            ),
-            previous,
-            next,
-          );
-          results.append(pagination);
-        };
-        if (quiet) {
           try {
-            await run();
+            const value = await store.open(input, (page) => {
+              if (current()) renderResults(page, input);
+            });
+            if (!current()) return;
+            const next = nextPageInput(input, value);
+            if (next) void store.prefetch(next);
+            ui.status.textContent = "";
           } catch (error) {
+            if (!current()) return;
+            // A revalidation failure keeps the cached page; only a cold failure is an error.
+            if (!cached && !quiet) throw error;
             ui.status.textContent = hubErrorText(error);
           }
-        } else await ui.load(run);
+        };
+        if (!cached && !quiet) await ui.load(run);
+        else await run();
       };
       let mounted = false;
       const statValues: HTMLElement[] = [];

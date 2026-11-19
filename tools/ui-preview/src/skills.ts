@@ -1,3 +1,7 @@
+import { localMachineLabel } from "../../../packages/renderer-extension/src/renderer-cross-host-harness-catalog.js";
+import claudeIcon from "../../../packages/adapters/claude-code/assets/icon.svg";
+import cursorIcon from "../../../packages/adapters/cursor-cli/assets/icon.svg";
+import { writeCachedHarnessDirectory } from "../../../packages/renderer-extension/src/renderer-harness-directory-cache.js";
 import type { SkillMachine, SkillSyncPlan } from "@codexhost/shared-contracts";
 import type { RendererSkillsClient } from "../../../packages/renderer-extension/src/renderer-skills-client.js";
 import { createSkillsSettingsPage } from "../../../packages/renderer-extension/src/settings/skills-page.js";
@@ -18,7 +22,7 @@ function entry(key: string, variant = "a") {
     version: variant === "a" ? "1.2" : "1.3",
     fingerprint: variant.repeat(64),
     modifiedAt: variant === "a" ? "2026-11-16T09:30:00Z" : "2026-11-17T02:10:00Z",
-    source: null,
+    source: key === "writing-guide" ? { source: "mattpocock/skills" } : null,
     skillMd: `---\nname: ${key}\nversion: ${variant === "a" ? "1.2" : "1.3"}\n---\n${variant === "a" ? "检查颜色、间距和键盘交互" : "检查颜色、间距、键盘交互与屏幕阅读器"}`,
     files: [
       { path: "SKILL.md", hash: variant.repeat(64), size: 128, executable: false },
@@ -40,7 +44,7 @@ function fakeClient(): RendererSkillsClient {
           {
             id: "codex",
             name: "Codex",
-            skillsDir: "~/.codex/skills",
+            skillsDir: "~/.agents/skills",
             native: true,
             evidence: "Codex 用户技能目录",
             excluded: false,
@@ -48,6 +52,11 @@ function fakeClient(): RendererSkillsClient {
             conflicts: 0,
             managed: 0,
             missing: 0,
+            states: {
+              "design-review": "native",
+              "project-search": "native",
+              "writing-guide": "native",
+            },
           },
           {
             id: "claude-code",
@@ -60,6 +69,11 @@ function fakeClient(): RendererSkillsClient {
             conflicts: 1,
             managed: 1,
             missing: 1,
+            states: {
+              "design-review": "conflict",
+              "project-search": "linked",
+              "writing-guide": "missing",
+            },
           },
           {
             id: "cursor",
@@ -72,6 +86,11 @@ function fakeClient(): RendererSkillsClient {
             conflicts: 0,
             managed: 0,
             missing: 2,
+            states: {
+              "design-review": "missing",
+              "project-search": "linked",
+              "writing-guide": "missing",
+            },
           },
           {
             id: "github-copilot",
@@ -84,6 +103,11 @@ function fakeClient(): RendererSkillsClient {
             conflicts: 0,
             managed: 0,
             missing: 3,
+            states: {
+              "design-review": "missing",
+              "project-search": "missing",
+              "writing-guide": "missing",
+            },
           },
         ],
       },
@@ -108,9 +132,16 @@ function fakeClient(): RendererSkillsClient {
             conflicts: 0,
             managed: 0,
             missing: 0,
+            states: { "design-review": "linked", "project-search": "linked" },
           },
         ],
       },
+    },
+    {
+      hostId: "offline-server",
+      name: "offline-server",
+      error: "connection_failed",
+      inventory: null,
     },
     {
       hostId: "build-server",
@@ -125,10 +156,46 @@ function fakeClient(): RendererSkillsClient {
     },
   ];
   let current: SkillSyncPlan | undefined;
+  let pending:
+    | { hostId: string; scope: { agentId: string; skill: string }; kind: "link" | "unlink" }
+    | undefined;
+  let lastToggle:
+    | {
+        hostId: string;
+        scope: { agentId: string; skill: string };
+        previous: "linked" | "missing" | "conflict" | "managed" | "native";
+      }
+    | undefined;
   document.body.dataset.skillsLinkApplies = "0";
   return {
     status: async () => structuredClone(machines),
-    async linkPlan(hostId, adopt) {
+    async linkPlan(hostId, options) {
+      const scope = options?.scope;
+      if (scope) {
+        const agent = machines
+          .find((machine) => machine.hostId === hostId)
+          ?.inventory?.agents.find((item) => item.id === scope.agentId);
+        const previous = agent?.states[scope.skill] ?? "missing";
+        const kind = previous === "linked" ? "unlink" : "link";
+        pending = { hostId, scope, kind };
+        return {
+          id: uuid,
+          hostId,
+          warnings: [],
+          actions: [
+            {
+              kind,
+              agentId: scope.agentId,
+              skill: scope.skill,
+              path: `~/.${scope.agentId}/skills/${scope.skill}`,
+              target: `~/.agents/skills/${scope.skill}`,
+              fingerprint: null,
+              previousLink: kind === "unlink" ? `../../.agents/skills/${scope.skill}` : null,
+            },
+          ],
+        };
+      }
+      const adopt = options?.adopt;
       return {
         id: uuid,
         hostId,
@@ -181,9 +248,44 @@ function fakeClient(): RendererSkillsClient {
       document.body.dataset.skillsLinkApplies = String(
         Number(document.body.dataset.skillsLinkApplies) + 1,
       );
+      if (pending) {
+        const agent = machines
+          .find((machine) => machine.hostId === pending?.hostId)
+          ?.inventory?.agents.find((item) => item.id === pending?.scope.agentId);
+        if (agent) {
+          const previous = (agent.states[pending.scope.skill] ?? "missing") as
+            "linked" | "missing" | "conflict" | "managed" | "native";
+          if (previous === "linked") agent.linked = Math.max(0, agent.linked - 1);
+          if (previous === "missing") agent.missing = Math.max(0, agent.missing - 1);
+          if (previous === "conflict") agent.conflicts = Math.max(0, agent.conflicts - 1);
+          const next = pending.kind === "unlink" ? "missing" : "linked";
+          agent.states[pending.scope.skill] = next;
+          if (next === "linked") agent.linked += 1;
+          else agent.missing += 1;
+          lastToggle = { hostId: pending.hostId, scope: pending.scope, previous };
+        }
+        pending = undefined;
+        return { id: uuid, changed: 1 };
+      }
       return { id: uuid, changed: 2 };
     },
-    undo: async () => ({ id: uuid, changed: 2 }),
+    undo: async () => {
+      if (lastToggle) {
+        const agent = machines
+          .find((machine) => machine.hostId === lastToggle?.hostId)
+          ?.inventory?.agents.find((item) => item.id === lastToggle?.scope.agentId);
+        if (agent) {
+          const current = agent.states[lastToggle.scope.skill];
+          if (current === "linked") agent.linked = Math.max(0, agent.linked - 1);
+          if (current === "missing") agent.missing = Math.max(0, agent.missing - 1);
+          agent.states[lastToggle.scope.skill] = lastToggle.previous;
+          if (lastToggle.previous === "linked") agent.linked += 1;
+          if (lastToggle.previous === "missing") agent.missing += 1;
+        }
+        lastToggle = undefined;
+      }
+      return { id: uuid, changed: 2 };
+    },
     async exclusions(hostId, agents) {
       const inventory = machines.find((m) => m.hostId === hostId)?.inventory;
       if (inventory) {
@@ -239,9 +341,33 @@ function fakeClient(): RendererSkillsClient {
     },
   };
 }
+function previewIcon(source: string): string {
+  return source.includes(";base64,")
+    ? source
+    : `data:image/svg+xml;base64,${btoa(decodeURIComponent(source.slice(source.indexOf(",") + 1)))}`;
+}
 export function mountSkillsPreview() {
+  writeCachedHarnessDirectory("local", {
+    fingerprint: "preview-artwork",
+    plugins: [
+      { id: "claude-code", name: "Claude Code", version: "1.0.0", icon: previewIcon(claudeIcon) },
+      { id: "cursor-cli", name: "Cursor", version: "1.0.0", icon: previewIcon(cursorIcon) },
+    ],
+    availability: {},
+    webUi: {},
+  });
   const shell = installRendererSettingsShell(
-    [createSkillsSettingsPage({ createClient: fakeClient })],
+    [
+      createSkillsSettingsPage({
+        createClient: fakeClient,
+        resolveMachineName: async (hostId) =>
+          hostId === "local"
+            ? localMachineLabel("zh-CN")
+            : hostId === "oracle-main"
+              ? "甲骨文新加坡"
+              : undefined,
+      }),
+    ],
     rendererSettingsMessages("zh-CN"),
   );
   shell.openSettings(undefined, "skills");

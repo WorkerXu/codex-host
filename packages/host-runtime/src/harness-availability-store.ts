@@ -71,6 +71,13 @@ export class HarnessAvailabilityStore {
     await this.#ensureLoaded();
     return this.#entries.get(harnessId);
   }
+  /** Every Harness the Host has actually seen installed, even if currently unavailable. */
+  async availableHarnessIds(): Promise<ReadonlySet<string>> {
+    await this.#ensureLoaded();
+    return new Set(
+      [...this.#entries].filter(([, entry]) => entry.status !== "notInstalled").map(([id]) => id),
+    );
+  }
 
   async set(harnessId: string, entry: HarnessAvailabilityEntry): Promise<void> {
     await this.#ensureLoaded();
