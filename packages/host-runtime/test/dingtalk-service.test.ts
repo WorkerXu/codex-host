@@ -973,6 +973,35 @@ describe("DingTalk live in-memory state", () => {
     }
   });
 
+  it("limits prefetch to two reads across overlapping RPC batches", async () => {
+    const env = await environment();
+    const cli = fakeCli(state({}));
+    const pending: (() => void)[] = [];
+    let active = 0;
+    let peak = 0;
+    const calls: string[] = [];
+    cli.messages = async ({ conversationId }) => {
+      calls.push(conversationId);
+      peak = Math.max(peak, ++active);
+      await new Promise<void>((resolve) => pending.push(resolve));
+      active -= 1;
+      return { messages: [], hasMore: false, nextCursor: null, errorCode: null };
+    };
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    try {
+      await service.prefetch({ conversationIds: ["a", "b"] });
+      await service.prefetch({ conversationIds: ["c", "d"] });
+      expect((await service.prefetch({ conversationIds: ["c", "d"] })).started).toBe(0);
+      expect(calls).toEqual(["a", "b"]);
+      pending.splice(0).forEach((resolve) => resolve());
+      await vi.waitFor(() => expect(calls).toEqual(["a", "b", "c", "d"]));
+      expect(peak).toBe(2);
+    } finally {
+      service.dispose();
+      pending.splice(0).forEach((resolve) => resolve());
+    }
+  });
+
   it("prefetches the rows the list shows, deduplicated per conversation", async () => {
     const env = await environment();
     const fake = state({

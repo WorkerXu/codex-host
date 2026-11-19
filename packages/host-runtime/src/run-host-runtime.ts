@@ -361,13 +361,19 @@ export async function runHostRuntime(input: {
           });
           const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
           const dingTalkDispatch = new DingTalkDispatchSettingsStore({});
-          const dingTalkState = new DingTalkDispatchStateStore({});
+          const dingTalkState = new DingTalkDispatchStateStore();
+          const desktopProjects = new DesktopProjectCatalogReader({});
           let host: AppServerHost | undefined;
           const dispatcher = new DingTalkDispatcher({
             service: dingtalk,
             settings: dingTalkDispatch,
             agents: codexAgents,
             state: dingTalkState,
+            projects: desktopProjects,
+            readNativeProject: (id) => {
+              if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
+              return host.readDingTalkProject(id);
+            },
             matcher: createDingTalkDispatchMatcher({ settings: modelSettings }),
             startThread: (input) => {
               if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
@@ -400,7 +406,7 @@ export async function runHostRuntime(input: {
                 : {}),
               stockCodexPath,
               arguments: input.arguments,
-              desktopProjects: new DesktopProjectCatalogReader({}),
+              desktopProjects,
               projectMirror: new ProjectMirrorService({
                 directory: defaultProjectMirrorDirectory(delegationEnvironment),
               }),

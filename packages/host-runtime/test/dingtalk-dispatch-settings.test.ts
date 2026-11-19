@@ -212,6 +212,23 @@ describe("DingTalkDispatchSettingsStore", () => {
     expect(raw).toEqual({ agents: {} });
   });
 
+  it("does not erase a legacy enabled selection before the agent list is available", async () => {
+    const settings = await store();
+    const text = JSON.stringify({
+      enabled: true,
+      replyScope: "direct",
+      participatingAgents: ["reviewer"],
+      eventTypes: "retired and ignored",
+      matchThreshold: "retired and ignored",
+    });
+    await writeFile(settings.filePath, text);
+    await settings.read(null);
+    expect(await readFile(settings.filePath, "utf8")).toBe(text);
+    expect(
+      (await settings.read([agent("reviewer.toml", "reviewer")])).agents["reviewer.toml"],
+    ).toMatchObject({ enabled: true, replyScope: "direct" });
+  });
+
   it("keeps entries when the agent list could not be read", async () => {
     const settings = await store();
     const saved = await settings.write({

@@ -214,6 +214,19 @@ export const dingtalkMessageSchema = z
     quotedMessage: dingtalkQuotedMessageSchema.nullable().optional(),
     reactions: z.array(dingtalkReactionSchema).max(20).optional(),
     resources: z.array(dingtalkMessageResourceSchema).max(20).optional(),
+    /** Manual dispatch marks retained with the bounded, memory-only transcript. */
+    dispatchedAgents: z
+      .array(
+        z
+          .object({
+            fileName: z.string().min(1).max(256),
+            name: z.string().min(1).max(256),
+            threadId: z.string().min(1).max(512),
+          })
+          .strict(),
+      )
+      .max(512)
+      .optional(),
     /** `sendType: bot` in dws. */
     bot: z.boolean().optional(),
     /** Markdown card title; the body stays in `text`. */

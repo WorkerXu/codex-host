@@ -1,5 +1,7 @@
 import { dingtalkRunError } from "./dingtalk-dispatch-errors.js";
 import { DingTalkProgressCard } from "./dingtalk-progress-card.js";
+import { readDingTalkDispatchProject } from "./dingtalk-dispatch-project.js";
+import type { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import type { DingTalkCardInput, DingTalkCardResult, DingTalkCardUpdate } from "./dingtalk-cli.js";
 
 import {
@@ -47,12 +49,17 @@ export interface DingTalkDispatchService {
   sendDirect(openDingTalkId: string, text: string): Promise<{ ok: boolean }>;
   sendCard(input: DingTalkCardInput): Promise<DingTalkCardResult>;
   updateCard(input: DingTalkCardUpdate): Promise<{ ok: boolean }>;
+  recordDispatch(
+    message: DingTalkMessage,
+    mark: NonNullable<DingTalkMessage["dispatchedAgents"]>[number],
+  ): void;
   startListening(): Promise<void>;
   setListeningHold(enabled: boolean): void;
 }
 
 export interface DingTalkDispatchAgentStore {
   read(fileName: string): Promise<CodexAgentRecord>;
+  list(): Promise<{ agents: { fileName: string; name: string; description: string }[] }>;
 }
 
 export interface DingTalkDispatchMatcher {
@@ -74,6 +81,8 @@ export interface DingTalkDispatcherOptions {
   state: DingTalkDispatchStateStore;
   matcher: DingTalkDispatchMatcher;
   startThread: DingTalkDispatchThreadStarter;
+  projects: Pick<DesktopProjectCatalogReader, "read">;
+  readNativeProject(id: string): Promise<{ id: string; roots: string[] }>;
   now?: () => number;
   diagnose?(error: unknown): void;
 }
@@ -152,7 +161,6 @@ export class DingTalkDispatcher {
   #refreshQueue: Promise<void> = Promise.resolve();
   readonly #cards = new Set<DingTalkProgressCard>();
   #disposed = false;
-  #enabled = false;
 
   constructor(options: DingTalkDispatcherOptions) {
     this.#options = options;
@@ -181,12 +189,13 @@ export class DingTalkDispatcher {
    */
   async #refreshSettings(): Promise<void> {
     if (this.#disposed) return;
-    this.#settings = await this.#options.settings.read();
+    const agents = await this.#options.agents
+      .list()
+      .then((result) => result.agents)
+      .catch(() => null);
+    this.#settings = await this.#options.settings.read(agents);
     const enabled = Object.values(this.#settings.agents).some((agent) => agent.enabled);
     if (this.#disposed) return;
-    if (enabled && !this.#enabled) await this.#options.state.setListeningSince(this.#now());
-    if (!enabled) await this.#options.state.setListeningSince(null);
-    this.#enabled = enabled;
     this.#options.service.setListeningHold(enabled);
     if (enabled) {
       await this.#options.service.startListening().catch(() => undefined);
@@ -194,32 +203,13 @@ export class DingTalkDispatcher {
   }
 
   status(): Promise<DingTalkDispatchStatus> {
-    return this.#options.state.status().then((status) =>
-      Object.fromEntries(
-        Object.entries(status)
-          .filter(([fileName]) => this.#settings.agents[fileName])
-          .map(([fileName, value]) => {
-            // Automatic scoring used to persist "匹配度 … 阈值 …"; that text must
-            // not survive on a card that now shows manual results only.
-            const retired = /匹配度|阈值/u.test(value.detail ?? "");
-            return [
-              fileName,
-              {
-                ...value,
-                ...(value.detail && !retired
-                  ? /[a-z]{3,}/iu.test(
-                      value.detail.replace(/Gemini|Desktop|Key|openDingTalkId/gu, ""),
-                    )
-                    ? { detail: dingtalkRunError(value.detail) }
-                    : {}
-                  : retired
-                    ? { detail: undefined }
-                    : {}),
-              },
-            ];
-          }),
-      ),
-    );
+    return this.#options.state
+      .status()
+      .then((status) =>
+        Object.fromEntries(
+          Object.entries(status).filter(([fileName]) => this.#settings.agents[fileName]),
+        ),
+      );
   }
 
   dispose(): void {
@@ -237,6 +227,7 @@ export class DingTalkDispatcher {
    * by name with null scores, so dispatch is never blocked by the model.
    */
   async score(conversationId: string, messageId: string): Promise<DingTalkDispatchScoreResult> {
+    await this.#refreshQueue;
     const target = await this.#target(conversationId, messageId);
     const agents = await this.#enabledAgents();
     if (agents.length === 0) return { agents: [], failed: false };
@@ -276,6 +267,7 @@ export class DingTalkDispatcher {
     messageId: string,
     fileNames: readonly string[],
   ): Promise<DingTalkDispatchRunResult> {
+    await this.#refreshQueue;
     const target = await this.#target(conversationId, messageId);
     if (!target) {
       return {
@@ -370,6 +362,21 @@ export class DingTalkDispatcher {
     const { conversation, message } = target;
     const kind = conversation.singleChat === false ? "group" : "direct";
     const label = conversationName(conversation, { kind });
+    let project: { projectId: string; cwd: string; roots: string[] };
+    try {
+      project = await readDingTalkDispatchProject(
+        this.#options.projects,
+        route.projectId ?? "",
+        this.#options.readNativeProject,
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "无法读取工作项目，请重新选择";
+      await this.#setStatus(agent.fileName, "failed", `${label}；${reason}`);
+      return { fileName: agent.fileName, name: agent.name, threadId: null, error: reason };
+    }
+    if (this.#disposed) {
+      return { fileName: agent.fileName, name: agent.name, threadId: null, error: "已停止" };
+    }
     const senderId = message.senderId ?? null;
     if (!senderId) {
       const error = "无法确定发送人的钉钉身份，未派发";
@@ -413,14 +420,9 @@ export class DingTalkDispatcher {
     let run: { threadId: string; completed: Promise<DingTalkDispatchTurnResult> };
     try {
       run = await this.#options.startThread({
-        cwd: route.projectPath ?? route.projectRoots[0] ?? "",
-        projectId: route.projectId,
-        projectRoots:
-          route.projectRoots.length > 0
-            ? route.projectRoots
-            : route.projectPath
-              ? [route.projectPath]
-              : [],
+        cwd: project.cwd,
+        projectId: project.projectId,
+        projectRoots: project.roots,
         onProgress: (text) => card.progress(text),
         title: `${agent.name} · ${label} · ${truncate(message.text || "钉钉消息", 40)}`,
         developerInstructions: this.#developerInstructions(agent),
@@ -435,6 +437,11 @@ export class DingTalkDispatcher {
       return { fileName: agent.fileName, name: agent.name, threadId: null, error: reason };
     }
 
+    this.#options.service.recordDispatch(message, {
+      fileName: agent.fileName,
+      name: agent.name,
+      threadId: run.threadId,
+    });
     void run.completed
       .catch((error: unknown) => ({
         answer: "",

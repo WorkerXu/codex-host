@@ -36,8 +36,6 @@ export interface DingTalkDispatchSettingsStoreOptions {
 const legacyDingTalkDispatchSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    eventTypes: z.array(z.string()).max(8),
-    matchThreshold: z.number().min(0).max(1),
     replyScope: z.enum(DINGTALK_REPLY_SCOPES),
     participatingAgents: z.array(z.string()).max(DINGTALK_DISPATCH_MAX_AGENTS),
   })
@@ -158,7 +156,8 @@ export class DingTalkDispatchSettingsStore {
 
     const legacy = legacyDingTalkDispatchSettingsSchema.safeParse(parsed);
     if (!legacy.success) return defaultDingTalkDispatchSettings();
-    const migrated = migrateLegacySettings(legacy.data, agents ?? []);
+    if (agents === null) return defaultDingTalkDispatchSettings();
+    const migrated = migrateLegacySettings(legacy.data, agents);
     await this.write(migrated).catch(() => undefined);
     return migrated;
   }

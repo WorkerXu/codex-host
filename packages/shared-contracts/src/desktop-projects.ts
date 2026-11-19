@@ -57,6 +57,8 @@ export const desktopProjectsCatalogSchema = z
     localProjects: z.record(z.string(), desktopLocalProjectSchema),
     remoteProjects: z.array(desktopRemoteProjectSchema).max(1_024),
     threadProjectAssignments: z.record(z.string(), threadProjectAssignmentSchema),
+    /** Desktop migration identities for this local CODEX_HOME; never match projects by path. */
+    appServerProjectIds: z.record(z.string(), z.string()).optional(),
     codexManagedRemoteConnections: z.array(desktopRemoteConnectionSchema).max(1_024),
     projectOrder: z.array(z.string().min(1).max(1_024)).max(4_096),
     /**

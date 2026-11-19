@@ -224,3 +224,29 @@ describe("Host Codex agent and DingTalk RPC", () => {
     }
   });
 });
+
+it("reads the native project identity and roots without creating or updating anything", async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.ready;
+    const request = new Promise<{ id: number; method: string; params: unknown }>((resolve) => {
+      fixture.official.stdin.setEncoding("utf8");
+      fixture.official.stdin.once("data", (chunk: string) => resolve(JSON.parse(chunk.trim())));
+    });
+    const reading = fixture.host.readDingTalkProject("native-project");
+    const input = await request;
+    expect(input.method).toBe("project/read");
+    expect(input.params).toEqual({ projectId: "native-project" });
+    fixture.official.stdout.write(
+      JSON.stringify({
+        id: input.id,
+        result: {
+          project: { id: "native-project", roots: [{ path: "/one" }, { path: "/two" }] },
+        },
+      }) + "\n",
+    );
+    expect(await reading).toEqual({ id: "native-project", roots: ["/one", "/two"] });
+  } finally {
+    await stopFixture(fixture);
+  }
+});

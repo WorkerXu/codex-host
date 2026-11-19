@@ -2939,6 +2939,19 @@ export class AppServerHost {
     }
   }
 
+  async readDingTalkProject(projectId: string): Promise<{ id: string; roots: string[] }> {
+    const response = await this.#requestOfficial("project/read", { projectId });
+    const result = isRecord(response.result) ? response.result : null;
+    const project = result && isRecord(result.project) ? result.project : null;
+    if (!project || project.id !== projectId || !Array.isArray(project.roots)) {
+      throw new Error("工作项目已不存在，请在智能体设置里重新选择");
+    }
+    const roots = project.roots.flatMap((root) =>
+      isRecord(root) && typeof root.path === "string" ? [root.path] : [],
+    );
+    return { id: projectId, roots };
+  }
+
   startDingTalkAgentRun(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
     return this.#dingTalkNativeRunner.start(input);
   }

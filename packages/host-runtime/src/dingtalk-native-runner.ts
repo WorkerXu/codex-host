@@ -49,6 +49,9 @@ export class DingTalkNativeRunner {
     const thread = startedResult && isRecord(startedResult.thread) ? startedResult.thread : null;
     const threadId = thread && typeof thread.id === "string" ? thread.id : null;
     if (!threadId) throw new Error("Official thread/start returned no Thread identity");
+    if (input.projectId && thread?.projectId !== input.projectId) {
+      throw new Error("工作项目归属未确认，已停止派发，请在智能体设置里重新选择");
+    }
     await this.#request("thread/name/set", { threadId, name: input.title }).catch(() => undefined);
     const completion = this.#watchDingTalkTurn(threadId, input.onProgress);
     let turnId: string;

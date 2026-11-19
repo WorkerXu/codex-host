@@ -172,6 +172,9 @@ export class DingTalkService {
   /** Memory only; never written to disk and dropped with the Host process. */
   readonly #live = new DingTalkLiveStore();
   readonly #timings: DingTalkOpenTiming[] = [];
+  readonly #prefetchQueue = new Set<string>();
+  readonly #prefetchPending = new Set<string>();
+  #prefetchActive = 0;
   #disposed = false;
 
   constructor(options: DingTalkServiceOptions) {
@@ -460,6 +463,15 @@ export class DingTalkService {
    * transcript the page is showing; an id outside that window is read from
    * dws, including a bounded scrollback, before giving up.
    */
+  recordDispatch(
+    message: DingTalkMessage,
+    mark: NonNullable<DingTalkMessage["dispatchedAgents"]>[number],
+  ): void {
+    if (this.#disposed) return;
+    this.#live.recordDispatch(message, mark, this.#now());
+    this.#notify(message.conversationId);
+  }
+
   async message(conversationId: string, messageId: string): Promise<DingTalkMessage | null> {
     await this.#ensure();
     const stored = this.#live.message(conversationId, messageId);
@@ -634,12 +646,30 @@ export class DingTalkService {
     // Two dws reads at a time keep the Host responsive while every visible row
     // warms; the live-state byte cap evicts the least recently viewed payloads.
     const pending = ids.filter(
-      (conversationId) => !this.#inflight.has(`live:messages:${conversationId}`),
+      (conversationId) =>
+        !this.#prefetchPending.has(conversationId) &&
+        !this.#inflight.has(`live:messages:${conversationId}`),
     );
-    void mapLimit(pending, 2, async (conversationId) => {
-      await this.#reconcileMessages(conversationId, PREFETCH_MESSAGE_LIMIT);
-    }).catch(() => undefined);
+    for (const id of pending) {
+      this.#prefetchPending.add(id);
+      this.#prefetchQueue.add(id);
+    }
+    this.#drainPrefetch();
     return dingtalkPrefetchResultSchema.parse({ started: pending.length });
+  }
+
+  #drainPrefetch(): void {
+    while (!this.#disposed && this.#prefetchActive < 2 && this.#prefetchQueue.size > 0) {
+      const id = this.#prefetchQueue.values().next().value;
+      if (!id) break;
+      this.#prefetchQueue.delete(id);
+      this.#prefetchActive += 1;
+      void this.#reconcileMessages(id, PREFETCH_MESSAGE_LIMIT).finally(() => {
+        this.#prefetchActive -= 1;
+        this.#prefetchPending.delete(id);
+        this.#drainPrefetch();
+      });
+    }
   }
 
   /** Renderer paint timings share the bounded ring; no content is recorded. */
@@ -1114,6 +1144,8 @@ export class DingTalkService {
     this.#eventListeners.clear();
     this.#seenEvents.clear();
     this.#live.clear();
+    this.#prefetchQueue.clear();
+    this.#prefetchPending.clear();
     this.#timings.length = 0;
     this.#events.dispose();
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);

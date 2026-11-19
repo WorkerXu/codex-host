@@ -196,7 +196,14 @@ export class DingTalkLiveStore {
       }
     }
     for (const message of input.messages) {
-      byId.set(message.messageId, normalizedMessage(message));
+      const previous = byId.get(message.messageId);
+      byId.set(
+        message.messageId,
+        normalizedMessage({
+          ...message,
+          ...(previous?.dispatchedAgents ? { dispatchedAgents: previous.dispatchedAgents } : {}),
+        }),
+      );
     }
     entry.messages = [...byId.values()]
       .sort((left, right) => right.createdAt - left.createdAt)
@@ -214,6 +221,31 @@ export class DingTalkLiveStore {
       });
     }
     return this.#commit(entry, before);
+  }
+
+  /** Dispatch marks share transcript eviction and byte accounting. */
+  recordDispatch(
+    message: DingTalkMessage,
+    mark: NonNullable<DingTalkMessage["dispatchedAgents"]>[number],
+    now: number,
+  ): void {
+    const entry = this.#ensure(message.conversationId);
+    const before = this.#snapshot(entry);
+    const existing = entry.messages.find((row) => row.messageId === message.messageId);
+    const marks = [...(existing?.dispatchedAgents ?? [])].filter(
+      (row) => row.fileName !== mark.fileName,
+    );
+    marks.push(mark);
+    const updated = { ...(existing ?? message), dispatchedAgents: marks };
+    entry.messages = [
+      updated,
+      ...entry.messages.filter((row) => row.messageId !== message.messageId),
+    ]
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .slice(0, DINGTALK_LIVE_MESSAGE_LIMIT);
+    entry.messagesAt ??= now;
+    entry.touchedAt = now;
+    this.#commit(entry, before);
   }
 
   /** One Stream event: append, bump the badge and preview, move the row up. */
@@ -241,7 +273,14 @@ export class DingTalkLiveStore {
     }
     this.#setRow(entry, row);
     if (entry.messagesAt !== null) {
-      entry.messages = [normalizedMessage(message), ...entry.messages]
+      const previous = entry.messages.find((row) => row.messageId === message.messageId);
+      entry.messages = [
+        normalizedMessage({
+          ...message,
+          ...(previous?.dispatchedAgents ? { dispatchedAgents: previous.dispatchedAgents } : {}),
+        }),
+        ...entry.messages,
+      ]
         .filter(
           (candidate, index, all) =>
             all.findIndex((other) => other.messageId === candidate.messageId) === index,

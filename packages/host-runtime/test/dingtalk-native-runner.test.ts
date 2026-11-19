@@ -17,6 +17,7 @@ async function fixture(
     fast?: boolean;
     approval?: boolean;
     missingConfig?: boolean;
+    wrongProject?: boolean;
     onProgress?: (text: string) => void;
   } = {},
 ) {
@@ -28,7 +29,15 @@ async function fixture(
         return options.missingConfig
           ? { error: { message: "failed" } }
           : { result: { config: { mcp_servers: { dingtalk: { url: "never-used" } } } } };
-      if (method === "thread/start") return { result: { thread: { id: "native-thread" } } };
+      if (method === "thread/start")
+        return {
+          result: {
+            thread: {
+              id: "native-thread",
+              projectId: options.wrongProject ? "other" : "project-1",
+            },
+          },
+        };
       if (method === "turn/start") {
         if (options.fast)
           runner.observe({
@@ -65,6 +74,12 @@ async function fixture(
 }
 
 describe("native DingTalk Threads", () => {
+  it("does not start a Turn when native project assignment was not confirmed", async () => {
+    const f = await fixture({ wrongProject: true });
+    await expect(f.run()).rejects.toThrow("工作项目归属未确认");
+    expect(f.request.mock.calls.map(([method]) => method)).toEqual(["thread/start"]);
+    f.runner.dispose();
+  });
   it("starts in the selected project with configured model/instructions and collects only final answers", async () => {
     const f = await fixture();
     const run = await f.run();
