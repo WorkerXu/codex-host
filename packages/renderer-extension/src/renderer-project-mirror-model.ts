@@ -159,6 +159,8 @@ export interface MirrorDestinationInput {
 export interface MirrorDestination {
   path: string;
   projectId: string | null;
+  /** What the probe saw for `path`; lets the caller skip a duplicate check. */
+  state: "directory" | "missing";
 }
 
 /**
@@ -174,12 +176,15 @@ export async function chooseMirrorDestination(
     const desktopProject = input.desktopProjects.find(
       (project) => project.id === input.known?.remoteProjectId,
     );
-    if (desktopProject) return { path: desktopProject.remotePath, projectId: desktopProject.id };
+    if (desktopProject)
+      return { path: desktopProject.remotePath, projectId: desktopProject.id, state: "directory" };
     const appProject = input.appProjects.some((project) =>
       project.roots.some((root) => root.path === input.known?.remotePath),
     );
-    if (appProject || (await input.directoryState(input.known.remotePath)) === "directory")
-      return { path: input.known.remotePath, projectId: null };
+    if (appProject) return { path: input.known.remotePath, projectId: null, state: "directory" };
+    const knownState = await input.directoryState(input.known.remotePath);
+    if (knownState === "directory")
+      return { path: input.known.remotePath, projectId: null, state: knownState };
   }
   for (const candidate of input.candidates) {
     const desktopProject = input.desktopProjects.find(
@@ -187,7 +192,7 @@ export async function chooseMirrorDestination(
     );
     if (desktopProject) {
       if (desktopProject.label !== input.name) continue;
-      return { path: candidate, projectId: desktopProject.id };
+      return { path: candidate, projectId: desktopProject.id, state: "directory" };
     }
     const appProject = input.appProjects.find((project) =>
       project.roots.some((root) => root.path === candidate),
@@ -195,7 +200,7 @@ export async function chooseMirrorDestination(
     if (appProject && appProject.name !== input.name) continue;
     const state = await input.directoryState(candidate);
     if (state === "other") continue;
-    return { path: candidate, projectId: null };
+    return { path: candidate, projectId: null, state };
   }
   return null;
 }
