@@ -4,12 +4,10 @@ import path from "node:path";
 
 import {
   DINGTALK_DISPATCH_MAX_AGENTS,
-  DINGTALK_EVENT_TYPES,
   DINGTALK_REPLY_SCOPES,
   defaultDingTalkDispatchSettings,
   dingtalkDispatchSettingsSchema,
   type DingTalkDispatchSettings,
-  type DingTalkEventType,
 } from "@codexhost/shared-contracts";
 import { z } from "zod";
 
@@ -31,15 +29,17 @@ export interface DingTalkDispatchSettingsStoreOptions {
   environment?: NodeJS.ProcessEnv;
 }
 
+/**
+ * Before per-agent settings, one global switch selected event types for a list
+ * of agent names. Only `replyScope` and enabled-ness remain meaningful.
+ */
 const legacyDingTalkDispatchSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    eventTypes: z.array(z.enum(DINGTALK_EVENT_TYPES)).max(8),
-    matchThreshold: z.number().min(0).max(1),
     replyScope: z.enum(DINGTALK_REPLY_SCOPES),
     participatingAgents: z.array(z.string()).max(DINGTALK_DISPATCH_MAX_AGENTS),
   })
-  .strict();
+  .strip();
 
 type LegacyDingTalkDispatchSettings = z.infer<typeof legacyDingTalkDispatchSettingsSchema>;
 
@@ -47,34 +47,31 @@ function defaultHomeDirectory(environment: NodeJS.ProcessEnv): string {
   return path.join(environment.HOME?.trim() || os.homedir(), ".codexhost");
 }
 
-function uniqueEventTypes(values: readonly DingTalkEventType[]): DingTalkEventType[] {
-  return DINGTALK_EVENT_TYPES.filter((eventType) => values.includes(eventType));
-}
-
 /**
  * The previous file kept one global switch and a list of agent names. Turn it
  * into per-agent entries for exactly the agents that participated before:
  * the saved names, or every agent with a description when the list was empty.
+ * Section and project stay unset, so the agent shows its setup hint until the
+ * user picks them.
  */
 function migrateLegacySettings(
   legacy: LegacyDingTalkDispatchSettings,
   agents: readonly DingTalkDispatchAgent[],
 ): DingTalkDispatchSettings {
+  const settings: DingTalkDispatchSettings = { agents: {} };
+  if (!legacy.enabled) return settings;
   const participants =
     legacy.participatingAgents.length > 0
       ? agents.filter((agent) => legacy.participatingAgents.includes(agent.name))
       : agents.filter((agent) => agent.description.trim().length > 0);
-  const settings: DingTalkDispatchSettings = {
-    threshold: legacy.matchThreshold,
-    agents: {},
-  };
-  if (!legacy.enabled) return settings;
-  const eventTypes = uniqueEventTypes(legacy.eventTypes);
   for (const agent of participants.slice(0, DINGTALK_DISPATCH_MAX_AGENTS)) {
     settings.agents[agent.fileName] = {
       enabled: true,
-      eventTypes: [...eventTypes],
       replyScope: legacy.replyScope,
+      sectionId: null,
+      projectId: null,
+      projectPath: null,
+      projectRoots: [],
     };
   }
   return settings;
@@ -88,16 +85,31 @@ function pruneSettings(
   const known = new Set(agents.map((agent) => agent.fileName));
   const entries = Object.entries(settings.agents).filter(([fileName]) => known.has(fileName));
   if (entries.length === Object.keys(settings.agents).length) return settings;
-  return { threshold: settings.threshold, agents: Object.fromEntries(entries) };
+  return { agents: Object.fromEntries(entries) };
+}
+
+/** Retired auto-dispatch keys must not survive a rewrite. */
+function hasRetiredKeys(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if ("threshold" in record || "eventTypes" in record || "matchThreshold" in record) return true;
+  const agents = record.agents;
+  if (typeof agents !== "object" || agents === null || Array.isArray(agents)) return false;
+  return Object.values(agents).some(
+    (agent) =>
+      typeof agent === "object" &&
+      agent !== null &&
+      !Array.isArray(agent) &&
+      ("eventTypes" in agent || "threshold" in agent),
+  );
 }
 
 /**
  * Persists the DingTalk dispatch choices on the local Host.
  *
- * This store is only the settings contract for the listener/dispatcher that is
- * implemented separately. Listening is per agent; approvals are never
- * auto-approved, and dispatch is multi-agent: every agent at or above the
- * threshold receives the task.
+ * Listening is per agent. Dispatch is manual only; a message is never sent to
+ * an agent by the event stream. The section and project choose where a manual
+ * dispatch creates its Thread.
  */
 export class DingTalkDispatchSettingsStore {
   readonly #directory: string;
@@ -118,8 +130,8 @@ export class DingTalkDispatchSettingsStore {
 
   /**
    * A missing or unreadable file means defaults. `agents` is the current agent
-   * list; `null` means the list could not be read, so entries are kept. A
-   * legacy file is migrated and written once, and stale entries are pruned.
+   * list; `null` means the list could not be read, so entries are kept. Retired
+   * `eventTypes` and `threshold` keys are ignored and rewritten without them.
    */
   async read(
     agents: readonly DingTalkDispatchAgent[] | null = null,
@@ -135,14 +147,17 @@ export class DingTalkDispatchSettingsStore {
 
     const current = dingtalkDispatchSettingsSchema.safeParse(parsed);
     if (current.success) {
-      const next = agents === null ? current.data : pruneSettings(current.data, agents);
-      if (next !== current.data) await this.write(next).catch(() => undefined);
-      return next;
+      const pruned = agents === null ? current.data : pruneSettings(current.data, agents);
+      if (hasRetiredKeys(parsed) || pruned !== current.data) {
+        await this.write(pruned).catch(() => undefined);
+      }
+      return pruned;
     }
 
     const legacy = legacyDingTalkDispatchSettingsSchema.safeParse(parsed);
     if (!legacy.success) return defaultDingTalkDispatchSettings();
-    const migrated = migrateLegacySettings(legacy.data, agents ?? []);
+    if (agents === null) return defaultDingTalkDispatchSettings();
+    const migrated = migrateLegacySettings(legacy.data, agents);
     await this.write(migrated).catch(() => undefined);
     return migrated;
   }

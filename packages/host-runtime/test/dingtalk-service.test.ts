@@ -926,11 +926,11 @@ describe("DingTalk live in-memory state", () => {
     const cli = fakeCli(fake);
     const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
     try {
-      for (let index = 0; index < 70; index += 1) {
+      for (let index = 0; index < 210; index += 1) {
         await service.messages({ conversationId: "a", limit: 30, includeConversation: false });
       }
       const diagnostics = await service.diagnostics({ limit: 200 });
-      expect(diagnostics.entries).toHaveLength(60);
+      expect(diagnostics.entries).toHaveLength(200);
       expect(diagnostics.entries[0]).toMatchObject({
         kind: "messages",
         conversationId: "a",
@@ -970,6 +970,35 @@ describe("DingTalk live in-memory state", () => {
       expect(diagnostics.messageConversations).toBe(0);
     } finally {
       service.dispose();
+    }
+  });
+
+  it("limits prefetch to two reads across overlapping RPC batches", async () => {
+    const env = await environment();
+    const cli = fakeCli(state({}));
+    const pending: (() => void)[] = [];
+    let active = 0;
+    let peak = 0;
+    const calls: string[] = [];
+    cli.messages = async ({ conversationId }) => {
+      calls.push(conversationId);
+      peak = Math.max(peak, ++active);
+      await new Promise<void>((resolve) => pending.push(resolve));
+      active -= 1;
+      return { messages: [], hasMore: false, nextCursor: null, errorCode: null };
+    };
+    const service = new DingTalkService({ environment: env, isLocalHost: true, cli });
+    try {
+      await service.prefetch({ conversationIds: ["a", "b"] });
+      await service.prefetch({ conversationIds: ["c", "d"] });
+      expect((await service.prefetch({ conversationIds: ["c", "d"] })).started).toBe(0);
+      expect(calls).toEqual(["a", "b"]);
+      pending.splice(0).forEach((resolve) => resolve());
+      await vi.waitFor(() => expect(calls).toEqual(["a", "b", "c", "d"]));
+      expect(peak).toBe(2);
+    } finally {
+      service.dispose();
+      pending.splice(0).forEach((resolve) => resolve());
     }
   });
 

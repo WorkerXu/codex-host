@@ -37,19 +37,20 @@ describe("DingTalkDispatchSettingsStore", () => {
   it("returns defaults with every agent off", async () => {
     const settings = await (await store()).read([agent("terra-worker.toml", "terra_worker")]);
     expect(settings).toEqual(defaultDingTalkDispatchSettings());
-    expect(settings.threshold).toBe(0.7);
     expect(settings.agents).toEqual({});
   });
 
-  it("writes 0600 JSON and reads it back", async () => {
+  it("writes 0600 JSON with only the manual settings", async () => {
     const settings = await store();
     const saved = await settings.write({
-      threshold: 0.9,
       agents: {
         "terra-worker.toml": {
           enabled: true,
-          eventTypes: ["mention_me", "approval_pending"],
           replyScope: "direct",
+          sectionId: "section-1",
+          projectId: "project-1",
+          projectPath: "/Users/me/project",
+          projectRoots: ["/Users/me/project"],
         },
       },
     });
@@ -59,19 +60,67 @@ describe("DingTalkDispatchSettingsStore", () => {
       expect((await stat(settings.filePath)).mode & 0o777).toBe(0o600);
     }
     const raw = JSON.parse(await readFile(settings.filePath, "utf8")) as Record<string, unknown>;
-    expect(raw).toMatchObject({ threshold: 0.9 });
+    expect(raw).toEqual(saved);
+    expect(raw).not.toHaveProperty("threshold");
   });
 
   it("falls back to defaults for unreadable or invalid files", async () => {
     const settings = await store();
-    await settings.write({ threshold: 0.7, agents: {} });
     await writeFile(settings.filePath, "{ not json");
     expect(await settings.read([agent("terra-worker.toml", "terra_worker")])).toEqual(
       defaultDingTalkDispatchSettings(),
     );
   });
 
-  it("migrates the old global switch into per-agent entries and writes the new shape", async () => {
+  it("drops retired eventTypes/threshold from a current file and keeps enabled agents", async () => {
+    const settings = await store();
+    await writeFile(
+      settings.filePath,
+      JSON.stringify({
+        threshold: 0.85,
+        agents: {
+          "reviewer.toml": {
+            enabled: true,
+            eventTypes: ["mention_me", "approval_pending"],
+            replyScope: "direct",
+          },
+          "off.toml": {
+            enabled: false,
+            eventTypes: ["mention_all"],
+            replyScope: "group",
+          },
+        },
+      }),
+    );
+    const migrated = await settings.read([
+      agent("reviewer.toml", "reviewer"),
+      agent("off.toml", "off"),
+    ]);
+    expect(migrated).toEqual({
+      agents: {
+        "reviewer.toml": {
+          enabled: true,
+          replyScope: "direct",
+          sectionId: null,
+          projectId: null,
+          projectPath: null,
+          projectRoots: [],
+        },
+        "off.toml": {
+          enabled: false,
+          replyScope: "group",
+          sectionId: null,
+          projectId: null,
+          projectPath: null,
+          projectRoots: [],
+        },
+      },
+    });
+    const raw = JSON.parse(await readFile(settings.filePath, "utf8")) as Record<string, unknown>;
+    expect(raw).toEqual(migrated);
+  });
+
+  it("migrates the old global switch into per-agent entries without event types", async () => {
     const settings = await store();
     await writeFile(
       settings.filePath,
@@ -88,12 +137,14 @@ describe("DingTalkDispatchSettingsStore", () => {
       agent("writer.toml", "writer"),
     ]);
     expect(migrated).toEqual({
-      threshold: 0.9,
       agents: {
         "reviewer.toml": {
           enabled: true,
-          eventTypes: ["mention_me", "approval_pending"],
           replyScope: "direct",
+          sectionId: null,
+          projectId: null,
+          projectPath: null,
+          projectRoots: [],
         },
       },
     });
@@ -120,7 +171,7 @@ describe("DingTalkDispatchSettingsStore", () => {
     expect(Object.keys(migrated.agents)).toEqual(["reviewer.toml"]);
     expect(migrated.agents["reviewer.toml"]).toMatchObject({
       enabled: true,
-      eventTypes: ["mention_all"],
+      replyScope: "group",
     });
   });
 
@@ -136,33 +187,60 @@ describe("DingTalkDispatchSettingsStore", () => {
         participatingAgents: ["reviewer"],
       }),
     );
-    // The legacy threshold is the user's own choice and survives the new default.
     expect(await settings.read([agent("reviewer.toml", "reviewer")])).toEqual({
-      ...defaultDingTalkDispatchSettings(),
-      threshold: 0.85,
+      agents: {},
     });
   });
 
   it("drops entries for agents that no longer exist and persists the prune", async () => {
     const settings = await store();
     await settings.write({
-      threshold: 0.85,
       agents: {
-        "old.toml": { enabled: true, eventTypes: ["mention_me"], replyScope: "group" },
+        "old.toml": {
+          enabled: true,
+          replyScope: "group",
+          sectionId: "s",
+          projectId: "p",
+          projectPath: "/tmp/p",
+          projectRoots: ["/tmp/p"],
+        },
       },
     });
     const pruned = await settings.read([agent("new.toml", "new")]);
     expect(pruned.agents).toEqual({});
     const raw = JSON.parse(await readFile(settings.filePath, "utf8")) as Record<string, unknown>;
-    expect(raw).toEqual({ threshold: 0.85, agents: {} });
+    expect(raw).toEqual({ agents: {} });
+  });
+
+  it("does not erase a legacy enabled selection before the agent list is available", async () => {
+    const settings = await store();
+    const text = JSON.stringify({
+      enabled: true,
+      replyScope: "direct",
+      participatingAgents: ["reviewer"],
+      eventTypes: "retired and ignored",
+      matchThreshold: "retired and ignored",
+    });
+    await writeFile(settings.filePath, text);
+    await settings.read(null);
+    expect(await readFile(settings.filePath, "utf8")).toBe(text);
+    expect(
+      (await settings.read([agent("reviewer.toml", "reviewer")])).agents["reviewer.toml"],
+    ).toMatchObject({ enabled: true, replyScope: "direct" });
   });
 
   it("keeps entries when the agent list could not be read", async () => {
     const settings = await store();
     const saved = await settings.write({
-      threshold: 0.85,
       agents: {
-        "old.toml": { enabled: true, eventTypes: ["mention_me"], replyScope: "group" },
+        "old.toml": {
+          enabled: true,
+          replyScope: "group",
+          sectionId: null,
+          projectId: null,
+          projectPath: null,
+          projectRoots: [],
+        },
       },
     });
     expect(await settings.read(null)).toEqual(saved);
@@ -170,8 +248,19 @@ describe("DingTalkDispatchSettingsStore", () => {
 
   it("rejects settings the dispatch contract cannot represent", async () => {
     const settings = await store();
-    await expect(settings.write({ threshold: 1.5, agents: {} })).rejects.toMatchObject({
-      code: "invalid_params",
-    });
+    await expect(
+      settings.write({
+        agents: {
+          "bad.toml": {
+            enabled: "yes" as unknown as boolean,
+            replyScope: "group",
+            sectionId: null,
+            projectId: null,
+            projectPath: null,
+            projectRoots: [],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_params" });
   });
 });

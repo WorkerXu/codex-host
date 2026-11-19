@@ -17,6 +17,7 @@ async function fixture(
     fast?: boolean;
     approval?: boolean;
     missingConfig?: boolean;
+    wrongProject?: boolean;
     onProgress?: (text: string) => void;
   } = {},
 ) {
@@ -28,7 +29,15 @@ async function fixture(
         return options.missingConfig
           ? { error: { message: "failed" } }
           : { result: { config: { mcp_servers: { dingtalk: { url: "never-used" } } } } };
-      if (method === "thread/start") return { result: { thread: { id: "native-thread" } } };
+      if (method === "thread/start")
+        return {
+          result: {
+            thread: {
+              id: "native-thread",
+              projectId: options.wrongProject ? "other" : "project-1",
+            },
+          },
+        };
       if (method === "turn/start") {
         if (options.fast)
           runner.observe({
@@ -47,14 +56,12 @@ async function fixture(
       return { result: {} };
     },
   );
-  const notify = vi.fn(async (message: JsonObject) => {
-    const params = message.params as JsonObject;
-    runner.projectReady({ requestId: params.requestId, error: null });
-  });
-  const runner = new DingTalkNativeRunner(request, notify);
+  const runner = new DingTalkNativeRunner(request);
   const run = () =>
     runner.start({
       cwd,
+      projectId: "project-1",
+      projectRoots: [cwd],
       title: "知识库 · 技术群 · 接口问题",
       developerInstructions: "查询知识库",
       model: "gpt-test",
@@ -63,16 +70,25 @@ async function fixture(
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.approval ? { readOnlySummary: true } : {}),
     });
-  return { runner, request, notify, run };
+  return { runner, request, run };
 }
 
 describe("native DingTalk Threads", () => {
-  it("starts in the native project with configured model/instructions and collects only final answers", async () => {
+  it("does not start a Turn when native project assignment was not confirmed", async () => {
+    const f = await fixture({ wrongProject: true });
+    await expect(f.run()).rejects.toThrow("工作项目归属未确认");
+    expect(f.request.mock.calls.map(([method]) => method)).toEqual(["thread/start"]);
+    f.runner.dispose();
+  });
+  it("starts in the selected project with configured model/instructions and collects only final answers", async () => {
     const f = await fixture();
     const run = await f.run();
     expect(f.request).toHaveBeenCalledWith(
       "thread/start",
       expect.objectContaining({
+        projectId: "project-1",
+        cwd: expect.any(String),
+        runtimeWorkspaceRoots: [expect.any(String)],
         developerInstructions: "查询知识库",
         sandbox: "read-only",
         approvalPolicy: "never",
@@ -83,7 +99,6 @@ describe("native DingTalk Threads", () => {
         },
       }),
     );
-    expect(f.notify).toHaveBeenCalledOnce();
     expect(f.request).toHaveBeenCalledWith(
       "turn/start",
       expect.objectContaining({

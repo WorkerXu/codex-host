@@ -82,25 +82,34 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 4))).toMatchObject({
-        result: { threshold: 0.7, agents: {} },
+        result: { agents: {} },
       });
 
       writeRequest(fixture.desktopInput, {
         id: 5,
         method: "codexhost/dingtalk-dispatch/set",
         params: {
-          threshold: 0.9,
           agents: {
             [savedRecord.fileName]: {
               enabled: true,
-              eventTypes: ["mention_me", "approval_pending"],
               replyScope: "direct",
+              sectionId: "section-1",
+              projectId: "project-1",
+              projectPath: "/Users/me/project",
             },
           },
         },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 5))).toMatchObject({
-        result: { threshold: 0.9, agents: { [savedRecord.fileName]: { enabled: true } } },
+        result: {
+          agents: {
+            [savedRecord.fileName]: {
+              enabled: true,
+              replyScope: "direct",
+              projectId: "project-1",
+            },
+          },
+        },
       });
 
       writeRequest(fixture.desktopInput, {
@@ -119,7 +128,7 @@ describe("Host Codex agent and DingTalk RPC", () => {
         params: {},
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 7))).toMatchObject({
-        result: { threshold: 0.9, agents: {} },
+        result: { agents: {} },
       });
     } finally {
       await stopFixture(fixture);
@@ -214,4 +223,30 @@ describe("Host Codex agent and DingTalk RPC", () => {
       await stopFixture(fixture);
     }
   });
+});
+
+it("reads the native project identity and roots without creating or updating anything", async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.ready;
+    const request = new Promise<{ id: number; method: string; params: unknown }>((resolve) => {
+      fixture.official.stdin.setEncoding("utf8");
+      fixture.official.stdin.once("data", (chunk: string) => resolve(JSON.parse(chunk.trim())));
+    });
+    const reading = fixture.host.readDingTalkProject("native-project");
+    const input = await request;
+    expect(input.method).toBe("project/read");
+    expect(input.params).toEqual({ projectId: "native-project" });
+    fixture.official.stdout.write(
+      JSON.stringify({
+        id: input.id,
+        result: {
+          project: { id: "native-project", roots: [{ path: "/one" }, { path: "/two" }] },
+        },
+      }) + "\n",
+    );
+    expect(await reading).toEqual({ id: "native-project", roots: ["/one", "/two"] });
+  } finally {
+    await stopFixture(fixture);
+  }
 });

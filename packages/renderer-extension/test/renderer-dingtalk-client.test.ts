@@ -119,7 +119,7 @@ describe("DingTalk renderer routing", () => {
     expect(calls.filter((call) => call.method === DINGTALK_PREFETCH_METHOD)).toEqual([
       {
         method: DINGTALK_PREFETCH_METHOD,
-        params: { conversationIds: ["a", "b", "c", "d", "e", "f"] },
+        params: { conversationIds: ["a", "b", "c", "d", "e", "f", "g"] },
         priority: "background",
       },
     ]);
@@ -288,4 +288,26 @@ it("does not gate the first unread read on a pending auth status", async () => {
   const client = createRendererDingTalkClient({ forHost: () => route("local", local) });
   expect((await client.conversations()).available).toBe(true);
   expect(calls).toEqual([DINGTALK_CONVERSATIONS_METHOD]);
+});
+
+it("prefetches every requested row in bounded background batches", async () => {
+  const batches: { params: unknown; options: unknown }[] = [];
+  const local: RendererDingTalkManager = {
+    async sendRequest(method, params, options) {
+      if (method === DINGTALK_STATUS_METHOD)
+        return status({ defaultHost: "local", defaultHostId: null });
+      batches.push({ params, options });
+      return { started: (params as { conversationIds: string[] }).conversationIds.length };
+    },
+  };
+  const client = createRendererDingTalkClient({ forHost: () => route("local", local) });
+  const ids = Array.from({ length: 123 }, (_, index) => `c${index}`);
+  expect(await client.prefetch(ids)).toEqual({ started: 123 });
+  expect(
+    batches.map(({ params }) => (params as { conversationIds: string[] }).conversationIds).flat(),
+  ).toEqual(ids);
+  expect(batches).toHaveLength(3);
+  expect(
+    batches.every(({ options }) => (options as { priority: string }).priority === "background"),
+  ).toBe(true);
 });

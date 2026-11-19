@@ -1,8 +1,9 @@
-import createElement from "lucide/dist/esm/createElement.mjs";
 import type { IconNode } from "lucide";
 import BellOffIcon from "lucide/dist/esm/icons/bell-off.mjs";
 import BotIcon from "lucide/dist/esm/icons/bot.mjs";
+import EllipsisIcon from "lucide/dist/esm/icons/ellipsis.mjs";
 import MessagesSquareIcon from "lucide/dist/esm/icons/messages-square.mjs";
+import ReplyIcon from "lucide/dist/esm/icons/reply.mjs";
 
 import type {
   DingTalkConversation,
@@ -39,19 +40,46 @@ export function createElementNode<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/** Builds the lucide icon node with this document, so test DOMs stay isolated. */
+function appendIconNode(
+  document: Document,
+  parent: SVGElement | Element,
+  node: IconNode[number],
+): void {
+  const tag = node[0];
+  const attributes = node[1] as Record<string, unknown>;
+  const children = (node as unknown as { 2?: IconNode })[2];
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    element.setAttribute(name, String(value));
+  }
+  for (const child of children ?? []) appendIconNode(document, element, child);
+  parent.appendChild(element);
+}
+
 export function createIcon(
   document: Document,
   icon: IconNode,
   size = 16,
   className = "dingtalk-icon",
 ): SVGElement {
-  const node = createElement(icon, {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({
+    xmlns: "http://www.w3.org/2000/svg",
     width: size,
     height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": 1.8,
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
     "aria-hidden": "true",
     focusable: "false",
-    "stroke-width": 1.8,
-  });
+  })) {
+    node.setAttribute(name, String(value));
+  }
+  for (const child of icon) appendIconNode(document, node, child);
   node.classList.add(...className.split(" ").filter(Boolean));
   return node;
 }
@@ -290,11 +318,26 @@ export function createSearchMessageRow(
   return row;
 }
 
+export interface MessageDispatchedAgent {
+  fileName: string;
+  name: string;
+  threadId: string;
+}
+
 export interface MessageRowOptions {
   continuation: boolean;
   /** The centered time separator already carries this group's time. */
   suppressTime?: boolean;
   onRetry?(): void;
+  /** Hover toolbar and context menu actions; every action covers this message only. */
+  onDispatch?(message: DingTalkMessage): void;
+  onReply?(message: DingTalkMessage): void;
+  onMenu?(message: DingTalkMessage, anchor: HTMLButtonElement): void;
+  /** Right-clicking the row opens the same menu at its toolbar button. */
+  onContextMenu?(message: DingTalkMessage, anchor: HTMLButtonElement): void;
+  /** Agents this message was manually dispatched to in this page session. */
+  dispatchedAgents?(message: DingTalkMessage): readonly MessageDispatchedAgent[];
+  onOpenThread?(threadId: string): void;
   /** Hands the empty image frame to the list controller for viewport loading. */
   attachImage?(
     frame: HTMLElement,
@@ -603,7 +646,64 @@ function buildMessageRow(
   } else {
     line.append(bubble);
   }
+  if (options.onDispatch || options.onReply || options.onMenu) {
+    const actions = createElementNode(document, "div", "dingtalk-message-actions");
+    if (options.onDispatch) {
+      const dispatch = createIconButton(document, text.dispatchAgent, BotIcon, {
+        className: "dingtalk-message-action",
+        size: 15,
+      });
+      dispatch.addEventListener("click", () => options.onDispatch?.(message));
+      actions.append(dispatch);
+    }
+    if (options.onReply) {
+      const reply = createIconButton(document, text.replyMessage, ReplyIcon, {
+        className: "dingtalk-message-action",
+        size: 15,
+      });
+      reply.addEventListener("click", () => options.onReply?.(message));
+      actions.append(reply);
+    }
+    if (options.onMenu) {
+      const more = createIconButton(document, text.messageMenu, EllipsisIcon, {
+        className: "dingtalk-message-action dingtalk-message-action--menu",
+        size: 15,
+      });
+      more.addEventListener("click", (event) => {
+        event.stopPropagation();
+        options.onMenu?.(message, more);
+      });
+      actions.append(more);
+    }
+    line.append(actions);
+    if (options.onContextMenu) {
+      row.addEventListener("contextmenu", (event) => {
+        if (message.pending || message.failed) return;
+        const anchor = actions.querySelector<HTMLButtonElement>(".dingtalk-message-action--menu");
+        if (!anchor) return;
+        event.preventDefault();
+        options.onContextMenu?.(message, anchor);
+      });
+    }
+  }
   body.append(line);
+  const dispatchedAgents = options.dispatchedAgents?.(message) ?? [];
+  if (dispatchedAgents.length > 0) {
+    const mark = createElementNode(document, "div", "dingtalk-message-dispatched");
+    mark.append(
+      createElementNode(document, "span", "dingtalk-message-dispatched-label", text.dispatchedTo),
+    );
+    for (const agent of dispatchedAgents) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "dingtalk-message-dispatched-agent";
+      chip.textContent = agent.name;
+      chip.title = text.openAgentThread.replace("{name}", agent.name);
+      chip.addEventListener("click", () => options.onOpenThread?.(agent.threadId));
+      mark.append(chip);
+    }
+    body.append(mark);
+  }
   if (message.reactions && message.reactions.length > 0) {
     const reactions = createElementNode(document, "div", "dingtalk-message-reactions");
     for (const reaction of message.reactions) {

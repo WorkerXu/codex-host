@@ -626,36 +626,6 @@
 }
 
 /* DingTalk listener */
-.dingtalk-listener {
-  margin-top: 32px;
-}
-
-.dingtalk-listener-head {
-  margin-bottom: 12px;
-}
-
-.dingtalk-listener-title {
-  margin: 0;
-  color: var(--color-token-text-primary);
-  font-size: var(--font-text-sm-size);
-  font-weight: 600;
-  line-height: var(--font-text-sm-line-height);
-}
-
-.dingtalk-listener-description {
-  margin: 4px 0 0;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-listener-card {
-  padding: 4px 12px 12px;
-  background: var(--color-token-main-surface-primary);
-  border: 1px solid var(--color-token-border-default);
-  border-radius: 12px;
-}
-
 .dingtalk-switch-row {
   display: flex;
   min-height: 56px;
@@ -724,122 +694,6 @@
 .dingtalk-switch:focus-visible {
   outline: 2px solid var(--color-token-text-link-foreground);
   outline-offset: 2px;
-}
-
-.dingtalk-listener-body {
-  display: flex;
-  flex-direction: column;
-  padding: 0 8px;
-  transition: opacity 120ms ease;
-}
-
-.dingtalk-listener-body[data-disabled="true"] {
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-.dingtalk-listener-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 0;
-  border-top: 1px solid var(--color-token-border-light);
-}
-
-.dingtalk-field-title {
-  color: var(--color-token-text-primary);
-  font-size: var(--font-text-sm-size);
-  font-weight: 500;
-  line-height: var(--font-text-sm-line-height);
-}
-
-.dingtalk-field-hint {
-  margin: 0;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-check-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dingtalk-check-list--row {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-}
-
-.dingtalk-check-row {
-  display: flex;
-  min-height: 30px;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  color: var(--color-token-text-primary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-text-sm-size);
-  line-height: var(--font-text-sm-line-height);
-}
-
-.dingtalk-check-row:hover {
-  background: var(--color-token-list-hover-background);
-}
-
-.dingtalk-checkbox {
-  width: 15px;
-  height: 15px;
-  flex: none;
-  margin: 0;
-  accent-color: var(--color-token-charts-blue, #0285ff);
-  cursor: pointer;
-}
-
-.dingtalk-threshold-row {
-  display: flex;
-  max-width: 360px;
-  align-items: center;
-  gap: 12px;
-}
-
-.dingtalk-threshold {
-  width: 280px;
-  max-width: 100%;
-  margin: 0;
-  accent-color: var(--color-token-charts-blue, #0285ff);
-}
-
-.dingtalk-threshold-value {
-  color: var(--color-token-text-secondary);
-  font-size: var(--font-text-xs-size);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-listener-note {
-  margin: 8px 0 0;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-listener-status {
-  display: block;
-  margin: 8px 0 0;
-  color: var(--color-token-text-tertiary);
-  font-size: var(--font-text-xs-size);
-  line-height: var(--font-text-xs-line-height);
-}
-
-.dingtalk-listener-status[hidden] {
-  display: none;
-}
-
-.dingtalk-listener-status[data-state="failed"] {
-  color: var(--color-background-danger-solid, #e02e2a);
 }
 
 /* Card actions popover */
@@ -991,14 +845,8 @@
   pointer-events: none;
 }
 
-.dingtalk-listener-field--first {
-  padding-top: 12px;
-  border-top: 0;
-}
-
 .agent-card-menu:focus-visible,
-.agent-editor-close:focus-visible,
-.dingtalk-check-row:focus-within {
+.agent-editor-close:focus-visible {
   outline: 2px solid var(--color-token-text-link-foreground);
   outline-offset: 1px;
 }
@@ -1016,4 +864,31 @@
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.agent-target-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.agent-target-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--color-token-text-secondary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.agent-target-field select {
+  width: 100%;
+}
+
+.agent-dingtalk-warning {
+  margin: 2px 0 0;
+  color: light-dark(#8a5500, #f5c96a);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
 }

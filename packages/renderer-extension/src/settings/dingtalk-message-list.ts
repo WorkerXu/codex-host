@@ -9,11 +9,14 @@ import {
 import type { DingTalkPageText } from "./dingtalk-page-strings.js";
 import {
   createDateSeparator,
+  createElementNode,
   createMessageRow,
   createTimeSeparator,
   dingtalkImageBox,
   showImageUnavailable,
+  type MessageDispatchedAgent,
 } from "./dingtalk-page-view.js";
+import { createDingTalkAnchoredMenu } from "./dingtalk-anchored-menu.js";
 
 const GROUP_GAP_MS = 5 * 60_000;
 
@@ -27,11 +30,25 @@ export interface DingTalkMessageListOptions {
     resource: NonNullable<DingTalkMessage["resources"]>[number],
   ): Promise<DingTalkResourceResult>;
   onImageLoaded?(wasNearBottom: boolean): void;
+  onImageStarted?(
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void;
+  /** Fires once per requested image whether it loaded or is unavailable. */
+  onImageSettled?(
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void;
   onImageClick?(
     message: DingTalkMessage,
     resource: NonNullable<DingTalkMessage["resources"]>[number],
   ): void;
   onRetry?(message: ViewMessage): void;
+  onDispatch?(message: DingTalkMessage): void;
+  /** Prefills the composer with `@sender ` and focuses it. */
+  onReply?(message: DingTalkMessage): void;
+  dispatchedAgents?(message: DingTalkMessage): readonly MessageDispatchedAgent[];
+  onOpenThread?(threadId: string): void;
   /** Injectable object-URL hooks keep this testable outside the Desktop. */
   createObjectUrl?(blob: Blob): string;
   revokeObjectUrl?(url: string): void;
@@ -52,6 +69,8 @@ export interface DingTalkMessageList {
   clear(): void;
   nodeFor(messageId: string): HTMLElement | null;
   lastMessage(): ViewMessage | undefined;
+  /** Closes an open message menu; the page calls this on outside pointerdown. */
+  closeMenus(): void;
   dispose(): void;
 }
 
@@ -95,6 +114,7 @@ interface Entry {
   nodes: HTMLElement[];
   row: HTMLElement;
   objectUrls: string[];
+  imageFrames: HTMLElement[];
   removed: boolean;
 }
 
@@ -159,6 +179,59 @@ export function createDingTalkMessageList(
   const distanceFromBottom = (): number =>
     container.scrollHeight - container.scrollTop - container.clientHeight;
 
+  const menuPlacements = new Map<HTMLElement, { close(): void }>();
+  const closeMenus = (): void => {
+    for (const placement of menuPlacements.values()) placement.close();
+    for (const menu of menuPlacements.keys()) menu.remove();
+    menuPlacements.clear();
+  };
+
+  const copyText = (value: string): void => {
+    const clipboard = document.defaultView?.navigator.clipboard;
+    if (clipboard?.writeText) {
+      void clipboard.writeText(value).catch(() => undefined);
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      /* Clipboard access is best effort. */
+    }
+    area.remove();
+  };
+
+  /** The native message menu: exactly agent dispatch, copy and reply. */
+  const openMessageMenu = (message: DingTalkMessage, anchor: HTMLButtonElement): void => {
+    closeMenus();
+    const menu = createElementNode(document, "div", "dingtalk-message-menu");
+    menu.setAttribute("role", "menu");
+    const item = (label: string, run: () => void): void => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "dingtalk-message-menu-item";
+      button.setAttribute("role", "menuitem");
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        closeMenus();
+        run();
+      });
+      menu.append(button);
+    };
+    if (options.onDispatch) item(text.dispatchAgent, () => options.onDispatch?.(message));
+    item(text.copyMessage, () => copyText(message.text));
+    if (options.onReply) item(text.replyMessage, () => options.onReply?.(message));
+    document.body.append(menu);
+    const placement = createDingTalkAnchoredMenu(menu, anchor, "right");
+    menuPlacements.set(menu, placement);
+    placement.toggle();
+  };
+
   const createEntry = (previous: ViewMessage | undefined, message: ViewMessage): Entry => {
     const nodes: HTMLElement[] = [];
     let suppressTime = false;
@@ -178,14 +251,22 @@ export function createDingTalkMessageList(
       nodes,
       row: document.createElement("div"),
       objectUrls: [],
+      imageFrames: [],
       removed: false,
     };
     const row = createMessageRow(document, message, text, {
       continuation,
       suppressTime,
       onRetry: () => options.onRetry?.(message),
+      ...(options.onDispatch ? { onDispatch: options.onDispatch } : {}),
+      ...(options.onReply ? { onReply: options.onReply } : {}),
+      onMenu: (target, anchor) => openMessageMenu(target, anchor),
+      ...(options.dispatchedAgents ? { dispatchedAgents: options.dispatchedAgents } : {}),
+      ...(options.onOpenThread ? { onOpenThread: options.onOpenThread } : {}),
+      onContextMenu: (target, anchor) => openMessageMenu(target, anchor),
       ...(options.onImageClick ? { onImageClick: options.onImageClick } : {}),
       attachImage: (frame, imageMessage, resource) => {
+        entry.imageFrames.push(frame);
         if (!imageObserver) {
           void loadImage(frame, { entry, message: imageMessage, resource });
           return;
@@ -203,7 +284,11 @@ export function createDingTalkMessageList(
     entry.removed = true;
     for (const url of entry.objectUrls) objectUrls.release(url);
     entry.objectUrls = [];
-    pendingImages.delete(entry.row);
+    for (const frame of entry.imageFrames) {
+      imageObserver?.unobserve(frame);
+      pendingImages.delete(frame);
+    }
+    entry.imageFrames = [];
     for (const node of entry.nodes) node.remove();
   };
 
@@ -219,7 +304,13 @@ export function createDingTalkMessageList(
     container.insertBefore(fragment, nextNode);
   };
 
-  const showImage = (frame: HTMLElement, image: HTMLImageElement, nearBottom: boolean): void => {
+  const showImage = (
+    frame: HTMLElement,
+    image: HTMLImageElement,
+    nearBottom: boolean,
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void => {
     if (!frame.isConnected) return;
     const box = dingtalkImageBox(image.naturalWidth || 1, image.naturalHeight || 1);
     frame.style.width = `${box.width}px`;
@@ -228,21 +319,27 @@ export function createDingTalkMessageList(
     frame.classList.add("dingtalk-message-image--loaded");
     frame.replaceChildren(image);
     options.onImageLoaded?.(nearBottom);
+    options.onImageSettled?.(message, resource);
   };
 
   const loadImage = async (frame: HTMLElement, pending: LoadedImage): Promise<void> => {
+    options.onImageStarted?.(pending.message, pending.resource);
     const nearBottom = distanceFromBottom() <= 80;
     const result = await options.loadResource(pending.message, pending.resource).catch(() => null);
     if (pending.entry.removed || !frame.isConnected) return;
     if (!result?.available || !result.dataUrl) {
       showImageUnavailable(document, frame);
+      options.onImageSettled?.(pending.message, pending.resource);
       return;
     }
     const blob = await (options.decodeImage ?? decodeDingTalkDataUrl)(result.dataUrl).catch(
       () => null,
     );
     if (!blob || pending.entry.removed || !frame.isConnected) {
-      if (!blob) showImageUnavailable(document, frame);
+      if (!blob) {
+        showImageUnavailable(document, frame);
+        options.onImageSettled?.(pending.message, pending.resource);
+      }
       return;
     }
     const url = objectUrls.add(blob);
@@ -254,11 +351,12 @@ export function createDingTalkMessageList(
     const image = document.createElement("img");
     image.className = "dingtalk-message-image-content";
     image.alt = pending.message.text || "图片";
-    image.onload = () => showImage(frame, image, nearBottom);
+    image.onload = () => showImage(frame, image, nearBottom, pending.message, pending.resource);
     image.onerror = () => {
       objectUrls.release(url);
       pending.entry.objectUrls = pending.entry.objectUrls.filter((value) => value !== url);
       if (frame.isConnected) showImageUnavailable(document, frame);
+      options.onImageSettled?.(pending.message, pending.resource);
     };
     image.src = url;
   };
@@ -388,7 +486,9 @@ export function createDingTalkMessageList(
       const id = order.at(-1);
       return id ? entries.get(id)?.message : undefined;
     },
+    closeMenus,
     dispose() {
+      closeMenus();
       imageObserver?.disconnect();
       api.clear();
       objectUrls.releaseAll();

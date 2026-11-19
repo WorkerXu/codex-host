@@ -1,31 +1,20 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  defaultDingTalkAgentDispatch,
   type CodexAgentRecord,
+  type DingTalkAgentDispatch,
   type DingTalkConversation,
   type DingTalkDispatchSettings,
   type DingTalkMessage,
 } from "@codexhost/shared-contracts";
-import {
-  createDingTalkCli,
-  parseDwsEventLine,
-  parseMessages,
-  type DwsEventRecord,
-} from "../src/dingtalk-cli.js";
-import { createDingTalkDispatchMatcher } from "../src/dingtalk-dispatch-matcher.js";
-import { ModelServiceSettingsStore } from "../src/model-service-settings.js";
-import {
-  DingTalkDispatcher,
-  type DingTalkDispatchService,
-  type DingTalkDispatchMatcher,
-} from "../src/dingtalk-dispatcher.js";
+import { createDingTalkCli, parseMessages } from "../src/dingtalk-cli.js";
+import { DingTalkDispatcher, type DingTalkDispatchService } from "../src/dingtalk-dispatcher.js";
 import { DingTalkDispatchSettingsStore } from "../src/dingtalk-dispatch-settings.js";
 import { DingTalkDispatchStateStore } from "../src/dingtalk-dispatch-state.js";
-import type { DingTalkDispatchThreadInput } from "../src/dingtalk-dispatch-types.js";
+import { DesktopProjectCatalogReader } from "../src/desktop-project-catalog.js";
 
 const directories: string[] = [];
 const disposers: (() => void)[] = [];
@@ -35,6 +24,7 @@ afterEach(async () => {
     directories.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })),
   );
 });
+
 const agent = (fileName: string): CodexAgentRecord => ({
   fileName,
   name: fileName.replace(".toml", ""),
@@ -44,7 +34,7 @@ const agent = (fileName: string): CodexAgentRecord => ({
   reasoningEffort: "high",
   revision: "1",
 });
-/** Real `dws chat message list` response with names, text and ids redacted. */
+
 const fixtureMessages = (name: string): DingTalkMessage[] =>
   parseMessages(
     JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")) as Record<
@@ -53,52 +43,89 @@ const fixtureMessages = (name: string): DingTalkMessage[] =>
     >,
     null,
   );
-const clock = (value: number): string =>
-  new Date(value + 8 * 60 * 60_000).toISOString().replace("T", " ").slice(0, 19);
-const targetEvent = (target: DingTalkMessage, conversationId: string): Partial<DwsEventRecord> => ({
-  messageId: target.messageId,
-  conversationId,
-  senderName: target.senderName,
-  ...(target.senderId ? { senderId: target.senderId } : {}),
-  text: target.text,
-  createdAt: target.createdAt,
-});
-const event = (overrides: Partial<DwsEventRecord> = {}): DwsEventRecord => ({
-  messageId: "m1",
-  conversationId: "group-1",
-  senderName: "林晓",
-  senderId: "open-sender",
-  text: "@我 接口如何实现？",
-  createdAt: 2000,
-  kind: "group",
-  atMe: true,
-  atAll: false,
-  ...overrides,
-});
+
+const conversation: DingTalkConversation = {
+  conversationId: "cid-fixture",
+  title: "技术群",
+  singleChat: false,
+  unreadCount: 0,
+  lastMessageAt: null,
+  muted: false,
+};
+
+function settingsWith(overrides: Record<string, DingTalkAgentDispatch> = {}) {
+  return {
+    agents: {
+      "qa.toml": {
+        enabled: true,
+        replyScope: "group" as const,
+        sectionId: "section-1",
+        projectId: "project-1",
+        projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
+      },
+      "bare.toml": {
+        enabled: true,
+        replyScope: "group" as const,
+        sectionId: null,
+        projectId: null,
+        projectPath: null,
+        projectRoots: [],
+      },
+      "off.toml": {
+        enabled: false,
+        replyScope: "group" as const,
+        sectionId: "section-1",
+        projectId: "project-1",
+        projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
+      },
+      ...overrides,
+    },
+  } satisfies DingTalkDispatchSettings;
+}
 
 async function setup(
   options: {
     settings?: DingTalkDispatchSettings;
     missingKey?: boolean;
-    matcher?: DingTalkDispatchMatcher;
+    messages?: DingTalkMessage[];
     cardFails?: boolean;
     updateFails?: boolean;
     runFails?: boolean;
-    approvals?: boolean;
-    messages?: DingTalkMessage[];
-    conversation?: DingTalkConversation;
+    nativeMissing?: boolean;
+    nativeRootsMismatch?: boolean;
+    migratedProject?: boolean;
   } = {},
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-dispatch-"));
   directories.push(directory);
   const settings = new DingTalkDispatchSettingsStore({ homeDirectory: directory });
-  const state = new DingTalkDispatchStateStore({ homeDirectory: directory });
-  await settings.write(
-    options.settings ?? {
-      threshold: 0.85,
-      agents: { "qa.toml": { ...defaultDingTalkAgentDispatch(), enabled: true } },
-    },
-  );
+  const state = new DingTalkDispatchStateStore();
+  const projects = new DesktopProjectCatalogReader({ codexHome: directory });
+  const writeProject = async (roots: string[] | null) => {
+    await writeFile(
+      projects.file,
+      JSON.stringify({
+        ...(options.migratedProject
+          ? {
+              "app-server-project-id-by-legacy-project-id-by-host": {
+                [`local:${directory}`]: { "project-1": "native-project-1" },
+                "local:/another/codex-home": { "project-1": "wrong-scope" },
+              },
+            }
+          : {}),
+        "local-projects":
+          roots === null
+            ? {}
+            : {
+                "project-1": { id: "project-1", name: "当前项目", rootPaths: roots },
+              },
+      }),
+    );
+  };
+  await writeProject([directory]);
+  await settings.write(options.settings ?? settingsWith());
   const commands: string[][] = [];
   const cli = createDingTalkCli({
     runImpl: async (args) => {
@@ -118,7 +145,7 @@ async function setup(
       };
     },
   });
-  let listener: ((event: DwsEventRecord) => void) | null = null;
+  const messages = options.messages ?? [];
   const service: DingTalkDispatchService = {
     status: async () => ({
       installed: true,
@@ -126,21 +153,16 @@ async function setup(
       userName: "我",
       userId: "self",
       corpName: null,
-      defaultHost: "tencent",
+      defaultHost: "local",
       defaultHostId: null,
       errorCode: null,
     }),
-    selfOpenDingTalkId: async () => "open-self",
+    message: vi.fn(async (_conversationId: string, messageId: string) => {
+      return messages.find((message) => message.messageId === messageId) ?? null;
+    }),
     messages: vi.fn(async (input: { conversationId: string; limit: number; before?: number }) => ({
-      conversation: options.conversation ?? {
-        conversationId: "group-1",
-        title: "技术群",
-        singleChat: false,
-        unreadCount: 0,
-        lastMessageAt: null,
-        muted: false,
-      },
-      messages: (options.messages ?? [])
+      conversation,
+      messages: messages
         .filter((message) => input.before === undefined || message.createdAt < input.before)
         .slice()
         .sort((left, right) => left.createdAt - right.createdAt)
@@ -151,28 +173,7 @@ async function setup(
     sendDirect: cli.sendDirect,
     sendCard: cli.sendCard,
     updateCard: cli.updateCard,
-    pendingApprovals: async () => ({
-      approvals: options.approvals
-        ? [
-            {
-              taskId: "task-1",
-              processInstanceId: "process-1",
-              title: "采购申请",
-              originatorName: "林晓",
-              originatorId: "sender",
-              formMessage: "服务器采购",
-              createdAt: 2000,
-              url: null,
-            },
-          ]
-        : [],
-    }),
-    subscribeEvents: (callback) => {
-      listener = callback;
-      return () => {
-        listener = null;
-      };
-    },
+    recordDispatch: vi.fn(),
     startListening: vi.fn(async () => undefined),
     setListeningHold: vi.fn(),
   };
@@ -195,49 +196,66 @@ async function setup(
     status: "completed" | "failed";
     errorMessage: string | null;
   }>();
-  const startThread = vi.fn<
-    (
-      input: DingTalkDispatchThreadInput,
-    ) => Promise<{ threadId: string; turnId: string; completed: typeof finish.promise }>
-  >(async () => {
-    if (options.runFails) throw new Error("无法启动");
-    return { threadId: "thread-1", turnId: "turn-1", completed: finish.promise };
-  });
+  let started = 0;
+  const startThread = vi.fn(
+    async (input: {
+      cwd: string;
+      projectId: string | null;
+      projectRoots: readonly string[];
+      title: string;
+      developerInstructions: string;
+      prompt: string;
+    }): Promise<{
+      threadId: string;
+      turnId: string;
+      completed: typeof finish.promise;
+    }> => {
+      void input;
+      started += 1;
+      if (options.runFails) throw new Error("无法启动");
+      return {
+        threadId: `thread-${started}`,
+        turnId: "turn-1",
+        completed: finish.promise,
+      };
+    },
+  );
   const dispatcher = new DingTalkDispatcher({
     service,
     settings,
     state,
-    agents: { read: async (file) => agent(file) },
-    matcher: options.matcher ?? matcher,
+    agents: {
+      read: async (file) => agent(file),
+      list: async () => ({
+        agents: Object.keys((options.settings ?? settingsWith()).agents).map(agent),
+      }),
+    },
+    matcher,
     startThread,
-    projectDirectory: path.join(directory, "钉钉智能体"),
+    projects,
+    readNativeProject: async (id) => {
+      if (options.nativeMissing) throw new Error("not found");
+      const current = await projects.read({ fresh: true });
+      const roots = current.localProjects["project-1"]?.rootPaths ?? [];
+      return { id, roots: options.nativeRootsMismatch ? ["/wrong"] : roots };
+    },
     now: () => 1000,
   });
   disposers.push(() => dispatcher.dispose());
   await dispatcher.start();
   return {
     dispatcher,
-    state,
     directory,
+    projects,
+    writeProject,
+    state,
     settings,
     service,
     commands,
     matcher,
     startThread,
-    emit: (input = event()) => listener?.(input),
-    complete: async () => {
-      finish.resolve({
-        answer: "# 答案\n\n第一步\n第二步",
-        status: "completed",
-        errorMessage: null,
-      });
-    },
     finish: async () => {
-      finish.resolve({
-        answer: "# 答案\n\n第一步\n第二步",
-        status: "completed",
-        errorMessage: null,
-      });
+      finish.resolve({ answer: "# 答案", status: "completed", errorMessage: null });
       await vi.waitFor(async () =>
         expect(
           Object.values(await state.status()).some((value) => value.result === "replied"),
@@ -247,373 +265,228 @@ async function setup(
   };
 }
 
-describe("DingTalk dispatch runtime (fake dws only)", () => {
-  it("drives a normalized event through one match, native task and in-place card completion", async () => {
-    const f = await setup();
-    const normalized = parseDwsEventLine(
-      JSON.stringify({
-        type: "user_im_message_receive_group_all",
-        message_id: "m1",
-        conversation_id: "group-1",
-        sender: "林晓",
-        sender_open_dingtalk_id: "open-sender",
-        content: "@我 接口如何实现？",
-        event_time: 2000,
-        at_me: true,
-      }),
-    );
-    if (!normalized) throw new Error("Invalid event fixture");
-    f.emit(normalized);
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
+describe("DingTalk manual dispatch", () => {
+  it("scores every enabled agent once from the message text and sorts high to low", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages });
+    const result = await f.dispatcher.score(conversation.conversationId, target.messageId);
     expect(f.matcher.scoreDingTalkCandidates).toHaveBeenCalledOnce();
-    expect(f.startThread.mock.calls[0]?.[0]).toMatchObject({
-      title: "qa · 技术群 · @我 接口如何实现？",
-      model: "gpt-test",
-      reasoningEffort: "high",
+    expect(f.matcher.scoreDingTalkCandidates.mock.calls[0]?.[0]).toBe(target.text);
+    expect(f.matcher.scoreDingTalkCandidates.mock.calls[0]?.[1].map((a) => a.fileName)).toEqual([
+      "bare.toml",
+      "qa.toml",
+    ]);
+    expect(result.failed).toBe(false);
+    expect(result.agents.map(({ agent }) => agent.fileName)).toEqual(["qa.toml", "bare.toml"]);
+    expect(result.agents[0]?.score).toBe(0.95);
+    expect(result.agents[0]?.agent.ready).toBe(true);
+    expect(result.agents[1]?.agent.ready).toBe(false);
+  });
+
+  it("returns the list by name with null scores when scoring fails", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages, missingKey: true });
+    const result = await f.dispatcher.score(conversation.conversationId, target.messageId);
+    expect(result.failed).toBe(true);
+    expect(result.agents.map(({ agent }) => agent.name)).toEqual(["bare", "qa"]);
+    expect(result.agents.every(({ score }) => score === null)).toBe(true);
+  });
+
+  it("runs the unchanged dispatch flow once per checked agent under its project", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-context.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages });
+    const result = await f.dispatcher.run(conversation.conversationId, target.messageId, [
+      "qa.toml",
+      "bare.toml",
+      "off.toml",
+    ]);
+    expect(f.startThread).toHaveBeenCalledOnce();
+    const input = f.startThread.mock.calls[0]?.[0];
+    expect(input).toMatchObject({
+      cwd: f.directory,
+      projectId: "project-1",
+      projectRoots: [f.directory],
     });
-    expect(f.startThread.mock.calls[0]?.[0].prompt).toContain("回复位置：原群聊");
+    expect(input?.title.startsWith("qa · 技术群 · ")).toBe(true);
+    expect(input?.prompt).toContain("触发：手动派发");
+    expect(input?.developerInstructions).toContain("oa approval approve / reject / revoke");
+    expect(input?.prompt).toContain("不要执行任何 OA 写操作，也不要执行任何 dws 写命令");
+    expect(input?.prompt).toContain("最近 30 条上下文");
+    expect(input?.prompt).toContain("回复位置：原群聊（@发送人）");
+    const byFile = Object.fromEntries(result.results.map((entry) => [entry.fileName, entry]));
+    expect(byFile["qa.toml"]?.threadId).toBe("thread-1");
+    expect(byFile["bare.toml"]?.error).toBe("需要设置分区和工作项目");
+    expect(byFile["off.toml"]?.error).toBe("智能体未启用");
+    await f.finish();
+    expect((await f.state.status())["qa.toml"]).toMatchObject({
+      result: "replied",
+      detail: "技术群",
+    });
+    expect((await f.state.status())["qa.toml"]?.detail).not.toContain("阈值");
     expect(f.commands[0]).toEqual(
       expect.arrayContaining([
         "send-a2ui-card",
         "--conversation-id",
-        "group-1",
-        "--at-open-dingtalk-ids",
-        "open-sender",
+        conversation.conversationId,
         "--yes",
       ]),
     );
-    await f.finish();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.result).toBe("replied"),
-    );
-    const updates = f.commands.filter((args) => args[2] === "update-a2ui-card");
-    expect(updates).toHaveLength(1);
-    expect(updates.at(-1)).toEqual(
-      expect.arrayContaining(["--biz-id", "card-1", "--flow-status", "FINISH"]),
-    );
   });
 
-  it("builds the prompt from 30 real messages before the target and marks the target", async () => {
-    const messages = fixtureMessages("dingtalk-message-list-context.json");
-    const target = messages[0];
-    if (!target) throw new Error("fixture target missing");
-    const conversation: DingTalkConversation = {
-      conversationId: "cid-fixture",
-      title: "技术群",
-      singleChat: false,
-      unreadCount: 0,
-      lastMessageAt: null,
-      muted: false,
-    };
-    const f = await setup({ messages, conversation });
-    f.emit(event(targetEvent(target, conversation.conversationId)));
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
-    expect(f.service.messages).toHaveBeenCalledWith({
-      conversationId: "cid-fixture",
-      limit: 40,
-      before: target.createdAt + 1_000,
-    });
-    expect(prompt).toContain("最近 30 条上下文（旧 → 新，最多 30 条，不含待处理消息）：");
-    const context = prompt.split("\n").filter((line) => line.startsWith("- 20"));
-    expect(context).toHaveLength(30);
-    // Oldest first; the 30 prior messages end just before the target.
-    expect(context[0]).toContain(`：上下文消息 31`);
-    expect(context.at(-1)).toContain(`：上下文消息 2`);
-    const images = context.filter((line) => line.includes("[图片]"));
-    expect(images).toHaveLength(4);
-    expect(images.every((line) => line.endsWith("：[图片]"))).toBe(true);
-    expect(context.some((line) => line.endsWith("：上下文消息 1"))).toBe(false);
-    expect(prompt).toContain(
-      `待处理消息（${target.senderName}，${clock(target.createdAt).slice(0, 16)}）：\n${target.text}`,
-    );
-    const conversationArg = "'cid-fixture'";
-    expect(prompt).toContain(
-      `需要更多信息时，可在本对话运行以下只读命令；dws 只在钉钉 Host 上，不要在本机查找或安装 dws：`,
-    );
-    expect(prompt).toContain(
-      `- 更多消息：codexhost dingtalk dws -- chat message list --conversation-id ${conversationArg} --limit 50`,
-    );
-    expect(prompt).toContain(
-      `- 更早的消息：codexhost dingtalk dws -- chat message list --conversation-id ${conversationArg} --time '${clock(messages[30]?.createdAt ?? 0)}' --direction older --limit 50`,
-    );
-    expect(prompt).toContain(
-      `- 会话信息：codexhost dingtalk dws -- chat +conversation-info --group ${conversationArg}`,
-    );
-    expect(prompt).toContain(
-      `- 群成员：codexhost dingtalk dws -- chat +chat-members-list --conversation-id ${conversationArg} --member-types user`,
-    );
-    expect(prompt).toContain("回复由 Host 发送；不要自行发消息或创建卡片。");
-    await f.finish();
-  });
-
-  it("reports a new conversation as having no earlier messages instead of counting the target", async () => {
-    const messages = fixtureMessages("dingtalk-message-list-single.json");
-    const target = messages[0];
-    if (!target) throw new Error("fixture target missing");
-    const conversation: DingTalkConversation = {
-      conversationId: "cid-fixture",
-      title: "技术群",
-      singleChat: false,
-      unreadCount: 0,
-      lastMessageAt: null,
-      muted: false,
-    };
-    const f = await setup({ messages, conversation });
-    f.emit(event(targetEvent(target, conversation.conversationId)));
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
-    expect(prompt).toContain("最近 0 条上下文（旧 → 新，最多 30 条，不含待处理消息）：");
-    expect(prompt).toContain("（没有更早的消息）");
-    expect(prompt).not.toContain("最近 1 条上下文");
-    expect(prompt).toContain(`待处理消息（${target.senderName}，`);
-    expect(prompt.split("\n").some((line) => line.endsWith(`：${target.text}`))).toBe(false);
-    await f.finish();
-  });
-
-  it("ignores messages that arrived after the target when building context", async () => {
-    const messages = fixtureMessages("dingtalk-message-list-single.json");
-    const target = messages[0];
-    if (!target) throw new Error("fixture target missing");
-    const conversation: DingTalkConversation = {
-      conversationId: "cid-fixture",
-      title: "技术群",
-      singleChat: false,
-      unreadCount: 0,
-      lastMessageAt: null,
-      muted: false,
-    };
-    const late: DingTalkMessage = {
-      ...target,
-      messageId: "msg-late",
-      text: "后到的消息",
-      createdAt: target.createdAt + 5_000,
-    };
-    const f = await setup({ messages: [...messages, late], conversation });
-    f.emit(event(targetEvent(target, conversation.conversationId)));
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    const prompt = f.startThread.mock.calls[0]?.[0].prompt ?? "";
-    expect(prompt).not.toContain("后到的消息");
-    expect(prompt).toContain("最近 0 条上下文");
-    await f.finish();
-  });
-
-  it.each([
-    { kind: "group" as const, scope: "direct" as const },
-    { kind: "direct" as const, scope: "group" as const },
-  ])("routes $kind/$scope to the exact sender private chat", async ({ kind, scope }) => {
-    const f = await setup({
-      settings: {
-        threshold: 0.85,
-        agents: {
-          "qa.toml": { ...defaultDingTalkAgentDispatch(), enabled: true, replyScope: scope },
-        },
-      },
-    });
-    f.emit(event({ kind, atMe: kind === "group" }));
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    expect(f.commands[0]).toContain("--open-dingtalk-id");
-    expect(f.commands[0]).toContain("open-sender");
-    expect(f.commands[0]).not.toContain("--group");
-    await f.finish();
-  });
-
-  it("filters disabled agents/types and dispatches every score >= .85 concurrently", async () => {
-    const cfg = defaultDingTalkAgentDispatch();
-    const f = await setup({
-      settings: {
-        threshold: 0.85,
-        agents: {
-          "a.toml": { ...cfg, enabled: true },
-          "b.toml": { ...cfg, enabled: true },
-          "low.toml": { ...cfg, enabled: true },
-          "off.toml": cfg,
-          "wrong.toml": { ...cfg, enabled: true, eventTypes: ["approval_pending"] },
-        },
-      },
-    });
-    f.emit();
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledTimes(2));
-    expect(f.matcher.scoreDingTalkCandidates).toHaveBeenCalledTimes(1);
-    expect(f.matcher.scoreDingTalkCandidates.mock.calls[0]?.[1].map((a) => a.fileName)).toEqual([
-      "a.toml",
-      "b.toml",
-      "low.toml",
-    ]);
-    expect((await f.state.status())["low.toml"]?.detail).toBe("匹配度 0.84，未达阈值 0.85");
-    await f.finish();
-  });
-
-  it("ignores old, self, bot, unaddressed and duplicated messages; persists dedupe", async () => {
-    const f = await setup();
-    for (const ignored of [
-      event({ createdAt: 999 }),
-      event({ senderName: "我" }),
-      event({ mine: true }),
-      event({ bot: true }),
-      event({ atMe: false }),
-    ])
-      f.emit(ignored);
-    f.emit();
-    f.emit();
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    expect(f.matcher.scoreDingTalkCandidates).toHaveBeenCalledOnce();
-    expect(
-      await new DingTalkDispatchStateStore({ homeDirectory: f.directory }).isProcessed("m1"),
-    ).toBe(true);
-    await f.finish();
-    f.dispatcher.dispose();
-    f.emit(event({ messageId: "after-dispose" }));
-    expect(f.service.setListeningHold).toHaveBeenLastCalledWith(false);
-  });
-
-  it("records a missing key and never sends or runs anything", async () => {
-    const f = await setup({ missingKey: true });
-    f.emit();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.detail).toBe("未配置 Gemini Key，未派发"),
-    );
-    expect(f.startThread).not.toHaveBeenCalled();
-    expect(f.commands).toEqual([]);
-  });
-
-  it.each([false, true])(
-    "records the General settings Gemini missing-key state for messages/approvals (%s)",
-    async (approvals) => {
-      const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-missing-model-"));
-      directories.push(directory);
-      const fetchImpl = vi.fn();
-      const matcher = createDingTalkDispatchMatcher({
-        settings: new ModelServiceSettingsStore({ configDirectory: directory }),
-        fetchImpl,
-      });
-      const f = await setup({ matcher, approvals });
-      if (!approvals) f.emit();
-      await vi.waitFor(async () =>
-        expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
-          result: "skipped",
-          detail: "未配置 Gemini Key，未派发",
-        }),
+  it.each(["deleted", "missing root", "file root", "no roots", "unreadable catalog"])(
+    "rejects a %s project before sending anything to DingTalk",
+    async (kind) => {
+      const messages = fixtureMessages("dingtalk-message-list-single.json");
+      const f = await setup({ messages });
+      if (kind === "deleted") await f.writeProject(null);
+      if (kind === "missing root") await f.writeProject([path.join(f.directory, "gone")]);
+      if (kind === "file root") await f.writeProject([f.projects.file]);
+      if (kind === "no roots") await f.writeProject([]);
+      if (kind === "unreadable catalog") await rm(f.projects.file);
+      const result = await f.dispatcher.run(
+        conversation.conversationId,
+        messages[0]?.messageId ?? "missing",
+        ["qa.toml"],
       );
-      expect(fetchImpl).not.toHaveBeenCalled();
-      expect(f.startThread).not.toHaveBeenCalled();
+      expect(result.results[0]).toMatchObject({
+        threadId: null,
+        error: expect.stringMatching(/工作项目/u),
+      });
       expect(f.commands).toEqual([]);
+      expect(f.startThread).not.toHaveBeenCalled();
     },
   );
 
-  it("does not run or send fallback text after unconfirmed card creation", async () => {
-    const f = await setup({ cardFails: true });
-    f.emit();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
-    );
-    expect(f.startThread).not.toHaveBeenCalled();
-    expect(f.commands).toHaveLength(1);
-  });
-
-  it("records an unconfirmed update without sending fallback text or another card", async () => {
-    const f = await setup({ updateFails: true });
-    f.emit();
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    // The completion is successful but delivery is unconfirmed.
-    await f.complete();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
-    );
-    expect(f.commands.map((args) => args[2])).toEqual(["send-a2ui-card", "update-a2ui-card"]);
-  });
-
-  it("puts startup failure in the card", async () => {
-    const f = await setup({ runFails: true });
-    f.emit();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.result).toBe("failed"),
-    );
-    expect(f.commands.at(-1)).toEqual(expect.arrayContaining(["--flow-status", "FINISH"]));
-    expect(f.commands.at(-1)?.join(" ")).toContain("处理失败：无法启动");
-  });
-
-  it("summarizes approval data with tools disabled and only a private progress card to self", async () => {
-    const f = await setup({ approvals: true });
-    await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-    expect(f.startThread.mock.calls[0]?.[0].readOnlySummary).toBe(true);
-    expect(f.startThread.mock.calls[0]?.[0].prompt).toContain("采购申请");
-    expect(f.commands[0]).toContain("open-self");
-    await f.finish();
-    await vi.waitFor(async () =>
-      expect((await f.state.status())["qa.toml"]?.result).toBe("replied"),
-    );
-    expect(f.commands.every((args) => args[0] === "chat")).toBe(true);
-  });
-
-  it("resets listener start on re-enable, keeping persisted processed ids", async () => {
-    const f = await setup();
-    await f.state.setListeningSince(1);
-    f.dispatcher.dispose();
-    const next = new DingTalkDispatcher({
-      service: f.service,
-      settings: f.settings,
-      state: new DingTalkDispatchStateStore({ homeDirectory: f.directory }),
-      agents: { read: async (file) => agent(file) },
-      matcher: f.matcher,
-      startThread: f.startThread,
-      now: () => 5000,
-    });
-    disposers.push(() => next.dispose());
-    await next.start();
-    expect(
-      await f.state
-        .read()
-        .then(() =>
-          new DingTalkDispatchStateStore({ homeDirectory: f.directory }).listeningSince(),
-        ),
-    ).toBe(5000);
-  });
-});
-
-it.each([false, true])(
-  "does not dispatch the real 1.034 Decisions answer for messages/approvals (%s)",
-  async (approvals) => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-score-scale-"));
-    directories.push(directory);
-    const store = new ModelServiceSettingsStore({ configDirectory: directory });
-    await store.update({ key: { provider: "gemini", value: "fake-key" } });
-    const sample = JSON.parse(
-      readFileSync(
-        new URL("./fixtures/dingtalk-decisions-review-score.json", import.meta.url),
-        "utf8",
-      ),
-    );
-    const matcher = createDingTalkDispatchMatcher({
-      settings: store,
-      fetchImpl: async () => Response.json(sample),
-    });
-    const f = await setup({ matcher, approvals });
-    if (!approvals) f.emit(event({ text: "<2 个 MR 链接> @许涛 帮review下这个代码" }));
-    await vi.waitFor(async () =>
-      expect((await f.dispatcher.status())["qa.toml"]).toMatchObject({
-        result: "skipped",
-        detail: "匹配度 0.29，未达阈值 0.85",
+  it("uses all current project roots after settings and a prior catalog read", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const f = await setup({ messages });
+    await f.projects.read();
+    const roots = [path.join(f.directory, "new"), path.join(f.directory, "second")];
+    await Promise.all(roots.map((root) => mkdir(root)));
+    await f.writeProject(roots);
+    await f.dispatcher.run(conversation.conversationId, messages[0]?.messageId ?? "missing", [
+      "qa.toml",
+    ]);
+    expect(f.startThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: roots[0],
+        projectRoots: roots,
+        projectId: "project-1",
       }),
     );
-    expect(f.startThread).not.toHaveBeenCalled();
-    expect(f.commands).toEqual([]);
-  },
-);
+    expect(f.commands[0]).toContain("send-a2ui-card");
+  });
 
-it("retains the normalized score and probabilities after a selected task replies", async () => {
-  const f = await setup({
-    matcher: {
-      scoreDingTalkCandidates: async () => ({
-        available: true,
-        scores: { "qa.toml": 0.9 },
-        probabilities: { "qa.toml": { 不能处理: 0.1, 能处理: 0.9 } },
-        errorCode: null,
+  it("translates the Desktop id using the current local CODEX_HOME migration map", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const f = await setup({ messages, migratedProject: true });
+    await f.dispatcher.run(conversation.conversationId, messages[0]?.messageId ?? "missing", [
+      "qa.toml",
+    ]);
+    expect(f.startThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "native-project-1",
+        cwd: f.directory,
       }),
+    );
+  });
+
+  it.each(["nativeMissing", "nativeRootsMismatch"] as const)(
+    "rejects %s before the progress card",
+    async (key) => {
+      const messages = fixtureMessages("dingtalk-message-list-single.json");
+      const f = await setup({ messages, [key]: true });
+      const result = await f.dispatcher.run(
+        conversation.conversationId,
+        messages[0]?.messageId ?? "missing",
+        ["qa.toml"],
+      );
+      expect(result.results[0]?.error).toContain("工作项目");
+      expect(f.commands).toEqual([]);
+      expect(f.startThread).not.toHaveBeenCalled();
     },
+  );
+
+  it("never restores automatic results or persists manual conversation data", async () => {
+    const f = await setup();
+    const legacy = path.join(f.directory, "dingtalk-dispatch-state.json");
+    const text = JSON.stringify({
+      status: { "qa.toml": { lastDispatchAt: 900, result: "replied", detail: "旧会话" } },
+    });
+    await writeFile(legacy, text);
+    expect(await f.dispatcher.status()).toEqual({});
+    await f.state.setStatus("qa.toml", {
+      lastDispatchAt: 1000,
+      result: "replied",
+      detail: "手动派发会话",
+    });
+    expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe("手动派发会话");
+    expect(readFileSync(legacy, "utf8")).toBe(text);
+    expect(await new DingTalkDispatchStateStore().status()).toEqual({});
   });
-  f.emit();
-  await vi.waitFor(() => expect(f.startThread).toHaveBeenCalledOnce());
-  await f.finish();
-  expect((await f.dispatcher.status())["qa.toml"]?.detail).toBe("匹配度 0.90，已达阈值 0.85");
+
+  it("does not dispatch anything from the event stream", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const f = await setup({ messages });
+    expect(f.service.message).not.toHaveBeenCalled();
+    expect(f.startThread).not.toHaveBeenCalled();
+    expect(f.service.setListeningHold).toHaveBeenCalledWith(true);
+  });
+
+  it("honors a just-saved disabled toggle before dispatch", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const f = await setup({ messages });
+    const saved = settingsWith();
+    await f.settings.write({
+      agents: { ...saved.agents, "qa.toml": { ...saved.agents["qa.toml"], enabled: false } },
+    });
+    const result = await f.dispatcher.run(
+      conversation.conversationId,
+      messages[0]?.messageId ?? "missing",
+      ["qa.toml"],
+    );
+    expect(result.results[0]?.error).toBe("智能体未启用");
+    expect(f.commands).toEqual([]);
+    expect(f.startThread).not.toHaveBeenCalled();
+  });
+
+  it("records a card creation failure without starting a Thread", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages, cardFails: true });
+    const result = await f.dispatcher.run(conversation.conversationId, target.messageId, [
+      "qa.toml",
+    ]);
+    expect(result.results[0]?.threadId).toBeNull();
+    expect(result.results[0]?.error).toContain("进度卡创建未确认");
+    expect(f.startThread).not.toHaveBeenCalled();
+    expect((await f.state.status())["qa.toml"]?.result).toBe("failed");
+  });
+
+  it("reports a start failure in the card and status", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-single.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages, runFails: true });
+    const result = await f.dispatcher.run(conversation.conversationId, target.messageId, [
+      "qa.toml",
+    ]);
+    expect(result.results[0]?.error).toBe("处理失败：无法启动");
+    expect(f.commands.at(-1)).toEqual(expect.arrayContaining(["--flow-status", "FINISH"]));
+    expect((await f.state.status())["qa.toml"]?.result).toBe("failed");
+  });
+
+  it("returns per-agent errors when the message is no longer available", async () => {
+    const f = await setup();
+    const result = await f.dispatcher.run("cid-fixture", "missing", ["qa.toml"]);
+    expect(result.results[0]?.error).toBe("无法读取这条消息，未派发");
+    expect(f.startThread).not.toHaveBeenCalled();
+  });
 });

@@ -37,6 +37,7 @@ import {
   type DingTalkSettings,
   type DingTalkSettingsSetParams,
   type DingTalkStatus,
+  type DingTalkTimingParams,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -71,7 +72,7 @@ const NOTIFY_DELAY_MS = 250;
 const UNREAD_LIMIT = 50;
 const UNREAD_WINDOW_MS = 48 * 60 * 60_000;
 const SEARCH_WINDOW_DAYS = 30;
-const TIMING_LIMIT = 60;
+const TIMING_LIMIT = 200;
 const PREFETCH_MESSAGE_LIMIT = 20;
 const RECONCILE_MESSAGE_LIMIT = DINGTALK_LIVE_MESSAGE_LIMIT;
 
@@ -171,6 +172,9 @@ export class DingTalkService {
   /** Memory only; never written to disk and dropped with the Host process. */
   readonly #live = new DingTalkLiveStore();
   readonly #timings: DingTalkOpenTiming[] = [];
+  readonly #prefetchQueue = new Set<string>();
+  readonly #prefetchPending = new Set<string>();
+  #prefetchActive = 0;
   #disposed = false;
 
   constructor(options: DingTalkServiceOptions) {
@@ -454,6 +458,36 @@ export class DingTalkService {
     });
   }
 
+  /**
+   * One message by id for manual dispatch. The live state answers for the
+   * transcript the page is showing; an id outside that window is read from
+   * dws, including a bounded scrollback, before giving up.
+   */
+  recordDispatch(
+    message: DingTalkMessage,
+    mark: NonNullable<DingTalkMessage["dispatchedAgents"]>[number],
+  ): void {
+    if (this.#disposed) return;
+    this.#live.recordDispatch(message, mark, this.#now());
+    this.#notify(message.conversationId);
+  }
+
+  async message(conversationId: string, messageId: string): Promise<DingTalkMessage | null> {
+    await this.#ensure();
+    const stored = this.#live.message(conversationId, messageId);
+    if (stored) return stored;
+    const page = await this.#readMessages(conversationId, 50).catch(() => null);
+    const found = page?.messages.find((message) => message.messageId === messageId);
+    if (found) {
+      if (page?.errorCode === null) this.#storeMessages(conversationId, page);
+      return found;
+    }
+    const scrollback = await this.#cli
+      .messages({ conversationId, limit: 100, pageAll: true, maxItems: 300 })
+      .catch(() => null);
+    return scrollback?.messages.find((message) => message.messageId === messageId) ?? null;
+  }
+
   /** Human members for the group composer's native `@` picker. */
   async members(conversationId: string): Promise<DingTalkMembersResult> {
     await this.#ensure();
@@ -609,11 +643,55 @@ export class DingTalkService {
   async prefetch(params: DingTalkPrefetchParams): Promise<DingTalkPrefetchResult> {
     await this.#ensure();
     const ids = [...new Set(params.conversationIds)].slice(0, DINGTALK_MAX_PREFETCH);
-    let started = 0;
-    for (const conversationId of ids) {
-      if (this.#reconcileMessages(conversationId, PREFETCH_MESSAGE_LIMIT)) started += 1;
+    // Two dws reads at a time keep the Host responsive while every visible row
+    // warms; the live-state byte cap evicts the least recently viewed payloads.
+    const pending = ids.filter(
+      (conversationId) =>
+        !this.#prefetchPending.has(conversationId) &&
+        !this.#inflight.has(`live:messages:${conversationId}`),
+    );
+    for (const id of pending) {
+      this.#prefetchPending.add(id);
+      this.#prefetchQueue.add(id);
     }
-    return dingtalkPrefetchResultSchema.parse({ started });
+    this.#drainPrefetch();
+    return dingtalkPrefetchResultSchema.parse({ started: pending.length });
+  }
+
+  #drainPrefetch(): void {
+    while (!this.#disposed && this.#prefetchActive < 2 && this.#prefetchQueue.size > 0) {
+      const id = this.#prefetchQueue.values().next().value;
+      if (!id) break;
+      this.#prefetchQueue.delete(id);
+      this.#prefetchActive += 1;
+      void this.#reconcileMessages(id, PREFETCH_MESSAGE_LIMIT).finally(() => {
+        this.#prefetchActive -= 1;
+        this.#prefetchPending.delete(id);
+        this.#drainPrefetch();
+      });
+    }
+  }
+
+  /** Renderer paint timings share the bounded ring; no content is recorded. */
+  async recordTiming(params: DingTalkTimingParams): Promise<Record<string, never>> {
+    const timing: DingTalkOpenTiming = {
+      at: this.#now(),
+      kind: "paint",
+      conversationId: params.conversationId,
+      memoryHit: true,
+      waitedMs: 0,
+      liveMs: null,
+      liveError: null,
+      storeBytes: this.#live.stats().storeBytes,
+      paintMs: params.paintMs,
+      renderMs: params.renderMs,
+      imagesMs: params.imagesMs,
+    };
+    this.#timings.push(timing);
+    if (this.#timings.length > TIMING_LIMIT) {
+      this.#timings.splice(0, this.#timings.length - TIMING_LIMIT);
+    }
+    return {};
   }
 
   /** Bounded open timings; ids and durations only, never message content. */
@@ -809,6 +887,9 @@ export class DingTalkService {
       liveMs: null,
       liveError: null,
       storeBytes: this.#live.stats().storeBytes,
+      paintMs: null,
+      renderMs: null,
+      imagesMs: null,
     };
     this.#timings.push(timing);
     if (this.#timings.length > TIMING_LIMIT) {
@@ -907,12 +988,16 @@ export class DingTalkService {
    * One live newest-page read per conversation. The caller already answered
    * from the store; this only reconciles what events may have missed.
    */
-  #reconcileMessages(conversationId: string, limit: number, timing?: DingTalkOpenTiming): boolean {
+  #reconcileMessages(
+    conversationId: string,
+    limit: number,
+    timing?: DingTalkOpenTiming,
+  ): Promise<void> {
     const key = `live:messages:${conversationId}`;
-    if (this.#inflight.has(key)) return false;
+    if (this.#inflight.has(key)) return Promise.resolve();
     const startedAt = this.#now();
     const recorded = timing ?? this.#recordOpen("prefetch", conversationId, false);
-    void this.#dedupe(key, async () => {
+    return this.#dedupe(key, async () => {
       const page = await this.#readMessages(conversationId, limit);
       if (page.errorCode !== null) {
         this.#noteLiveError(page.errorCode);
@@ -933,7 +1018,6 @@ export class DingTalkService {
         recorded.liveError = "dws_failed";
         recorded.storeBytes = this.#live.stats().storeBytes;
       });
-    return true;
   }
 
   #reconcileMembers(conversationId: string, timing: DingTalkOpenTiming): void {
@@ -1060,6 +1144,8 @@ export class DingTalkService {
     this.#eventListeners.clear();
     this.#seenEvents.clear();
     this.#live.clear();
+    this.#prefetchQueue.clear();
+    this.#prefetchPending.clear();
     this.#timings.length = 0;
     this.#events.dispose();
     if (this.#notifyTimer) clearTimeout(this.#notifyTimer);

@@ -33,6 +33,28 @@ function message(
 }
 
 describe("DingTalk live state", () => {
+  it("keeps dispatch marks across live reconcile and clears them with the live state", () => {
+    const store = new DingTalkLiveStore();
+    const target = message("m1", "a", 300);
+    const mark = { fileName: "agent.toml", name: "助手", threadId: "thread-1" };
+    store.recordDispatch(target, mark, 1000);
+    store.applyMessages({
+      conversationId: "a",
+      messages: [target],
+      hasMore: false,
+      nextCursor: null,
+      preview: null,
+      now: 2000,
+    });
+    expect(store.messages("a", 30, 3000)?.messages[0]?.dispatchedAgents).toEqual([mark]);
+    const previousBytes = store.stats().storeBytes;
+    store.recordDispatch(target, { ...mark, threadId: "thread-2" }, 4000);
+    expect(store.message("a", "m1")?.dispatchedAgents).toEqual([{ ...mark, threadId: "thread-2" }]);
+    expect(store.stats().storeBytes).toBe(previousBytes);
+    store.clear();
+    expect(store.message("a", "m1")).toBeNull();
+  });
+
   it("bumps the row, its preview and its position on a Stream event", () => {
     const store = new DingTalkLiveStore();
     store.applyConversations([row("a", 100), row("b", 200)], { now: 1_000 });

@@ -1,6 +1,5 @@
 import { createCodeRepositoriesClient } from "./code-repositories-client.js";
 import { createRendererModelServiceClient } from "./model-service-client.js";
-import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-project.js";
 import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
 import { mountRendererThreadFolders } from "./renderer-thread-folders.js";
 import { createRendererSkillsClient, SKILLS_HUB_METHOD } from "./renderer-skills-client.js";
@@ -141,6 +140,7 @@ import {
   jarvisSearchShouldFallback,
 } from "./renderer-jarvis-client.js";
 import { createRendererDingTalkClient } from "./renderer-dingtalk-client.js";
+import { createRendererDingTalkDispatchClient } from "./renderer-dingtalk-dispatch-client.js";
 import {
   installRendererDingTalkEntry,
   type RendererDingTalkEntryControl,
@@ -995,6 +995,9 @@ export function installRendererBindingProbe(
       return route ? { hostId: route.hostId, manager: route.manager } : null;
     },
   });
+  const dingtalkDispatchClient = createRendererDingTalkDispatchClient({
+    manager: () => window.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+  });
   const usageStatistics = createRendererUsageStatisticsSource({
     routing: () => window.__codexhostHostRoutingV1,
     listConnections: () => remoteConnections.ssh.list(),
@@ -1056,8 +1059,14 @@ export function installRendererBindingProbe(
     ),
     dingtalk: {
       createClient: () => dingtalkClient,
+      createDispatchClient: () => dingtalkDispatchClient,
       readLocale: () => settingsLifecycle.locale,
       embed: (mention) => embedDingTalkMention(mention),
+      openThread: (threadId) => {
+        void openRendererThread(threadId as Parameters<typeof openRendererThread>[0], {
+          hostId: "local",
+        });
+      },
     },
     codexAgents: { createClient: () => codexAgentsClient },
     hubAdmin: { createClient: () => hubAdminClient },
@@ -1392,10 +1401,6 @@ export function installRendererBindingProbe(
   let jarvisMention: RendererJarvisMentionControl | null = null;
   let dingtalkMention: RendererDingTalkEntryControl | null = null;
   const disposeDingTalkLinks = installRendererDingTalkLinks(document);
-  const disposeDingTalkProject = installDingTalkDispatchProject(window, () => {
-    const route = window.__codexhostHostRoutingV1?.forHost("local");
-    return route ? { hostId: "local", manager: route.manager } : null;
-  });
   const peerDelegationCatalogs = createDelegationPeerCatalogSource({
     load: (hostId, { refresh }) => {
       const client = modelClientForHost(hostId);
@@ -4410,7 +4415,6 @@ export function installRendererBindingProbe(
       jarvisMention?.dispose();
       dingtalkMention?.dispose();
       disposeDingTalkLinks();
-      disposeDingTalkProject();
       sidebarAgentIcons.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();

@@ -31,6 +31,8 @@ export interface DingTalkComposer {
   readonly element: HTMLElement;
   reset(): void;
   setPlaceholder(name: string): void;
+  /** Native reply: `@sender ` in the input, focus at the end, nothing sent. */
+  prefillMention(name: string): void;
   dispose(): void;
 }
 
@@ -328,6 +330,19 @@ export function createDingTalkComposer(options: DingTalkComposerOptions): DingTa
     },
     setPlaceholder(name) {
       input.placeholder = text.sendPlaceholder.replace("{name}", name);
+    },
+    prefillMention(name) {
+      const mention = `@${name.trim()} `;
+      const current = input.value;
+      input.value =
+        current.length > 0 && !/\s$/u.test(current)
+          ? `${current} ${mention}`
+          : `${current}${mention}`;
+      grow();
+      updateSend();
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
     },
     dispose() {
       picker.dispose();

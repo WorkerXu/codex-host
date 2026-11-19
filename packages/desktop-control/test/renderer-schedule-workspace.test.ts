@@ -9,7 +9,7 @@ import {
 import type { RendererHostRouting } from "../src/renderer-host-routing.js";
 
 const model = encodeHarnessPluginRoute({ harnessId: harnessIdSchema.parse("pi") });
-const workspace = { id: "project-a", label: "Project A", cwd: "/workspace" };
+const workspace = { id: "project-a", label: "Project A", cwd: "/workspace", roots: ["/workspace"] };
 const project = (group = {}) => ({
   source: "codex",
   group: {
