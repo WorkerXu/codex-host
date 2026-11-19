@@ -408,16 +408,30 @@ export function createDingTalkMessageList(
     },
     append(messages) {
       const fresh = newMessages(messages);
-      const lastId = order.at(-1);
-      const previous = lastId ? entries.get(lastId)?.message : undefined;
-      const created = entryList(fresh, previous);
-      const fragment = document.createDocumentFragment();
-      for (const entry of created) {
-        entries.set(entry.message.messageId, entry);
-        order.push(entry.message.messageId);
-        for (const node of entry.nodes) fragment.append(node);
+      if (fresh.length === 0) return;
+      // A catch-up page can carry messages older than the window the page
+      // already shows. Insert each one by time so the newest stays last.
+      const sorted = [...fresh].sort((left, right) => left.createdAt - right.createdAt);
+      for (const message of sorted) {
+        let index = 0;
+        while (index < order.length) {
+          const current = entries.get(order[index] ?? "")?.message;
+          if (current && current.createdAt > message.createdAt) break;
+          index += 1;
+        }
+        const previous = index > 0 ? entries.get(order[index - 1] ?? "")?.message : undefined;
+        const nextId = order[index];
+        const nextNode = nextId ? (entries.get(nextId)?.nodes[0] ?? null) : null;
+        const [created] = entryList([message], previous);
+        if (!created) continue;
+        entries.set(message.messageId, created);
+        const fragment = document.createDocumentFragment();
+        for (const node of created.nodes) fragment.append(node);
+        if (nextNode) container.insertBefore(fragment, nextNode);
+        else container.append(fragment);
+        order.splice(index, 0, message.messageId);
+        if (nextId) rebuild(nextId, message);
       }
-      container.append(fragment);
     },
     prepend(messages) {
       const fresh = newMessages(messages);

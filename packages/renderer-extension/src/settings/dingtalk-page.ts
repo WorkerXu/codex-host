@@ -117,6 +117,10 @@ export function createDingTalkSettingsPage(
       let searchCursor = -1;
       let loadingOlderRequest = false;
       let loadedOlderPages = false;
+      /** Last real scroll intent; a rebuild must not look like scrolling up. */
+      let userScrollAt = Number.NEGATIVE_INFINITY;
+      /** Rebuilding the list moves scrollTop; older pages wait for the user. */
+      let ignoreOlderUntil = 0;
       const prefetchedIds = new Set<string>();
       const hoverBound = new WeakSet<HTMLElement>();
       const hoverTimers = new Map<string, number>();
@@ -687,6 +691,14 @@ export function createDingTalkSettingsPage(
         )}`;
       };
 
+      const resetMessages = (
+        messages: readonly ViewMessage[],
+        behavior?: { scroll?: "bottom"; distance?: number },
+      ): void => {
+        ignoreOlderUntil = view.performance.now() + 300;
+        messageListView.reset(messages, behavior);
+      };
+
       const renderMessages = (behavior?: { scroll?: "bottom"; distance?: number }): void => {
         if (state.selectedId === null) {
           messageListView.clear();
@@ -727,7 +739,7 @@ export function createDingTalkSettingsPage(
           return;
         }
         renderMainState(null);
-        messageListView.reset(state.messages, behavior);
+        resetMessages(state.messages, behavior);
         if (state.messages.length === 0) {
           messageList.append(
             createElementNode(document, "div", "dingtalk-message-empty", text.emptyMessages),
@@ -907,6 +919,7 @@ export function createDingTalkSettingsPage(
         const generation = messageGeneration;
         const nearBottom = distanceFromBottom() <= 80;
         const distance = distanceFromBottom();
+        const knownNewestAt = state.messages.at(-1)?.createdAt ?? 0;
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
           .catch(() => null);
@@ -938,7 +951,7 @@ export function createDingTalkSettingsPage(
           messageListView.removeOldest(overflow);
         }
         if ([...known].some((id) => !state.messages.some((message) => message.messageId === id))) {
-          messageListView.reset(state.messages, nearBottom ? { scroll: "bottom" } : { distance });
+          resetMessages(state.messages, nearBottom ? { scroll: "bottom" } : { distance });
         } else
           messageListView.append(
             result.messages.filter((message) =>
@@ -948,7 +961,9 @@ export function createDingTalkSettingsPage(
         if (nearBottom) {
           scrollToBottom();
         } else {
-          state.pendingNewCount += fresh.length;
+          state.pendingNewCount += fresh.filter(
+            (message) => message.createdAt > knownNewestAt,
+          ).length;
           renderPill();
         }
         const newest = state.messages.at(-1);
@@ -1302,8 +1317,22 @@ export function createDingTalkSettingsPage(
         clearSearch();
         searchInput.focus();
       });
+      const noteUserScroll = (): void => {
+        userScrollAt = view.performance.now();
+      };
+      messageList.addEventListener("wheel", noteUserScroll, { passive: true });
+      messageList.addEventListener("touchmove", noteUserScroll, { passive: true });
+      messageList.addEventListener("pointerdown", noteUserScroll);
+      messageList.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+          noteUserScroll();
+        }
+      });
       messageList.addEventListener("scroll", () => {
-        if (messageList.scrollTop < 80) {
+        // Only a real scroll up asks for history. A rebuild sets scrollTop to 0
+        // for a frame, and lazy images change heights; neither is the user.
+        const now = view.performance.now();
+        if (messageList.scrollTop < 80 && now - userScrollAt < 600 && now >= ignoreOlderUntil) {
           scrollRequest += 1;
           void loadOlder();
         }

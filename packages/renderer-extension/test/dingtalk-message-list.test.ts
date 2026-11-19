@@ -296,6 +296,17 @@ describe("DingTalk message window rendering", () => {
     expect(revoked).toEqual([]);
   });
 
+  it("inserts a catch-up message by time instead of after the newest row", () => {
+    const document = new FakeDocument();
+    const { container, list } = createList(document, [], []);
+    list.reset([message("m1", 1_000), message("m2", 3_000)]);
+    list.append([message("m0", 500)]);
+    expect(renderedIds(container)).toEqual(["m0", "m1", "m2"]);
+    list.append([message("m4", 4_000), message("m3", 2_000)]);
+    expect(renderedIds(container)).toEqual(["m0", "m1", "m3", "m2", "m4"]);
+    list.dispose();
+  });
+
   it("caps the rendered window on both edges", () => {
     const document = new FakeDocument();
     const created: string[] = [];
