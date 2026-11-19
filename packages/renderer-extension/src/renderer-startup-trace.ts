@@ -102,15 +102,18 @@ export function createRendererStartupTrace(
         ok = true;
         return result;
       } finally {
-        requests.push({
-          method: input.method,
-          hostId: input.hostId,
-          priority: input.priority,
-          startedAtMs: roundMs(startedAtMs),
-          durationMs: roundMs(now() - startedAtMs),
-          ok,
-        });
-        if (requests.length > MAX_REQUESTS) requests.shift();
+        // Startup samples are kept in arrival order; later retries must not
+        // evict the critical-path requests that explain the initial paint.
+        if (requests.length < MAX_REQUESTS) {
+          requests.push({
+            method: input.method,
+            hostId: input.hostId,
+            priority: input.priority,
+            startedAtMs: roundMs(startedAtMs),
+            durationMs: roundMs(now() - startedAtMs),
+            ok,
+          });
+        }
       }
     },
     snapshot() {
