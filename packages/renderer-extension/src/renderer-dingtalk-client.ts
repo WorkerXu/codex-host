@@ -16,6 +16,7 @@ import {
   DINGTALK_SEARCH_METHOD,
   DINGTALK_SEND_METHOD,
   DINGTALK_STATUS_METHOD,
+  DINGTALK_TIMING_METHOD,
   DINGTALK_VIEWED_METHOD,
   dingtalkConversationsResultSchema,
   dingtalkMessagesResultSchema,
@@ -86,6 +87,13 @@ export interface RendererDingTalkClient {
   search(params: DingTalkSearchParams): Promise<DingTalkSearchResult>;
   resolve(conversationId: string, messageIds?: readonly string[]): Promise<DingTalkResolveResult>;
   markViewed(conversationId: string, lastMessageAt: number, active?: boolean): Promise<void>;
+  /** Renderer paint timings; content-free and best effort. */
+  timing(
+    conversationId: string,
+    paintMs: number,
+    renderMs: number | null,
+    imagesMs: number | null,
+  ): Promise<void>;
   subscribe(listener: (conversationId: string | null) => void): () => void;
 }
 
@@ -373,6 +381,23 @@ export function createRendererDingTalkClient(
         });
       } catch {
         // View state is an optimization; a failure must not hide messages.
+      }
+    },
+    async timing(conversationId, paintMs, renderMs, imagesMs) {
+      try {
+        await request(
+          DINGTALK_TIMING_METHOD,
+          {
+            conversationId,
+            paintMs: Math.max(0, Math.round(paintMs)),
+            renderMs: renderMs === null ? null : Math.max(0, Math.round(renderMs)),
+            imagesMs: imagesMs === null ? null : Math.max(0, Math.round(imagesMs)),
+          },
+          10_000,
+          "background",
+        );
+      } catch {
+        // Diagnostics must never affect the open.
       }
     },
     subscribe(listener) {

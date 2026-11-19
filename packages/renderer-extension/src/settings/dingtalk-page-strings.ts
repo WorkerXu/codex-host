@@ -45,6 +45,28 @@ export interface DingTalkPageText {
   membersFailed: string;
   membersLoading: string;
   removeMention: string;
+  dispatchAgent: string;
+  copyMessage: string;
+  copyDone: string;
+  replyMessage: string;
+  messageMenu: string;
+  panelTitle: string;
+  panelSubtitle: string;
+  panelLoading: string;
+  panelScoring: string;
+  panelFailed: string;
+  panelEmpty: string;
+  panelNeedsTarget: string;
+  panelReady: string;
+  panelDispatch: string;
+  panelDispatching: string;
+  panelCancel: string;
+  panelClose: string;
+  panelScore: string;
+  panelAlready: string;
+  panelStillDispatch: string;
+  dispatchedTo: string;
+  openAgentThread: string;
 }
 
 const ZH: DingTalkPageText = {
@@ -91,6 +113,28 @@ const ZH: DingTalkPageText = {
   membersFailed: "成员加载失败",
   membersLoading: "正在加载成员",
   removeMention: "移除",
+  dispatchAgent: "交给智能体",
+  copyMessage: "复制",
+  copyDone: "已复制",
+  replyMessage: "回复",
+  messageMenu: "消息操作",
+  panelTitle: "交给智能体",
+  panelSubtitle: "选择处理这条消息的智能体",
+  panelLoading: "正在判断哪几个智能体能处理…",
+  panelScoring: "正在判断…",
+  panelFailed: "判断失败，可直接选择",
+  panelEmpty: "还没有启用钉钉的智能体，请先在「智能体」页面启用",
+  panelNeedsTarget: "需要设置分区和工作项目",
+  panelReady: "可派发",
+  panelDispatch: "派发（{count}）",
+  panelDispatching: "正在派发…",
+  panelCancel: "取消",
+  panelClose: "关闭",
+  panelScore: "{percent}%",
+  panelAlready: "已派发过，仍要派发？",
+  panelStillDispatch: "仍要派发",
+  dispatchedTo: "已派发：",
+  openAgentThread: "打开「{name}」的对话",
 };
 
 const EN: DingTalkPageText = {
@@ -137,6 +181,28 @@ const EN: DingTalkPageText = {
   membersFailed: "Could not load members",
   membersLoading: "Loading members",
   removeMention: "Remove",
+  dispatchAgent: "Send to agent",
+  copyMessage: "Copy",
+  copyDone: "Copied",
+  replyMessage: "Reply",
+  messageMenu: "Message actions",
+  panelTitle: "Send to agent",
+  panelSubtitle: "Choose the agents that handle this message",
+  panelLoading: "Deciding which agents can handle this…",
+  panelScoring: "Scoring…",
+  panelFailed: "Scoring failed; choose any agent",
+  panelEmpty: "No agent has DingTalk enabled. Enable one on the Agents page.",
+  panelNeedsTarget: "Needs a section and project",
+  panelReady: "Ready",
+  panelDispatch: "Send ({count})",
+  panelDispatching: "Sending…",
+  panelCancel: "Cancel",
+  panelClose: "Close",
+  panelScore: "{percent}%",
+  panelAlready: "Already sent to this agent. Send again?",
+  panelStillDispatch: "Send again",
+  dispatchedTo: "Sent to:",
+  openAgentThread: "Open {name}'s thread",
 };
 
 export function dingtalkPageStrings(locale: RendererSettingsLocale): DingTalkPageText {

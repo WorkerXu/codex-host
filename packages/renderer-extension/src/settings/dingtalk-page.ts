@@ -1,14 +1,20 @@
 import SearchIcon from "lucide/dist/esm/icons/search.mjs";
 import XIcon from "lucide/dist/esm/icons/x.mjs";
 
-import type { DingTalkConversation, DingTalkMention } from "@codexhost/shared-contracts";
+import type {
+  DingTalkConversation,
+  DingTalkMention,
+  DingTalkMessage,
+} from "@codexhost/shared-contracts";
 
 import type { RendererDingTalkClient } from "../renderer-dingtalk-client.js";
+import type { RendererDingTalkDispatchClient } from "../renderer-dingtalk-dispatch-client.js";
 import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext } from "./core.js";
 import type { RendererSettingsLocale, RendererSettingsMessages } from "./localization.js";
 import {
   conversationMention,
   mergeDingTalkMessages,
+  messagePreview,
   type DingTalkPageState,
   type ViewMessage,
 } from "./dingtalk-page-model.js";
@@ -32,6 +38,8 @@ import { createDingTalkPageMenu } from "./dingtalk-page-menu.js";
 import { consumeDingTalkReveal, type DingTalkRevealTarget } from "./dingtalk-reveal.js";
 import { createDingTalkSearchPanel } from "./dingtalk-search-panel.js";
 import { dingtalkPageStrings } from "./dingtalk-page-strings.js";
+import { createDingTalkAgentPanel } from "./dingtalk-agent-panel.js";
+import type { MessageDispatchedAgent } from "./dingtalk-page-view.js";
 
 /**
  * Chat state machine for the DingTalk workbench. DOM builders live in
@@ -44,7 +52,8 @@ const INITIAL_MESSAGE_LIMIT = 30;
 const OLDER_MESSAGE_LIMIT = 30;
 const MAX_MESSAGE_WINDOW = 200;
 const PREVIEW_CONCURRENCY = 3;
-const PREFETCH_LIMIT = 3;
+const HOVER_PREFETCH_MS = 150;
+const IMAGE_SETTLE_CAP_MS = 10_000;
 /** A memory-backed open answers in a few milliseconds; only a miss shows a skeleton. */
 const SKELETON_DELAY_MS = 150;
 const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation.unread";
@@ -52,9 +61,12 @@ const LEGACY_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation";
 
 export interface RendererDingTalkPageOptions {
   createClient(): RendererDingTalkClient | null;
+  /** Manual dispatch is local to the desktop Host that owns the agents. */
+  createDispatchClient?(): RendererDingTalkDispatchClient | null;
   readLocale(): RendererSettingsLocale;
   /** Embeds a mention into the Composer that opened the workbench. */
   embed(mention: DingTalkMention): Promise<boolean> | boolean;
+  openThread?(threadId: string): void;
 }
 
 export function createDingTalkSettingsPage(
@@ -70,6 +82,7 @@ export function createDingTalkSettingsPage(
       const view = document.defaultView ?? window;
       const locale = options.readLocale();
       const client = options.createClient();
+      const dispatchClient = options.createDispatchClient?.() ?? null;
       client?.beginSession();
       const text = dingtalkPageStrings(locale);
       const state: DingTalkPageState = {
@@ -103,13 +116,91 @@ export function createDingTalkSettingsPage(
       let searchCursor = -1;
       let loadingOlderRequest = false;
       let loadedOlderPages = false;
-      let prefetchedList = false;
+      const prefetchedIds = new Set<string>();
+      const hoverBound = new WeakSet<HTMLElement>();
+      const hoverTimers = new Map<string, number>();
+      let visibleObserver: IntersectionObserver | null = null;
       let skeletonVisible = false;
       let skeletonTimer: number | null = null;
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
       const previewAttempted = new Set<string>();
       let previewActive = 0;
+      const dispatchMarks = new Map<string, MessageDispatchedAgent[]>();
+      const dispatchKey = (message: DingTalkMessage): string =>
+        `${message.conversationId}\u0000${message.messageId}`;
+      const marksFor = (message: DingTalkMessage): readonly MessageDispatchedAgent[] =>
+        dispatchMarks.get(dispatchKey(message)) ?? [];
+      let panelMessage: ViewMessage | null = null;
+      let panel: ReturnType<typeof createDingTalkAgentPanel> | null = null;
+      interface OpenProbe {
+        conversationId: string;
+        startedAt: number;
+        renderMs: number | null;
+        paintMs: number | null;
+        imagesPending: number;
+        imagesDone: boolean;
+        timer: number | null;
+      }
+      let openProbe: OpenProbe | null = null;
+
+      /** One bounded entry per open: click → paint, build cost and images. */
+      const flushOpenProbe = (): void => {
+        const probe = openProbe;
+        if (!probe || probe.paintMs === null || !probe.imagesDone) return;
+        openProbe = null;
+        if (probe.timer !== null) view.clearTimeout(probe.timer);
+        const imagesMs = probe.imagesDone
+          ? Math.max(probe.paintMs, Math.round(view.performance.now() - probe.startedAt))
+          : null;
+        void client
+          ?.timing?.(probe.conversationId, probe.paintMs, probe.renderMs, imagesMs)
+          ?.catch(() => undefined);
+      };
+
+      const settleOpenImage = (conversationId: string): void => {
+        const probe = openProbe;
+        if (!probe || probe.imagesDone || probe.conversationId !== conversationId) return;
+        probe.imagesPending = Math.max(0, probe.imagesPending - 1);
+        if (probe.imagesPending === 0) {
+          probe.imagesDone = true;
+          flushOpenProbe();
+        }
+      };
+
+      const beginOpenProbe = (conversationId: string, images: number, startedAt: number): void => {
+        if (openProbe?.timer !== null && openProbe?.timer !== undefined) {
+          view.clearTimeout(openProbe.timer);
+        }
+        openProbe = {
+          conversationId,
+          startedAt,
+          renderMs: null,
+          paintMs: null,
+          imagesPending: images,
+          imagesDone: images === 0,
+          timer: null,
+        };
+        const probe = openProbe;
+        probe.timer = view.setTimeout(() => {
+          if (openProbe !== probe) return;
+          probe.imagesPending = 0;
+          probe.imagesDone = true;
+          probe.timer = null;
+          flushOpenProbe();
+        }, IMAGE_SETTLE_CAP_MS);
+      };
+
+      const finishOpenPaint = (renderMs: number): void => {
+        const probe = openProbe;
+        if (!probe) return;
+        probe.renderMs = Math.round(renderMs);
+        view.requestAnimationFrame(() => {
+          if (openProbe !== probe) return;
+          probe.paintMs = Math.max(0, Math.round(view.performance.now() - probe.startedAt));
+          flushOpenProbe();
+        });
+      };
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
 
@@ -198,6 +289,18 @@ export function createDingTalkSettingsPage(
         document,
         container: messageList,
         text,
+        onDispatch: (message) => {
+          if (state.selectedId === null) return;
+          panelMessage = message;
+          panel?.show({
+            conversationId: message.conversationId,
+            messageId: message.messageId,
+            excerpt: messagePreview(message),
+          });
+        },
+        onReply: (message) => composer.prefillMention(message.senderName),
+        dispatchedAgents: marksFor,
+        ...(options.openThread ? { onOpenThread: options.openThread } : {}),
         loadResource: async (message, resource) => {
           if (!client) {
             return {
@@ -218,6 +321,7 @@ export function createDingTalkSettingsPage(
         onImageLoaded: (wasNearBottom) => {
           if (wasNearBottom) scrollToBottom();
         },
+        onImageSettled: (message) => settleOpenImage(message.conversationId),
         onImageClick: (message, resource) => openImage(message, resource),
         onRetry: (message) => void deliver(message),
       });
@@ -235,8 +339,51 @@ export function createDingTalkSettingsPage(
         },
       });
 
+      panel = createDingTalkAgentPanel({
+        document,
+        text,
+        client: dispatchClient,
+        hasDispatched: (fileName) =>
+          panelMessage !== null &&
+          marksFor(panelMessage).some((mark) => mark.fileName === fileName),
+        onRun: (results) => {
+          const message = panelMessage;
+          if (!message) return;
+          const key = dispatchKey(message);
+          const marks = [...(dispatchMarks.get(key) ?? [])];
+          const errors: string[] = [];
+          for (const result of results) {
+            if (result.threadId) {
+              const mark: MessageDispatchedAgent = {
+                fileName: result.fileName,
+                name: result.name,
+                threadId: result.threadId,
+              };
+              const index = marks.findIndex((entry) => entry.fileName === result.fileName);
+              if (index >= 0) marks[index] = mark;
+              else marks.push(mark);
+            } else if (result.error) {
+              errors.push(`${result.name}：${result.error}`);
+            }
+          }
+          dispatchMarks.set(key, marks);
+          const current =
+            state.messages.find(
+              (entry) =>
+                entry.messageId === message.messageId &&
+                entry.conversationId === message.conversationId,
+            ) ?? message;
+          messageListView.update(current);
+          panelMessage = null;
+          if (errors.length > 0) setNotice(errors.join("；"));
+        },
+        onClose: () => {
+          panelMessage = null;
+        },
+      });
+
       main.append(mainHead.element, notice, pane, composer.element);
-      root.append(sidebar, pageMenu.element, main);
+      root.append(sidebar, pageMenu.element, main, panel.element);
       context.content.append(root);
 
       const lightbox = createDingTalkLightbox({
@@ -392,15 +539,63 @@ export function createDingTalkSettingsPage(
         skeletonVisible = false;
       };
 
-      /** Warms the next rows the user is likely to open, once per page visit. */
-      const warmTopConversations = (): void => {
-        if (!client || prefetchedList || state.conversations.length === 0) return;
-        prefetchedList = true;
-        const ids = state.conversations
-          .filter((row) => row.conversationId !== state.selectedId && !row.preview)
-          .slice(0, PREFETCH_LIMIT)
-          .map((row) => row.conversationId);
-        if (ids.length > 0) void client.prefetch(ids).catch(() => undefined);
+      /** Warms every visible row at background priority, once per page visit. */
+      const requestPrefetch = (ids: readonly string[]): void => {
+        if (!client) return;
+        const fresh = [...new Set(ids)].filter(
+          (conversationId) =>
+            conversationId !== state.selectedId && !prefetchedIds.has(conversationId),
+        );
+        if (fresh.length === 0) return;
+        for (const conversationId of fresh) prefetchedIds.add(conversationId);
+        void client.prefetch(fresh).catch(() => undefined);
+      };
+
+      const bindHoverPrefetch = (conversationId: string, row: HTMLElement): void => {
+        if (hoverBound.has(row)) return;
+        hoverBound.add(row);
+        row.addEventListener("pointerenter", () => {
+          if (prefetchedIds.has(conversationId)) return;
+          const timer = view.setTimeout(() => {
+            hoverTimers.delete(conversationId);
+            requestPrefetch([conversationId]);
+          }, HOVER_PREFETCH_MS);
+          hoverTimers.set(conversationId, timer);
+        });
+        row.addEventListener("pointerleave", () => {
+          const timer = hoverTimers.get(conversationId);
+          if (timer !== undefined) view.clearTimeout(timer);
+          hoverTimers.delete(conversationId);
+        });
+      };
+
+      if (typeof IntersectionObserver !== "undefined") {
+        visibleObserver = new IntersectionObserver(
+          (entries) => {
+            requestPrefetch(
+              entries
+                .filter((entry) => entry.isIntersecting)
+                .map((entry) => (entry.target as HTMLElement).dataset.conversationId ?? "")
+                .filter(Boolean),
+            );
+          },
+          { root: conversationList, rootMargin: "120px" },
+        );
+      }
+
+      /** Observes the rows the list currently shows; no-op for rows already warm. */
+      const warmVisibleConversations = (): void => {
+        if (!client || state.conversations.length === 0) return;
+        if (!visibleObserver) {
+          requestPrefetch(state.conversations.map((row) => row.conversationId));
+          return;
+        }
+        for (const { conversationId } of state.conversations) {
+          const row = conversationRows.elementFor(conversationId);
+          if (!row) continue;
+          bindHoverPrefetch(conversationId, row);
+          visibleObserver.observe(row);
+        }
       };
 
       const renderList = (): void => {
@@ -422,6 +617,7 @@ export function createDingTalkSettingsPage(
           return;
         }
         conversationRows.render(state.conversations, state.selectedId);
+        warmVisibleConversations();
         for (const conversation of state.conversations) {
           if (previewAttempted.has(conversation.conversationId)) continue;
           const row = conversationRows.elementFor(conversation.conversationId);
@@ -540,6 +736,7 @@ export function createDingTalkSettingsPage(
 
       const selectConversation = async (conversationId: string, force = false): Promise<void> => {
         if (!client) return;
+        const openStartedAt = view.performance.now();
         if (!force && state.selectedId === conversationId && state.messages.length > 0) {
           // Auto-selection and a later click can race; the row is already open,
           // but a stale badge must still be cleared through the same route.
@@ -630,7 +827,16 @@ export function createDingTalkSettingsPage(
         state.nextCursor = result.nextCursor;
         state.messagesError = result.errorCode !== null && state.messages.length === 0;
         updateHeader();
+        const imageCount = state.messages.reduce(
+          (count, message) =>
+            count +
+            (message.resources?.filter((resource) => resource.kind === "image").length ?? 0),
+          0,
+        );
+        beginOpenProbe(conversationId, imageCount, openStartedAt);
+        const renderStarted = view.performance.now();
         renderMessages({ scroll: "bottom" });
+        finishOpenPaint(view.performance.now() - renderStarted);
         const newest = state.messages.at(-1);
         if (newest) void client.markViewed(conversationId, newest.createdAt, true);
         // The @ picker is the only member consumer; warm it after the transcript
@@ -852,11 +1058,9 @@ export function createDingTalkSettingsPage(
           renderMessages();
           renderList();
           if (target) void selectConversation(target);
-          warmTopConversations();
           return;
         }
         renderList();
-        warmTopConversations();
         if (state.conversations.length === 0) {
           if (state.selectedId) {
             void client.markViewed(
@@ -1120,6 +1324,14 @@ export function createDingTalkSettingsPage(
         // Event.target is retargeted to the shadow host for this document-level
         // listener; composedPath keeps the real menu nodes visible.
         const path = event.composedPath();
+        if (
+          !path.some(
+            (node) =>
+              node instanceof HTMLElement && node.classList.contains("dingtalk-message-menu"),
+          )
+        ) {
+          messageListView.closeMenus();
+        }
         const inside = (menu: { contains(node: Node): boolean }): boolean =>
           path.some((node) => node instanceof Node && menu.contains(node));
         if (mainHead.menuOpen && !inside(mainHead)) mainHead.closeMenu();
@@ -1129,6 +1341,11 @@ export function createDingTalkSettingsPage(
       };
       const onKey = (event: KeyboardEvent): void => {
         if (event.key !== "Escape") return;
+        if (panel?.open) {
+          panel.close();
+          event.stopPropagation();
+          return;
+        }
         if (mainHead.menuOpen) {
           mainHead.closeMenu();
           event.stopPropagation();
@@ -1186,6 +1403,7 @@ export function createDingTalkSettingsPage(
         poll.stop();
         document.removeEventListener("visibilitychange", onVisibility);
         lightbox.dispose();
+        panel?.dispose();
         composer.dispose();
         pageMenu.close();
         mainHead.closeMenu();
@@ -1201,6 +1419,13 @@ export function createDingTalkSettingsPage(
         messageGeneration += 1;
         searchGeneration += 1;
         previewObserver?.disconnect();
+        visibleObserver?.disconnect();
+        for (const timer of hoverTimers.values()) view.clearTimeout(timer);
+        hoverTimers.clear();
+        if (openProbe?.timer !== null && openProbe?.timer !== undefined) {
+          view.clearTimeout(openProbe.timer);
+        }
+        openProbe = null;
         previewQueue.length = 0;
         previewPending.clear();
         conversationRows.clear();

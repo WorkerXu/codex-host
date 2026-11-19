@@ -173,6 +173,10 @@ class FakeDocument {
     return new FakeElement(tag, this);
   }
 
+  createElementNS(_namespace: string, tag: string): FakeElement {
+    return new FakeElement(tag, this);
+  }
+
   createTextNode(text: string): FakeText {
     return new FakeText(text);
   }

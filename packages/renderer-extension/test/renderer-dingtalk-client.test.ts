@@ -119,7 +119,7 @@ describe("DingTalk renderer routing", () => {
     expect(calls.filter((call) => call.method === DINGTALK_PREFETCH_METHOD)).toEqual([
       {
         method: DINGTALK_PREFETCH_METHOD,
-        params: { conversationIds: ["a", "b", "c", "d", "e", "f"] },
+        params: { conversationIds: ["a", "b", "c", "d", "e", "f", "g"] },
         priority: "background",
       },
     ]);
