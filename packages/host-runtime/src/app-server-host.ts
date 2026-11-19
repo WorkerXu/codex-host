@@ -13,6 +13,11 @@ import {
   threadFoldersGetParamsSchema,
   threadFoldersSetParamsSchema,
 } from "@codexhost/shared-contracts";
+import { SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
+import { getSkillsHub, skillsError, type SkillsHubService } from "./skills-hub/service.js";
+import { HUB_ADMIN_METHOD } from "@codexhost/shared-contracts";
+import { HubAdminService } from "./hub-admin-service.js";
+import { HubAdminError } from "./hub-admin-http.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -510,6 +515,10 @@ export interface AppServerHostOptions {
   /** Desktop-local shared model credentials and structured connection tests. */
   modelService?: ModelService;
   codeRepositories?: CodeRepositories;
+  /** Central skills inventory, agent discovery and per-skill sync. */
+  skillsHub?: Pick<SkillsHubService, "request">;
+  /** MCP server and memory administration through allowlisted localhost services. */
+  hubAdmin?: HubAdminService;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -883,6 +892,7 @@ export class AppServerHost {
   readonly #desktopRequests = new DesktopRequestQueue();
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
+  readonly #hubAdmin: Pick<HubAdminService, "request" | "stop">;
 
   constructor(options: AppServerHostOptions) {
     this.#options = {
@@ -892,6 +902,8 @@ export class AppServerHost {
       ...options,
     };
     this.#threadFolders = new ThreadFolders(options.environment ?? process.env);
+    this.#hubAdmin =
+      options.hubAdmin ?? new HubAdminService({ environment: options.environment ?? process.env });
     this.#modelPrices = options.modelPrices ?? new ModelPriceCatalog();
     this.#observedSessionUsage = new ObservedSessionUsage(
       () =>
@@ -1276,6 +1288,7 @@ export class AppServerHost {
       this.#unregisterDelegationApi = undefined;
       this.#unsubscribeAccountState?.();
       this.#unsubscribeAccountState = undefined;
+      await this.#hubAdmin.stop().catch((error) => this.#diagnose(error));
       if (this.#options.closeMappingStoreOnExit !== false) {
         await this.#repository.close().catch((error) => this.#diagnose(error));
       }
@@ -1666,6 +1679,37 @@ export class AppServerHost {
           await this.#writer.json(rpcError(request, -32602, "invalid_params"));
         }
       });
+      return;
+    }
+    if (request.method === SKILLS_HUB_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service =
+            this.#options.skillsHub ?? getSkillsHub(this.#options.environment ?? process.env);
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32096, skillsError(error)));
+        }
+      });
+      return;
+    }
+    if (request.method === HUB_ADMIN_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service = this.#hubAdmin;
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(request, -32096, error instanceof HubAdminError ? error.code : "failed"),
+          );
+        }
+      });
+      return;
+    }
+    if (request.method.startsWith("codexhost/hub-admin/")) {
+      await this.#writer.json(rpcError(request, -32601, "invalid"));
       return;
     }
     if (request.method.startsWith("codexhost/jarvis/")) {

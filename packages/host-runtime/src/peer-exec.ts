@@ -6,6 +6,17 @@ import { readRuntimeControl } from "./runtime-control-file.js";
 
 /** The only Runtime routes a peer may invoke; never arbitrary paths or URLs. */
 export const PEER_EXEC_ROUTES = [
+  "/v1/skills/export-chunk",
+  "/v1/skills/import-begin",
+  "/v1/skills/import-chunk",
+  "/v1/skills/import-finish",
+  "/v1/skills/inventory",
+  "/v1/skills/link-plan",
+  "/v1/skills/link-apply",
+  "/v1/skills/undo",
+  "/v1/skills/exclusions",
+  "/v1/skills/export",
+  "/v1/skills/import",
   "/v1/harness/list",
   "/v1/harness/inspect",
   "/v1/delegate/start",

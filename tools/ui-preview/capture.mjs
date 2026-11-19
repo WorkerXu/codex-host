@@ -14,6 +14,20 @@ const previewRoot = import.meta.dirname;
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 const baseUrl = `http://127.0.0.1:${port}`;
 const allScenarios = [
+  "skills-matrix",
+  "skills-hover",
+  "skills-focus",
+  "skills-agents",
+  "skills-exclusions",
+  "skills-link-choice",
+  "skills-sync-selection",
+  "skills-conflict",
+  "skills-conflict-files",
+  "skills-conflict-files-focus",
+  "skills-link-preview",
+  "skills-link-focus",
+  "skills-link-checked-focus",
+  "skills-agents-focus",
   "dingtalk-heavy",
   "dingtalk-list",
   "dingtalk-deduplicated",
@@ -158,6 +172,7 @@ if (!(await serverIsUp())) {
 }
 
 const hoverSelectors = new Map([
+  ["skills-hover", "[data-skills-refresh]"],
   ["agents-menu", ".agent-menu-item"],
   ["at-entry", "[data-codexhost-jarvis-entry-row]"],
   ["at-entry-native-visible", "[data-codexhost-dingtalk-entry]"],
@@ -336,6 +351,15 @@ for (const scenario of scenarios) {
       const list = await pointAt(page, ".dingtalk-message-list");
       await page.mouse.move(list.x, list.y);
       await page.mouse.wheel(0, 1200);
+    }
+    let skillsTooltipDismissed = false;
+    if (scenario === "skills-hover") {
+      await hoverPreviewElement(page, "[data-skills-refresh]");
+      await realClick(page, "[data-skills-refresh]");
+      await page.keyboard.press("Escape");
+      skillsTooltipDismissed = !(await page.locator('[role="tooltip"]').isVisible());
+      await page.mouse.move(0, 0);
+      await page.keyboard.press("Tab");
     }
     if (scenario === "dingtalk-hover") {
       await realHover(page, ".dingtalk-message", -1);
@@ -579,6 +603,122 @@ for (const scenario of scenarios) {
         "native-desktop-theme",
         document.body.dataset.nativeTheme === document.body.dataset.theme,
       );
+      if (document.body.dataset.scenario?.startsWith("hub-")) {
+        check("hub-native-theme", document.documentElement.dataset.nativeTheme === "true");
+        check("hub-no-native-select", queryAll(".hub-page select").length === 0);
+        check("hub-no-host-select", !query('.hub-select[aria-label="主机"]'));
+        if (["hub-servers", "hub-memory"].includes(document.body.dataset.scenario))
+          check(
+            "hub-updated-age",
+            /^更新于 (刚刚|\d+ 分钟前|\d+ 小时前|\d+ 天前)$/u.test(
+              query(".hub-updated")?.textContent ?? "",
+            ),
+          );
+        check(
+          "hub-no-developer-fields",
+          !query(".hub-page")?.textContent.includes("session-") &&
+            !query(".hub-page")?.textContent.includes("调用 —"),
+        );
+        const scenario = document.body.dataset.scenario;
+        if (scenario === "hub-servers") {
+          const disabled = query('.hub-server[data-disabled="true"]');
+          check(
+            "hub-disabled-content-dimmed",
+            disabled &&
+              Number(getComputedStyle(disabled.querySelector(".hub-server-title")).opacity) < 1 &&
+              !disabled.querySelector('[role="switch"]').disabled,
+          );
+          check(
+            "hub-metadata-separators",
+            getComputedStyle(query(".hub-server-meta span + span"), "::before").content.includes(
+              "·",
+            ),
+          );
+        }
+        if (["hub-memory", "hub-memory-search", "hub-memory-empty"].includes(scenario)) {
+          const values = queryAll(".hub-stat-value").map((element) => {
+            const style = getComputedStyle(element);
+            return `${style.fontSize}/${style.fontWeight}`;
+          });
+          check("hub-uniform-statistics", values.length === 3 && new Set(values).size === 1);
+          if (scenario !== "hub-memory")
+            check(
+              "hub-search-count-heading",
+              /搜索结果 · \d+ 条/u.test(query(".hub-section-head")?.textContent ?? ""),
+            );
+        }
+        if (scenario === "hub-header-rows") {
+          const add = query(".hub-header-editor > button");
+          check(
+            "hub-header-add-aligned",
+            Math.abs(
+              add.getBoundingClientRect().left -
+                query(".hub-header-row input").getBoundingClientRect().left,
+            ) < 2 && add.querySelector("svg"),
+          );
+        }
+        if (
+          [
+            "hub-connection-connect",
+            "hub-connection-replace",
+            "hub-connection-test-error",
+          ].includes(scenario)
+        ) {
+          const input = query('.hub-dialog input[type="password"]');
+          check("hub-key-masked", input && input.autocomplete === "off");
+          if (scenario === "hub-connection-test-error")
+            check("hub-failed-key-cleared", input?.value === "");
+        }
+        if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
+          check(
+            "hub-unconfigured-state",
+            query(".hub-connection-state h3")?.textContent === "尚未连接 MCPHub" &&
+              !visible(query('[aria-label="MCPHub 连接设置"]')),
+          );
+        if (scenario === "hub-connection-empty") {
+          const state = query(".hub-connection-state--empty");
+          const icon = state?.querySelector("svg");
+          const button = state?.querySelector("button");
+          check(
+            "hub-empty-content",
+            icon &&
+              button?.textContent === "连接" &&
+              state?.textContent.includes("填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥"),
+          );
+          const pageRect = query(".settings-page").getBoundingClientRect();
+          const center =
+            icon && button
+              ? (icon.getBoundingClientRect().top + button.getBoundingClientRect().bottom) / 2
+              : 0;
+          check(
+            "hub-empty-centered",
+            Math.abs(center - (pageRect.top + pageRect.bottom) / 2) < 48,
+            String(center),
+          );
+        }
+        if (scenario === "hub-connection-connect")
+          check(
+            "hub-connection-host-guidance",
+            query(".hub-dialog-content")?.textContent.includes(
+              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在本机。",
+            ),
+          );
+        if (["hub-auth-error", "hub-error"].includes(scenario))
+          check(
+            "hub-auth-recovery",
+            query(".hub-connection-state")?.textContent.includes("密钥无效或权限不足") &&
+              query(".hub-connection-state button")?.textContent === "更换密钥",
+          );
+        const primary = query(".hub-primary");
+        if (primary) {
+          const color = getComputedStyle(primary).backgroundColor;
+          check(
+            "hub-neutral-primary",
+            !/rgb\(\s*0,\s*(105|106),\s*(204|205)\s*\)/u.test(color),
+            color,
+          );
+        }
+      }
 
       // Every custom property used by the workbench must resolve inside the
       // shadow root, or carry an explicit fallback.
@@ -621,6 +761,231 @@ for (const scenario of scenarios) {
           unresolved.size === 0,
           [...unresolved].slice(0, 8).join(" | "),
         );
+      }
+
+      if (document.body.dataset.scenario?.startsWith("skills-"))
+        check("skills-page-visible", visible(query(".skills-hub")));
+      if (query(".skills-hub")) {
+        check("skills-matrix-rows", queryAll(".skills-matrix tbody tr").length === 3);
+        check("skills-machine-sections", queryAll(".skills-machine").length === 3);
+        const hub = query(".skills-hub");
+        const native = getComputedStyle(hub);
+        const primary = query(
+          ".skills-head .skills-button:not(.settings-command-button--secondary)",
+        );
+        check(
+          "skills-native-primary",
+          getComputedStyle(primary).backgroundColor !== "rgba(0, 0, 0, 0)",
+          getComputedStyle(primary).backgroundColor,
+        );
+        check(
+          "skills-native-theme",
+          getComputedStyle(query(".skills-machine")).backgroundColor ===
+            (document.body.dataset.theme === "dark" ? "rgb(24, 24, 24)" : "rgb(255, 255, 255)"),
+          native.getPropertyValue("--app-color-background-surface"),
+        );
+        check(
+          "skills-semantic-status",
+          queryAll(".skills-status").length === 9 && queryAll(".skills-status svg").length === 6,
+        );
+        const warning = query(".skills-status.text-settings-warning");
+        const focusProbe = document.createElement("span");
+        focusProbe.style.color = "var(--settings-focus)";
+        hub.append(focusProbe);
+        check(
+          "skills-warning-color",
+          getComputedStyle(warning).color !== getComputedStyle(focusProbe).color,
+          getComputedStyle(warning).color,
+        );
+        focusProbe.remove();
+        const consistent = queryAll(".skills-matrix tbody tr").find((row) =>
+          row.textContent.includes("project-search"),
+        );
+        check("skills-consistent-no-action", consistent && !consistent.querySelector("button"));
+        check(
+          "skills-writing-description",
+          queryAll(".skills-description")[1]?.textContent !==
+            queryAll(".skills-description")[2]?.textContent,
+        );
+        const rows = queryAll(".skills-agent-row");
+        check(
+          "skills-single-agent-status",
+          rows.every((row) => row.children.length === 3) &&
+            !query(".skills-machines")?.textContent.includes("需链接") &&
+            !query(".skills-machines")?.textContent.includes("直接读取中央库"),
+        );
+        check(
+          "skills-native-agent-status",
+          query('[data-agent="codex"] .skills-agent-progress')?.textContent === "原生支持",
+        );
+        check(
+          "skills-fully-linked",
+          query('[data-agent="codebuddy"] .skills-agent-linked')?.textContent === "已链接" &&
+            Boolean(query('[data-agent="codebuddy"] .skills-agent-linked svg')),
+        );
+        const columnPositions = rows.map((row) =>
+          [...row.children].map((cell) => Math.round(cell.getBoundingClientRect().x)),
+        );
+        check(
+          "skills-agent-alignment",
+          columnPositions.every(
+            (positions) => JSON.stringify(positions) === JSON.stringify(columnPositions[0]),
+          ),
+          JSON.stringify(columnPositions),
+        );
+        const excluded = query('[data-agent="github-copilot"]');
+        check(
+          "skills-excluded-only",
+          excluded?.textContent.includes("已排除") &&
+            !excluded.textContent.includes("需链接") &&
+            !excluded.textContent.includes("已链接"),
+        );
+        check(
+          "skills-linked-denominator",
+          query('[data-agent="claude-code"]')?.textContent.includes("已链接 1/3"),
+        );
+        check(
+          "skills-one-exclusion-footer",
+          queryAll(".skills-exclusions").length === 1 &&
+            query(".skills-exclusions")?.textContent.includes("GitHub Copilot、Qoder"),
+        );
+        check(
+          "skills-no-developer-data",
+          !/a{12}|b{12}|c{12}|claude-code|github-copilot/.test(hub.textContent),
+        );
+        check(
+          "skills-one-machine-primary",
+          queryAll(".skills-machine-head").every(
+            (head) =>
+              head.querySelectorAll(".skills-button:not(.settings-command-button--secondary)")
+                .length === 1,
+          ),
+        );
+        if (document.body.dataset.scenario === "skills-focus")
+          check("skills-keyboard-focus", primary.matches(":focus-visible"));
+        if (document.body.dataset.scenario === "skills-agents-focus")
+          check(
+            "skills-agent-keyboard-focus",
+            query(
+              ".skills-machine-head .skills-button:not(.settings-command-button--secondary)",
+            )?.matches(":focus-visible"),
+          );
+        const dialog = query("dialog[open]");
+        if (dialog) {
+          const rect = dialog.getBoundingClientRect();
+          check(
+            "skills-dialog-fits-viewport",
+            rect.x >= 0 &&
+              rect.y >= 0 &&
+              rect.right <= window.innerWidth &&
+              rect.bottom <= window.innerHeight,
+          );
+        }
+
+        if (document.body.dataset.scenario.startsWith("skills-conflict")) {
+          const summary = query(".skills-file-summary");
+          const chevron = summary?.querySelector("svg");
+          check(
+            "skills-file-chevron",
+            Boolean(chevron) &&
+              getComputedStyle(summary).display === "flex" &&
+              getComputedStyle(summary).listStyleType === "none",
+          );
+          check("skills-file-summary-small", getComputedStyle(summary).fontSize === "12px");
+          check(
+            "skills-file-chevron-animation",
+            Boolean(chevron) &&
+              getComputedStyle(chevron).transitionProperty.includes("transform") &&
+              parseFloat(getComputedStyle(chevron).transitionDuration) > 0,
+          );
+          check(
+            "skills-file-chevron-direction",
+            getComputedStyle(chevron).rotate === (query("details[open]") ? "90deg" : "none"),
+            getComputedStyle(chevron).rotate,
+          );
+          if (document.body.dataset.scenario === "skills-conflict-files-focus")
+            check(
+              "skills-file-keyboard-focus",
+              summary.matches(":focus-visible") &&
+                getComputedStyle(summary).outlineOffset === "-2px" &&
+                Boolean(query("details[open]")),
+            );
+          check("skills-conflict-dialog", visible(query("dialog[open]")));
+          check("skills-conflict-versions", queryAll(".skills-version").length === 2);
+          const cards = queryAll(".skills-version");
+          check(
+            "skills-conflict-selection-border",
+            getComputedStyle(cards[0]).borderColor !== getComputedStyle(cards[1]).borderColor,
+          );
+          check(
+            "skills-conflict-radio-outline",
+            getComputedStyle(query(".skills-version input:checked")).outlineStyle === "none",
+          );
+          check(
+            "skills-diff-tints",
+            getComputedStyle(query(".skills-diff-add")).backgroundColor !== "rgba(0, 0, 0, 0)" &&
+              getComputedStyle(query(".skills-diff-remove")).backgroundColor !== "rgba(0, 0, 0, 0)",
+          );
+          check(
+            "skills-diff-file-separation",
+            !query(".skills-diff")?.textContent.includes("SKILL.md") &&
+              query(".skills-file-list")?.textContent.includes("references/checklist.md"),
+          );
+          check(
+            "skills-conflict-continue",
+            query(".skills-actions button:last-child")?.textContent === "继续",
+          );
+          check(
+            "skills-conflict-keyboard-selection",
+            queryAll(".skills-version input:checked").length === 1,
+          );
+          check(
+            "skills-conflict-diff",
+            query(".skills-diff")?.textContent.includes("+ version: 1.3"),
+          );
+        }
+        if (document.body.dataset.scenario.startsWith("skills-link")) {
+          const checkbox = query("[data-skill-adoption]");
+          const checkboxStyle = getComputedStyle(checkbox);
+          check(
+            "skills-desktop-checkbox",
+            checkboxStyle.appearance === "none" &&
+              checkboxStyle.width === "18px" &&
+              checkboxStyle.borderStyle === "solid",
+          );
+          check(
+            "skills-checkbox-mark",
+            getComputedStyle(checkbox, "::after").opacity === (checkbox.checked ? "1" : "0"),
+          );
+          if (
+            ["skills-link-focus", "skills-link-checked-focus"].includes(
+              document.body.dataset.scenario,
+            )
+          )
+            check(
+              "skills-checkbox-keyboard-focus",
+              checkbox.matches(":focus-visible") && checkboxStyle.outlineStyle === "solid",
+            );
+          check("skills-link-actions", queryAll(".skills-link-row").length === 4);
+          check("skills-link-groups", queryAll(".skills-link-group").length === 2);
+          check(
+            "skills-link-choice-default",
+            query("[data-skill-adoption]")?.checked ===
+              ["skills-link-choice", "skills-link-checked-focus"].includes(
+                document.body.dataset.scenario,
+              ),
+          );
+          check(
+            "skills-link-footer",
+            query(".skills-actions button:first-child")?.textContent === "取消" &&
+              query(".skills-actions button:last-child")?.textContent === "应用",
+          );
+          check("skills-link-no-apply", document.body.dataset.skillsLinkApplies === "0");
+          check(
+            "skills-link-adopt",
+            query(".skills-dialog-body")?.textContent.includes("收进中央库"),
+          );
+        }
       }
 
       if (query(".dingtalk-conversation-list:not([hidden]) .dingtalk-conversation")) {
@@ -1935,14 +2300,23 @@ for (const scenario of scenarios) {
         fullPage: false,
         animations: "disabled",
       });
+      const hoverChecks =
+        scenario === "skills-hover"
+          ? [
+              {
+                name: "skills-refresh-tooltip",
+                ok: skillsTooltipDismissed && (await page.locator('[role="tooltip"]').isVisible()),
+              },
+            ]
+          : [];
       report.captures.push({
         scenario: `${scenario}-hover`,
         theme,
         approximate: theme === "dark" && shadowContext.darkApproximate === true,
         screenshot: path.join(outputDirectory, hoverFile),
         pageErrors: errors,
-        checks: [],
-        ok: errors.length === 0,
+        checks: hoverChecks,
+        ok: errors.length === 0 && hoverChecks.every((check) => check.ok),
       });
       console.log(`[ui-preview] ${hoverFile}`);
     }

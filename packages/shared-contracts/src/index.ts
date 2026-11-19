@@ -678,3 +678,5 @@ export * from "./model-service.js";
 export * from "./thread-folders.js";
 export * from "./delegation-projects.js";
 export * from "./code-repositories.js";
+export * from "./skills-hub.js";
+export * from "./hub-admin.js";
