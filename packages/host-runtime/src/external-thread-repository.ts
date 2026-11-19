@@ -33,6 +33,7 @@ import {
   materializeExternalSubagent,
   projectExternalSnapshot,
 } from "./external-subagent-threads.js";
+import { stripHandoffBlock } from "./thread-agent-switch.js";
 
 export interface ExternalThreadStore {
   initialize(): Promise<void>;
@@ -562,16 +563,18 @@ export function externalThreadValue(input: {
       ? preview.content
       : null;
   const previewText = Array.isArray(previewContent)
-    ? previewContent
-        .filter(
-          (part): part is JsonObject =>
-            typeof part === "object" &&
-            part !== null &&
-            !Array.isArray(part) &&
-            part.type === "text",
-        )
-        .map((part) => (typeof part.text === "string" ? part.text : ""))
-        .join("\n")
+    ? stripHandoffBlock(
+        previewContent
+          .filter(
+            (part): part is JsonObject =>
+              typeof part === "object" &&
+              part !== null &&
+              !Array.isArray(part) &&
+              part.type === "text",
+          )
+          .map((part) => (typeof part.text === "string" ? part.text : ""))
+          .join("\n"),
+      )
     : "";
   return {
     id: record.hostThreadId,

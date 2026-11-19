@@ -61,6 +61,9 @@ import {
   codexAccountListResultSchema,
   externalThreadForkParamsSchema,
   externalThreadForkResultSchema,
+  THREAD_AGENT_SWITCH_METHOD,
+  threadAgentSwitchParamsSchema,
+  threadAgentSwitchResultSchema,
   harnessCommandCatalogSchema,
   harnessCommandsInspectParamsSchema,
   harnessConfigurationStateSchema,
@@ -92,6 +95,8 @@ import {
   updateStatusResultSchema,
   type ExternalThreadForkParams,
   type ExternalThreadForkResult,
+  type ThreadAgentSwitchParams,
+  type ThreadAgentSwitchResult,
   type CodexAccountChanged,
   type CodexAccountListResult,
   type HarnessCommandCatalog,
@@ -220,6 +225,8 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   listHarnessPlugins?(input?: HarnessPluginListParams): Promise<HarnessPluginListResult>;
   clientForHost?(hostId: string): RendererModelClient | null;
   forkThread(input: ExternalThreadForkParams): Promise<ExternalThreadForkResult>;
+  /** Moves the conversation to another Agent on its Host; the source is archived. */
+  switchThreadAgent?(input: ThreadAgentSwitchParams): Promise<ThreadAgentSwitchResult>;
   inspectHarness(
     input: HarnessInspectParams,
     options?: RendererRequestOptions,
@@ -446,6 +453,12 @@ export function createRendererModelClient(
       const params = externalThreadForkParamsSchema.parse(input);
       const result = await manager.sendRequest(THREAD_FORK_METHOD, params);
       return externalThreadForkResultSchema.parse(result);
+    },
+    async switchThreadAgent(input: ThreadAgentSwitchParams): Promise<ThreadAgentSwitchResult> {
+      const params = threadAgentSwitchParamsSchema.parse(input);
+      return threadAgentSwitchResultSchema.parse(
+        await manager.sendRequest(THREAD_AGENT_SWITCH_METHOD, params),
+      );
     },
     inspectHarness,
     async listHarnessPlugins(input?: HarnessPluginListParams): Promise<HarnessPluginListResult> {

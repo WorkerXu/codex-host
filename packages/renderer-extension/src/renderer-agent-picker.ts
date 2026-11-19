@@ -121,7 +121,7 @@ export function rendererAgentMenuPlacement(
 }
 
 export function rendererAgentPickerTooltip(
-  state: { agent: RendererAgent; phase: ComposerAgentPhase },
+  state: { agent: RendererAgent; phase: ComposerAgentPhase; switchable?: boolean },
   activeAccount: CodexAccountSummary | undefined,
   plugin?: HarnessPluginDescriptor,
 ): string {
@@ -129,22 +129,24 @@ export function rendererAgentPickerTooltip(
     state.agent === "codex" && activeAccount
       ? ` · ${activeAccount.email ?? activeAccount.label}`
       : "";
-  return `Agent: ${rendererAgentLabel(state.agent, plugin)}${account}${state.phase === "locked" ? " (locked)" : ""}`;
+  return `Agent: ${rendererAgentLabel(state.agent, plugin)}${account}${state.phase === "locked" && state.switchable !== true ? " (locked)" : ""}`;
 }
 
 export function rendererAgentPickerView(
-  state: { agent: RendererAgent; phase: ComposerAgentPhase },
+  /** `switchable`: an existing conversation that may move to another Agent on its Host. */
+  state: { agent: RendererAgent; phase: ComposerAgentPhase; switchable?: boolean },
   adapterState: RendererAdapterStatus["state"],
   switching: boolean,
   agents: readonly RendererAgent[],
   availability: AgentAvailability = {},
   plugin?: HarnessPluginDescriptor,
 ): RendererAgentPickerView {
+  const locked = state.phase === "locked" && state.switchable !== true;
   const optionDisabled = Object.fromEntries(
     agents.map((agent) => [
       agent,
       switching ||
-        state.phase === "locked" ||
+        locked ||
         (agent !== "codex" && (adapterState !== "ready" || availability[agent] !== "ready")),
     ]),
   ) as Partial<Record<RendererAgent, boolean>>;
@@ -160,8 +162,7 @@ export function rendererAgentPickerView(
   ) as Partial<Record<ExternalRendererAgent, boolean>>;
   return {
     label: rendererAgentLabel(state.agent, plugin),
-    triggerDisabled:
-      switching || state.phase === "locked" || (agents.length < 2 && state.agent === "codex"),
+    triggerDisabled: switching || locked || (agents.length < 2 && state.agent === "codex"),
     nativeModelHidden: switching || state.agent !== "codex",
     optionDisabled,
     downloadVisible,
@@ -689,7 +690,7 @@ export function mountRendererAgentPicker(
 
 export function renderRendererAgentPicker(
   control: RendererAgentPickerControl,
-  state: { agent: RendererAgent; phase: ComposerAgentPhase },
+  state: { agent: RendererAgent; phase: ComposerAgentPhase; switchable?: boolean },
   adapterState: RendererAdapterStatus["state"],
   switching: boolean,
   availability: AgentAvailability = {},
@@ -722,7 +723,7 @@ export function renderRendererAgentPicker(
     "aria-label",
     ownershipError
       ? pickerGroupMessages().ownershipErrorLabel
-      : state.phase === "locked"
+      : state.phase === "locked" && state.switchable !== true
         ? `Agent: ${view.label}`
         : `Select Agent, current ${view.label}`,
   );

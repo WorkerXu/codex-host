@@ -808,7 +808,7 @@ function nativeSendDisabled(button: HTMLButtonElement, fallback: boolean): boole
  */
 export function renderComposerAgentControl(
   control: ComposerAgentControl,
-  state: { agent: RendererAgent; phase: ComposerAgentPhase },
+  state: { agent: RendererAgent; phase: ComposerAgentPhase; switchable?: boolean },
   adapterState: RendererAdapterStatus["state"],
   switching: boolean,
   availability: Partial<Record<ExternalRendererAgent, RendererAgentAvailability>> = {},
