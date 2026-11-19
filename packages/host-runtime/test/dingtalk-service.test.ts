@@ -887,7 +887,7 @@ describe("DingTalk live in-memory state", () => {
       await service.startListening();
       await vi.waitFor(() => expect(deliver).not.toBeNull(), { timeout: 2_000 });
       const callsBefore = fake.messageCalls;
-      deliver?.({
+      (deliver as ((record: DwsEventRecord) => void) | null)?.({
         messageId: "e1",
         conversationId: "g1",
         senderName: "林晓",

@@ -101,7 +101,7 @@ describe("Hub SSH forward", () => {
   });
 
   it("closes the master connection on stop", async () => {
-    const execFile = vi.fn(async () => ({ stdout: "", stderr: "" }));
+    const execFile = vi.fn<Exec>(async () => ({ stdout: "", stderr: "" }));
     const { instance } = forward({ execFile });
     await instance.endpoints();
     await instance.stop();
@@ -112,7 +112,7 @@ describe("Hub SSH forward", () => {
   });
 
   it("reads the token through the master and never re-handshakes", async () => {
-    const execFile = vi.fn(async () => ({ stdout: "token-value\n", stderr: "" }));
+    const execFile = vi.fn<Exec>(async () => ({ stdout: "token-value\n", stderr: "" }));
     const { instance, spawned } = forward({ execFile });
     await instance.endpoints();
     expect(await instance.readToken("/token")).toBe("token-value\n");
@@ -134,7 +134,7 @@ describe("Hub SSH forward", () => {
   });
 
   it("never puts remote output in errors", async () => {
-    const execFile = vi.fn(async () => {
+    const execFile = vi.fn<Exec>(async () => {
       throw Object.assign(new Error("remote failed"), { stderr: "secret-in-config" });
     });
     const { instance } = forward({ execFile });
@@ -145,7 +145,7 @@ describe("Hub SSH forward", () => {
   });
 
   it("returns only MCPHub's routing fields", async () => {
-    const execFile = vi.fn(async () => ({
+    const execFile = vi.fn<Exec>(async () => ({
       stdout: JSON.stringify({
         enableBearerAuth: true,
         bearerAuthHeaderName: "X-Mcp-Key",
@@ -166,7 +166,7 @@ describe("Hub SSH forward", () => {
 
 describe("Hub remote secrets", () => {
   it("reads the token once and forgets it on demand", async () => {
-    const execFile = vi.fn(async () => ({ stdout: "token-value\n", stderr: "" }));
+    const execFile = vi.fn<Exec>(async () => ({ stdout: "token-value\n", stderr: "" }));
     const remote = new HubRemote(
       {},
       {
@@ -187,7 +187,7 @@ describe("Hub remote secrets", () => {
   });
 
   it("keeps only the derived header name", async () => {
-    const execFile = vi.fn(async () => ({
+    const execFile = vi.fn<Exec>(async () => ({
       stdout: JSON.stringify({
         enableBearerAuth: true,
         bearerAuthHeaderName: "X-Mcp-Key",

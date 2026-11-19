@@ -43,7 +43,6 @@ function fixture(
         memhub: "http://127.0.0.1:8765",
         mcphub: "http://127.0.0.1:3000",
       }),
-      readFile: async () => "",
       token: async () => "",
       forgetToken: async () => {},
       mcphubHeaderName: async () => "X-Mcp-Key",

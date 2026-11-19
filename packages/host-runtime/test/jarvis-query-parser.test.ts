@@ -262,7 +262,10 @@ describe("Jarvis Gemini structured query", () => {
       signal = init?.signal;
       return new Promise<Response>(() => {});
     });
-    const client = createJarvisGeminiQuery({ readApiKey: async () => "key", fetchImpl });
+    const client = createJarvisGeminiQuery({
+      readApiKey: async () => "key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
     const result = client.interpret("旧查询", NOW, controller.signal);
     const assertion = expect(result).rejects.toMatchObject({ code: "cancelled" });
     await vi.advanceTimersByTimeAsync(1);

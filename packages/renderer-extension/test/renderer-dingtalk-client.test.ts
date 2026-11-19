@@ -106,7 +106,7 @@ describe("DingTalk renderer routing", () => {
   });
 
   it("prefetches the visible rows at background priority", async () => {
-    const calls: { method: string; params: unknown; priority?: string }[] = [];
+    const calls: { method: string; params: unknown; priority?: string | undefined }[] = [];
     const target = manager([], { status: status({ defaultHost: "local", defaultHostId: null }) });
     const original = target.sendRequest.bind(target);
     target.sendRequest = async (method, params, options) => {

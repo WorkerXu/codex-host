@@ -11,10 +11,10 @@ import {
 } from "../src/dingtalk-dispatch.js";
 
 describe("DingTalk dispatch settings contract", () => {
-  it("defaults to 0.85 with every agent off", () => {
+  it("defaults to 0.7 with every agent off", () => {
     const settings = defaultDingTalkDispatchSettings();
-    expect(settings).toEqual({ threshold: 0.85, agents: {} });
-    expect(DEFAULT_DINGTALK_MATCH_THRESHOLD).toBe(0.85);
+    expect(settings).toEqual({ threshold: 0.7, agents: {} });
+    expect(DEFAULT_DINGTALK_MATCH_THRESHOLD).toBe(0.7);
     expect(defaultDingTalkAgentDispatch()).toEqual({
       enabled: false,
       eventTypes: [...DINGTALK_EVENT_TYPES],
