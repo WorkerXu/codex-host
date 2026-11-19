@@ -50,6 +50,16 @@ export interface RendererConnectionSnapshot {
   readonly hosts: readonly RendererConnectionHostSnapshot[];
 }
 
+/**
+ * Desktop reserves `durable` for Codex Cloud execution; it is not a machine the
+ * user connected and must not appear as a connection row or Host tab.
+ */
+export function visibleConnectionHosts(
+  hosts: readonly RendererConnectionHostSnapshot[],
+): readonly RendererConnectionHostSnapshot[] {
+  return hosts.filter(({ hostId }) => hostId !== "durable");
+}
+
 export interface RendererConnectionDiagnostics {
   snapshot(): RendererConnectionSnapshot;
   /** With a Host, wait for existing diagnostics and start a fresh post-mutation inspection. */
@@ -816,13 +826,12 @@ export function createConnectionsSettingsPage(
           content.replaceChildren(empty);
           return;
         }
+        const hosts = visibleConnectionHosts(snapshot.hosts);
         const selectedHost =
-          (selectedHostId
-            ? snapshot.hosts.find((host) => host.hostId === selectedHostId)
-            : undefined) ??
-          snapshot.hosts.find((host) => host.active) ??
-          snapshot.hosts.find((host) => host.hostId === "local") ??
-          snapshot.hosts[0];
+          (selectedHostId ? hosts.find((host) => host.hostId === selectedHostId) : undefined) ??
+          hosts.find((host) => host.active) ??
+          hosts.find((host) => host.hostId === "local") ??
+          hosts[0];
         if (!selectedHost) return;
         selectedHostId = selectedHost.hostId;
 
@@ -840,7 +849,7 @@ export function createConnectionsSettingsPage(
         const scrollRight = createHostScrollButton(document, "right", messages);
         const panelId = "codexhost-settings-connection-host-panel";
 
-        snapshot.hosts.forEach((host, index) => {
+        hosts.forEach((host, index) => {
           const tab = document.createElement("button");
           tab.type = "button";
           tab.className = "settings-connection-host-tab";
@@ -861,8 +870,7 @@ export function createConnectionsSettingsPage(
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
             const direction = event.key === "ArrowRight" ? 1 : -1;
-            const next =
-              snapshot.hosts[(index + direction + snapshot.hosts.length) % snapshot.hosts.length];
+            const next = hosts[(index + direction + hosts.length) % hosts.length];
             if (!next) return;
             selectedHostId = next.hostId;
             render(latestSnapshot);
