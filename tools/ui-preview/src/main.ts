@@ -33,7 +33,7 @@ import {
   type FakeDingTalkOptions,
   type FakeDingTalkStatus,
 } from "./fake-clients.js";
-import type { JarvisBugSearchResult } from "@codexhost/shared-contracts";
+import type { JarvisBugCondition, JarvisBugSearchResult } from "@codexhost/shared-contracts";
 
 const parameters = new URLSearchParams(location.search);
 const scenarioName = parameters.get("scenario") ?? "dingtalk-list";
@@ -308,7 +308,22 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
     readHostId: () => "local",
     readLocale: () => locale,
     anchorForEditor: () => menu,
-    search: async () => ({
+    listProjects: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      projects: [],
+      complete: false,
+      userId: null,
+    }),
+    previewProjectBugTitle: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    }),
+    searchProjectBugs: async () => ({
       available: false,
       errorCode: "jarvis_failed",
       conditions: [],
@@ -375,23 +390,22 @@ async function mountNativeAtMenu(open: boolean): Promise<void> {
   await waitFor(() => document.body.dataset.entryOpened === "true");
 }
 
-interface JarvisPreviewResult {
-  result: JarvisBugSearchResult;
-  delayMs?: number;
-  pending?: boolean;
+interface JarvisPreviewBug {
+  id: number;
+  title: string;
+  status?: number;
+  priority?: number;
+  severity?: number;
+  updatedAt?: string;
 }
 
 function previewBug(
   id: number,
-  projectId: number,
-  projectName: string,
   title: string,
-  overrides: Partial<JarvisBugSearchResult["bugs"][number]> = {},
-): JarvisBugSearchResult["bugs"][number] {
+  overrides: Partial<JarvisPreviewBug> = {},
+): JarvisPreviewBug {
   return {
     id,
-    projectId,
-    projectName,
     title,
     status: 1,
     priority: 3,
@@ -401,161 +415,107 @@ function previewBug(
   };
 }
 
-const jarvisPreviewResults: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [
-    { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    { key: "status:1", kind: "status", label: "未解决" },
-  ],
-  bugs: [
-    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：列表页加载失败", {
-      priority: 1,
-      severity: 2,
-      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
-    }),
-    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：筛选条件未生效", {
-      priority: 3,
-      severity: 3,
-      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
-    }),
-    previewBug(9104, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
-      priority: 2,
-      severity: 1,
-      updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
-    }),
-    previewBug(9105, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
-      priority: 3,
-      severity: 2,
-      updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
-    }),
-  ],
-  total: 4,
-  capped: false,
-};
+const jarvisPreviewProjects = [
+  "示例后台 · 迭代 B",
+  "示例商城 · 迭代 A",
+  "管货迭代 2026-09-15",
+  "管货迭代 2026-09-01",
+  "加盟商竞拍单 支持发起帮鉴定",
+  "爱回收香港门店支持邮寄",
+  "平台交易拍品打通直播拍品",
+  "管货迭代 2026-06-09",
+];
 
-const jarvisPreviewSingleBug: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [{ key: "status:1", kind: "status", label: "未解决" }],
-  bugs: [previewBug(9301, 9001, "示例后台 · 迭代 B", "示例：列表页加载失败", { priority: 1 })],
-  total: 1,
-  capped: false,
-};
+const jarvisPreviewVisibleProjects = [
+  "寄售图文议价订单自动发货",
+  "回收商商品发货接入顺店通",
+  "发货流程调整发货后出库",
+  "发货单详情 增加打印质检报告",
+];
 
-const jarvisPreviewMany: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [
-    { key: "status:1", kind: "status", label: "未解决" },
-    { key: "order:newest", kind: "order", label: "最新" },
-  ],
-  bugs: Array.from({ length: 14 }, (_, index) =>
-    previewBug(
-      9400 + index,
-      9001 + (index % 3),
-      `示例项目 ${(index % 3) + 1}`,
-      `示例：第 ${index + 1} 条待处理 Bug`,
-      {
-        // The active condition is 「未解决」; every fixture row must match it.
-        status: 1,
-        priority: (index % 3) + 1,
-        severity: (index % 4) + 1,
-        updatedAt: new Date(Date.now() - index * 40 * 60_000).toISOString(),
-      },
-    ),
-  ),
-  total: 14,
-  capped: false,
-};
+const jarvisPreviewTitles: JarvisPreviewBug[] = [
+  previewBug(9101, "示例：发货单列表筛选类型未生效", { priority: 1, severity: 2 }),
+  previewBug(9102, "示例：买家单平台发货类型错误", {
+    updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+  }),
+  previewBug(9103, "示例：发货后出库状态未同步", {
+    status: 2,
+    priority: 2,
+    severity: 1,
+    updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+  }),
+  previewBug(9104, "示例：批量发货缺少面单图片", {
+    priority: 3,
+    severity: 3,
+    updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+  }),
+];
 
-const jarvisPreviewProjectRecent: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [
-    { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    { key: "project:示例买", kind: "project", label: "示例买 ×2 个项目" },
-    { key: "order:newest", kind: "order", label: "最新" },
-  ],
-  bugs: [
-    previewBug(9201, 9003, "示例买 · 消息通知", "示例：消息通知未送达", {
-      priority: 2,
-      severity: 1,
-      updatedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
-    }),
-    previewBug(9202, 9004, "示例买 · 标记迭代", "示例：列表标记未显示", {
-      status: 2,
-      priority: 3,
-      severity: 2,
-      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
-    }),
-    previewBug(9203, 9003, "示例买 · 消息通知", "示例：通知开关无效", {
-      priority: 3,
-      severity: 3,
-      updatedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
-    }),
-    previewBug(9204, 9004, "示例买 · 标记迭代", "示例：标记颜色错误", {
-      priority: 3,
-      severity: 3,
-      updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
-    }),
-  ],
-  total: 4,
-  capped: false,
-};
+const jarvisPreviewParsedConditions: JarvisBugCondition[] = [
+  { key: "scope:assigned", kind: "scope", label: "指派给我" },
+  { key: "status:1", kind: "status", label: "未解决" },
+  { key: "priority:1", kind: "priority", label: "高优先级" },
+  { key: "title", kind: "title", label: "标题含「发货」" },
+];
 
-const jarvisPreviewConditions: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [
-    { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    { key: "status:1", kind: "status", label: "未解决" },
-    { key: "severity:2", kind: "severity", label: "严重" },
-    { key: "title", kind: "title", label: "标题含「登录」" },
-  ],
-  bugs: [
-    previewBug(9101, 9001, "示例后台 · 迭代 B", "示例：登录后无法进入工作台", {
-      severity: 2,
-    }),
-    previewBug(9103, 9002, "示例商城 · 迭代 A", "示例：验证码不显示", {
-      severity: 2,
-      updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
-    }),
-  ],
-  total: 2,
-  capped: false,
-};
+interface JarvisTwoStepOptions {
+  step: "project" | "bug";
+  /** First-step cache and background revalidation payload. */
+  projects?: string[];
+  projectsPending?: boolean;
+  projectsError?: string;
+  /** Type this into the project search field. */
+  projectQuery?: string;
+  /** Seed the short-lived project cache before opening the panel. */
+  seedCache?: string[];
+  /** Leave the cache empty so the first step must ask the Host. */
+  skipCache?: boolean;
+  /** Seed the remembered project; opens directly in the bug step. */
+  seedLastProject?: string;
+  /** Bug-step preview payload. */
+  preview?: {
+    titles?: string[];
+    pending?: boolean;
+    errorCode?: string;
+    delayMs?: number;
+  };
+  /** Bug-step parse payload, triggered by Enter. */
+  parse?: { titles: string[]; conditions: JarvisBugCondition[] } | "fail" | "pending";
+  /** Type this into the bug search field before the capture. */
+  bugQuery?: string;
+  pressEnter?: boolean;
+  /** Click this condition chip after the parse is shown. */
+  removeChip?: string;
+  ready?: (step: HTMLElement) => boolean;
+}
 
-const jarvisPreviewEmpty: JarvisBugSearchResult = {
-  available: true,
-  errorCode: null,
-  conditions: [
-    { key: "scope:assigned", kind: "scope", label: "指派给我" },
-    { key: "status:3", kind: "status", label: "已关闭" },
-    { key: "severity:2", kind: "severity", label: "严重" },
-  ],
-  bugs: [],
-  total: 0,
-  capped: false,
-};
+function jarvisResult(
+  titles: readonly string[] | undefined,
+  conditions: JarvisBugCondition[] = [],
+): JarvisBugSearchResult {
+  const bugs = (titles ?? jarvisPreviewTitles.map((bug) => bug.title)).map((title, index) => {
+    const fixture = jarvisPreviewTitles.find((bug) => bug.title === title);
+    return {
+      id: fixture?.id ?? 9200 + index,
+      projectId: 9001,
+      title,
+      status: fixture?.status ?? 1,
+      priority: fixture?.priority ?? 3,
+      severity: fixture?.severity ?? 3,
+      updatedAt: fixture?.updatedAt ?? new Date(Date.now() - index * 40 * 60_000).toISOString(),
+    };
+  });
+  return {
+    available: true,
+    errorCode: null,
+    conditions,
+    bugs,
+    total: bugs.length,
+    capped: false,
+  };
+}
 
-const jarvisPreviewError: JarvisBugSearchResult = {
-  available: false,
-  errorCode: "not_logged_in",
-  conditions: [],
-  bugs: [],
-  total: 0,
-  capped: false,
-};
-
-async function mountJarvisSearch(
-  preview: JarvisPreviewResult,
-  query: string,
-  clickEntry = true,
-  ready?: (mode: HTMLElement) => boolean,
-  initialText = "@",
-  prefill?: string,
-): Promise<void> {
+async function mountJarvisTwoStep(options: JarvisTwoStepOptions): Promise<void> {
   await loadDesktopCss();
   const stage = mountStage(`
     <main class="preview-canvas preview-canvas--composer">
@@ -566,13 +526,38 @@ async function mountJarvisSearch(
   const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
   const card = stage.querySelector<HTMLElement>("[data-composer-body]");
   if (!editor || !card) throw new Error("Composer preview is missing");
-  editor.textContent = initialText;
+  editor.textContent = "@";
   const menu = nativeAtMenu();
   card.append(menu);
   pinAtMenu(card, menu);
-  const previewWindow = window as Window & { __jarvisPreviewSearchCalls?: number };
-  previewWindow.__jarvisPreviewSearchCalls = 0;
-  const control = installRendererJarvisMention(document, {
+
+  localStorage.removeItem("codexhost.jarvis.projects.v1.local");
+  localStorage.removeItem("codexhost.jarvis.last-project.v1.local.10058");
+  const cache = options.seedCache ?? options.projects ?? jarvisPreviewProjects;
+  if (!options.skipCache) {
+    localStorage.setItem(
+      "codexhost.jarvis.projects.v1.local",
+      JSON.stringify({
+        userId: 10058,
+        savedAt: Date.now(),
+        projects: cache.map((name, index) => ({ id: 9001 + index, name })),
+      }),
+    );
+  }
+  if (options.seedLastProject) {
+    localStorage.setItem(
+      "codexhost.jarvis.last-project.v1.local.10058",
+      JSON.stringify({
+        savedAt: Date.now(),
+        project: {
+          id: 9001 + cache.indexOf(options.seedLastProject),
+          name: options.seedLastProject,
+        },
+      }),
+    );
+  }
+
+  installRendererJarvisMention(document, {
     isComposerEditor: (element) => element === editor,
     readHostId: () => "local",
     readLocale: () => locale,
@@ -580,32 +565,73 @@ async function mountJarvisSearch(
     openSettings: () => {
       document.body.dataset.jarvisSettingsOpened = "true";
     },
-    search: async (_hostId, params, signal) => {
-      document.body.dataset.jarvisLastQuery = params.query;
-      previewWindow.__jarvisPreviewSearchCalls =
-        (previewWindow.__jarvisPreviewSearchCalls ?? 0) + 1;
-      const result = {
-        ...preview.result,
-        conditions: preview.result.conditions.filter(
-          (condition) => !params.omit?.includes(condition.key),
-        ),
+    listProjects: async (_hostId, params) => {
+      if (options.projectsPending) return new Promise(() => undefined);
+      await delay(120);
+      if (options.projectsError) {
+        return {
+          available: false,
+          errorCode: options.projectsError,
+          projects: [],
+          complete: false,
+          userId: null,
+        };
+      }
+      const names = params.query
+        ? (options.projects ?? jarvisPreviewVisibleProjects).filter((name) =>
+            name.includes(params.query ?? ""),
+          )
+        : (options.projects ?? jarvisPreviewProjects);
+      return {
+        available: true,
+        errorCode: null,
+        projects: names.map((name, index) => ({ id: 9001 + index, name })),
+        complete: true,
+        userId: 10058,
       };
-      signal?.addEventListener(
-        "abort",
-        () => {
-          document.body.dataset.jarvisCancelled = String(
-            Number(document.body.dataset.jarvisCancelled ?? 0) + 1,
-          );
-        },
-        { once: true },
+    },
+    previewProjectBugTitle: async (_hostId, params) => {
+      if (options.preview?.pending) return new Promise(() => undefined);
+      await delay(options.preview?.delayMs ?? 100);
+      if (options.preview?.errorCode) {
+        return {
+          available: false,
+          errorCode: options.preview.errorCode,
+          conditions: [],
+          bugs: [],
+          total: 0,
+          capped: false,
+        };
+      }
+      const titles = options.preview?.titles ?? jarvisPreviewTitles.map((bug) => bug.title);
+      const trimmed = params.title.trim();
+      const matched = trimmed ? titles.filter((title) => title.includes(trimmed)) : titles;
+      return jarvisResult(matched, []);
+    },
+    searchProjectBugs: async (_hostId, params) => {
+      if (options.parse === "pending") return new Promise(() => undefined);
+      await delay(140);
+      if (options.parse === "fail") {
+        return {
+          available: false,
+          errorCode: "timeout",
+          conditions: [],
+          bugs: [],
+          total: 0,
+          capped: false,
+        };
+      }
+      const parsed = options.parse ?? {
+        titles: jarvisPreviewTitles.map((bug) => bug.title),
+        conditions: jarvisPreviewParsedConditions,
+      };
+      const conditions = parsed.conditions.filter(
+        (condition) => !params.omit?.includes(condition.key),
       );
-      if (preview.pending) return new Promise(() => undefined);
-      return await new Promise((resolve) => {
-        setTimeout(() => resolve(result), preview.delayMs ?? 80);
-      });
+      return jarvisResult(parsed.titles, conditions);
     },
   });
-  control.refresh();
+
   editor.focus();
   const text = editor.firstChild;
   if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
@@ -616,43 +642,135 @@ async function mountJarvisSearch(
   selection?.removeAllRanges();
   selection?.addRange(range);
   document.dispatchEvent(new Event("selectionchange"));
+
   const row = await waitFor(() =>
     document.querySelector<HTMLElement>("[data-codexhost-jarvis-entry-row]"),
   );
-  if (!clickEntry) {
-    await delay(80);
-    return;
-  }
   await previewClick(row);
-  const mode = await waitFor(() =>
-    document.querySelector<HTMLElement>("[data-codexhost-jarvis-mode]"),
+  const panelStep = await waitFor(() =>
+    document.querySelector<HTMLElement>("[data-codexhost-jarvis-step]"),
   );
-  const input = mode.querySelector<HTMLInputElement>("input");
-  if (!input) throw new Error("Jarvis search field is missing");
-  if (prefill !== undefined) {
-    await waitFor(() => input.value === prefill);
-    document.body.dataset.jarvisPrefill = input.value;
-    document.body.dataset.jarvisEditorText = editor.textContent ?? "";
-    document.body.dataset.jarvisSearchCalls = String(previewWindow.__jarvisPreviewSearchCalls ?? 0);
+  if (options.step === "bug" || options.seedLastProject) {
+    const bugStep = await waitFor(() =>
+      document.querySelector<HTMLElement>("[data-codexhost-jarvis-step='bug']"),
+    );
+    if (options.bugQuery) {
+      const input = bugStep.querySelector<HTMLInputElement>("input");
+      if (!input) throw new Error("Bug search field is missing");
+      await previewType(input, options.bugQuery);
+      await delay(420);
+    }
+    if (options.pressEnter) {
+      const input = bugStep.querySelector<HTMLInputElement>("input");
+      if (!input) throw new Error("Bug search field is missing");
+      await previewKey(input, "Enter");
+    }
+    if (options.removeChip) {
+      const chip = await waitFor(() =>
+        bugStep.querySelector<HTMLElement>(`[data-jarvis-chip='${options.removeChip}']`),
+      );
+      await previewClick(chip);
+    }
     await waitFor(
       () =>
-        (ready?.(mode) ?? Boolean(mode.querySelector("[data-codexhost-jarvis-bug]"))) ? mode : null,
+        (options.ready?.(bugStep) ??
+        Boolean(bugStep.querySelector("[data-codexhost-jarvis-bug]")) ??
+        true)
+          ? bugStep
+          : null,
+      4_000,
+    );
+    await delay(150);
+    return;
+  }
+  if (options.projectsPending || options.projectsError) {
+    await waitFor(
+      () =>
+        (
+          options.projectsError
+            ? panelStep.textContent?.includes("未登录 Jarvis")
+            : panelStep.querySelector("[data-codexhost-jarvis-skeleton]") !== null
+        )
+          ? panelStep
+          : null,
       4_000,
     );
     await delay(120);
     return;
   }
-  await previewType(input, query);
-  if (preview.pending) {
-    await waitFor(() => mode.getAttribute("aria-busy") === "true");
-  } else {
-    await waitFor(
-      () =>
-        (ready?.(mode) ?? Boolean(mode.querySelector("[data-codexhost-jarvis-bug]"))) ? mode : null,
-      4_000,
-    );
+  if (options.projectQuery) {
+    const input = panelStep.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("Project search field is missing");
+    await previewType(input, options.projectQuery);
+    await delay(420);
   }
-  await delay(120);
+  await waitFor(
+    () =>
+      (options.ready?.(panelStep) ??
+      Boolean(panelStep.querySelector("[data-codexhost-jarvis-project]")))
+        ? panelStep
+        : null,
+    4_000,
+  );
+  await delay(150);
+}
+
+async function mountJarvisEntryOnly(withQuery: boolean): Promise<void> {
+  await loadDesktopCss();
+  const stage = mountStage(`
+    <main class="preview-canvas preview-canvas--composer">
+      <div class="preview-composer-card" data-composer-body>
+        <div class="preview-composer-editor" contenteditable="true">@</div>
+      </div>
+    </main>`);
+  const editor = stage.querySelector<HTMLElement>(".preview-composer-editor");
+  const card = stage.querySelector<HTMLElement>("[data-composer-body]");
+  if (!editor || !card) throw new Error("Composer preview is missing");
+  editor.textContent = withQuery ? "@我还没处理完的bug" : "@";
+  const menu = nativeAtMenu();
+  card.append(menu);
+  pinAtMenu(card, menu);
+  installRendererJarvisMention(document, {
+    isComposerEditor: (element) => element === editor,
+    readHostId: () => "local",
+    readLocale: () => locale,
+    anchorForEditor: () => card,
+    listProjects: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      projects: [],
+      complete: false,
+      userId: null,
+    }),
+    previewProjectBugTitle: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    }),
+    searchProjectBugs: async () => ({
+      available: false,
+      errorCode: "jarvis_failed",
+      conditions: [],
+      bugs: [],
+      total: 0,
+      capped: false,
+    }),
+  });
+  editor.focus();
+  const text = editor.firstChild;
+  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("Editor text is missing");
+  const range = document.createRange();
+  range.setStart(text, text.textContent?.length ?? 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  document.dispatchEvent(new Event("selectionchange"));
+  await waitFor(() => document.querySelector("[data-codexhost-jarvis-entry-row]"), 4_000);
+  await delay(80);
 }
 
 async function mountUnreadScenario(): Promise<void> {
@@ -1386,65 +1504,150 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 
   async "jarvis-entry"() {
-    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "", false);
+    await mountJarvisEntryOnly(false);
   },
 
   async "jarvis-entry-query"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewResults, pending: true },
-      "",
-      false,
-      undefined,
-      "@我还没处理完的bug",
+    await mountJarvisEntryOnly(true);
+  },
+
+  async "jarvis-projects"() {
+    await mountJarvisTwoStep({ step: "project", seedCache: jarvisPreviewProjects });
+  },
+
+  async "jarvis-projects-search"() {
+    await mountJarvisTwoStep({
+      step: "project",
+      projectQuery: "发货",
+      projects: jarvisPreviewVisibleProjects,
+    });
+  },
+
+  async "jarvis-projects-loading"() {
+    await mountJarvisTwoStep({
+      step: "project",
+      projectsPending: true,
+      skipCache: true,
+    });
+  },
+
+  async "jarvis-projects-empty"() {
+    await mountJarvisTwoStep({
+      step: "project",
+      projectQuery: "不存在",
+      projects: [],
+      ready: (step) => step.textContent?.includes("无结果") === true,
+    });
+  },
+
+  async "jarvis-projects-error"() {
+    await mountJarvisTwoStep({
+      step: "project",
+      projectsError: "not_logged_in",
+      skipCache: true,
+    });
+  },
+
+  async "jarvis-bugs-preview"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      bugQuery: "发货",
+      preview: { titles: jarvisPreviewTitles.map((bug) => bug.title) },
+    });
+  },
+
+  async "jarvis-bugs-conditions"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      bugQuery: "发货",
+      pressEnter: true,
+      preview: { titles: jarvisPreviewTitles.map((bug) => bug.title) },
+      parse: {
+        titles: jarvisPreviewTitles.slice(0, 2).map((bug) => bug.title),
+        conditions: jarvisPreviewParsedConditions,
+      },
+      ready: (step) => step.querySelectorAll("[data-jarvis-chip]").length >= 4,
+    });
+  },
+
+  async "jarvis-bugs-unparsed"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      bugQuery: "发货",
+      pressEnter: true,
+      preview: { titles: jarvisPreviewTitles.map((bug) => bug.title) },
+      parse: "fail",
+      ready: (step) => step.textContent?.includes("条件未识别，已按标题搜索") === true,
+    });
+  },
+
+  async "jarvis-bugs-empty"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      preview: { titles: [] },
+      ready: (step) => step.textContent?.includes("无结果") === true,
+    });
+  },
+
+  async "jarvis-bugs-error"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      preview: { errorCode: "not_logged_in" },
+      ready: (step) => step.textContent?.includes("未登录 Jarvis") === true,
+    });
+  },
+
+  async "jarvis-bugs-loading"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      preview: { pending: true },
+      ready: () => true,
+    });
+  },
+
+  async "jarvis-bugs-many"() {
+    const titles = Array.from(
+      { length: 14 },
+      (_, index) => `示例：第 ${index + 1} 条待处理的发货 Bug`,
     );
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      preview: { titles },
+      ready: (step) => step.querySelectorAll("[data-codexhost-jarvis-bug]").length >= 14,
+    });
   },
 
-  async "jarvis-mode-prefilled"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewProjectRecent, delayMs: 120 },
-      "",
-      true,
-      undefined,
-      "@示例买的最近的bug",
-      "示例买的最近的bug",
-    );
-  },
-
-  async "jarvis-mode-detached"() {
-    await mountJarvisSearch({ result: jarvisPreviewResults, delayMs: 120 }, "我还没处理完成的bug");
-    document.querySelector<HTMLInputElement>("[data-codexhost-jarvis-mode] input")?.focus();
-    document.querySelector(".preview-at-menu")?.remove();
-    await waitFor(() => document.querySelector("[data-codexhost-jarvis-detached]"), 4_000);
-    await delay(120);
-  },
-
-  async "jarvis-mode-loading"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewResults, pending: true },
-      "我还没处理的，标题有发货的",
-    );
-  },
-
-  async "jarvis-mode-results"() {
-    await mountJarvisSearch({ result: jarvisPreviewResults, delayMs: 120 }, "我还没处理完成的bug");
-  },
-
-  async "jarvis-mode-empty"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewEmpty, delayMs: 80 },
-      "已关闭的严重bug",
-      true,
-      (mode) => mode.textContent?.includes("没有符合条件的 Bug") === true,
-    );
-  },
-
-  async "jarvis-mode-error"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewError, delayMs: 80 },
-      "我还没处理完的bug",
-      true,
-      (mode) => mode.textContent?.includes("Jarvis 未安装或未登录") === true,
-    );
+  async "jarvis-bugs-chip-removed"() {
+    await mountJarvisTwoStep({
+      step: "bug",
+      seedCache: jarvisPreviewProjects,
+      seedLastProject: "示例后台 · 迭代 B",
+      bugQuery: "发货",
+      pressEnter: true,
+      preview: { titles: jarvisPreviewTitles.map((bug) => bug.title) },
+      parse: {
+        titles: jarvisPreviewTitles.slice(0, 2).map((bug) => bug.title),
+        conditions: jarvisPreviewParsedConditions,
+      },
+      removeChip: "status:1",
+      ready: (step) =>
+        step.querySelectorAll("[data-jarvis-chip]").length === 3 &&
+        step.querySelector("[data-jarvis-chip='status:1']") === null,
+    });
   },
 
   async "model-service-empty"() {
@@ -1471,57 +1674,6 @@ const scenarios: Record<string, () => Promise<void>> = {
   async "model-service-add"() {
     await mountModelSettings("add");
   },
-  async "jarvis-mode-gemini-missing-key"() {
-    await mountJarvisSearch(
-      {
-        result: { ...jarvisPreviewError, source: "gemini", errorCode: "missing_key" },
-        delayMs: 80,
-      },
-      "我还没处理的标题有发货的",
-      true,
-      (mode) =>
-        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("未配置 Gemini Key") === true,
-    );
-  },
-  async "jarvis-mode-gemini-quota"() {
-    await mountJarvisSearch(
-      {
-        result: { ...jarvisPreviewError, source: "gemini", errorCode: "quota_exhausted" },
-        delayMs: 80,
-      },
-      "我还没处理的标题有发货的",
-      true,
-      (mode) =>
-        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("Gemini 额度不足") === true,
-    );
-  },
-
-  async "jarvis-mode-gemini-timeout"() {
-    await mountJarvisSearch(
-      { result: { ...jarvisPreviewError, source: "gemini", errorCode: "timeout" }, delayMs: 80 },
-      "我还没处理的标题有发货的",
-      true,
-      (mode) =>
-        document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的" &&
-        mode.textContent?.includes("连接超时") === true,
-    );
-  },
-
-  async "jarvis-mode-slow"() {
-    await mountJarvisSearch({ result: jarvisPreviewResults, pending: true }, "我还没处理完的bug");
-    await delay(8_200);
-  },
-
-  async "jarvis-mode-single"() {
-    await mountJarvisSearch({ result: jarvisPreviewSingleBug, delayMs: 80 }, "我还没处理完的bug");
-  },
-
-  async "jarvis-mode-many"() {
-    await mountJarvisSearch({ result: jarvisPreviewMany, delayMs: 80 }, "我还没处理完的bug");
-  },
-
   async "harness-picker"() {
     const stage = mountStage(`
       <main class="preview-canvas preview-canvas--composer">
@@ -1571,29 +1723,6 @@ const scenarios: Record<string, () => Promise<void>> = {
     await previewClick(picker.trigger);
     await waitFor(() => menu.matches(":popover-open"));
     document.body.dataset.harnessPicker = String(Boolean(menu.isConnected));
-  },
-
-  async "jarvis-mode-conditions"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewConditions, delayMs: 80 },
-      "我还没处理完成的严重登录bug",
-      true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
-    );
-  },
-
-  async "jarvis-mode-chip-removed"() {
-    await mountJarvisSearch(
-      { result: jarvisPreviewConditions, delayMs: 80 },
-      "我还没处理完成的严重登录bug",
-      true,
-      (mode) => mode.querySelectorAll("[data-jarvis-chip]").length >= 4,
-    );
-    const chip = document.querySelector<HTMLElement>('[data-jarvis-chip="status:1"]');
-    if (!chip) throw new Error("Status chip is missing");
-    await previewClick(chip);
-    await waitFor(() => document.querySelector('[data-jarvis-chip="status:1"]') === null, 4_000);
-    await delay(120);
   },
 };
 

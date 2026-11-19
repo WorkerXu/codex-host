@@ -52,8 +52,9 @@ function fakeCli(rows: FakeBug[], options: { fail?: boolean } = {}): JarvisBugSe
     searchProjects: vi.fn(async (name: string) =>
       VISIBLE.filter((project) => project.name.includes(name)),
     ),
-    bugs: vi.fn(async (projectId: number, params: JarvisBugListOptions = {}) => {
-      if (options.fail) throw new Error("cli failed");
+    bugList: vi.fn(async (projectId: number, params: JarvisBugListOptions = {}) => {
+      if (options.fail)
+        return { list: [], total: 0, page: 1, pageSize: 100, errorCode: "cli_failed" };
       let filtered = rows.filter(
         (row) => row.projectId === projectId && (params.createdByMe ? row.created : row.assigned),
       );
@@ -77,7 +78,7 @@ function fakeCli(rows: FakeBug[], options: { fail?: boolean } = {}): JarvisBugSe
         createTime: row.createTime,
         updateTime: row.updateTime,
       }));
-      return { list, total: filtered.length, page, pageSize };
+      return { list, total: filtered.length, page, pageSize, errorCode: null };
     }),
   };
 }
@@ -137,7 +138,7 @@ describe("Jarvis structured bug search", () => {
     expect(cli.user).not.toHaveBeenCalled();
     expect(cli.projects).not.toHaveBeenCalled();
     expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain("prepayment");
   });
 
@@ -163,7 +164,7 @@ describe("Jarvis structured bug search", () => {
       });
       if (code === "timeout") {
         await vi.advanceTimersByTimeAsync(19_999);
-        expect(cli.bugs).not.toHaveBeenCalled();
+        expect(cli.bugList).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
       }
       expect(await pending).toEqual({
@@ -179,7 +180,7 @@ describe("Jarvis structured bug search", () => {
       expect(cli.user).not.toHaveBeenCalled();
       expect(cli.projects).not.toHaveBeenCalled();
       expect(cli.searchProjects).not.toHaveBeenCalled();
-      expect(cli.bugs).not.toHaveBeenCalled();
+      expect(cli.bugList).not.toHaveBeenCalled();
     },
   );
 
@@ -195,8 +196,8 @@ describe("Jarvis structured bug search", () => {
     const result = await api.search({ query: "我还没处理的标题有发货的" });
     expect(interpret).toHaveBeenCalledExactlyOnceWith("我还没处理的标题有发货的", NOW, undefined);
     expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(cli.bugs).toHaveBeenCalledTimes(2);
-    expect(cli.bugs).toHaveBeenCalledWith(
+    expect(cli.bugList).toHaveBeenCalledTimes(2);
+    expect(cli.bugList).toHaveBeenCalledWith(
       9002,
       expect.objectContaining({ createdByMe: false, statuses: [1], title: "发货" }),
     );
@@ -275,10 +276,10 @@ describe("Jarvis structured bug search", () => {
     }).api.search({ query: "我相关的登录或支付bug" });
     expect(result.bugs.map(({ id }) => id).sort()).toEqual([30, 31, 32]);
     expect(result.total).toBe(3);
-    expect(cli.bugs).toHaveBeenCalledTimes(8);
-    expect(cli.bugs).toHaveBeenCalledWith(9002, expect.objectContaining({ title: "登录" }));
-    expect(cli.bugs).toHaveBeenCalledWith(9002, expect.objectContaining({ title: "支付" }));
-    expect(cli.bugs).not.toHaveBeenCalledWith(
+    expect(cli.bugList).toHaveBeenCalledTimes(8);
+    expect(cli.bugList).toHaveBeenCalledWith(9002, expect.objectContaining({ title: "登录" }));
+    expect(cli.bugList).toHaveBeenCalledWith(9002, expect.objectContaining({ title: "支付" }));
+    expect(cli.bugList).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ title: "登录 支付" }),
     );
@@ -332,7 +333,7 @@ describe("Jarvis structured bug search", () => {
     }).api.search({ query: "上周我提的跟登录有关的严重问题" });
     expect(result.bugs.map(({ id }) => id)).toEqual([40]);
     expect(result.conditions.find(({ kind }) => kind === "time")?.label).toContain("11/09");
-    expect(cli.bugs).toHaveBeenCalledWith(
+    expect(cli.bugList).toHaveBeenCalledWith(
       9002,
       expect.objectContaining({ createdByMe: true, title: "登录" }),
     );
@@ -356,7 +357,7 @@ describe("Jarvis structured bug search", () => {
       titleKeywords: ["登录"],
     }).api.search({ query: "不存在的项目的登录bug" });
     expect(cli.searchProjects).toHaveBeenCalledExactlyOnceWith("不存在的项目");
-    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
     expect(result.total).toBe(0);
     expect(result.conditions).toContainEqual({
       key: "project:不存在的项目",
@@ -383,7 +384,7 @@ describe("Jarvis structured bug search", () => {
       kind: "project",
       label: "安心买 ×4 个项目",
     });
-    expect(cli.bugs).toHaveBeenCalledTimes(4);
+    expect(cli.bugList).toHaveBeenCalledTimes(4);
   });
 
   it("caches project lookups and de-duplicates repeated project names", async () => {
@@ -441,7 +442,7 @@ describe("Jarvis structured bug search", () => {
     expect(cli.user).not.toHaveBeenCalled();
     expect(cli.projects).not.toHaveBeenCalled();
     expect(cli.searchProjects).not.toHaveBeenCalled();
-    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
   });
 
   it("surfaces unrecognized text instead of silently dropping it", async () => {
@@ -449,7 +450,7 @@ describe("Jarvis structured bug search", () => {
     expect(
       await searcher(cli, { unrecognized: "不明条件" }).api.search({ query: "不明条件的bug" }),
     ).toMatchObject({ available: false, errorCode: "unrecognized_query" });
-    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
   });
 
   it("does not invoke the model on a remote Host", async () => {
@@ -461,7 +462,7 @@ describe("Jarvis structured bug search", () => {
       errorCode: "local_only",
     });
     expect(interpret).not.toHaveBeenCalled();
-    expect(cli.bugs).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
   });
 
   it("reports missing authentication and CLI failure", async () => {
@@ -474,5 +475,115 @@ describe("Jarvis structured bug search", () => {
       available: false,
       errorCode: "not_logged_in",
     });
+  });
+});
+
+describe("Jarvis fixed-project search", () => {
+  it("searches only the chosen project and never resolves projects", async () => {
+    const cli = fakeCli([
+      bug({ id: 81, projectId: 9001, bugTitle: "发货按钮无效", status: 1, created: true }),
+      bug({ id: 82, projectId: 9002, bugTitle: "发货按钮无效", status: 1, created: true }),
+    ]);
+    const { api, interpret } = searcher(cli, {
+      scope: "created",
+      statuses: [1],
+      titleKeywords: ["发货"],
+      // The project comes from step 1; names in the parse must be ignored.
+      projectNames: ["另一个项目"],
+    });
+    const result = await api.searchInProject({ projectId: 9001, query: "我创建的发货bug" });
+    expect(result).toMatchObject({
+      available: true,
+      errorCode: null,
+      conditions: [
+        { key: "scope:created", kind: "scope", label: "我创建的" },
+        { key: "status:1", kind: "status", label: "未解决" },
+        { key: "order:newest", kind: "order", label: "最新" },
+        { key: "title", kind: "title" },
+      ],
+      bugs: [{ id: 81, projectId: 9001 }],
+      total: 1,
+    });
+    expect(interpret).toHaveBeenCalledOnce();
+    expect(cli.projects).not.toHaveBeenCalled();
+    expect(cli.searchProjects).not.toHaveBeenCalled();
+    expect(cli.bugList).toHaveBeenCalledOnce();
+    expect(cli.bugList).toHaveBeenCalledWith(
+      9001,
+      expect.objectContaining({ createdByMe: true, statuses: [1], title: "发货" }),
+    );
+  });
+
+  it("removes a condition chip through omit without touching projects", async () => {
+    const cli = fakeCli([bug({ id: 81, projectId: 9001, bugTitle: "发货失败" })]);
+    const { api, interpret } = searcher(cli, {
+      statuses: [3],
+      titleKeywords: ["发货"],
+    });
+    const result = await api.searchInProject({
+      projectId: 9001,
+      query: "已关闭的发货bug",
+      omit: ["status:3"],
+    });
+    expect(result.conditions).toEqual([
+      { key: "scope:assigned", kind: "scope", label: "指派给我" },
+      { key: "order:newest", kind: "order", label: "最新" },
+      { key: "title", kind: "title", label: expect.stringContaining("发货") },
+    ]);
+    expect(result.bugs).toHaveLength(1);
+    expect(interpret).toHaveBeenCalledWith("已关闭的发货bug", NOW, undefined);
+    expect(cli.searchProjects).not.toHaveBeenCalled();
+  });
+
+  it("previews the raw text as a title in one call", async () => {
+    const cli = fakeCli([
+      bug({ id: 81, projectId: 9001, bugTitle: "发货按钮无效" }),
+      bug({ id: 82, projectId: 9001, bugTitle: "登录失败" }),
+    ]);
+    const { api, interpret } = searcher(cli);
+    const result = await api.previewTitle(9001, "发货");
+    expect(result).toMatchObject({
+      available: true,
+      errorCode: null,
+      conditions: [],
+      bugs: [{ id: 81 }],
+      total: 1,
+    });
+    expect(interpret).not.toHaveBeenCalled();
+    expect(cli.projects).not.toHaveBeenCalled();
+    expect(cli.searchProjects).not.toHaveBeenCalled();
+    expect(cli.bugList).toHaveBeenCalledOnce();
+    expect(cli.bugList).toHaveBeenCalledWith(
+      9001,
+      expect.objectContaining({ createdByMe: false, title: "发货", page: 1 }),
+    );
+  });
+
+  it("keeps the CLI error so the panel can say 未登录 Jarvis", async () => {
+    const cli = fakeCli([]);
+    vi.mocked(cli.bugList).mockResolvedValue({
+      list: [],
+      total: 0,
+      page: 1,
+      pageSize: 100,
+      errorCode: "not_logged_in",
+    });
+    const { api } = searcher(cli);
+    expect(await api.previewTitle(9001, "发货")).toMatchObject({
+      available: false,
+      errorCode: "not_logged_in",
+    });
+  });
+
+  it("does not call the model or CLI on a remote Host", async () => {
+    const cli = fakeCli([]);
+    const interpret = vi.fn();
+    const api = new JarvisBugSearcher({ cli, interpreter: { interpret }, isLocalHost: false });
+    expect(await api.searchInProject({ projectId: 9001, query: "bug" })).toMatchObject({
+      errorCode: "local_only",
+    });
+    expect(await api.previewTitle(9001, "发货")).toMatchObject({ errorCode: "local_only" });
+    expect(interpret).not.toHaveBeenCalled();
+    expect(cli.bugList).not.toHaveBeenCalled();
   });
 });

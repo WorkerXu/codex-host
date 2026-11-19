@@ -7,6 +7,7 @@ import {
   jarvisCodeFromError,
   jarvisSearchShouldFallback,
   jarvisErrorText,
+  jarvisStepErrorText,
 } from "../src/renderer-jarvis-client.js";
 import {
   findJarvisTrigger,
@@ -175,6 +176,75 @@ describe("Renderer Jarvis client", () => {
       errorCode: "jarvis_failed",
       bugs: [],
     });
+  });
+
+  it("sends the fixed-project title preview without a model request", async () => {
+    const sendRequest = vi.fn(async () => ({ ...result, conditions: [] }));
+    const client = createRendererJarvisClient({
+      forHost: (hostId) => ({ hostId, manager: { sendRequest } }),
+    });
+    expect(
+      await client.previewProjectBugTitle("local", { projectId: 9001, title: "发货" }),
+    ).toEqual({ ...result, conditions: [] });
+    expect(sendRequest).toHaveBeenCalledWith(
+      "codexhost/jarvis/project/bug/title",
+      { projectId: 9001, title: "发货" },
+      expect.any(Object),
+    );
+  });
+
+  it("cancels a slow fixed-project parse and ignores an aborted request", async () => {
+    let finish!: (value: unknown) => void;
+    const sendRequest = vi.fn((method: string) =>
+      method.endsWith("/cancel")
+        ? Promise.resolve({})
+        : new Promise((resolve) => {
+            finish = resolve;
+          }),
+    );
+    const client = createRendererJarvisClient({
+      forHost: (hostId) => ({ hostId, manager: { sendRequest } }),
+    });
+    const controller = new AbortController();
+    const pending = client.searchProjectBugs(
+      "local",
+      { projectId: 9001, query: "未解决的bug" },
+      controller.signal,
+    );
+    const params = (sendRequest.mock.calls as unknown as [string, { requestId: string }][])[0]?.[1];
+    expect(sendRequest).toHaveBeenCalledWith(
+      "codexhost/jarvis/project/bug/search",
+      expect.objectContaining({
+        projectId: 9001,
+        query: "未解决的bug",
+        requestId: params?.requestId,
+      }),
+      expect.any(Object),
+    );
+    controller.abort();
+    expect(sendRequest).toHaveBeenLastCalledWith(
+      "codexhost/jarvis/bug/search/cancel",
+      params && { requestId: params.requestId },
+      expect.any(Object),
+    );
+    finish({ ...result, errorCode: "cancelled", available: false });
+    await pending;
+    expect(
+      await client.searchProjectBugs(
+        "local",
+        { projectId: 9001, query: "已取消" },
+        controller.signal,
+      ),
+    ).toMatchObject({ available: false, errorCode: "jarvis_failed" });
+  });
+
+  it("localizes the two-step errors without provider wording", () => {
+    expect(jarvisStepErrorText("not_logged_in", "zh-CN")).toBe("未登录 Jarvis");
+    expect(jarvisStepErrorText("not_installed", "zh-CN")).toBe("未安装 Jarvis");
+    expect(jarvisStepErrorText("timeout", "zh-CN")).toBe("网络失败，请稍后重试");
+    expect(jarvisStepErrorText("cli_failed", "zh-CN")).toBe("网络失败，请稍后重试");
+    expect(jarvisStepErrorText("unknown", "zh-CN")).toBe("Jarvis 请求失败，请稍后重试");
+    expect(jarvisStepErrorText("not_logged_in", "en")).toBe("Not signed in to Jarvis");
   });
 
   it("keeps settings local and reports hasKey without exposing the key", async () => {

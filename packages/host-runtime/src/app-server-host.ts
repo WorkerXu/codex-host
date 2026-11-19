@@ -36,7 +36,13 @@ import {
   JARVIS_STATUS_METHOD,
   JARVIS_BUG_SEARCH_METHOD,
   JARVIS_BUG_SEARCH_CANCEL_METHOD,
+  JARVIS_PROJECT_LIST_METHOD,
+  JARVIS_PROJECT_BUG_TITLE_METHOD,
+  JARVIS_PROJECT_BUG_SEARCH_METHOD,
   jarvisBugSearchCancelParamsSchema,
+  jarvisProjectListParamsSchema,
+  jarvisProjectBugTitleParamsSchema,
+  jarvisProjectBugSearchParamsSchema,
   JARVIS_SETTINGS_GET_METHOD,
   JARVIS_SETTINGS_SET_METHOD,
   JARVIS_SETTINGS_TEST_METHOD,
@@ -3956,6 +3962,27 @@ export class AppServerHost {
         throw new JarvisServiceError("invalid_params", "Invalid search cancellation");
       service.cancelSearch(parsed.data.requestId);
       return {};
+    }
+    if (request.method === JARVIS_PROJECT_LIST_METHOD) {
+      const parsed = jarvisProjectListParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis project list request");
+      }
+      return await service.listProjects(parsed.data);
+    }
+    if (request.method === JARVIS_PROJECT_BUG_TITLE_METHOD) {
+      const parsed = jarvisProjectBugTitleParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis title preview request");
+      }
+      return await service.previewProjectBugTitle(parsed.data);
+    }
+    if (request.method === JARVIS_PROJECT_BUG_SEARCH_METHOD) {
+      const parsed = jarvisProjectBugSearchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis project search request");
+      }
+      return await service.searchProjectBugs(parsed.data);
     }
     if (request.method === JARVIS_BUG_SEARCH_METHOD) {
       const parsed = jarvisBugSearchParamsSchema.safeParse(request.params);

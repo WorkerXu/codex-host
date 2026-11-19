@@ -50,16 +50,38 @@ export interface JarvisProjectRow {
   name: string;
 }
 
+export interface JarvisProjectList {
+  projects: JarvisProjectRow[];
+  /** False when the CLI truncated the visible-project search. */
+  complete: boolean;
+  errorCode: string | null;
+}
+
+export interface JarvisBugPageResult extends JarvisBugPage {
+  errorCode: string | null;
+}
+
+export interface JarvisAuthState {
+  user: JarvisUser | null;
+  errorCode: string | null;
+}
+
 export interface JarvisCli {
   executable(): Promise<string | null>;
   run(args: readonly string[], timeoutMs?: number): Promise<JarvisCommandResult>;
   status(): Promise<JarvisStatus>;
+  /** Signed-in user plus the stable reason when there is none. */
+  auth(): Promise<JarvisAuthState>;
   user(): Promise<JarvisUser | null>;
   /** Projects linked to my bugs. */
   projects(): Promise<JarvisProjectRow[]>;
   /** Visible project search used only when the query names a project. */
   searchProjects(name: string): Promise<JarvisProjectRow[]>;
+  /** One project list with the CLI's own error preserved. */
+  projectList(query?: string): Promise<JarvisProjectList>;
   bugs(projectId: number, options?: JarvisBugListOptions): Promise<JarvisBugPage>;
+  /** One bug page with the CLI's own error preserved. */
+  bugList(projectId: number, options?: JarvisBugListOptions): Promise<JarvisBugPageResult>;
   detail(mention: JarvisMention): Promise<JarvisCommandResult>;
 }
 
@@ -152,6 +174,21 @@ export function parseJarvisOutput(stdout: string, stderr: string): JarvisCommand
   };
 }
 
+/**
+ * Stable reason for one failed CLI call. `jarvis` reports a missing session as
+ * a generic `operation_failed` with a Chinese message, so the message is the
+ * only place that distinguishes it from a transport failure.
+ */
+export function jarvisCliErrorCode(result: JarvisCommandResult): string {
+  if (result.ok) return "";
+  if (result.errorCode === "not_installed" || result.errorCode === "timeout") {
+    return result.errorCode;
+  }
+  if (/尚未登录|未登录|unauthenticated/iu.test(result.errorMessage ?? "")) return "not_logged_in";
+  if (result.errorCode === "invalid_output") return "invalid_response";
+  return "cli_failed";
+}
+
 export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
   const environment = environmentOf(options);
   const spawnImpl = options.spawnImpl ?? spawn;
@@ -218,15 +255,13 @@ export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
       ? (result.data as Record<string, unknown>)
       : null;
 
-  const list = async (args: readonly string[]): Promise<Record<string, unknown>[]> => {
-    const data = dataObject(await run(args));
-    return Array.isArray(data?.list)
+  const rowsFrom = (data: Record<string, unknown> | null): Record<string, unknown>[] =>
+    Array.isArray(data?.list)
       ? data.list.filter(
           (item): item is Record<string, unknown> =>
             typeof item === "object" && item !== null && !Array.isArray(item),
         )
       : [];
-  };
 
   const projectsFrom = (rows: Record<string, unknown>[]): JarvisProjectRow[] =>
     rows.flatMap((row) =>
@@ -238,6 +273,75 @@ export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
         ? [{ id: row.id, name: row.name.trim() }]
         : [],
     );
+
+  const projectList = async (query?: string): Promise<JarvisProjectList> => {
+    const name = query?.trim();
+    const result = await run(
+      name
+        ? ["project", "list", "--scope", "visible", "--name", name, "--json"]
+        : ["project", "list", "--json"],
+    );
+    const data = dataObject(result);
+    return {
+      projects: projectsFrom(rowsFrom(data)),
+      complete: data?.complete !== false,
+      errorCode: result.ok ? null : jarvisCliErrorCode(result),
+    };
+  };
+
+  const bugList = async (
+    projectId: number,
+    bugOptions: JarvisBugListOptions = {},
+  ): Promise<JarvisBugPageResult> => {
+    const page = bugOptions.page ?? 1;
+    const pageSize = bugOptions.pageSize ?? 100;
+    const result = await run([
+      "bug",
+      "list",
+      "--project-id",
+      String(projectId),
+      ...(bugOptions.createdByMe ? ["--created-by-me"] : []),
+      ...(bugOptions.statuses && bugOptions.statuses.length > 0
+        ? ["--status", bugOptions.statuses.join(",")]
+        : []),
+      ...(bugOptions.priorities && bugOptions.priorities.length > 0
+        ? ["--priority", bugOptions.priorities.join(",")]
+        : []),
+      ...(bugOptions.title ? ["--title", bugOptions.title] : []),
+      "--page",
+      String(page),
+      "--page-size",
+      String(pageSize),
+      "--json",
+    ]);
+    const data = dataObject(result);
+    const rows = rowsFrom(data);
+    return {
+      list: rows,
+      total: typeof data?.total === "number" ? data.total : rows.length,
+      page: typeof data?.page === "number" ? data.page : page,
+      pageSize: typeof data?.pageSize === "number" ? data.pageSize : pageSize,
+      errorCode: result.ok ? null : jarvisCliErrorCode(result),
+    };
+  };
+
+  const authState = async (): Promise<JarvisAuthState> => {
+    const result = await run(["auth", "status", "--json"], 10_000);
+    const data = dataObject(result);
+    const user =
+      typeof data?.user === "object" && data.user !== null
+        ? (data.user as Record<string, unknown>)
+        : null;
+    if (data?.authenticated === true) {
+      return typeof user?.user_id === "number" && typeof user.name === "string"
+        ? { user: { id: user.user_id, name: user.name }, errorCode: null }
+        : { user: null, errorCode: "invalid_response" };
+    }
+    return {
+      user: null,
+      errorCode: result.ok ? "not_logged_in" : jarvisCliErrorCode(result),
+    };
+  };
 
   return {
     executable: resolve,
@@ -275,61 +379,24 @@ export function createJarvisCli(options: JarvisCliOptions = {}): JarvisCli {
         errorCode: version.ok ? (auth.ok ? null : "auth_failed") : "version_failed",
       });
     },
+    async auth() {
+      return await authState();
+    },
     async user() {
-      const data = dataObject(await run(["auth", "status", "--json"], 10_000));
-      if (data?.authenticated !== true) return null;
-      const user =
-        typeof data.user === "object" && data.user !== null
-          ? (data.user as Record<string, unknown>)
-          : null;
-      return typeof user?.user_id === "number" && typeof user.name === "string"
-        ? { id: user.user_id, name: user.name }
-        : null;
+      return (await authState()).user;
     },
     async projects() {
-      return projectsFrom(await list(["project", "list", "--json"]));
+      return (await projectList()).projects;
     },
     async searchProjects(name) {
-      return projectsFrom(
-        await list(["project", "list", "--scope", "visible", "--name", name, "--json"]),
-      );
+      return (await projectList(name)).projects;
     },
+    projectList,
     async bugs(projectId, bugOptions = {}) {
-      const page = bugOptions.page ?? 1;
-      const pageSize = bugOptions.pageSize ?? 100;
-      const result = await run([
-        "bug",
-        "list",
-        "--project-id",
-        String(projectId),
-        ...(bugOptions.createdByMe ? ["--created-by-me"] : []),
-        ...(bugOptions.statuses && bugOptions.statuses.length > 0
-          ? ["--status", bugOptions.statuses.join(",")]
-          : []),
-        ...(bugOptions.priorities && bugOptions.priorities.length > 0
-          ? ["--priority", bugOptions.priorities.join(",")]
-          : []),
-        ...(bugOptions.title ? ["--title", bugOptions.title] : []),
-        "--page",
-        String(page),
-        "--page-size",
-        String(pageSize),
-        "--json",
-      ]);
-      const data = dataObject(result);
-      const rows = Array.isArray(data?.list)
-        ? data.list.filter(
-            (item): item is Record<string, unknown> =>
-              typeof item === "object" && item !== null && !Array.isArray(item),
-          )
-        : [];
-      return {
-        list: rows,
-        total: typeof data?.total === "number" ? data.total : rows.length,
-        page: typeof data?.page === "number" ? data.page : page,
-        pageSize: typeof data?.pageSize === "number" ? data.pageSize : pageSize,
-      };
+      const { list, total, page, pageSize } = await bugList(projectId, bugOptions);
+      return { list, total, page, pageSize };
     },
+    bugList,
     async detail(mention) {
       const args = [
         "bug",

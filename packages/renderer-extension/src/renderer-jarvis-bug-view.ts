@@ -1,5 +1,5 @@
 /**
- * View builders for the Jarvis `@` row and its bug-search mode.
+ * View builders for the Jarvis `@` row and its bug step.
  *
  * These functions only create DOM. The controller in
  * `renderer-jarvis-mention.ts` owns state, requests, hosting and keyboard
@@ -9,38 +9,34 @@
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Bug from "lucide/dist/esm/icons/bug.mjs";
 
-import type {
-  JarvisBug,
-  JarvisBugCondition,
-  JarvisBugSearchResult,
-} from "@codexhost/shared-contracts";
+import type { JarvisBug, JarvisBugCondition, JarvisProject } from "@codexhost/shared-contracts";
 
 import {
   createWorkbenchRow,
   createWorkbenchSection,
   keepEditorFocusOnPress,
 } from "./renderer-native-at-menu.js";
-import { jarvisErrorText } from "./renderer-jarvis-client.js";
+import {
+  BORDER,
+  GREEN,
+  HOVER,
+  ORANGE,
+  ROW_MIN_HEIGHT,
+  ROW_PADDING_X,
+  RED,
+  TEXT_PRIMARY,
+  TEXT_TERTIARY,
+  jarvisResultsScroller,
+  style,
+  textSpan,
+} from "./renderer-jarvis-panel-view.js";
 import { createJarvisMark } from "./settings/jarvis-icon.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
-export const JARVIS_SECTION_ATTRIBUTE = "data-codexhost-jarvis-section";
-export const JARVIS_MODE_ATTRIBUTE = "data-codexhost-jarvis-mode";
 export const JARVIS_ENTRY_ROW_ATTRIBUTE = "data-codexhost-jarvis-entry-row";
 export const JARVIS_BUG_ROW_ATTRIBUTE = "data-codexhost-jarvis-bug";
-export const JARVIS_SKELETON_ATTRIBUTE = "data-codexhost-jarvis-skeleton";
-export const JARVIS_SEARCH_PLACEHOLDER = "搜索 Bug，如「我还没处理完成的bug」";
-
-const TEXT_PRIMARY = "var(--color-token-text-primary, #0d0d0d)";
-const TEXT_TERTIARY =
-  "var(--color-text-tertiary, var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5)))";
-const BORDER = "var(--color-token-border-default, rgba(13, 13, 13, 0.08))";
-const HOVER = "var(--color-token-interactive-bg-secondary-hover, rgba(127, 127, 127, 0.08))";
-const ORANGE = "var(--color-chart-orange, #fb6a22)";
-const GREEN = "var(--color-chart-green, #04b84c)";
-const RED = "var(--color-chart-red, #fa423e)";
-const ROW_MIN_HEIGHT = "48px";
-const ROW_PADDING_X = "12px";
+export const JARVIS_PROJECT_CHIP_ATTRIBUTE = "data-jarvis-project-chip";
+export const JARVIS_SEARCH_PLACEHOLDER = "搜索 Bug 标题";
 
 export function truncateJarvisText(value: string, limit: number): string {
   const text = value.trim().replace(/\s+/gu, " ");
@@ -119,11 +115,6 @@ export function jarvisRelativeTime(
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function style(element: HTMLElement, values: Record<string, string>): void {
-  for (const [property, value] of Object.entries(values))
-    element.style.setProperty(property, value);
-}
-
 function statusColor(status: number | undefined): string {
   if (status === 1) return ORANGE;
   if (status === 2) return GREEN;
@@ -134,23 +125,6 @@ function priorityColor(priority: number | undefined): string {
   if (priority === 1) return RED;
   if (priority === 2) return ORANGE;
   return TEXT_TERTIARY;
-}
-
-function text(
-  document: Document,
-  value: string,
-  values: Record<string, string> = {},
-): HTMLSpanElement {
-  const span = document.createElement("span");
-  span.textContent = value;
-  style(span, {
-    "min-width": "0",
-    overflow: "hidden",
-    "text-overflow": "ellipsis",
-    "white-space": "nowrap",
-    ...values,
-  });
-  return span;
 }
 
 function bugIcon(document: Document, color: string): SVGElement {
@@ -230,246 +204,83 @@ export function createJarvisEntrySection(
   return { element: section.element, row };
 }
 
-/** A removable parsed-condition chip; mousedown must not blur the search field. */
-export function createJarvisConditionChip(
-  document: Document,
-  condition: JarvisBugCondition,
-): HTMLButtonElement {
+function chipBase(document: Document): HTMLButtonElement {
   const chip = document.createElement("button");
   chip.type = "button";
-  chip.setAttribute("data-jarvis-chip", condition.key);
+  chip.setAttribute("data-jarvis-control", "true");
   style(chip, {
     display: "inline-flex",
     "align-items": "center",
     gap: "4px",
     "max-width": "100%",
-    padding: "1px 7px",
+    padding: "1px 8px",
     border: `1px solid ${BORDER}`,
     "border-radius": "999px",
     color: TEXT_TERTIARY,
     background: "transparent",
     font: "400 12px/18px system-ui, sans-serif",
     cursor: "pointer",
+    "box-sizing": "border-box",
   });
-  const label = text(document, condition.label);
-  label.style.flex = "0 1 auto";
-  const close = document.createElement("span");
-  close.textContent = "×";
-  style(close, { flex: "0 0 auto", color: TEXT_TERTIARY });
-  chip.append(label, close);
   keepEditorFocusOnPress(chip);
   return chip;
 }
 
-export interface JarvisModeChrome {
-  section: HTMLElement;
-  back: HTMLButtonElement;
-  input: HTMLInputElement;
-  clear: HTMLButtonElement;
-  chips: HTMLElement;
-  summary: HTMLElement;
-  results: HTMLElement;
-}
-
-/** Header, focused search field, chip row, summary and scrolling result area. */
-export function createJarvisModeChrome(
+/** The chosen project, removable: removing it returns to the project step. */
+export function createJarvisProjectChip(
   document: Document,
-  locale: RendererSettingsLocale,
-): JarvisModeChrome {
-  const section = document.createElement("div");
-  section.setAttribute(JARVIS_SECTION_ATTRIBUTE, "true");
-  style(section, {
-    display: "flex",
-    "flex-direction": "column",
-    width: "100%",
-    "min-height": "0",
-    "max-height": "100%",
-    flex: "1 1 auto",
+  project: Pick<JarvisProject, "id" | "name">,
+  onRemove: () => void,
+): HTMLButtonElement {
+  const chip = chipBase(document);
+  chip.setAttribute(JARVIS_PROJECT_CHIP_ATTRIBUTE, String(project.id));
+  chip.setAttribute("aria-label", `切换项目：${project.name}`);
+  style(chip, {
+    "max-width": "min(100%, 260px)",
+    background: HOVER,
     color: TEXT_PRIMARY,
-    "font-family": "system-ui, -apple-system, sans-serif",
+    border: "1px solid transparent",
+    "font-weight": "500",
   });
-
-  const header = document.createElement("div");
-  style(header, {
-    display: "flex",
-    "align-items": "center",
-    gap: "6px",
-    "flex-shrink": "0",
-    padding: "8px 12px",
-    "border-bottom": `1px solid ${BORDER}`,
-  });
-  const back = document.createElement("button");
-  back.type = "button";
-  back.setAttribute("aria-label", locale === "zh-CN" ? "返回" : "Back");
-  back.style.cssText =
-    "display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;" +
-    "border:0;border-radius:6px;background:transparent;color:inherit;font:400 18px/1 system-ui,sans-serif;" +
-    "cursor:pointer;flex:0 0 auto;padding:0";
-  back.textContent = "‹";
-  keepEditorFocusOnPress(back);
-  const mark = createJarvisMark(document, 16);
-  mark.style.flex = "0 0 auto";
-  const title = document.createElement("span");
-  title.textContent = "Jarvis";
-  style(title, { color: TEXT_PRIMARY, font: "600 13px/18px system-ui, sans-serif" });
-  const separator = document.createElement("span");
-  separator.textContent = "·";
-  style(separator, { color: TEXT_TERTIARY, font: "400 13px/18px system-ui, sans-serif" });
-  const subtitle = document.createElement("span");
-  subtitle.textContent = "Bug";
-  style(subtitle, { color: TEXT_TERTIARY, font: "400 13px/18px system-ui, sans-serif" });
-  header.append(back, mark, title, separator, subtitle);
-
-  const searchWrap = document.createElement("div");
-  style(searchWrap, {
-    position: "relative",
-    display: "flex",
-    "flex-shrink": "0",
-    padding: "8px 12px",
-  });
-  const input = document.createElement("input");
-  // A text input avoids the heavy UA clear button of `type=search`.
-  input.type = "text";
-  input.placeholder = JARVIS_SEARCH_PLACEHOLDER;
-  input.maxLength = 200;
-  input.spellcheck = false;
-  input.autocomplete = "off";
-  input.value = "";
-  style(input, {
-    width: "100%",
-    "min-width": "0",
-    height: "30px",
-    padding: "0 28px 0 8px",
-    border: `1px solid ${BORDER}`,
-    "border-radius": "6px",
-    background: "transparent",
-    color: TEXT_PRIMARY,
-    font: "400 13px/18px system-ui, sans-serif",
-    outline: "none",
-    "box-sizing": "border-box",
-  });
-  const clear = document.createElement("button");
-  clear.type = "button";
-  clear.style.display = "none";
-  clear.setAttribute("data-jarvis-clear", "true");
-  clear.setAttribute("aria-label", locale === "zh-CN" ? "清除" : "Clear");
-  clear.style.cssText =
-    "position:absolute;right:20px;top:50%;transform:translateY(-50%);" +
-    "display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;" +
-    "border:0;border-radius:4px;background:transparent;color:" +
-    TEXT_TERTIARY +
-    ";cursor:pointer;padding:0";
-  const clearIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  clearIcon.setAttribute("viewBox", "0 0 12 12");
-  clearIcon.setAttribute("width", "12");
-  clearIcon.setAttribute("height", "12");
-  clearIcon.setAttribute("fill", "none");
-  clearIcon.setAttribute("stroke", "currentColor");
-  clearIcon.setAttribute("stroke-width", "1.25");
-  clearIcon.setAttribute("stroke-linecap", "round");
-  clearIcon.setAttribute("aria-hidden", "true");
-  const clearPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  clearPath.setAttribute("d", "M3 3l6 6M9 3l-6 6");
-  clearIcon.append(clearPath);
-  clear.append(clearIcon);
-  keepEditorFocusOnPress(clear);
-  searchWrap.append(input, clear);
-
-  const chips = document.createElement("div");
-  style(chips, {
-    display: "flex",
-    "flex-wrap": "wrap",
-    gap: "4px",
-    "flex-shrink": "0",
-    padding: "0 12px 8px",
-  });
-  chips.hidden = true;
-  const summary = document.createElement("div");
-  summary.setAttribute("data-jarvis-summary", "true");
-  summary.setAttribute("role", "status");
-  style(summary, {
-    "flex-shrink": "0",
-    padding: "0 12px 6px",
+  const label = textSpan(document, project.name, { flex: "0 1 auto" });
+  const close = textSpan(document, "×", {
+    flex: "0 0 auto",
     color: TEXT_TERTIARY,
-    font: "400 12px/16px system-ui, sans-serif",
+    "font-size": "14px",
+    "line-height": "12px",
   });
-  const results = document.createElement("div");
-  style(results, {
-    display: "flex",
-    "flex-direction": "column",
-    gap: "2px",
-    flex: "1 1 auto",
-    "min-height": "0",
-    overflow: "hidden",
-    padding: "0 6px 6px",
+  chip.append(label, close);
+  chip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemove();
   });
-  // Results inside the panel are the only scrolling surface; the panel itself
-  // grows upward from the Composer and stops at the available space.
-  const scroller = document.createElement("div");
-  scroller.setAttribute("data-jarvis-results", "true");
-  style(scroller, {
-    display: "flex",
-    "flex-direction": "column",
-    gap: "2px",
-    flex: "1 1 auto",
-    "min-height": "0",
-    "overflow-y": "auto",
-    "overscroll-behavior": "contain",
-  });
-  results.append(scroller);
-
-  section.append(header, searchWrap, chips, summary, results);
-  return { section, back, input, clear, chips, summary, results };
+  return chip;
 }
 
-/** The scrollable list that owns bug rows. */
-export function jarvisResultsScroller(results: HTMLElement): HTMLElement {
-  return results.querySelector<HTMLElement>('[data-jarvis-results="true"]') ?? results;
-}
-
-/** Three placeholder rows while the Host search is running. */
-export function renderJarvisLoading(document: Document, results: HTMLElement): void {
-  const scroller = jarvisResultsScroller(results);
-  scroller.replaceChildren();
-  scroller.scrollTop = 0;
-  for (let index = 0; index < 3; index += 1) {
-    const row = document.createElement("div");
-    style(row, {
-      display: "flex",
-      "align-items": "center",
-      gap: "10px",
-      "min-height": ROW_MIN_HEIGHT,
-      padding: `6px ${ROW_PADDING_X}`,
-      "pointer-events": "none",
-    });
-    row.setAttribute(JARVIS_SKELETON_ATTRIBUTE, "true");
-    row.setAttribute("aria-hidden", "true");
-    const content = document.createElement("div");
-    style(content, {
-      display: "flex",
-      "flex-direction": "column",
-      gap: "6px",
-      width: "100%",
-    });
-    const first = document.createElement("div");
-    style(first, {
-      height: "10px",
-      width: "64%",
-      "border-radius": "4px",
-      background: HOVER,
-    });
-    const second = document.createElement("div");
-    style(second, {
-      height: "8px",
-      width: "36%",
-      "border-radius": "4px",
-      background: HOVER,
-      opacity: "0.6",
-    });
-    content.append(first, second);
-    row.append(content);
-    scroller.append(row);
-  }
+/** A parsed condition chip; removing it re-runs the parse with that `omit`. */
+export function createJarvisConditionChip(
+  document: Document,
+  condition: JarvisBugCondition,
+  onRemove: () => void,
+): HTMLButtonElement {
+  const chip = chipBase(document);
+  chip.setAttribute("data-jarvis-chip", condition.key);
+  chip.setAttribute("aria-label", `移除条件：${condition.label}`);
+  const label = textSpan(document, condition.label, { flex: "0 1 auto" });
+  const close = textSpan(document, "×", {
+    flex: "0 0 auto",
+    color: TEXT_TERTIARY,
+    "font-size": "14px",
+    "line-height": "12px",
+  });
+  chip.append(label, close);
+  chip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemove();
+  });
+  return chip;
 }
 
 export interface JarvisBugRowHandlers {
@@ -529,12 +340,12 @@ export function renderJarvisBugRows(
       "min-width": "0",
       width: "100%",
     });
-    const id = text(document, `#${bug.id}`, {
+    const id = textSpan(document, `#${bug.id}`, {
       color: TEXT_TERTIARY,
       font: "400 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace",
       "flex-shrink": "0",
     });
-    const title = text(document, bug.title, {
+    const title = textSpan(document, bug.title, {
       color: TEXT_PRIMARY,
       font: "500 13px/18px system-ui, sans-serif",
       flex: "1 1 auto",
@@ -566,11 +377,11 @@ export function renderJarvisBugRows(
         "flex-shrink": "0",
       });
       dot.setAttribute("aria-hidden", "true");
-      second.append(dot, text(document, priority));
+      second.append(dot, textSpan(document, priority));
     }
     const severity = jarvisSeverityText(bug.severity, locale);
-    if (severity) second.append(text(document, `· ${severity}`));
-    const time = text(document, jarvisRelativeTime(bug.updatedAt ?? bug.createdAt, locale), {
+    if (severity) second.append(textSpan(document, `· ${severity}`));
+    const time = textSpan(document, jarvisRelativeTime(bug.updatedAt ?? bug.createdAt, locale), {
       "margin-left": "auto",
       "flex-shrink": "0",
     });
@@ -595,54 +406,4 @@ export function renderJarvisBugRows(
     scroller.append(row);
   });
   return entries;
-}
-
-export function renderJarvisEmpty(
-  document: Document,
-  results: HTMLElement,
-  result: JarvisBugSearchResult,
-  locale: RendererSettingsLocale,
-  onSettings?: (opener: HTMLElement) => void,
-): void {
-  const failed = !result.available || result.errorCode !== null;
-  const message = failed
-    ? result.errorCode === "not_logged_in"
-      ? locale === "zh-CN"
-        ? "Jarvis 未安装或未登录"
-        : "Jarvis is not installed or signed in"
-      : jarvisErrorText(result.errorCode, locale, result.source)
-    : locale === "zh-CN"
-      ? "没有符合条件的 Bug。试试去掉一个条件或换个说法。"
-      : "No matching bugs. Try removing a condition or rephrasing.";
-  const scroller = jarvisResultsScroller(results);
-  scroller.replaceChildren();
-  scroller.scrollTop = 0;
-  const empty = document.createElement("div");
-  style(empty, {
-    padding: "10px 12px",
-    color: TEXT_TERTIARY,
-    font: "400 12px/18px system-ui, sans-serif",
-    "white-space": "normal",
-  });
-  const messageText = document.createElement("span");
-  messageText.textContent = message;
-  empty.append(messageText);
-  if (failed && onSettings) {
-    const link = document.createElement("button");
-    link.type = "button";
-    link.setAttribute("data-jarvis-settings", "true");
-    link.textContent = locale === "zh-CN" ? "去设置" : "Open settings";
-    link.style.cssText =
-      "margin-left:4px;border:0;background:transparent;color:" +
-      TEXT_PRIMARY +
-      ";font:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer;padding:0";
-    keepEditorFocusOnPress(link);
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onSettings(link);
-    });
-    empty.append(link);
-  }
-  scroller.append(empty);
 }

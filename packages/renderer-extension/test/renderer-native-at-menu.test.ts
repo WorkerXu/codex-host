@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createJarvisConditionChip,
-  createJarvisModeChrome,
-  renderJarvisEmpty,
-} from "../src/renderer-jarvis-bug-view.js";
+import { createJarvisConditionChip } from "../src/renderer-jarvis-bug-view.js";
+import { createJarvisStepChrome, renderJarvisMessage } from "../src/renderer-jarvis-panel-view.js";
 import {
   createWorkbenchRow,
   ensureWorkbenchSection,
@@ -403,59 +400,56 @@ describe("focus-safe press", () => {
 
   it("keeps focus for the Jarvis back button and condition chips", () => {
     const { document } = documentWithView();
-    const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
+    const chrome = createJarvisStepChrome(document as unknown as Document, "zh-CN", {
+      step: "bug",
+      subtitle: "Bug",
+      placeholder: "搜索标题，回车识别条件",
+      listLabel: "",
+      withChips: true,
+    });
     const backEvent = press();
     (chrome.back as unknown as FakeElement).dispatch("mousedown", backEvent);
     expect(backEvent.preventDefault).toHaveBeenCalled();
 
-    const chip = createJarvisConditionChip(document as unknown as Document, {
-      key: "status:1",
-      kind: "status",
-      label: "未解决",
-    }) as unknown as FakeElement;
+    const chip = createJarvisConditionChip(
+      document as unknown as Document,
+      { key: "status:1", kind: "status", label: "未解决" },
+      vi.fn(),
+    ) as unknown as FakeElement;
     const chipEvent = press();
     chip.dispatch("mousedown", chipEvent);
     expect(chipEvent.preventDefault).toHaveBeenCalled();
     expect(chipEvent.stopPropagation).toHaveBeenCalled();
   });
 
-  it.each([
-    ["quota_exhausted", "Gemini 额度不足"],
-    ["unauthorized", "Gemini Key 无效"],
-    ["missing_key", "未配置 Gemini Key"],
-    ["timeout", "解析超时"],
-    ["network", "网络连接失败"],
-    ["invalid_response", "解析结果无效，请重试"],
-  ])("shows only the Chinese reason and settings action for %s", (errorCode, reason) => {
+  it("renders one Chinese message with an optional action", () => {
     const { document } = documentWithView();
-    const chrome = createJarvisModeChrome(document as unknown as Document, "zh-CN");
-    const onSettings = vi.fn();
-    renderJarvisEmpty(
-      document as unknown as Document,
-      chrome.results,
-      { available: false, errorCode, conditions: [], bugs: [], total: 0, capped: false },
-      "zh-CN",
-      onSettings,
-    );
-    expect(chrome.results.querySelector("span")?.textContent).toBe(reason);
-    const button = chrome.results.querySelector("[data-jarvis-settings]") as unknown as FakeElement;
+    const chrome = createJarvisStepChrome(document as unknown as Document, "zh-CN", {
+      step: "bug",
+      subtitle: "Bug",
+      placeholder: "搜索标题",
+      listLabel: "",
+      withChips: true,
+    });
+    const onAction = vi.fn();
+    renderJarvisMessage(document as unknown as Document, chrome.results, "未登录 Jarvis", {
+      label: "去设置",
+      onClick: onAction,
+    });
+    expect(chrome.results.querySelector("span")?.textContent).toBe("未登录 Jarvis");
+    const button = chrome.results.querySelector("[data-jarvis-action]") as unknown as FakeElement;
     expect(button.textContent).toBe("去设置");
     const event = press();
     button.dispatch("click", event);
     expect(event.preventDefault).toHaveBeenCalled();
     expect(event.stopPropagation).toHaveBeenCalled();
-    expect(onSettings).toHaveBeenCalledExactlyOnceWith(button);
+    expect(onAction).toHaveBeenCalledExactlyOnceWith(button);
     expect(chrome.results.querySelectorAll("button")).toHaveLength(1);
     expect(chrome.results.querySelectorAll("span")).toHaveLength(1);
-    renderJarvisEmpty(
-      document as unknown as Document,
-      chrome.results,
-      { available: true, errorCode: null, conditions: [], bugs: [], total: 0, capped: false },
-      "zh-CN",
-      onSettings,
-    );
-    expect(chrome.results.querySelector("[data-jarvis-settings]")).toBeNull();
-    expect(chrome.results.querySelector("span")?.textContent).toContain("没有符合条件的 Bug");
+
+    renderJarvisMessage(document as unknown as Document, chrome.results, "无结果。");
+    expect(chrome.results.querySelector("[data-jarvis-action]")).toBeNull();
+    expect(chrome.results.querySelector("span")?.textContent).toBe("无结果。");
   });
 });
 
