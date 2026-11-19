@@ -79,7 +79,10 @@ function mergeRow(
   const incomingIsNewer = (incoming.lastMessageAt ?? 0) >= (previous.lastMessageAt ?? 0);
   const incomingPreview = incoming.preview?.trim() ? incoming.preview : undefined;
   if (incomingPreview === undefined || (previous.preview !== undefined && !incomingIsNewer)) {
-    merged.preview = previous.preview;
+    // Never leave `preview: undefined` behind: the Host's JSON check rejects
+    // the whole conversation list when one row carries an undefined value.
+    if (previous.preview !== undefined) merged.preview = previous.preview;
+    else delete merged.preview;
   }
   if (incoming.groupType === undefined && previous.groupType !== undefined) {
     merged.groupType = previous.groupType;

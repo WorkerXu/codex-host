@@ -3890,7 +3890,9 @@ export class AppServerHost {
     }
     try {
       const result = await this.#runDingTalkMethod(service, request);
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
     } catch (error) {
       if (error instanceof DingTalkServiceError) {
         await this.#writer.json(rpcError(request, -32094, error.code));
@@ -4235,7 +4237,9 @@ export class AppServerHost {
       } else {
         throw new CodexAgentError("invalid_params", "Unknown DingTalk dispatch method");
       }
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
     } catch (error) {
       if (error instanceof CodexAgentError) {
         await this.#writer.json(rpcError(request, -32095, error.code));
@@ -4273,7 +4277,9 @@ export class AppServerHost {
     try {
       if (request.method === PROJECT_MIRROR_LIST_METHOD) {
         const result = await service.list();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        await this.#writer.json(
+          rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+        );
         return;
       }
       const parsed = projectMirrorUpsertParamsSchema.safeParse(request.params);
@@ -4282,7 +4288,9 @@ export class AppServerHost {
         return;
       }
       const result = await service.upsert(parsed.data);
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
     } catch (error) {
       if (error instanceof ProjectMirrorRevisionConflictError) {
         await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
