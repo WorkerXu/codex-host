@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { harnessPluginDescriptorSchema } from "@codexhost/shared-contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createConsoleConnectionDiagnostics } from "../../src/console/connection-diagnostics.js";
+import { writeCachedHarnessDirectory } from "../../src/renderer-harness-directory-cache.js";
 import type { RendererModelClient } from "../../src/renderer-model-client.js";
 
 function client(overrides: Partial<RendererModelClient>): RendererModelClient {
@@ -14,6 +16,10 @@ function client(overrides: Partial<RendererModelClient>): RendererModelClient {
     ...overrides,
   } as RendererModelClient;
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("console connection diagnostics", () => {
   it("derives availability, errors and Web UI from Harness inspections", async () => {
@@ -64,6 +70,42 @@ describe("console connection diagnostics", () => {
 
     await diagnostics.refresh();
     expect(inspectHarness).toHaveBeenCalledWith({ harnessId: "pi", refresh: true });
+  });
+
+  it("paints the cached directory and never inspects a not-installed Harness on open", async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins: [
+        harnessPluginDescriptorSchema.parse({ id: "pi", name: "Pi", version: "1" }),
+        harnessPluginDescriptorSchema.parse({ id: "grok", name: "Grok", version: "1" }),
+      ],
+      availability: { pi: "ready", grok: "notInstalled" },
+      webUi: { pi: true },
+    });
+    const listHarnessPlugins = vi.fn(async () => ({
+      unchanged: true,
+      fingerprint: "fp-1",
+    }));
+    const inspectHarness = vi.fn(async () => ({ status: "ready" as const }));
+    const diagnostics = createConsoleConnectionDiagnostics(
+      client({ listHarnessPlugins, inspectHarness: inspectHarness as never }),
+    );
+    const initial = diagnostics.snapshot();
+    const agents = new Map(initial.hosts[0]?.agents.map((agent) => [agent.agent, agent]));
+    expect(agents.get("pi")).toMatchObject({ availability: "ready", webUiAvailable: true });
+    expect(agents.get("grok")).toMatchObject({ availability: "notInstalled" });
+    await vi.waitFor(() =>
+      expect(listHarnessPlugins).toHaveBeenCalledWith({ ifNoneMatch: "fp-1" }),
+    );
+    await Promise.resolve();
+    expect(inspectHarness).not.toHaveBeenCalled();
   });
 
   it.each(["install", "check", "update"] as const)(

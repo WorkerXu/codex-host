@@ -23,6 +23,11 @@ import { summaryTiles } from "../usage/summary.js";
 import type { ConsoleMessages } from "../messages.js";
 import { createModelPricesDialog } from "../model-prices.js";
 import { createRendererSettingsIcon } from "../../settings/icons.js";
+import {
+  readCachedHarnessDirectory,
+  writeCachedHarnessDirectory,
+} from "../../renderer-harness-directory-cache.js";
+import { recordRendererPageOpen } from "../../renderer-page-timings.js";
 import type {
   RendererSettingsPageDefinition,
   RendererSettingsPageMountContext,
@@ -85,6 +90,33 @@ type Granularity = "day" | "week" | "month";
 /** Console Host method that names the installed Harness plugins. */
 const HARNESS_PLUGIN_LIST_METHOD = "codexhost/harness/plugins/list";
 const POLL_MS = 2_000;
+const LAST_RESULTS_LIMIT = 8;
+interface LastUsageResult {
+  result: UsageStatisticsResult;
+  at: number;
+}
+/** Repeat opens paint the last Host/query result while the Host refreshes. */
+const LAST_RESULTS = new Map<string, LastUsageResult>();
+function usageCacheKey(hostId: string, params: UsageStatisticsParams): string {
+  return `${hostId}\u0000${JSON.stringify(params)}`;
+}
+function rememberUsageResult(key: string, result: UsageStatisticsResult, at: number): void {
+  LAST_RESULTS.delete(key);
+  LAST_RESULTS.set(key, { result, at });
+  while (LAST_RESULTS.size > LAST_RESULTS_LIMIT) {
+    const oldest = LAST_RESULTS.keys().next().value;
+    if (oldest === undefined) break;
+    LAST_RESULTS.delete(oldest);
+  }
+}
+function isInvalidParams(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === -32602
+  );
+}
 /** Filter key of the requests whose record names no Model or project; never a real value. */
 const UNKNOWN = "\u0000unknown";
 const OTHERS = "\u0000others";
@@ -201,6 +233,7 @@ export function createUsageStatisticsPage(
     label: messages.label,
     icon: "dashboard" as const,
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
       const document = context.content.ownerDocument;
       const locale = pageLocale ?? (document.documentElement.lang || "en");
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -299,6 +332,11 @@ export function createUsageStatisticsPage(
           loadedAt = 0;
           // The previous machine's Harness names must not label the new machine's numbers.
           names.clear();
+          const cached = LAST_RESULTS.get(usageCacheKey(view.hostId, params()));
+          if (cached) {
+            result = cached.result;
+            loadedAt = cached.at;
+          }
           save();
           hostOptions();
           render();
@@ -504,6 +542,9 @@ export function createUsageStatisticsPage(
         );
         renderFilters(data);
         renderNotices(data);
+        if (error) {
+          notices.append(h(document, "p", { className: "console-muted", role: "alert" }, error));
+        }
         if (data.totals.requests === 0) {
           rebuildKeepingFocus(body, [
             // While the first read runs, no usage yet is not "no usage".
@@ -1337,14 +1378,35 @@ export function createUsageStatisticsPage(
       async function refreshHarnessNames(): Promise<void> {
         const hostId = view.hostId;
         const isCurrent = harnessNamesRead.begin(hostId);
+        const cached = readCachedHarnessDirectory(hostId);
         names.clear();
+        for (const plugin of cached?.plugins ?? []) names.set(plugin.id, plugin.name);
+        if (names.size > 0) render();
         try {
-          const value = await request(HARNESS_PLUGIN_LIST_METHOD, {}, hostId);
+          let value: unknown;
+          try {
+            value = await request(
+              HARNESS_PLUGIN_LIST_METHOD,
+              cached?.fingerprint ? { ifNoneMatch: cached.fingerprint } : {},
+              hostId,
+            );
+          } catch (error) {
+            if (!isInvalidParams(error)) throw error;
+            value = await request(HARNESS_PLUGIN_LIST_METHOD, {}, hostId);
+          }
           // A slower response for an earlier machine must not name this one's Harnesses.
           if (!isCurrent()) return;
-          for (const plugin of harnessPluginListResultSchema.parse(value).plugins ?? []) {
-            names.set(plugin.id, plugin.name);
-          }
+          const parsed = harnessPluginListResultSchema.parse(value);
+          if (parsed.unchanged === true) return;
+          const plugins = parsed.plugins ?? [];
+          names.clear();
+          for (const plugin of plugins) names.set(plugin.id, plugin.name);
+          writeCachedHarnessDirectory(hostId, {
+            fingerprint: parsed.fingerprint ?? null,
+            plugins,
+            availability: parsed.availability ?? cached?.availability ?? {},
+            webUi: cached?.webUi ?? {},
+          });
         } catch {
           // Names fall back to Harness IDs.
           if (!isCurrent()) return;
@@ -1362,6 +1424,7 @@ export function createUsageStatisticsPage(
               result = parsed.data;
               error = null;
               loadedAt = Date.now();
+              rememberUsageResult(usageCacheKey(view.hostId, requested), parsed.data, loadedAt);
               // A day the Host ignored (outside the new range) is no longer selected.
               date = parsed.data.filters.date;
             } else {
@@ -1374,15 +1437,21 @@ export function createUsageStatisticsPage(
           },
           failure(failure) {
             error = failure instanceof Error ? failure.message : String(failure);
-            result = null;
+            // Keep the last Host/query result visible; the notice explains the refresh failure.
             render();
             schedule();
           },
         });
       }
 
+      const cachedInitial = LAST_RESULTS.get(usageCacheKey(view.hostId, params()));
+      if (cachedInitial) {
+        result = cachedInitial.result;
+        loadedAt = cachedInitial.at;
+      }
       context.content.replaceChildren(header, prices.element, filters, notices, body);
       render();
+      recordRendererPageOpen("usage-statistics", pageStartedAt, view.hostId);
       offerHosts();
       void refreshHarnessNames();
       load();

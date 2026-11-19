@@ -19,6 +19,7 @@ export function createHarnessVersionPanel(
   agent: ExternalRendererAgent,
   client: { run(action: "check" | "update"): Promise<HarnessInstallationState> },
   onChange: () => void = () => undefined,
+  initial?: { state: HarnessInstallationState; check: boolean },
 ): HarnessVersionPanel {
   const panel = document.createElement("section");
   panel.className = "settings-harness-version";
@@ -142,8 +143,26 @@ export function createHarnessVersionPanel(
     },
     { once: true },
   );
-  status.textContent = messages.harnessVersionChecking;
-  render();
+  if (initial) {
+    state = initial.state;
+    status.textContent = initial.check ? messages.harnessVersionChecking : "";
+    render();
+    if (!initial.check) {
+      return {
+        element: panel,
+        get state() {
+          return state;
+        },
+        get updating() {
+          return updating;
+        },
+        update: updateVersion,
+      };
+    }
+  } else {
+    status.textContent = messages.harnessVersionChecking;
+    render();
+  }
   // Resolving a native Host can synchronously walk React fibers. Let the
   // Connections page paint before doing that work, even when the RPC itself
   // is async. A microtask or work inside the first frame would still block it.

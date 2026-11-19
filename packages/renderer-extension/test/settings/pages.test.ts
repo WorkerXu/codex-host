@@ -32,6 +32,8 @@ import {
 import { credentialImportChinese } from "../../src/settings/credential-import-messages.js";
 import { createHarnessAccounts } from "../../src/settings/harness-accounts.js";
 import { createHarnessVersionPanel } from "../../src/settings/harness-version-panel.js";
+import { writeCachedAccountPresentation } from "../../src/settings/account-presentation-cache.js";
+import { writeCachedHarnessDirectory } from "../../src/renderer-harness-directory-cache.js";
 import { createConnectionUpdates } from "../../src/settings/connection-updates.js";
 import { rendererSettingsMessages } from "../../src/settings/localization.js";
 import { createRendererModelClient } from "../../src/renderer-model-client.js";
@@ -559,7 +561,7 @@ describe("Read-only Harness accounts", () => {
       },
     ],
   };
-  it("loads native snapshots and discards stale accounts after empty or failed refreshes", async () => {
+  it("loads native snapshots, clears an authoritative empty list and keeps rows after a failure", async () => {
     const scope = new RendererSettingsPageScope();
     const listHarnessAccounts = vi.fn(async () => result);
     const mounted = createHarnessAccounts(scope.signal, () => ({ listHarnessAccounts }), vi.fn());
@@ -573,7 +575,9 @@ describe("Read-only Harness accounts", () => {
     expect(mounted.accounts).toEqual(result.accounts);
     listHarnessAccounts.mockRejectedValueOnce(new Error("unavailable"));
     await mounted.refresh();
-    expect(mounted.accounts).toEqual([]);
+    // A failed refresh keeps the last known account rows visible; only an
+    // authoritative empty result clears them.
+    expect(mounted.accounts).toEqual(result.accounts);
     expect(mounted.refreshing).toBe(false);
     scope.dispose();
   });
@@ -767,6 +771,57 @@ describe("Read-only Harness accounts", () => {
     expect(mounted.accounts.map((account) => account.label)).toEqual(["DeepSeek", "qingge"]);
     scope.dispose();
   });
+
+  it("seeds the last rows and never inspects a not-installed Harness", async () => {
+    const scope = new RendererSettingsPageScope();
+    const listHarnessAccountSources = vi.fn(async () => ({
+      sources: [
+        { harnessId: harnessIdSchema.parse("grok"), harnessName: "Grok" },
+        { harnessId: harnessIdSchema.parse("claude-code"), harnessName: "Claude Code" },
+      ],
+    }));
+    const inspectHarnessAccount = vi.fn(async ({ harnessId }: { harnessId: string }) => ({
+      harnessId: harnessIdSchema.parse(harnessId),
+      harnessName: harnessId,
+      account: {
+        email: `${harnessId}@example.com`,
+        credits: { usedPercent: 10, periodType: "weekly" as const },
+      },
+    }));
+    const mounted = createHarnessAccounts(
+      scope.signal,
+      () => ({ listHarnessAccountSources, inspectHarnessAccount }),
+      vi.fn(),
+      { shouldInspect: (harnessId) => harnessId !== "grok" },
+    );
+    mounted.seed(result.accounts);
+    expect(mounted.accounts).toEqual(result.accounts);
+    await mounted.refresh();
+    expect(inspectHarnessAccount).toHaveBeenCalledOnce();
+    expect(inspectHarnessAccount.mock.calls[0]?.[0]).toMatchObject({
+      harnessId: "claude-code",
+    });
+    expect(mounted.accounts.map(({ harnessId }) => harnessId)).toEqual(["claude-code"]);
+    scope.dispose();
+  });
+
+  it("keeps seeded rows visible while a live refresh is in flight", async () => {
+    const scope = new RendererSettingsPageScope();
+    const pending = deferred<HarnessAccountListResult>();
+    const mounted = createHarnessAccounts(
+      scope.signal,
+      () => ({ listHarnessAccounts: () => pending.promise }),
+      vi.fn(),
+    );
+    mounted.seed(result.accounts);
+    const refresh = mounted.refresh();
+    expect(mounted.accounts).toEqual(result.accounts);
+    expect(mounted.status).toBe("loading");
+    pending.resolve(result);
+    await refresh;
+    expect(mounted.accounts).toEqual(result.accounts);
+    scope.dispose();
+  });
 });
 
 describe("Harness CLI version panel", () => {
@@ -776,7 +831,10 @@ describe("Harness CLI version panel", () => {
     updateAvailable: true,
     canUpdate: true,
   };
-  const mount = (run: (action: "check" | "update") => Promise<typeof state>) => {
+  const mount = (
+    run: (action: "check" | "update") => Promise<typeof state>,
+    initial?: { state: typeof state; check: boolean },
+  ) => {
     const document = new FakeDocument();
     const abort = new AbortController();
     const panel = createHarnessVersionPanel(
@@ -785,6 +843,8 @@ describe("Harness CLI version panel", () => {
       abort.signal,
       "pi",
       { run },
+      undefined,
+      initial,
     ).element as unknown as FakeElement;
     const button = (action: string) => {
       const element = descendants(panel).find(
@@ -816,6 +876,17 @@ describe("Harness CLI version panel", () => {
     expect(button("update").disabled).toBe(true);
     abort.abort();
   });
+  it("renders a fresh cached check without running the CLI again", async () => {
+    const run = vi.fn(async () => state);
+    const { panel, abort } = mount(run, { state, check: false });
+    expect(visibleText(panel)).toContain("Current version: 1.0.0");
+    expect(visibleText(panel)).toContain("Latest version: 1.1.0");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(run).not.toHaveBeenCalled();
+    abort.abort();
+  });
+
   it("shows check failures without a duplicate website link, and checks again when the page reopens", async () => {
     const run = vi.fn(async () => state).mockRejectedValueOnce(new Error("secret-native-output"));
     const { panel, button, abort } = mount(run);
@@ -2383,6 +2454,84 @@ describe("Renderer Codex Accounts page", () => {
     expect(visibleText(content)).toContain("cached");
     expect(visibleText(content)).not.toContain("CODEX_HOME");
     scope.dispose();
+  });
+
+  it("paints persisted Harness account rows and quotas before live requests finish", async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins: [{ id: harnessIdSchema.parse("grok"), name: "Grok", version: "1" }],
+      availability: { grok: "ready" },
+      webUi: {},
+    });
+    writeCachedAccountPresentation("local", {
+      codex: null,
+      harness: {
+        accounts: [
+          {
+            harnessId: harnessIdSchema.parse("grok"),
+            harnessName: "Grok",
+            email: "cached@example.com",
+            credits: { usedPercent: 25, periodType: "weekly" },
+          },
+        ],
+        observedAt: Date.now() - 60 * 60_000,
+      },
+      usage: {},
+    });
+    const pending = new Promise<never>(() => undefined);
+    const client = {
+      listCodexAccounts: vi.fn(() => pending),
+      listHarnessAccountSources: vi.fn(() => pending),
+      inspectHarnessAccount: vi.fn(() => pending),
+    };
+    const diagnostics: RendererConnectionDiagnostics = {
+      snapshot: () => ({
+        adapter: {
+          state: "ready",
+          reason: "ready",
+          modelUpdates: 0,
+          hook: "request-bridge",
+        },
+        hosts: [{ hostId: "local", active: true, agents: [] }],
+      }),
+      harnessDirectory: () => ({
+        plugins: [{ id: harnessIdSchema.parse("grok"), name: "Grok", version: "1" }],
+        availability: { grok: "ready" },
+        error: null,
+      }),
+      revalidateHarnessDirectory: async () => undefined,
+      refresh: async () => undefined,
+      subscribe: () => () => undefined,
+    };
+    const page = createDefaultRendererSettingsPages(
+      rendererSettingsMessages("zh-CN"),
+      () => null,
+      () => diagnostics,
+      () => client,
+    ).find(({ id }) => id === "accounts");
+    if (!page) throw new Error("Accounts page is not registered");
+    const document = new FakeDocument();
+    const content = document.createElement("main");
+    const scope = new RendererSettingsPageScope();
+    try {
+      page.mount({
+        content: content as unknown as HTMLElement,
+        signal: scope.signal,
+        runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
+      });
+      await vi.waitFor(() => expect(visibleText(content)).toContain("cached@example.com"));
+      expect(visibleText(content)).toContain("更新于");
+    } finally {
+      scope.dispose();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("renders current Account quota and reset-credit count without consume or login actions", async () => {

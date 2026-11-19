@@ -3423,6 +3423,17 @@ export function installRendererBindingProbe(
   };
 
   connectionDiagnostics = {
+    harnessDirectory(hostId: string) {
+      const state = hostHarnessAvailabilityState(hostId);
+      return {
+        plugins: state.plugins,
+        availability: { ...state.availability },
+        error: state.directoryError ?? null,
+      };
+    },
+    revalidateHarnessDirectory(hostId: string) {
+      return refreshHarnessAvailabilityForHost(hostId);
+    },
     snapshot(): RendererConnectionSnapshot {
       void reconcileSshConnectionHosts();
       const hostIds = [

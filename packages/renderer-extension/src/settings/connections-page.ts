@@ -18,6 +18,7 @@ import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext }
 import { createRendererSettingsIcon } from "./icons.js";
 import { configureHostScroller, createHostScrollButton } from "./connection-host-strip.js";
 import { createHarnessLaunchControls } from "./harness-launch-controls.js";
+import { recordRendererPageOpen } from "../renderer-page-timings.js";
 import { harnessHasInstallCommands } from "./harness-installation-guides.js";
 import { createHarnessInstallationPanel } from "./harness-installation-panel.js";
 import { harnessInstallStore } from "./harness-install-store.js";
@@ -60,10 +61,20 @@ export function visibleConnectionHosts(
   return hosts.filter(({ hostId }) => hostId !== "durable");
 }
 
+export interface RendererConnectionHarnessDirectory {
+  plugins: readonly HarnessPluginDescriptor[] | null;
+  availability: Readonly<Record<string, string | undefined>>;
+  error: string | null;
+}
+
 export interface RendererConnectionDiagnostics {
   snapshot(): RendererConnectionSnapshot;
   /** With a Host, wait for existing diagnostics and start a fresh post-mutation inspection. */
   refresh(hostId?: string): Promise<void>;
+  /** Cached Harness directory, so settings pages paint before any request. */
+  harnessDirectory?(hostId: string): RendererConnectionHarnessDirectory;
+  /** One background conditional directory revalidation, never a full sweep. */
+  revalidateHarnessDirectory?(hostId: string): Promise<void>;
   /** Apply an already-read native connection catalog so deleted Hosts stop being reported. */
   reconcileConnections?(
     connections: readonly {
@@ -686,6 +697,7 @@ export function createConnectionsSettingsPage(
     label: messages.pageLabels.connections,
     icon: "connections",
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
       const document = context.content.ownerDocument;
       const header = document.createElement("div");
       header.className = "settings-connection-page-header";
@@ -1189,6 +1201,7 @@ export function createConnectionsSettingsPage(
       };
 
       render(diagnostics?.snapshot() ?? null);
+      recordRendererPageOpen("connections", pageStartedAt, selectedHostId);
       void getRemoteConnections()
         ?.ssh.list(context.signal)
         .then(
