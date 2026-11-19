@@ -1,3 +1,4 @@
+import { createDingTalkOpenTimings } from "./dingtalk-open-timings.js";
 import SearchIcon from "lucide/dist/esm/icons/search.mjs";
 import XIcon from "lucide/dist/esm/icons/x.mjs";
 
@@ -53,7 +54,6 @@ const OLDER_MESSAGE_LIMIT = 30;
 const MAX_MESSAGE_WINDOW = 200;
 const PREVIEW_CONCURRENCY = 3;
 const HOVER_PREFETCH_MS = 150;
-const IMAGE_SETTLE_CAP_MS = 10_000;
 /** A memory-backed open answers in a few milliseconds; only a miss shows a skeleton. */
 const SKELETON_DELAY_MS = 150;
 const LAST_CONVERSATION_KEY = "codexhost.dingtalk.lastConversation.unread";
@@ -130,77 +130,17 @@ export function createDingTalkSettingsPage(
       const dispatchKey = (message: DingTalkMessage): string =>
         `${message.conversationId}\u0000${message.messageId}`;
       const marksFor = (message: DingTalkMessage): readonly MessageDispatchedAgent[] =>
-        dispatchMarks.get(dispatchKey(message)) ?? [];
+        dispatchMarks.get(dispatchKey(message)) ?? message.dispatchedAgents ?? [];
       let panelMessage: ViewMessage | null = null;
       let panel: ReturnType<typeof createDingTalkAgentPanel> | null = null;
-      interface OpenProbe {
-        conversationId: string;
-        startedAt: number;
-        renderMs: number | null;
-        paintMs: number | null;
-        imagesPending: number;
-        imagesDone: boolean;
-        timer: number | null;
-      }
-      let openProbe: OpenProbe | null = null;
-
-      /** One bounded entry per open: click → paint, build cost and images. */
-      const flushOpenProbe = (): void => {
-        const probe = openProbe;
-        if (!probe || probe.paintMs === null || !probe.imagesDone) return;
-        openProbe = null;
-        if (probe.timer !== null) view.clearTimeout(probe.timer);
-        const imagesMs = probe.imagesDone
-          ? Math.max(probe.paintMs, Math.round(view.performance.now() - probe.startedAt))
-          : null;
-        void client
-          ?.timing?.(probe.conversationId, probe.paintMs, probe.renderMs, imagesMs)
-          ?.catch(() => undefined);
-      };
-
-      const settleOpenImage = (conversationId: string): void => {
-        const probe = openProbe;
-        if (!probe || probe.imagesDone || probe.conversationId !== conversationId) return;
-        probe.imagesPending = Math.max(0, probe.imagesPending - 1);
-        if (probe.imagesPending === 0) {
-          probe.imagesDone = true;
-          flushOpenProbe();
-        }
-      };
-
-      const beginOpenProbe = (conversationId: string, images: number, startedAt: number): void => {
-        if (openProbe?.timer !== null && openProbe?.timer !== undefined) {
-          view.clearTimeout(openProbe.timer);
-        }
-        openProbe = {
-          conversationId,
-          startedAt,
-          renderMs: null,
-          paintMs: null,
-          imagesPending: images,
-          imagesDone: images === 0,
-          timer: null,
-        };
-        const probe = openProbe;
-        probe.timer = view.setTimeout(() => {
-          if (openProbe !== probe) return;
-          probe.imagesPending = 0;
-          probe.imagesDone = true;
-          probe.timer = null;
-          flushOpenProbe();
-        }, IMAGE_SETTLE_CAP_MS);
-      };
-
-      const finishOpenPaint = (renderMs: number): void => {
-        const probe = openProbe;
-        if (!probe) return;
-        probe.renderMs = Math.round(renderMs);
-        view.requestAnimationFrame(() => {
-          if (openProbe !== probe) return;
-          probe.paintMs = Math.max(0, Math.round(view.performance.now() - probe.startedAt));
-          flushOpenProbe();
-        });
-      };
+      const openTimings = createDingTalkOpenTimings({
+        view,
+        report: (conversationId, paintMs, renderMs, imagesMs) => {
+          void client
+            ?.timing?.(conversationId, paintMs, renderMs, imagesMs)
+            ?.catch(() => undefined);
+        },
+      });
 
       const root = createElementNode(document, "div", "dingtalk-workbench");
 
@@ -321,7 +261,8 @@ export function createDingTalkSettingsPage(
         onImageLoaded: (wasNearBottom) => {
           if (wasNearBottom) scrollToBottom();
         },
-        onImageSettled: (message) => settleOpenImage(message.conversationId),
+        onImageStarted: openTimings.imageStarted,
+        onImageSettled: openTimings.imageSettled,
         onImageClick: (message, resource) => openImage(message, resource),
         onRetry: (message) => void deliver(message),
       });
@@ -350,7 +291,7 @@ export function createDingTalkSettingsPage(
           const message = panelMessage;
           if (!message) return;
           const key = dispatchKey(message);
-          const marks = [...(dispatchMarks.get(key) ?? [])];
+          const marks = [...marksFor(message)];
           const errors: string[] = [];
           for (const result of results) {
             if (result.threadId) {
@@ -540,25 +481,27 @@ export function createDingTalkSettingsPage(
       };
 
       /** Warms every visible row at background priority, once per page visit. */
-      const requestPrefetch = (ids: readonly string[]): void => {
+      const requestPrefetch = (ids: readonly string[], force = false): void => {
         if (!client) return;
         const fresh = [...new Set(ids)].filter(
           (conversationId) =>
-            conversationId !== state.selectedId && !prefetchedIds.has(conversationId),
+            conversationId !== state.selectedId && (force || !prefetchedIds.has(conversationId)),
         );
         if (fresh.length === 0) return;
         for (const conversationId of fresh) prefetchedIds.add(conversationId);
-        void client.prefetch(fresh).catch(() => undefined);
+        void client.prefetch(fresh).catch(() => {
+          for (const id of fresh) prefetchedIds.delete(id);
+        });
       };
 
       const bindHoverPrefetch = (conversationId: string, row: HTMLElement): void => {
         if (hoverBound.has(row)) return;
         hoverBound.add(row);
         row.addEventListener("pointerenter", () => {
-          if (prefetchedIds.has(conversationId)) return;
+          if (conversationId === state.selectedId) return;
           const timer = view.setTimeout(() => {
             hoverTimers.delete(conversationId);
-            requestPrefetch([conversationId]);
+            requestPrefetch([conversationId], true);
           }, HOVER_PREFETCH_MS);
           hoverTimers.set(conversationId, timer);
         });
@@ -827,16 +770,10 @@ export function createDingTalkSettingsPage(
         state.nextCursor = result.nextCursor;
         state.messagesError = result.errorCode !== null && state.messages.length === 0;
         updateHeader();
-        const imageCount = state.messages.reduce(
-          (count, message) =>
-            count +
-            (message.resources?.filter((resource) => resource.kind === "image").length ?? 0),
-          0,
-        );
-        beginOpenProbe(conversationId, imageCount, openStartedAt);
+        openTimings.begin(conversationId, state.messages, openStartedAt);
         const renderStarted = view.performance.now();
         renderMessages({ scroll: "bottom" });
-        finishOpenPaint(view.performance.now() - renderStarted);
+        openTimings.rendered(view.performance.now() - renderStarted);
         const newest = state.messages.at(-1);
         if (newest) void client.markViewed(conversationId, newest.createdAt, true);
         // The @ picker is the only member consumer; warm it after the transcript
@@ -1422,10 +1359,7 @@ export function createDingTalkSettingsPage(
         visibleObserver?.disconnect();
         for (const timer of hoverTimers.values()) view.clearTimeout(timer);
         hoverTimers.clear();
-        if (openProbe?.timer !== null && openProbe?.timer !== undefined) {
-          view.clearTimeout(openProbe.timer);
-        }
-        openProbe = null;
+        openTimings.dispose();
         previewQueue.length = 0;
         previewPending.clear();
         conversationRows.clear();

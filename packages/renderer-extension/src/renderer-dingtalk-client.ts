@@ -340,11 +340,20 @@ export function createRendererDingTalkClient(
       );
     },
     async prefetch(conversationIds) {
-      const ids = [...new Set(conversationIds)].slice(0, DINGTALK_MAX_PREFETCH);
-      if (ids.length === 0) return { started: 0 };
-      return dingtalkPrefetchResultSchema.parse(
-        await request(DINGTALK_PREFETCH_METHOD, { conversationIds: ids }, 30_000, "background"),
-      );
+      const ids = [...new Set(conversationIds)];
+      let started = 0;
+      for (let offset = 0; offset < ids.length; offset += DINGTALK_MAX_PREFETCH) {
+        const result = dingtalkPrefetchResultSchema.parse(
+          await request(
+            DINGTALK_PREFETCH_METHOD,
+            { conversationIds: ids.slice(offset, offset + DINGTALK_MAX_PREFETCH) },
+            30_000,
+            "background",
+          ),
+        );
+        started += result.started;
+      }
+      return { started };
     },
     async members(conversationId) {
       return dingtalkMembersResultSchema.parse(

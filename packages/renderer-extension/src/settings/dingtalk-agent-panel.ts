@@ -130,10 +130,14 @@ export function createDingTalkAgentPanel(options: DingTalkAgentPanelOptions): Di
         : text.panelDispatch.replace("{count}", String(count));
     dispatch.disabled = loading || dispatching || count === 0;
     cancel.disabled = dispatching;
+    closeButton.disabled = dispatching;
     for (const row of list.querySelectorAll<HTMLElement>(".dingtalk-agent-row")) {
       const fileName = row.dataset.agentFile ?? "";
       const checkbox = row.querySelector<HTMLInputElement>(".dingtalk-agent-row-check");
-      if (checkbox) checkbox.checked = selected.has(fileName);
+      if (checkbox) {
+        checkbox.checked = selected.has(fileName);
+        checkbox.disabled = dispatching || row.dataset.disabled === "true";
+      }
     }
   };
 
@@ -246,8 +250,9 @@ export function createDingTalkAgentPanel(options: DingTalkAgentPanelOptions): Di
       .catch(() => ({ agents: [], failed: true }));
     if (run !== generation || !panelOpen) return;
     loading = false;
-    applyDefaultSelection(result);
     renderRows(result);
+    applyDefaultSelection({ ...result, agents: entries });
+    updateFooter();
   };
 
   const runDispatch = async (): Promise<void> => {
@@ -302,6 +307,7 @@ export function createDingTalkAgentPanel(options: DingTalkAgentPanelOptions): Di
       return panelOpen;
     },
     show(input) {
+      if (dispatching) return;
       current = input;
       panelOpen = true;
       root.hidden = false;
@@ -309,7 +315,7 @@ export function createDingTalkAgentPanel(options: DingTalkAgentPanelOptions): Di
       void loadScore(input);
     },
     close() {
-      if (!panelOpen) return;
+      if (!panelOpen || dispatching) return;
       panelOpen = false;
       generation += 1;
       loading = false;

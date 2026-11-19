@@ -30,8 +30,15 @@ export interface DingTalkMessageListOptions {
     resource: NonNullable<DingTalkMessage["resources"]>[number],
   ): Promise<DingTalkResourceResult>;
   onImageLoaded?(wasNearBottom: boolean): void;
-  /** Fires once per initial image whether it loaded or is unavailable. */
-  onImageSettled?(message: DingTalkMessage): void;
+  onImageStarted?(
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void;
+  /** Fires once per requested image whether it loaded or is unavailable. */
+  onImageSettled?(
+    message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
+  ): void;
   onImageClick?(
     message: DingTalkMessage,
     resource: NonNullable<DingTalkMessage["resources"]>[number],
@@ -107,6 +114,7 @@ interface Entry {
   nodes: HTMLElement[];
   row: HTMLElement;
   objectUrls: string[];
+  imageFrames: HTMLElement[];
   removed: boolean;
 }
 
@@ -243,6 +251,7 @@ export function createDingTalkMessageList(
       nodes,
       row: document.createElement("div"),
       objectUrls: [],
+      imageFrames: [],
       removed: false,
     };
     const row = createMessageRow(document, message, text, {
@@ -257,6 +266,7 @@ export function createDingTalkMessageList(
       onContextMenu: (target, anchor) => openMessageMenu(target, anchor),
       ...(options.onImageClick ? { onImageClick: options.onImageClick } : {}),
       attachImage: (frame, imageMessage, resource) => {
+        entry.imageFrames.push(frame);
         if (!imageObserver) {
           void loadImage(frame, { entry, message: imageMessage, resource });
           return;
@@ -274,7 +284,11 @@ export function createDingTalkMessageList(
     entry.removed = true;
     for (const url of entry.objectUrls) objectUrls.release(url);
     entry.objectUrls = [];
-    pendingImages.delete(entry.row);
+    for (const frame of entry.imageFrames) {
+      imageObserver?.unobserve(frame);
+      pendingImages.delete(frame);
+    }
+    entry.imageFrames = [];
     for (const node of entry.nodes) node.remove();
   };
 
@@ -295,6 +309,7 @@ export function createDingTalkMessageList(
     image: HTMLImageElement,
     nearBottom: boolean,
     message: DingTalkMessage,
+    resource: NonNullable<DingTalkMessage["resources"]>[number],
   ): void => {
     if (!frame.isConnected) return;
     const box = dingtalkImageBox(image.naturalWidth || 1, image.naturalHeight || 1);
@@ -304,16 +319,17 @@ export function createDingTalkMessageList(
     frame.classList.add("dingtalk-message-image--loaded");
     frame.replaceChildren(image);
     options.onImageLoaded?.(nearBottom);
-    options.onImageSettled?.(message);
+    options.onImageSettled?.(message, resource);
   };
 
   const loadImage = async (frame: HTMLElement, pending: LoadedImage): Promise<void> => {
+    options.onImageStarted?.(pending.message, pending.resource);
     const nearBottom = distanceFromBottom() <= 80;
     const result = await options.loadResource(pending.message, pending.resource).catch(() => null);
     if (pending.entry.removed || !frame.isConnected) return;
     if (!result?.available || !result.dataUrl) {
       showImageUnavailable(document, frame);
-      options.onImageSettled?.(pending.message);
+      options.onImageSettled?.(pending.message, pending.resource);
       return;
     }
     const blob = await (options.decodeImage ?? decodeDingTalkDataUrl)(result.dataUrl).catch(
@@ -322,7 +338,7 @@ export function createDingTalkMessageList(
     if (!blob || pending.entry.removed || !frame.isConnected) {
       if (!blob) {
         showImageUnavailable(document, frame);
-        options.onImageSettled?.(pending.message);
+        options.onImageSettled?.(pending.message, pending.resource);
       }
       return;
     }
@@ -335,12 +351,12 @@ export function createDingTalkMessageList(
     const image = document.createElement("img");
     image.className = "dingtalk-message-image-content";
     image.alt = pending.message.text || "图片";
-    image.onload = () => showImage(frame, image, nearBottom, pending.message);
+    image.onload = () => showImage(frame, image, nearBottom, pending.message, pending.resource);
     image.onerror = () => {
       objectUrls.release(url);
       pending.entry.objectUrls = pending.entry.objectUrls.filter((value) => value !== url);
       if (frame.isConnected) showImageUnavailable(document, frame);
-      options.onImageSettled?.(pending.message);
+      options.onImageSettled?.(pending.message, pending.resource);
     };
     image.src = url;
   };

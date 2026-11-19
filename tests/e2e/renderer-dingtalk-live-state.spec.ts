@@ -237,3 +237,23 @@ test("paints the memory snapshot without a skeleton and keeps draft and scroll o
   expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
   await expect(page.locator(".dingtalk-new-messages")).toBeVisible();
 });
+
+test("hover starts a fresh read at 150 ms and leaving cancels it", async ({ page }) => {
+  await setup(page);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  const row = page.locator('[data-conversation-id="cidB"]');
+  const count = () => page.evaluate(() => Reflect.get(globalThis, "callCounts")().prefetch);
+  const initial = await count();
+  await row.hover();
+  await page.clock.fastForward(149);
+  expect(await count()).toBe(initial);
+  await page.clock.fastForward(1);
+  await expect.poll(count).toBe(initial + 1);
+  await page.mouse.move(1190, 790);
+  await row.hover();
+  await page.clock.fastForward(100);
+  await page.mouse.move(1190, 790);
+  await page.clock.fastForward(100);
+  expect(await count()).toBe(initial + 1);
+});

@@ -41,9 +41,12 @@ const { outputFiles } = await build({
         message("m3", "上线时间还没定", 3_000),
       ];
       let failScore = false;
+      let failRun = false;
+      let scores = [0.82, 0.21, 0.64];
       let lastScoreCalls = 0;
       let runs = [];
       const dispatched = new Map();
+      let disposePage = null;
 
       const client = {
         available: () => true,
@@ -85,21 +88,27 @@ const { outputFiles } = await build({
             agents: [
               {
                 agent: { fileName: "reviewer.toml", name: "评审助手", description: "代码评审与上线检查", ready: true },
-                score: failScore ? null : 0.82,
+                score: failScore ? null : scores[0],
               },
               {
                 agent: { fileName: "writer.toml", name: "写作助手", description: "整理说明和文档", ready: true },
-                score: failScore ? null : 0.21,
+                score: failScore ? null : scores[1],
               },
               {
                 agent: { fileName: "bare.toml", name: "未配置助手", description: "还没选择分区", ready: false },
-                score: failScore ? null : 0.64,
+                score: failScore ? null : scores[2],
               },
             ],
           };
         },
         run: async (conversationId, messageId, agents) => {
+          if (failRun) throw new Error("fixture failure");
           runs.push({ conversationId, messageId, agents });
+          transcript = transcript.map((message) => message.messageId === messageId ? {
+            ...message, dispatchedAgents: agents.map((fileName, index) => ({
+              fileName, name: fileName === "reviewer.toml" ? "评审助手" : fileName, threadId: "thread-" + index,
+            })),
+          } : message);
           return {
             results: agents.map((fileName, index) => ({
               fileName,
@@ -112,6 +121,7 @@ const { outputFiles } = await build({
       };
 
       globalThis.openDingTalk = () => {
+        disposePage?.();
         const messages = rendererSettingsMessages("zh-CN");
         const page = createDingTalkSettingsPage(messages, {
           createClient: () => client,
@@ -122,13 +132,15 @@ const { outputFiles } = await build({
         });
         const content = document.getElementById("content");
         const controller = new AbortController();
-        page.mount({
+        disposePage = page.mount({
           content,
           signal: controller.signal,
           runLatest: async (operation) => { await operation(controller.signal); },
         });
       };
       globalThis.setFailScore = (value) => { failScore = value; };
+      globalThis.setScores = (value) => { scores = value; };
+      globalThis.setFailRun = (value) => { failRun = value; };
       globalThis.scoreCalls = () => lastScoreCalls;
       globalThis.runCalls = () => runs;
       globalThis.openedThread = (id) => dispatched.has(id);
@@ -259,4 +271,72 @@ test("right-click menu contains exactly agent, copy and reply; reply prefills th
   ]);
   await menu.getByRole("menuitem", { name: "回复" }).click();
   await expect(page.locator(".dingtalk-composer-input")).toHaveValue("@林晓 ");
+});
+
+for (const score of [0.29, 0.3]) {
+  test(`default selection at score ${score}`, async ({ page }) => {
+    await setup(page);
+    await page.evaluate((value) => Reflect.get(globalThis, "setScores")([value, 0.1, 0.2]), score);
+    const row = page.locator('[data-message-id="m3"]');
+    await row.hover();
+    await row.getByRole("button", { name: "交给智能体" }).click();
+    const check = page.locator('.dingtalk-agent-row[data-agent-file="reviewer.toml"] input');
+    if (score < 0.3) await expect(check).not.toBeChecked();
+    else await expect(check).toBeChecked();
+  });
+}
+
+test("sorts before choosing the default even if the score response is unsorted", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.evaluate(() => Reflect.get(globalThis, "setScores")([0.82, 0.92, 0.64]));
+  await page.locator('[data-message-id="m3"]').getByRole("button", { name: "交给智能体" }).click();
+  const top = page.locator(".dingtalk-agent-row").first();
+  await expect(top).toContainText("写作助手");
+  await expect(top.locator("input")).toBeChecked();
+});
+
+test("dispatches two checked agents only for the selected message", async ({ page }) => {
+  await setup(page);
+  await page.locator('[data-message-id="m3"]').getByRole("button", { name: "交给智能体" }).click();
+  await page.locator('.dingtalk-agent-row[data-agent-file="writer.toml"] input').check();
+  await page.getByRole("button", { name: "派发（2）" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(globalThis, "runCalls")()))
+    .toEqual([
+      { conversationId: "cidA", messageId: "m3", agents: ["reviewer.toml", "writer.toml"] },
+    ]);
+  await expect(
+    page.locator('[data-message-id="m3"] .dingtalk-message-dispatched-agent'),
+  ).toHaveCount(2);
+  await expect(
+    page.locator('[data-message-id="m1"] .dingtalk-message-dispatched-agent'),
+  ).toHaveCount(0);
+});
+
+test("keeps checkboxes usable after a dispatch transport failure", async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => Reflect.get(globalThis, "setFailRun")(true));
+  await page.locator('[data-message-id="m3"]').getByRole("button", { name: "交给智能体" }).click();
+  await page.getByRole("button", { name: "派发（1）" }).click();
+  const check = page.locator('.dingtalk-agent-row[data-agent-file="writer.toml"] input');
+  await expect(check).toBeEnabled();
+  await check.check();
+  await expect(page.getByRole("button", { name: "派发（2）" })).toBeEnabled();
+});
+
+test("keeps dispatch marks and the duplicate confirmation after reopening the page", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.locator('[data-message-id="m3"]').getByRole("button", { name: "交给智能体" }).click();
+  await page.getByRole("button", { name: "派发（1）" }).click();
+  await expect(page.locator(".dingtalk-message-dispatched-agent")).toHaveCount(1);
+  await page.evaluate(() => Reflect.get(globalThis, "openDingTalk")());
+  await expect(page.locator(".dingtalk-message-dispatched-agent")).toHaveText("评审助手");
+  await page.locator('[data-message-id="m3"]').getByRole("button", { name: "交给智能体" }).click();
+  await page.getByRole("button", { name: "派发（1）" }).click();
+  await expect(page.locator(".dingtalk-agent-panel-confirm")).toContainText("已派发过，仍要派发？");
+  expect(await page.evaluate(() => Reflect.get(globalThis, "runCalls")().length)).toBe(1);
 });
