@@ -4369,11 +4369,8 @@ export class AppServerHost {
       ([harnessId]) => harnessId === params.data.harnessId,
     );
     const adapter = registered?.[1];
-    // Full interactive inspections are authoritative for the shared cache;
-    // availability-only probes are already cached by their own coordinator path.
-    const record = params.data.purpose !== "availability";
     if (!adapter) {
-      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "unavailable");
+      await this.#recordHarnessAvailability(params.data.harnessId, "unavailable");
       await this.#writer.json(
         rpcError(request, -32077, `Harness '${params.data.harnessId}' is unavailable`),
       );
@@ -4387,7 +4384,7 @@ export class AppServerHost {
         ...(params.data.purpose ? { purpose: params.data.purpose } : {}),
       });
     } catch (error) {
-      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "error");
+      await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, `Harness inspection failed: ${errorMessage(error)}`),
       );
@@ -4395,15 +4392,13 @@ export class AppServerHost {
     }
     const validated = harnessInspectionSchema.safeParse(inspection);
     if (!validated.success) {
-      if (record) await this.#recordHarnessAvailability(params.data.harnessId, "error");
+      await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, "Harness inspection returned an invalid result"),
       );
       return;
     }
-    if (record) {
-      await this.#recordHarnessAvailability(params.data.harnessId, validated.data.status);
-    }
+    await this.#recordHarnessAvailability(params.data.harnessId, validated.data.status);
     await this.#writer.json(
       rpcEnvelope(request, { result: jsonValueSchema.parse(validated.data) }),
     );

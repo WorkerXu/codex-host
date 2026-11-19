@@ -90,6 +90,29 @@ describe("HarnessAvailabilityStore", () => {
     await expect(store.generation()).resolves.toBe(0);
   });
 
+  it("bumps generation only when status or fingerprint changes", async () => {
+    const store = new HarnessAvailabilityStore({});
+    await expect(store.generation()).resolves.toBe(0);
+
+    await store.set("grok", { status: "ready", checkedAt: 1, fingerprint: "f1" });
+    await expect(store.generation()).resolves.toBe(1);
+
+    // A repeated observation with a fresh checkedAt persists but must not
+    // invalidate every Renderer directory.
+    await store.set("grok", { status: "ready", checkedAt: 2, fingerprint: "f1" });
+    await expect(store.generation()).resolves.toBe(1);
+    await expect(store.get("grok")).resolves.toMatchObject({ checkedAt: 2 });
+
+    await store.set("grok", { status: "unavailable", checkedAt: 3, fingerprint: "f1" });
+    await expect(store.generation()).resolves.toBe(2);
+
+    await store.set("grok", { status: "unavailable", checkedAt: 4, fingerprint: "f2" });
+    await expect(store.generation()).resolves.toBe(3);
+
+    await store.invalidate("grok");
+    await expect(store.generation()).resolves.toBe(4);
+  });
+
   it("invalidates one entry and ignores a corrupt cache", async () => {
     const directory = await root();
     const environment = { CODEXHOST_USER_DIR: directory };

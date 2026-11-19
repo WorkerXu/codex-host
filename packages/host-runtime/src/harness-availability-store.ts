@@ -78,8 +78,12 @@ export class HarnessAvailabilityStore {
     // observation wins even if the earlier one finishes last.
     const existing = this.#entries.get(harnessId);
     if (existing && existing.checkedAt > entry.checkedAt) return;
+    // Generation keys the directory fingerprint, so a repeated observation of
+    // the same status/fingerprint must not invalidate every Renderer's cache.
+    const changed =
+      !existing || existing.status !== entry.status || existing.fingerprint !== entry.fingerprint;
     this.#entries.set(harnessId, entry);
-    this.#generation += 1;
+    if (changed) this.#generation += 1;
     await this.#persist();
   }
 
