@@ -216,26 +216,34 @@ export function createMemoryAdminPage(
       const afterOverview = () => {
         if (!query.trim() && !source) void search(true);
       };
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      const scheduleRetry = (error: unknown) => {
+        const code = (error as { message?: string } | null)?.message;
+        if (code !== "connecting" && code !== "retrying") return;
+        if (retry) clearTimeout(retry);
+        retry = setTimeout(() => {
+          retry = null;
+          background();
+        }, 3_000);
+      };
       const refresh = async (pending?: string) => {
         await ui.load(async () => {
-          await controller.refresh();
+          try {
+            await controller.refresh();
+          } catch (error) {
+            scheduleRetry(error);
+            throw error;
+          }
         }, pending);
         afterOverview();
       };
-      let retry: ReturnType<typeof setTimeout> | null = null;
       const background = () => {
         void controller
           .refresh()
           .then(afterOverview)
           .catch((error: unknown) => {
             ui.status.textContent = hubErrorText(error);
-            const code = (error as { message?: string } | null)?.message;
-            if (code !== "connecting" && code !== "retrying") return;
-            if (retry) clearTimeout(retry);
-            retry = setTimeout(() => {
-              retry = null;
-              background();
-            }, 3_000);
+            scheduleRetry(error);
           });
       };
       context.signal.addEventListener(

@@ -104,10 +104,7 @@ export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
   let enabled = true;
   let headerName = "Authorization";
   return {
-    hosts: async () => [
-      { hostId: "local", displayName: "本机" },
-      { hostId: "oracle-main", displayName: "oracle-main" },
-    ],
+    hosts: async () => [{ hostId: "local", displayName: "本机" }],
     async request<O extends HubOperation>(
       _host: string,
       input: Extract<HubAdminParams, { op: O }>,

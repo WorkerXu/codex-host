@@ -111,26 +111,30 @@ export function createMcpAdminPage(
         },
         applyView,
       );
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      const scheduleRetry = (error: unknown) => {
+        const code = (error as { message?: string } | null)?.message;
+        if (code !== "connecting" && code !== "retrying") return;
+        if (retry) clearTimeout(retry);
+        retry = setTimeout(() => {
+          retry = null;
+          background();
+        }, 3_000);
+      };
       const refresh = async (pending?: string) => {
         await ui.load(async () => {
           try {
             await controller.refresh();
           } catch (error) {
+            scheduleRetry(error);
             fail(error, true);
           }
         }, pending);
       };
-      let retry: ReturnType<typeof setTimeout> | null = null;
       const background = () => {
         void controller.refresh().catch((error: unknown) => {
           fail(error, false);
-          const code = (error as { message?: string } | null)?.message;
-          if (code !== "connecting" && code !== "retrying") return;
-          if (retry) clearTimeout(retry);
-          retry = setTimeout(() => {
-            retry = null;
-            background();
-          }, 3_000);
+          scheduleRetry(error);
         });
       };
       context.signal.addEventListener(
