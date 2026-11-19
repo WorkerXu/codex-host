@@ -9,10 +9,16 @@ export interface DesktopRemoteProjectResult {
   label: string;
 }
 
+export interface DesktopLocalProjectResult {
+  projectId: string;
+  rootPaths: string[];
+}
+
 /**
  * Subset of Desktop's renderer `appServices`. The methods stay on their real
  * nested service objects; the mirror calls `projects.createRemote`,
- * `workspaceFiles.createDirectory`, and `executionPaths.readHomeDirectory`.
+ * `projects.createLocal`, `workspaceFiles.createDirectory`, and
+ * `executionPaths.readHomeDirectory`.
  */
 export interface ProjectMirrorDesktopServices {
   projects: {
@@ -23,6 +29,17 @@ export interface ProjectMirrorDesktopServices {
       remotePath: string;
       reuseExisting?: boolean;
     }): Promise<DesktopRemoteProjectResult | null>;
+    /**
+     * Desktop's own local project creation. With no sources it creates
+     * `~/Documents/ChatGPT/<name>` (numbering through Desktop's own rule).
+     */
+    createLocal(input: {
+      appearance: null;
+      initializeDefaultWorkspaceGitRepository: boolean;
+      name: string;
+      setActive?: boolean;
+      sources: string[];
+    }): Promise<DesktopLocalProjectResult | null>;
   };
   workspaceFiles: {
     createDirectory(input: { hostId: string; path: string }): Promise<unknown>;
@@ -45,11 +62,13 @@ const record = (value: unknown): value is Record<string, unknown> =>
 function isServices(value: unknown): value is ProjectMirrorDesktopServices {
   if (!isCodexServiceRegistry(value)) return false;
   try {
-    const projects = value.projects as { createRemote?: unknown } | undefined;
+    const projects = value.projects as
+      { createRemote?: unknown; createLocal?: unknown } | undefined;
     const workspaceFiles = value.workspaceFiles as { createDirectory?: unknown } | undefined;
     const executionPaths = value.executionPaths as { readHomeDirectory?: unknown } | undefined;
     return (
       typeof projects?.createRemote === "function" &&
+      typeof projects?.createLocal === "function" &&
       typeof workspaceFiles?.createDirectory === "function" &&
       typeof executionPaths?.readHomeDirectory === "function"
     );

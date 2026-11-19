@@ -1,7 +1,6 @@
 import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
   desktopProjectsCatalogSchema,
-  type DesktopLocalProject,
   type DesktopProjectsCatalog,
 } from "@codexhost/shared-contracts";
 
@@ -17,11 +16,14 @@ import {
 } from "./renderer-cross-host-agent-section.js";
 import {
   chooseMirrorDestination,
-  isNameOnlyProject,
+  findNameOnlyLocalProject,
   mirrorDirectoryCandidates,
   readComposerProject,
+  resolveMirrorSource,
+  type MirrorProjectSource,
+  type ProjectEligibilityReason,
 } from "./renderer-project-mirror-model.js";
-import { confirmProjectMirror, showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
+import { showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
 import { joinMirroredProjectSection } from "./renderer-project-mirror-section.js";
 import {
   createProjectMirrorRpc,
@@ -39,21 +41,13 @@ type HostRoute = {
 
 type ProjectSource = "composer" | "catalog";
 
-type ProjectEligibilityReason =
-  | "unknown"
-  | "eligible"
-  | "no-project"
-  | "remote-project"
-  | "missing-project"
-  | "not-name-only"
-  | "catalog-error";
-
 export interface ProjectMirrorContext {
   catalog: DesktopProjectsCatalog;
-  source: DesktopLocalProject;
-  acknowledged: boolean;
+  source: MirrorProjectSource;
   revision: number;
 }
+
+type ProjectMirrorReason = "unknown" | "catalog-error" | ProjectEligibilityReason;
 
 export interface ProjectMirrorStatus {
   pickerDetected: boolean;
@@ -61,7 +55,7 @@ export interface ProjectMirrorStatus {
   peersLoaded: number;
   lastError: string | null;
   projectSource: ProjectSource | null;
-  projectReason: ProjectEligibilityReason;
+  projectReason: ProjectMirrorReason;
   machineCount: number;
 }
 
@@ -111,7 +105,7 @@ function hostRoute(hostId: string): HostRoute | null {
 interface ContextResult {
   context: ProjectMirrorContext | null;
   source: ProjectSource | null;
-  reason: ProjectEligibilityReason;
+  reason: ProjectMirrorReason;
   error: string | null;
 }
 
@@ -134,25 +128,11 @@ async function readContext(composer: Element): Promise<ContextResult> {
     const selected = composerProject ?? catalog.selectedProject ?? null;
     const source: ProjectSource | null = composerProject ? "composer" : selected ? "catalog" : null;
     if (!selected) return { context: null, source, reason: "no-project", error: null };
-    if (selected.type !== "local")
-      return { context: null, source, reason: "remote-project", error: null };
-    const project = catalog.localProjects[selected.projectId];
-    if (!project)
-      return {
-        context: null,
-        source,
-        reason: "missing-project",
-        error: `Project ${selected.projectId} is missing from the Desktop catalog`,
-      };
-    if (!isNameOnlyProject(project, catalog.defaultProjectParent))
-      return { context: null, source, reason: "not-name-only", error: null };
+    const resolved = resolveMirrorSource(catalog, selected);
+    if (!resolved.source)
+      return { context: null, source, reason: resolved.reason, error: resolved.error };
     return {
-      context: {
-        catalog,
-        source: project,
-        acknowledged: registry.acknowledged.includes(project.id),
-        revision: registry.revision,
-      },
+      context: { catalog, source: resolved.source, revision: registry.revision },
       source,
       reason: "eligible",
       error: null,
@@ -166,7 +146,6 @@ async function upsertRegistry(
   rpc: ProjectMirrorRpc,
   input: {
     sourceProjectId: string;
-    acknowledge?: true;
     record?: {
       hostId: string;
       remoteProjectId: string;
@@ -194,7 +173,10 @@ let harnessCatalogCache: {
   value: Promise<CrossHostHarnessCatalog>;
 } | null = null;
 
-function loadHarnessCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostHarnessCatalog> {
+function loadHarnessCatalog(
+  catalog: DesktopProjectsCatalog,
+  sourceHostId: string,
+): Promise<CrossHostHarnessCatalog> {
   const routing = window.__codexhostHostRoutingV1;
   const knownHostIds = routing?.knownHostIds?.() ?? [];
   const hostIds = [
@@ -204,8 +186,10 @@ function loadHarnessCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostH
       ...catalog.remoteProjects.map(({ hostId }) => hostId),
     ]),
   ].sort();
+  const includeLocal = sourceHostId !== "local";
   const key = hostIds
     .map((hostId) => `${hostId}:${routing?.forHost(hostId) != null ? "1" : "0"}`)
+    .concat(`local:${includeLocal ? "1" : "0"}`, `source:${sourceHostId}`)
     .join("|");
   if (
     harnessCatalogCache &&
@@ -218,6 +202,8 @@ function loadHarnessCatalog(catalog: DesktopProjectsCatalog): Promise<CrossHostH
     connections: catalog.codexManagedRemoteConnections,
     knownHostIds,
     remoteProjectHostIds: catalog.remoteProjects.map(({ hostId }) => hostId),
+    includeLocal,
+    excludeHostIds: [sourceHostId],
     isOnline: (hostId) => routing?.forHost(hostId) != null,
     directory: (hostId) =>
       probe?.harnessDirectory(hostId) ?? {
@@ -327,21 +313,6 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
   };
   let disposed = false;
 
-  const acknowledge = async (
-    context: ProjectMirrorContext,
-    rpc: ProjectMirrorRpc,
-  ): Promise<void> => {
-    if (!(await confirmProjectMirror(document, context.source.name))) return;
-    try {
-      await upsertRegistry(rpc, { sourceProjectId: context.source.id, acknowledge: true });
-      context.acknowledged = true;
-      showProjectMirrorNotice(document, "已启用跨机对话，重新打开 Agent 菜单即可使用");
-    } catch (error) {
-      status.lastError = errorMessage(error);
-      showProjectMirrorNotice(document, `启用跨机对话失败：${errorMessage(error)}`, "error");
-    }
-  };
-
   const runMirror = async (
     context: ProjectMirrorContext,
     selection: CrossHostAgentSelection,
@@ -362,72 +333,103 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     try {
       const route = hostRoute(hostId);
       if (!route) return fail(`${selection.machine.label} 当前离线`);
-      const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
-      const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
-      const remoteProjects = context.catalog.remoteProjects.filter(
-        (project) => project.hostId === hostId,
-      );
-      const appProjects = await listAppProjects(route).catch(() => []);
       const registry = await rpc.list();
       const known = registry.projects[sourceId];
-
-      const destination = await chooseMirrorDestination({
-        name,
-        hostId,
-        candidates: mirrorDirectoryCandidates(parent, name),
-        known:
-          known && known.hostId === hostId
-            ? {
-                hostId: known.hostId,
-                remotePath: known.remotePath,
-                remoteProjectId: known.remoteProjectId,
-              }
-            : null,
-        desktopProjects: remoteProjects,
-        appProjects,
-        directoryState: (path) => directoryState(route, path),
-      });
-      if (!destination) return fail("找不到可用的远程目录名");
-      const chosenPath = destination.path;
-      let existingProjectId = destination.projectId;
-
-      if (!existingProjectId) {
-        if ((await directoryState(route, chosenPath)) === "missing") {
-          await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
-          if ((await directoryState(route, chosenPath)) !== "directory") {
-            return fail("远程目录创建失败");
-          }
-        }
-        const created = await services.projects.createRemote({
-          appearance: null,
-          hostId,
-          label: name,
-          remotePath: chosenPath,
-          reuseExisting: true,
-        });
-        if (!created) return fail("创建远程项目被取消");
-        existingProjectId = created.id;
-      }
-
-      const projectId = existingProjectId;
-      if (!projectId) return fail("创建远程项目失败");
-      const appProject = appProjects.find((project) =>
-        project.roots.some((root) => root.path === chosenPath),
-      );
-      if (!appProject) {
-        void route.manager
-          .sendRequest("project/create", {
-            name,
-            roots: [{ path: chosenPath }],
-            metadata: {},
-            idempotencyKey: projectId,
-          })
-          .catch((error: unknown) =>
-            console.warn("codexhost project mirror: project/create failed", error),
-          );
-      }
-
       const now = new Date().toISOString();
+      let projectId: string | null;
+      let chosenPath: string;
+
+      if (hostId === "local") {
+        // The mirror runs the other way: Desktop creates `~/Documents/ChatGPT/<name>`
+        // here, so the Mac reuses its own same-name project when it exists.
+        const existing =
+          (known?.hostId === "local"
+            ? context.catalog.localProjects[known.remoteProjectId]
+            : undefined) ??
+          findNameOnlyLocalProject(
+            Object.values(context.catalog.localProjects),
+            name,
+            context.catalog.defaultProjectParent,
+          );
+        if (existing) {
+          projectId = existing.id;
+          chosenPath = existing.rootPaths[0] ?? "";
+        } else {
+          const created = await services.projects.createLocal({
+            appearance: null,
+            initializeDefaultWorkspaceGitRepository: false,
+            name,
+            setActive: false,
+            sources: [],
+          });
+          if (!created) return fail("创建本机项目被取消");
+          projectId = created.projectId;
+          chosenPath = created.rootPaths[0] ?? "";
+        }
+      } else {
+        const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
+        const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
+        const remoteProjects = context.catalog.remoteProjects.filter(
+          (project) => project.hostId === hostId,
+        );
+        const appProjects = await listAppProjects(route).catch(() => []);
+        const destination = await chooseMirrorDestination({
+          name,
+          hostId,
+          candidates: mirrorDirectoryCandidates(parent, name),
+          known:
+            known && known.hostId === hostId
+              ? {
+                  hostId: known.hostId,
+                  remotePath: known.remotePath,
+                  remoteProjectId: known.remoteProjectId,
+                }
+              : null,
+          desktopProjects: remoteProjects,
+          appProjects,
+          directoryState: (path) => directoryState(route, path),
+        });
+        if (!destination) return fail("找不到可用的远程目录名");
+        chosenPath = destination.path;
+        projectId = destination.projectId;
+
+        if (!projectId) {
+          if ((await directoryState(route, chosenPath)) === "missing") {
+            await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
+            if ((await directoryState(route, chosenPath)) !== "directory") {
+              return fail("远程目录创建失败");
+            }
+          }
+          const created = await services.projects.createRemote({
+            appearance: null,
+            hostId,
+            label: name,
+            remotePath: chosenPath,
+            reuseExisting: true,
+          });
+          if (!created) return fail("创建远程项目被取消");
+          projectId = created.id;
+        }
+
+        if (!projectId) return fail("创建远程项目失败");
+        const appProject = appProjects.find((project) =>
+          project.roots.some((root) => root.path === chosenPath),
+        );
+        if (!appProject) {
+          void route.manager
+            .sendRequest("project/create", {
+              name,
+              roots: [{ path: chosenPath }],
+              metadata: {},
+              idempotencyKey: projectId,
+            })
+            .catch((error: unknown) =>
+              console.warn("codexhost project mirror: project/create failed", error),
+            );
+        }
+      }
+
+      if (!projectId || !chosenPath) return fail("创建项目失败，请稍后重试");
       await upsertRegistry(rpc, {
         sourceProjectId: sourceId,
         record: {
@@ -496,12 +498,7 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       const section: CrossHostAgentSection = createCrossHostAgentSection({
         document,
         catalog: { machines: [], loadedPeers: 0 },
-        acknowledged: context.acknowledged,
         loading: true,
-        onAcknowledge: () => {
-          input.picker.close();
-          void acknowledge(context, rpc);
-        },
         onClose: () => input.picker.close(),
         onSelect: (selection) => {
           if (!services) {
@@ -516,28 +513,28 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
       try {
         const [loadedServices, catalog] = await Promise.all([
           loadProjectMirrorDesktopServices(window),
-          loadHarnessCatalog(context.catalog),
+          loadHarnessCatalog(context.catalog, context.source.hostId),
         ]);
         if (disposed || !section.element.isConnected) return;
         services = loadedServices;
         if (!services) {
           status.lastError = "Desktop project services are unavailable";
-          section.refresh({ machines: [], loadedPeers: 0 }, context.acknowledged, {
-            loading: false,
-            error: "Desktop 项目服务不可用",
-          });
+          section.refresh(
+            { machines: [], loadedPeers: 0 },
+            { loading: false, error: "Desktop 项目服务不可用" },
+          );
           return;
         }
         status.peersLoaded = catalog.loadedPeers;
         status.machineCount = catalog.machines.length;
-        section.refresh(catalog, context.acknowledged, { loading: false, error: null });
+        section.refresh(catalog, { loading: false, error: null });
       } catch (error) {
         if (disposed || !section.element.isConnected) return;
         status.lastError = errorMessage(error);
-        section.refresh({ machines: [], loadedPeers: 0 }, context.acknowledged, {
-          loading: false,
-          error: `其他机器不可用：${errorMessage(error)}`,
-        });
+        section.refresh(
+          { machines: [], loadedPeers: 0 },
+          { loading: false, error: `其他机器不可用：${errorMessage(error)}` },
+        );
       }
     })().catch((error: unknown) => {
       if (disposed) return;

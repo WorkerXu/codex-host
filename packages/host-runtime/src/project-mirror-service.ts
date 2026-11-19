@@ -35,7 +35,6 @@ export class ProjectMirrorService {
     return {
       revision: file.revision,
       projects: file.projects,
-      acknowledged: Object.keys(file.acknowledged),
     };
   }
 
@@ -50,13 +49,11 @@ export class ProjectMirrorService {
             updatedAt: now,
           };
     const file = await this.#store.upsert(params.revision, params.sourceProjectId, {
-      ...(params.acknowledge ? { acknowledge: true as const } : {}),
       ...(record !== undefined ? { record } : {}),
     });
     return {
       revision: file.revision,
       projects: file.projects,
-      acknowledged: Object.keys(file.acknowledged),
     };
   }
 }
