@@ -5,6 +5,7 @@ import { createRendererSettingsIcon, type RendererSettingsIconName } from "./ico
 import { skillButton, skillNode } from "./skills-dialog.js";
 import { skillDirectory } from "./skills-presentation.js";
 import { skillsClass } from "./skills-style.js";
+import { hubAgeLabel } from "./hub-cache.js";
 
 export interface SkillsViewState {
   tab: "library" | "agents";
@@ -18,13 +19,14 @@ export interface SkillsInventoryOptions {
   container: HTMLElement;
   machines: SkillMachine[];
   progress: Map<string, string>;
+  /** When each machine's inventory last answered, including cached values. */
+  updatedAt: ReadonlyMap<string, number>;
   state: SkillsViewState;
   onState(patch: Partial<SkillsViewState>): void;
   sync(skill: string, source?: string): void;
   linkAll(hostId: string): void;
   toggle(hostId: string, agentId: string, skill: string, linked: boolean): void;
   refresh(): void;
-  editExclusions(): void;
 }
 interface SkillsRenderOptions extends SkillsInventoryOptions {
   agentIcon: ReturnType<typeof skillsAgentIcons>;
@@ -97,16 +99,6 @@ export function renderSkillsInventory(options: SkillsInventoryOptions): void {
   };
   if (state.tab === "library") {
     renderLibrary(renderOptions, container, node);
-    const footer = node("div", "", "skills-footer");
-    const excluded = machines.flatMap((machine) =>
-      (machine.inventory?.agents ?? [])
-        .filter((agent) => agent.excluded)
-        .map((agent) => `${machine.name} · ${agent.name}`),
-    );
-    if (excluded.length)
-      footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
-    footer.append(skillButton(document, "管理排除…", options.editExclusions));
-    container.append(footer);
   } else if (state.agent) {
     const machine = machines.find((item) => item.hostId === state.agent?.hostId);
     const agent = machine?.inventory?.agents.find((item) => item.id === state.agent?.agentId);
@@ -198,7 +190,7 @@ function renderLibrary(options: SkillsRenderOptions, container: HTMLElement, nod
     (state.machine ? machines.find((item) => item.hostId === state.machine) : undefined) ??
     machines.find((item) => item.hostId === "local" && item.inventory) ??
     machines.find((item) => item.inventory);
-  const badgeAgents = badgeMachine?.inventory?.agents.filter((agent) => !agent.excluded) ?? [];
+  const badgeAgents = badgeMachine?.inventory?.agents ?? [];
   const rows = [...skills.values()]
     .filter((skill) => {
       const text = `${skill.key} ${skill.name} ${skill.description}`.toLowerCase();
@@ -248,6 +240,8 @@ function renderLibrary(options: SkillsRenderOptions, container: HTMLElement, nod
       const stateName = !entry ? "缺失" : differs ? "版本不同" : "✓";
       const chip = node("span", `${item.name} ${stateName}`, "skills-chip");
       chip.dataset.state = !entry ? "missing" : differs ? "different" : "same";
+      const age = options.updatedAt.get(item.hostId);
+      if (age !== undefined) chip.title = `更新于 ${hubAgeLabel(age)}`;
       chips.append(chip);
     }
     if ((differs || missing) && machines.filter((item) => item.inventory).length > 1) {
@@ -305,6 +299,8 @@ function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node
     const section = node("section", "", "skills-machine-group");
     const head = node("div", "", "skills-machine-heading");
     head.append(node("h3", machine.name));
+    const age = options.updatedAt.get(machine.hostId);
+    if (age !== undefined) head.append(node("span", `更新于 ${hubAgeLabel(age)}`, "skills-muted"));
     if (machine.inventory.agents.length) {
       const linkAll = skillButton(document, "一键链接", () => options.linkAll(machine.hostId));
       setClass(linkAll, "skills-chip-action");
@@ -335,7 +331,6 @@ function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node
       info.append(title, node("span", skillDirectory(agent.skillsDir), "skills-path"));
       const tags = node("div", "", "skills-agent-tags");
       if (agent.native === true) tags.append(node("span", "原生支持", "skills-chip"));
-      if (agent.excluded) tags.append(node("span", "已排除", "skills-chip"));
       if (agent.conflicts)
         tags.append(node("span", `${agent.conflicts} 个冲突`, "skills-status-conflict"));
       info.append(tags);
@@ -368,16 +363,6 @@ function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node
     container.append(section);
   }
   if (!sections) container.append(node("p", "没有可用的机器", "skills-empty"));
-  const excluded = machines.flatMap((machine) =>
-    (machine.inventory?.agents ?? [])
-      .filter((agent) => agent.excluded)
-      .map((agent) => `${machine.name} · ${agent.name}`),
-  );
-  const footer = node("div", "", "skills-footer");
-  if (excluded.length)
-    footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
-  footer.append(skillButton(document, "管理排除…", options.editExclusions));
-  container.append(footer);
 }
 function renderAgentDetail(
   options: SkillsRenderOptions,
@@ -399,7 +384,6 @@ function renderAgentDetail(
   const line = node("div", "", "skills-agent-title");
   line.append(node("h3", agent.name));
   if (agent.native === true) line.append(node("span", "原生支持", "skills-chip"));
-  if (agent.excluded) line.append(node("span", "已排除", "skills-chip"));
   info.append(line, node("span", skillDirectory(agent.skillsDir), "skills-path"));
   title.append(icon, info);
   head.append(back, title);

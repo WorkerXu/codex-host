@@ -2,10 +2,11 @@ import { skillsNativeTokens } from "./skills-style.js";
 import { renderSkillsInventory } from "./skills-inventory-view.js";
 import { showSkillConflicts } from "./skills-conflicts.js";
 import { showSkillLinks } from "./skills-link-preview.js";
-import { editSkillExclusions } from "./skills-exclusions.js";
 import { createRendererSettingsIcon } from "./icons.js";
 import { required } from "./skills-dialog.js";
+import { hubAgeLabel, readHubCache, writeHubCache } from "./hub-cache.js";
 import type {
+  SkillHost,
   SkillMachine,
   SkillSyncPlan,
   SkillsHubRequest,
@@ -28,8 +29,13 @@ type SyncRequest = Extract<
     op: "sync-plan";
   }
 >;
-/** The last inventory paints before the Host's cached status answers. */
-let cachedMachines: SkillMachine[] | null = null;
+const HOSTS_CACHE_KEY = "skills-hosts";
+const machineCacheKey = (hostId: string) => `skills-machine-${hostId}`;
+/** Cached hosts and inventories paint before the first Host answers. */
+interface MachineEntry {
+  machine: SkillMachine;
+  updatedAt: number | null;
+}
 export function createSkillsSettingsPage(
   options: RendererSkillsSettingsOptions,
 ): RendererSettingsPageDefinition {
@@ -44,11 +50,15 @@ export function createSkillsSettingsPage(
         root.style.setProperty(name, value);
       const head = skillNode(document, "div", "", "skills-head");
       head.append(skillNode(document, "h1", "技能"));
+      const updated = skillNode(document, "span", "", "skills-muted");
+      updated.hidden = true;
       const notice = skillNode(document, "div", "", "skills-notice");
       notice.setAttribute("role", "status");
       const matrix = skillNode(document, "div", "", "skills-view");
       const undoBar = skillNode(document, "div", "", "skills-undo");
       const client = options.createClient();
+      let hosts: SkillHost[] = [];
+      const entries = new Map<string, MachineEntry>();
       let machines: SkillMachine[] = [],
         busy = false;
       let tab: "library" | "agents" = "library";
@@ -64,9 +74,24 @@ export function createSkillsSettingsPage(
       const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") =>
         skillNode(document, tag, text, className);
       const machineName = (id: string, fallback = id) =>
-        machines.find((m) => m.hostId === id)?.name ?? fallback;
+        machines.find((m) => m.hostId === id)?.name ??
+        hosts.find((host) => host.hostId === id)?.name ??
+        fallback;
       const remember = (hostId: string, id: string) =>
         changes.set(hostId, [...(changes.get(hostId) ?? []), id]);
+      const publish = (): void => {
+        machines = hosts.flatMap((host) => {
+          const entry = entries.get(host.hostId);
+          return entry ? [entry.machine] : [];
+        });
+      };
+      const updateAge = (): void => {
+        const ages = hosts
+          .map((host) => entries.get(host.hostId)?.updatedAt)
+          .filter((value): value is number => value !== null && value !== undefined);
+        updated.hidden = !ages.length;
+        updated.textContent = ages.length ? `更新于 ${hubAgeLabel(Math.min(...ages))}` : "";
+      };
       async function perform<T>(
         operation: () => Promise<T>,
         success: (result: T) => void | Promise<void>,
@@ -91,24 +116,57 @@ export function createSkillsSettingsPage(
           root.removeAttribute("aria-busy");
         }
       }
-      async function load(): Promise<void> {
-        if (!client) {
-          notice.textContent = "连接失败";
-          return;
+      async function loadHosts(): Promise<boolean> {
+        if (!client) return false;
+        try {
+          hosts = await client.hosts();
+          writeHubCache(HOSTS_CACHE_KEY, hosts);
+          return true;
+        } catch (error) {
+          notice.textContent = skillsErrorText(error);
+          if (!hosts.length) matrix.replaceChildren();
+          return false;
         }
-        machines = await Promise.all(
-          (await client.status()).map(async (machine) => ({
-            ...machine,
-            name:
-              (await options.resolveMachineName?.(machine.hostId).catch(() => undefined)) ??
-              machine.name,
-          })),
-        );
-        cachedMachines = machines;
-        progress.clear();
+      }
+      async function loadMachine(hostId: string): Promise<void> {
+        if (!client) return;
+        try {
+          const [result, resolved] = await Promise.all([
+            client.status(hostId),
+            options.resolveMachineName?.(hostId).catch(() => undefined) ??
+              Promise.resolve(undefined),
+          ]);
+          const machine = { ...result, name: resolved ?? result.name };
+          const updatedAt = Date.now();
+          entries.set(hostId, { machine, updatedAt });
+          writeHubCache(machineCacheKey(hostId), machine, updatedAt);
+          progress.delete(hostId);
+        } catch (error) {
+          const previous = entries.get(hostId);
+          if (!previous?.machine.inventory)
+            entries.set(hostId, {
+              machine: {
+                hostId,
+                name: machineName(hostId),
+                inventory: null,
+                error: error instanceof Error ? error.message : "skills_failed",
+              },
+              updatedAt: null,
+            });
+        }
+        publish();
         if (!context.signal.aborted) render();
       }
-      const refresh = button("", () => void perform(load, () => {}));
+      /** Local first; every remote Host fills in as its own answer arrives. */
+      async function loadAll(): Promise<void> {
+        const order = hosts.map((host) => host.hostId);
+        const local = order.indexOf("local");
+        if (local > 0) order.unshift(...order.splice(local, 1));
+        const first = order.shift();
+        if (first) await loadMachine(first);
+        await Promise.all(order.map((hostId) => loadMachine(hostId)));
+      }
+      const refresh = button("", () => void refreshPage());
       refresh.setAttribute("aria-label", "刷新");
       refresh.dataset.skillsRefresh = "true";
       refresh.append(createRendererSettingsIcon("refresh", 14));
@@ -151,10 +209,11 @@ export function createSkillsSettingsPage(
           }),
         true,
       );
-      head.append(refreshWrap, fill);
+      head.append(updated, refreshWrap, fill);
       root.append(head, notice, undoBar, matrix);
       context.content.append(root);
       function render(): void {
+        updateAge();
         fill.disabled = machines.filter((machine) => machine.inventory).length < 2;
         undoBar.replaceChildren();
         for (const [hostId, ids] of changes) {
@@ -167,10 +226,14 @@ export function createSkillsSettingsPage(
           );
         }
         undoBar.hidden = !undoBar.childElementCount;
+        const updatedAt = new Map<string, number>();
+        for (const [hostId, entry] of entries)
+          if (entry.updatedAt !== null) updatedAt.set(hostId, entry.updatedAt);
         renderSkillsInventory({
           container: matrix,
           machines,
           progress,
+          updatedAt,
           state: {
             tab,
             search,
@@ -200,20 +263,7 @@ export function createSkillsSettingsPage(
                 ? { unlink: [{ agentId, skill }], scope: { agentId, skill } }
                 : { scope: { agentId, skill } },
             ),
-          refresh: () => void perform(load, () => {}),
-          editExclusions: () =>
-            editSkillExclusions({
-              root,
-              machines,
-              save: (hostId, ids, close) =>
-                void perform(
-                  () => required(client).exclusions(hostId, ids),
-                  async () => {
-                    close();
-                    await load();
-                  },
-                ),
-            }),
+          refresh: () => void refreshPage(),
         });
       }
       function confirmUndo(hostId: string, id: string): void {
@@ -229,7 +279,7 @@ export function createSkillsSettingsPage(
                 async () => {
                   changes.get(hostId)?.pop();
                   dialog.close();
-                  await load();
+                  await loadMachine(hostId);
                 },
               ),
             true,
@@ -342,8 +392,8 @@ export function createSkillsSettingsPage(
             void perform(
               () => required(client).syncApply(plan.id),
               async (result) => {
-                const hosts = new Set(result.results.map((r) => r.hostId));
-                for (const host of hosts) {
+                const affected = new Set(result.results.map((r) => r.hostId));
+                for (const host of affected) {
                   const rows = result.results.filter((r) => r.hostId === host);
                   progress.set(
                     host,
@@ -353,9 +403,9 @@ export function createSkillsSettingsPage(
                   );
                   for (const row of rows) if (row.id) remember(host, row.id);
                 }
-                await load();
+                await Promise.all([...affected].map((host) => loadMachine(host)));
                 const done = skillsDialog(root, "同步完成");
-                for (const host of hosts) {
+                for (const host of affected) {
                   const row = node("div", "", "skills-head");
                   row.append(node("span", `${machineName(host)} · ${progress.get(host)}`));
                   if (machines.find((machine) => machine.hostId === host)?.inventory?.agents.length)
@@ -408,23 +458,57 @@ export function createSkillsSettingsPage(
               async (result) => {
                 remember(plan.hostId, result.id);
                 progress.set(plan.hostId, `已完成 ${result.changed} 项更改`);
-                await load();
+                await loadMachine(plan.hostId);
               },
             );
           },
         });
       }
+      async function refreshPage(): Promise<void> {
+        if (busy || !client) return;
+        busy = true;
+        root.setAttribute("aria-busy", "true");
+        try {
+          if (await loadHosts()) {
+            publish();
+            render();
+            await Promise.all(hosts.map((host) => loadMachine(host.hostId)));
+          }
+        } finally {
+          busy = false;
+          root.removeAttribute("aria-busy");
+        }
+      }
+      const cachedHosts = readHubCache<SkillHost[]>(HOSTS_CACHE_KEY);
+      if (cachedHosts) {
+        hosts = cachedHosts.value;
+        for (const host of hosts) {
+          const cached = readHubCache<SkillMachine>(machineCacheKey(host.hostId));
+          if (cached)
+            entries.set(host.hostId, { machine: cached.value, updatedAt: cached.updatedAt });
+        }
+        publish();
+      }
       matrix.append(node("div", "", "skills-skeleton"));
-      if (client && cachedMachines) {
-        machines = cachedMachines;
-        render();
-        void perform(load, () => {});
-      } else if (client) void perform(load, () => {});
-      else {
+      if (client) {
+        if (machines.length) render();
+        void (async () => {
+          if (await loadHosts()) {
+            publish();
+            if (machines.length) render();
+            await loadAll();
+          }
+        })();
+      } else {
         matrix.replaceChildren();
         notice.textContent = "连接失败";
       }
+      const tick = setInterval(() => {
+        if (!updated.hidden) updateAge();
+      }, 30_000);
+      context.signal.addEventListener("abort", () => clearInterval(tick), { once: true });
       return () => {
+        clearInterval(tick);
         document.defaultView?.removeEventListener("keydown", dismissTooltip, true);
         root.querySelectorAll("dialog").forEach((dialog) => {
           dialog.close();

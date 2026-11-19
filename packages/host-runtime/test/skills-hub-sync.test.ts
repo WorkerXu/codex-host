@@ -132,6 +132,19 @@ describe("skills sync planning", () => {
   });
 });
 describe("two fake hosts through authenticated skills routes", () => {
+  it("lists configured machines without reading any inventory", async () => {
+    const { service } = await setup();
+    expect(await service.request({ op: "hosts" })).toEqual({
+      hosts: [
+        { hostId: "local", name: "Mac" },
+        { hostId: "peer", name: "Peer" },
+      ],
+    });
+    const local = await service.request({ op: "status", hostId: "local" });
+    expect((local as { machines: SkillMachine[] }).machines.map((m) => m.hostId)).toEqual([
+      "local",
+    ]);
+  });
   it("copies tarball content, offers links separately and undoes imports", async () => {
     const { a, b, service } = await setup();
     await install(a.home, "example", "A");

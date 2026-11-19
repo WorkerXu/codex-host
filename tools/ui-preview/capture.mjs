@@ -24,7 +24,6 @@ const allScenarios = [
   "skills-hover",
   "skills-focus",
   "skills-agents",
-  "skills-exclusions",
   "skills-link-choice",
   "skills-sync-selection",
   "skills-conflict",

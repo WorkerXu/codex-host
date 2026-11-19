@@ -150,8 +150,17 @@ export class SkillsHubService {
       ),
     };
   }
+  async hosts(): Promise<{
+    hosts: {
+      hostId: string;
+      name: string;
+    }[];
+  }> {
+    return { hosts: await this.#hosts() };
+  }
   async request(value: unknown): Promise<unknown> {
     const input = skillsHubRequestSchema.parse(value);
+    if (input.op === "hosts") return this.hosts();
     if (input.op === "status") return this.status(input.hostId);
     if (input.op === "sync-plan") {
       if (input.sourceHost) input.sourceHost = await this.#canonicalHost(input.sourceHost);
@@ -282,8 +291,6 @@ export class SkillsHubService {
       );
       return { ...result, hostId: input.hostId };
     }
-    if (input.op === "exclusions")
-      return this.machineRequest(input.hostId, "exclusions", { agents: input.agents });
     return this.machineRequest(input.hostId, input.op, { id: input.id });
   }
 }

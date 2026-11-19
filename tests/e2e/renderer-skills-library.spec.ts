@@ -9,7 +9,8 @@ const { outputFiles } = await build({
   stdin: {
     contents: `
       import { mountSkillsPreview } from "./tools/ui-preview/src/skills.ts";
-      globalThis.setupSkills = mountSkillsPreview;
+      globalThis.setupSkills = () => mountSkillsPreview();
+      globalThis.setupSkillsSlow = () => mountSkillsPreview({ remoteDelayMs: 1_200 });
     `,
     resolveDir: path.resolve(import.meta.dirname, "../.."),
     sourcefile: "skills-library-e2e-entry.ts",
@@ -23,15 +24,47 @@ const { outputFiles } = await build({
   plugins: [tailwindEsbuildPlugin()],
   write: false,
 });
-async function setup(page: Page) {
+async function setup(page: Page, mode: "normal" | "slow" = "normal") {
   await page.route("http://localhost/skills-test", (route) =>
     route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body></body></html>" }),
   );
   await page.goto("http://localhost/skills-test");
   await page.addScriptTag({ content: outputFiles[0]?.text ?? "" });
-  await page.evaluate(() => Reflect.get(globalThis, "setupSkills")());
+  await page.evaluate(
+    (slow) => Reflect.get(globalThis, slow ? "setupSkillsSlow" : "setupSkills")(),
+    mode === "slow",
+  );
   await expect(page.locator(".skills-card")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "管理排除…" })).toHaveCount(0);
 }
+
+test("local machine paints first and remote machines fill in when they answer", async ({
+  page,
+}) => {
+  await setup(page, "slow");
+  expect(await page.locator(".skills-chips").first().locator(".skills-chip").count()).toBe(1);
+  await expect(page.locator(".skills-chips").first()).toContainText("甲骨文新加坡", {
+    timeout: 5_000,
+  });
+});
+
+test("reopened page paints the cached inventories before any Host answers", async ({ page }) => {
+  await setup(page);
+  await expect(page.locator(".skills-chips").first()).toContainText("甲骨文新加坡");
+  await page.evaluate(() => Reflect.get(globalThis, "setupSkillsSlow")());
+  const cached = await page.evaluate(() => {
+    const shadow = document.querySelector("[data-codexhost-settings-shell]")?.shadowRoot;
+    if (!shadow) throw new Error("settings shell is missing");
+    return {
+      cards: shadow.querySelectorAll(".skills-card").length,
+      chips: shadow.querySelectorAll(".skills-chips")[0]?.querySelectorAll(".skills-chip").length,
+      updated: shadow.querySelector(".skills-head .skills-muted")?.textContent ?? "",
+    };
+  });
+  expect(cached.cards).toBe(3);
+  expect(cached.chips).toBe(4);
+  expect(cached.updated).toMatch(/^更新于 /u);
+});
 
 test("search keeps Shadow DOM focus across characters, filters, and empty results", async ({
   page,
@@ -44,7 +77,6 @@ test("search keeps Shadow DOM focus across characters, filters, and empty result
   await expect(page.locator(".skills-card-name")).toHaveText(["writing-guide"]);
   await search.fill("nothing-matches");
   await expect(page.locator(".skills-card")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "管理排除…" })).toBeVisible();
   await search.fill("");
   await page.getByLabel("筛选机器").selectOption("oracle-main");
   await page.getByRole("button", { name: "已链接", exact: true }).click();
@@ -137,7 +169,7 @@ test("search preserves an active IME composition until the text is committed", a
   await expect(page.locator(".skills-card-name")).toHaveText(["design-review"]);
 });
 
-test("Desktop machine names are consistent across filters, chips, sync, conflicts and exclusions", async ({
+test("Desktop machine names are consistent across filters, chips, sync and conflicts", async ({
   page,
 }) => {
   await setup(page);
@@ -170,13 +202,6 @@ test("Desktop machine names are consistent across filters, chips, sync, conflict
   await conflicts.locator('input[value="local"]').check();
   await conflicts.getByRole("button", { name: "继续", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("此计算机 → 甲骨文新加坡");
-  await page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
-  await page.getByRole("button", { name: "管理排除…", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "设置机器" }).locator("option")).toHaveText([
-    "此计算机",
-    "甲骨文新加坡",
-    "build-server",
-  ]);
   await page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
   await page.getByRole("tab", { name: "按 Agent" }).click();
   await page

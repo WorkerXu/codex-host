@@ -1041,13 +1041,18 @@ export function installRendererBindingProbe(
         return desktopDisplayNameForPeer(peer ?? { hostIds: [hostId], ssh: hostId });
       },
       createClient: () =>
-        createRendererSkillsClient(async (params) => {
-          const route = window.__codexhostHostRoutingV1?.forHost("local");
-          if (!route) throw new Error("connection_failed");
-          return route.manager.sendRequest(SKILLS_HUB_METHOD, params, {
-            priority: "interactive",
-            timeoutMs: 120_000,
-          });
+        createRendererSkillsClient({
+          async request(machineId, params) {
+            // The local Host needs no SSH catalog; remote peers map to the
+            // Desktop connection that is already open for that machine.
+            if (machineId !== "local") await reconcileSshConnectionHosts();
+            const route = skillsMachineRoute(machineId);
+            if (!route) throw new Error("connection_failed");
+            return route.manager.sendRequest(SKILLS_HUB_METHOD, params, {
+              priority: "interactive",
+              timeoutMs: 120_000,
+            });
+          },
         }),
     },
     jarvis: { createClient: () => jarvisClient },
@@ -1174,6 +1179,7 @@ export function installRendererBindingProbe(
   let sshConnectionHostIds: ReadonlySet<string> | null = null;
   let sshConnectionDisplayNames = new Map<string, string>();
   let sshConnectionDisplayNamesByAlias = new Map<string, string>();
+  let sshConnectionHostIdsByAlias = new Map<string, string>();
   let sshConnectionHostsRequest: Promise<void> | null = null;
   let sshConnectionHostsCheckedAt = 0;
   const SSH_CONNECTION_CATALOG_TTL_MS = 30_000;
@@ -1203,15 +1209,18 @@ export function installRendererBindingProbe(
     const next = new Set(list.map(({ hostId }) => hostId));
     sshConnectionDisplayNames = new Map();
     sshConnectionDisplayNamesByAlias = new Map();
+    sshConnectionHostIdsByAlias = new Map();
     for (const connection of list) {
       const displayName = connection.displayName?.trim();
       if (!displayName) continue;
       sshConnectionDisplayNames.set(connection.hostId, displayName);
       if (connection.sshAlias) {
         sshConnectionDisplayNamesByAlias.set(connection.sshAlias, displayName);
+        sshConnectionHostIdsByAlias.set(connection.sshAlias, connection.hostId);
       }
       if (connection.sshHost) {
         sshConnectionDisplayNamesByAlias.set(connection.sshHost, displayName);
+        sshConnectionHostIdsByAlias.set(connection.sshHost, connection.hostId);
       }
     }
     sshConnectionHostIds = next;
@@ -4098,6 +4107,20 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
+  /** A peer name resolves to the Desktop Host route that is already connected. */
+  function skillsMachineRoute(machineId: string) {
+    const routing = window.__codexhostHostRoutingV1;
+    if (!routing) return null;
+    const direct = routing.forHost(machineId);
+    if (direct) return direct;
+    const peer = peerDelegationCatalogs.get("local")?.peers.find((item) => item.name === machineId);
+    for (const hostId of [sshConnectionHostIdsByAlias.get(machineId), ...(peer?.hostIds ?? [])]) {
+      if (!hostId) continue;
+      const route = routing.forHost(hostId);
+      if (route) return route;
+    }
+    return null;
+  }
   const desktopDisplayNameForPeer = (
     peer: Pick<DelegationPeerCatalogEntry, "hostIds" | "ssh">,
   ): string | undefined => {

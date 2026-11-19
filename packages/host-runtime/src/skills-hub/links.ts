@@ -40,7 +40,7 @@ export async function planLinks(
     unlink.map((request) => [`${request.agentId}/${request.skill}`, request]),
   );
   for (const agent of current.agents) {
-    if (agent.excluded || agent.native === true) continue;
+    if (agent.native === true) continue;
     try {
       await safePath(paths.home, agent.skillsDir);
     } catch {
@@ -93,13 +93,7 @@ export async function planLinks(
   }
   for (const request of unlinks.values()) {
     const agent = current.agents.find((entry) => entry.id === request.agentId);
-    if (
-      !agent ||
-      agent.excluded ||
-      agent.native === true ||
-      isManagedSkill(agent.id, request.skill)
-    )
-      continue;
+    if (!agent || agent.native === true || isManagedSkill(agent.id, request.skill)) continue;
     await safePath(paths.home, agent.skillsDir);
     const file = path.join(agent.skillsDir, request.skill),
       target = path.join(root, request.skill);

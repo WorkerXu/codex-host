@@ -30,7 +30,7 @@ function entry(key: string, variant = "a") {
     ],
   };
 }
-function fakeClient(): RendererSkillsClient {
+function fakeClient(delays: { remoteMs?: number } = {}): RendererSkillsClient {
   const machines: SkillMachine[] = [
     {
       hostId: "local",
@@ -39,7 +39,6 @@ function fakeClient(): RendererSkillsClient {
       inventory: {
         skills: [entry("design-review"), entry("project-search"), entry("writing-guide")],
         warnings: [],
-        exclusions: ["github-copilot", "qoder"],
         agents: [
           {
             id: "codex",
@@ -47,7 +46,6 @@ function fakeClient(): RendererSkillsClient {
             skillsDir: "~/.agents/skills",
             native: true,
             evidence: "Codex 用户技能目录",
-            excluded: false,
             linked: 0,
             conflicts: 0,
             managed: 0,
@@ -64,7 +62,6 @@ function fakeClient(): RendererSkillsClient {
             skillsDir: "~/.claude/skills",
             native: false,
             evidence: "Claude Code 个人技能目录",
-            excluded: false,
             linked: 1,
             conflicts: 1,
             managed: 1,
@@ -81,7 +78,6 @@ function fakeClient(): RendererSkillsClient {
             skillsDir: "~/.cursor/skills",
             native: false,
             evidence: "Cursor 用户技能目录",
-            excluded: false,
             linked: 1,
             conflicts: 0,
             managed: 0,
@@ -98,7 +94,6 @@ function fakeClient(): RendererSkillsClient {
             skillsDir: "~/.copilot/skills",
             native: false,
             evidence: "GitHub Copilot 用户技能目录",
-            excluded: true,
             linked: 0,
             conflicts: 0,
             managed: 0,
@@ -119,7 +114,6 @@ function fakeClient(): RendererSkillsClient {
       inventory: {
         skills: [entry("design-review", "b"), entry("project-search")],
         warnings: [],
-        exclusions: ["github-copilot", "qoder"],
         agents: [
           {
             id: "codebuddy",
@@ -127,7 +121,6 @@ function fakeClient(): RendererSkillsClient {
             skillsDir: "~/.codebuddy/skills",
             native: false,
             evidence: "CodeBuddy 用户技能目录",
-            excluded: false,
             linked: 2,
             conflicts: 0,
             managed: 0,
@@ -150,7 +143,6 @@ function fakeClient(): RendererSkillsClient {
       inventory: {
         skills: [entry("project-search")],
         warnings: [],
-        exclusions: ["github-copilot", "qoder"],
         agents: [],
       },
     },
@@ -168,7 +160,14 @@ function fakeClient(): RendererSkillsClient {
     | undefined;
   document.body.dataset.skillsLinkApplies = "0";
   return {
-    status: async () => structuredClone(machines),
+    hosts: async () => machines.map(({ hostId, name }) => ({ hostId, name })),
+    async status(hostId) {
+      if (hostId !== "local" && delays.remoteMs)
+        await new Promise((done) => setTimeout(done, delays.remoteMs));
+      const machine = machines.find((item) => item.hostId === hostId);
+      if (!machine) throw new Error("connection_failed");
+      return structuredClone(machine);
+    },
     async linkPlan(hostId, options) {
       const scope = options?.scope;
       if (scope) {
@@ -286,13 +285,6 @@ function fakeClient(): RendererSkillsClient {
       }
       return { id: uuid, changed: 2 };
     },
-    async exclusions(hostId, agents) {
-      const inventory = machines.find((m) => m.hostId === hostId)?.inventory;
-      if (inventory) {
-        inventory.exclusions = agents;
-        for (const agent of inventory.agents) agent.excluded = agents.includes(agent.id);
-      }
-    },
     async syncPlan(input) {
       const versions = machines
         .filter((m) => m.inventory?.skills.some((s) => s.key === "design-review"))
@@ -346,7 +338,7 @@ function previewIcon(source: string): string {
     ? source
     : `data:image/svg+xml;base64,${btoa(decodeURIComponent(source.slice(source.indexOf(",") + 1)))}`;
 }
-export function mountSkillsPreview() {
+export function mountSkillsPreview(options: { remoteDelayMs?: number } = {}) {
   writeCachedHarnessDirectory("local", {
     fingerprint: "preview-artwork",
     plugins: [
@@ -359,7 +351,7 @@ export function mountSkillsPreview() {
   const shell = installRendererSettingsShell(
     [
       createSkillsSettingsPage({
-        createClient: fakeClient,
+        createClient: () => fakeClient({ remoteMs: options.remoteDelayMs }),
         resolveMachineName: async (hostId) =>
           hostId === "local"
             ? localMachineLabel("zh-CN")

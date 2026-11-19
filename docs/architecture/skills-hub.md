@@ -6,10 +6,10 @@
 
 - `shared-contracts/skills-hub.ts` 定义浏览器安全的请求、库存、冲突与操作结果。
 - `host-runtime/skills-hub/` 负责库存、发现、指纹、链接计划、备份、撤销、归档、来源重建及跨机协调。
-- `renderer-extension/settings/skills-*` 使用设置页的 Shadow DOM 和 Tailwind 样式，只通过 `codexhost/skills/request` 调用本机协调器。
+- `renderer-extension/settings/skills-*` 使用设置页的 Shadow DOM 和 Tailwind 样式。每台机器通过 `codexhost/skills/request` 读取自己的状态；跨机同步和导入仍由本机协调器安排。
 - Rust launcher 只把 `skills` 命令交给 TypeScript CLI，不解释技能语义。
 
-本机协调器读取现有 `peers.json`，以 peer 名称列出远程机器；CLI 的 `--host` 也接受配置中的机器标识。远端必须运行支持技能路由的 codexhost。传输复用 `requestPeerRoute` 的 SSH ControlMaster 和认证控制服务。新增的白名单路由仅覆盖 `/v1/skills/` 下的库存、链接预览/执行、排除设置、撤销、导出、导入和分块传输；请求不接受任意路径或 shell 命令。远程技能路由不能递归发起跨机同步。
+本机协调器读取现有 `peers.json`，以 peer 名称列出远程机器；CLI 的 `--host` 也接受配置中的机器标识。远端必须运行支持技能路由的 codexhost。跨机同步、导入导出和分块传输复用 `requestPeerRoute` 的 SSH ControlMaster 和认证控制服务；白名单路由仅覆盖 `/v1/skills/` 下的库存、链接预览/执行、撤销、导出、导入和分块传输，请求不接受任意路径或 shell 命令。远程技能路由不能递归发起跨机同步。
 
 ## 库存与发现
 
@@ -19,9 +19,9 @@
 
 Agent 名单来自缓存的 Harness 可用性（`~/.codexhost/cache/harness-availability.json` 中 `status !== "notInstalled"`），只列已安装的 Agent 加官方 Codex；不读取未安装 Agent 的技能目录，也不扫描 `~/.*` 或 PATH。可用性由 Harness 检查器维护，技能操作读取该缓存，不重新探测 CLI；缓存名单变化时重新建立库存候选。没有可用条目时只保留内置 Codex。
 
-库存以中央库及每个 Agent 技能目录的 mtime、size 作为指纹。指纹未变时直接返回上次库存，不读取任何文件；有变化才重新扫描。页面先用上次库存立即渲染，再在后台刷新。
+库存以中央库及每个 Agent 技能目录的 mtime、size 作为指纹。指纹未变时直接返回上次库存，不读取任何文件；有变化才重新扫描。设置页按机器缓存上次库存；重开时先用缓存立即渲染并显示「更新于 X 前」，再在后台刷新。首次打开直接向每台机器的 Host 读取自己的 `{op:"status",hostId:"local"}`，不再由 Mac Host 为每次请求新开 SSH；本机先出现，远程机器各自返回后逐台填充。直连请求（状态、链接预览、执行、撤销）的请求体一律使用 `hostId:"local"`，预览结果返回前换回该机器的 peer 名称；只有跨机同步仍把 peer 名称交给本机协调器。
 
-每个技能的每个 Agent 状态（已链接、未链接、冲突、原生支持、托管）随库存返回，供技能库徽标和 Agent 页使用。链接徽标复用预览、应用与撤销流程；目标化 `unlink` 只移除指向对应中央技能的符号链接，不删除中央库技能，可撤销。托管技能和排除项不参与链接或解除链接。库存、预览、应用前校验、导入导出和排除设置均使用缓存的 Harness availability 筛选 Agent；预览后安装状态变化会使预览失效，已卸载 Agent 的链接撤销会拒绝执行。
+每个技能的每个 Agent 状态（已链接、未链接、冲突、原生支持、托管）随库存返回，供技能库徽标和 Agent 页使用。链接徽标复用预览、应用与撤销流程；目标化 `unlink` 只移除指向对应中央技能的符号链接，不删除中央库技能，可撤销。托管技能不参与链接或解除链接。库存、预览、应用前校验和导入导出均使用缓存的 Harness availability 筛选 Agent；预览后安装状态变化会使预览失效，已卸载 Agent 的链接撤销会拒绝执行。
 
 原生支持证据（2026-11-17 核对）：
 
@@ -34,11 +34,11 @@ Agent 名单来自缓存的 Harness 可用性（`~/.codexhost/cache/harness-avai
 | Antigravity | 否 | [skills 的 Agent 路径实现](https://github.com/vercel-labs/skills/blob/main/src/agents.ts) 明确 `globalReadsCanonical=false`，用户目录为 `.gemini/config/skills`。 |
 | CodeBuddy、Grok、Cursor、Kiro | 按独立用户目录链接 | 同一份 [skills 路径实现](https://github.com/vercel-labs/skills/blob/main/src/agents.ts) 的 `globalSkillsDir`；项目级 `.agents/skills` 不等于用户级中央库支持。 |
 
-GitHub Copilot、Qoder、Qoder CN 默认排除，设置页可以按机器编辑标识列表。即使其 home 或 CLI 存在，也不为被排除项创建技能目录。Claude Code 的 `codexhost-delegation` 留给专属安装/更新器管理。
+设置页不提供排除功能：已安装的 Agent 都按同一规则参与库存、链接和同步。旧的 `exclusions.json` 不再读取，也不会被删除。Claude Code 的 `codexhost-delegation` 留给专属安装/更新器管理。
 
 ## 链接、冲突与撤销
 
-「一键链接」先生成有效期十分钟的只读预览。执行使用一次性预览编号，重新扫描库存、发现结果、排除列表和计划。任何变化都要求重新预览。
+「一键链接」先生成有效期十分钟的只读预览。执行使用一次性预览编号，重新扫描库存、发现结果和计划。任何变化都要求重新预览。
 
 创建的新链接使用相对目标。已经指向正确中央技能的链接保留；仅自动清理指向中央库内部、且目标缺失的链接。外部失效链接、普通文件和同名真实目录都显示冲突。选择「收进中央库」需要单独确认并重新预览；执行会备份中央同名版本、移动选中的真实目录并留下相对链接。一次预览不能为同一个中央技能选择两个目录。
 
@@ -46,7 +46,7 @@ GitHub Copilot、Qoder、Qoder CN 默认排除，设置页可以按机器编辑�
 
 每次导出重新验证来源指纹；每次导入比较目标的预期指纹或缺失状态。两台机器无需全局事务：失败按机器与技能返回，已完成的操作有独立撤销编号。同步完成后提供目标机器的链接入口，链接不会隐式执行。
 
-备份、变更清单、排除列表和来源记录保存在 `~/.codexhost/skills-hub/`。清单包含每一步的状态，执行失败可用预览编号检查。撤销前校验当前文件、链接和来源记录；被用户或其他工具修改后会拒绝撤销。撤销保留替换版本作为备份，不递归删除用户技能。设置页提供本次页面会话内的「撤销上次更改」，CLI 可按清单编号撤销。
+备份、变更清单和来源记录保存在 `~/.codexhost/skills-hub/`。清单包含每一步的状态，执行失败可用预览编号检查。撤销前校验当前文件、链接和来源记录；被用户或其他工具修改后会拒绝撤销。撤销保留替换版本作为备份，不递归删除用户技能。设置页提供本次页面会话内的「撤销上次更改」，CLI 可按清单编号撤销。
 
 ## 传输限制
 
@@ -77,10 +77,10 @@ codexhost skills link --host oracle-main --confirm <previous-confirmation>
 
 ## 验证与真实 Desktop 验收
 
-聚焦测试覆盖假 home 下的库存、指纹、发现、排除、真实目录冲突、失效链接、收进中央库、撤销、来源重建、预览失效、分块偏移，以及两台假机器通过认证路由同步与撤销。真实用户目录验证只运行 dry-run。
+聚焦测试覆盖假 home 下的库存、指纹、发现、真实目录冲突、失效链接、收进中央库、撤销、来源重建、预览失效、分块偏移，以及两台假机器通过认证路由同步与撤销。真实用户目录验证只运行 dry-run。
 
-`tools/ui-preview` 覆盖技能库卡片和列表、机器与链接筛选、Agent 卡片及详情、排除编辑、冲突选择及文件列表、链接预览和收进中央库的选择，并提供悬停与键盘焦点场景。徽标优先复用对应 Host 缓存的 Harness 图标，缺少图标时显示名称缩写；图标目录不参与安装状态判断。场景通过真实鼠标/键盘桥操作设置页 Shadow DOM。`CODEX_DESKTOP_CSS` 指向 Desktop 样式时，预览提取原始主题变量、深色选择器及媒体条件，避免浅色导出值遮蔽深色变量；截图报告记录主题来源。仅提供浅色变量导出时，深色报告仍标记为 approximate。
+`tools/ui-preview` 覆盖技能库卡片和列表、机器与链接筛选、Agent 卡片及详情、冲突选择及文件列表、链接预览和收进中央库的选择，并提供悬停与键盘焦点场景。徽标优先复用对应 Host 缓存的 Harness 图标，缺少图标时显示名称缩写；图标目录不参与安装状态判断。场景通过真实鼠标/键盘桥操作设置页 Shadow DOM。`CODEX_DESKTOP_CSS` 指向 Desktop 样式时，预览提取原始主题变量、深色选择器及媒体条件，避免浅色导出值遮蔽深色变量；截图报告记录主题来源。仅提供浅色变量导出时，深色报告仍标记为 approximate。
 
-链接预览按 Agent 显示名和目录分组。「收进中央库」默认不勾选；更改选择后重新生成预览，点击「应用」才执行该预览。机器卡片共用列宽，排除编辑入口统一放在页面底部，设置仍按机器保存。
+链接预览按 Agent 显示名和目录分组。「收进中央库」默认不勾选；更改选择后重新生成预览，点击「应用」才执行该预览。机器卡片共用列宽。
 
 真实 Desktop 需验证：本机设置入口与 peer 名单；Mac/SSH peer 的实际技能发现；每个 Agent 对链接技能的原生加载；跨机断连与权限错误；同名冲突反复询问；确认后的同步、收进中央库及撤销。macOS/Windows 的符号链接权限和文件系统行为需在对应平台实测。

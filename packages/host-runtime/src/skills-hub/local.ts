@@ -25,7 +25,6 @@ export const SKILL_PEER_OPERATIONS = [
   "link-plan",
   "link-apply",
   "undo",
-  "exclusions",
   "export",
   "import",
 ] as const;
@@ -81,7 +80,7 @@ export class LocalSkillsHub {
     if (op === "link-plan") {
       const request = linkPlanInput.parse(body);
       const plan = await planLinks(this.paths, request, available);
-      // Fingerprints, exclusions, and every agent path participate in preview freshness.
+      // Fingerprints and every agent path participate in preview freshness.
       const snapshot = await this.#snapshot(plan, available);
       for (const [id, value] of this.plans)
         if (Date.now() - value.created > 600000) this.plans.delete(id);
@@ -103,15 +102,6 @@ export class LocalSkillsHub {
       const { id } = idInput.parse(body);
       await this.#safeState();
       return undoChanges(this.paths, id, available);
-    }
-    if (op === "exclusions") {
-      const { agents } = z
-        .object({ agents: z.array(z.string().regex(/^[a-zA-Z0-9._-]+$/u)).max(100) })
-        .strict()
-        .parse(body);
-      await this.#safeState();
-      await this.#writeJson("exclusions.json", [...new Set(agents)]);
-      return inventory(this.paths, available);
     }
     if (op === "export") {
       const { skill, expected } = z
@@ -144,12 +134,6 @@ export class LocalSkillsHub {
   async #safeState(): Promise<void> {
     await safePath(this.paths.home, this.paths.state);
     await mkdir(this.paths.state, { recursive: true, mode: 0o700 });
-  }
-  async #writeJson(name: string, value: unknown): Promise<void> {
-    const file = path.join(this.paths.state, name),
-      temporary = `${file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
-    await rename(temporary, file);
   }
   async #import({ bundle, expected }: z.infer<typeof skillImportSchema>): Promise<{
     id: string;
