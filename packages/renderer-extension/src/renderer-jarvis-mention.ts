@@ -222,7 +222,6 @@ interface ModeState {
   previewText: string;
   previewGeneration: number;
   previewRequest: AbortController | null;
-  previewError: string | null;
   parse: "idle" | "pending" | "done" | "failed";
   parseText: string;
   parseGeneration: number;
@@ -426,7 +425,6 @@ export function installRendererJarvisMention(
       previewText: "",
       previewGeneration: 0,
       previewRequest: null,
-      previewError: null,
       parse: "idle",
       parseText: "",
       parseGeneration: 0,
@@ -740,7 +738,6 @@ export function installRendererJarvisMention(
       return;
     }
     state.parse = "done";
-    state.previewError = null;
     setBusy(state, false);
     state.bugChrome.summary.textContent =
       result.bugs.length === 0 ? "" : resultCount(state, result);
@@ -804,7 +801,6 @@ export function installRendererJarvisMention(
     if (state.parse === "failed" && state.parseText === text) return;
     state.previewText = text;
     if (!result.available || result.errorCode) {
-      state.previewError = result.errorCode;
       // A pending parse owns the panel; its own failure path reports later.
       if (parsing) return;
       setBusy(state, false);
@@ -819,7 +815,6 @@ export function installRendererJarvisMention(
       );
       return;
     }
-    state.previewError = null;
     if (parsing) {
       // Only the rows may update; the pending summary and skeleton stay.
       if (result.bugs.length > 0) renderBugRows(state, result.bugs);
@@ -904,7 +899,6 @@ export function installRendererJarvisMention(
       state.parseRequest = null;
       state.parse = "idle";
       state.parseText = "";
-      state.previewError = null;
       state.omit.clear();
       renderBugChips(state, []);
       if (state.step.kind === "bug") state.bugChrome.summary.textContent = "";
@@ -977,7 +971,6 @@ export function installRendererJarvisMention(
     state.parse = "idle";
     state.parseText = "";
     state.previewText = "";
-    state.previewError = null;
     const chrome = state.bugChrome;
     chrome.input.value = "";
     chrome.clear.style.display = "none";
