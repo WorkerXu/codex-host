@@ -136,3 +136,105 @@ test("search preserves an active IME composition until the text is committed", a
   await expect(search).toBeFocused();
   await expect(page.locator(".skills-card-name")).toHaveText(["design-review"]);
 });
+
+test("Desktop machine names are consistent across filters, chips, sync, conflicts and exclusions", async ({
+  page,
+}) => {
+  await setup(page);
+  const machines = page.getByRole("combobox", { name: "筛选机器" });
+  await expect(machines.locator("option")).toHaveText([
+    "全部机器",
+    "此计算机",
+    "甲骨文新加坡",
+    "offline-server",
+    "build-server",
+  ]);
+  await expect(machines.locator('option[value="oracle-main"]')).toHaveText("甲骨文新加坡");
+  await expect(page.locator(".skills-chips").first()).toContainText("此计算机");
+  await expect(page.locator(".skills-chips").first()).toContainText("甲骨文新加坡");
+  await expect(page.locator(".skills-chips").first()).not.toContainText("oracle-main");
+  await page.getByRole("button", { name: "同步…", exact: true }).first().click();
+  const sync = page.getByRole("dialog");
+  await expect(sync.getByRole("combobox", { name: "来源机器" }).locator("option")).toHaveText([
+    "此计算机",
+    "甲骨文新加坡",
+  ]);
+  await expect(sync.getByRole("checkbox", { name: "甲骨文新加坡", exact: true })).toBeChecked();
+  await sync.getByRole("button", { name: "预览", exact: true }).click();
+  const conflicts = page.getByRole("dialog");
+  await expect(conflicts.locator(".skills-version strong")).toHaveText([
+    "此计算机",
+    "甲骨文新加坡较新",
+  ]);
+  await expect(conflicts.locator(".skills-diff-heading")).toHaveText("此计算机 → 甲骨文新加坡");
+  await conflicts.locator('input[value="local"]').check();
+  await conflicts.getByRole("button", { name: "继续", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("此计算机 → 甲骨文新加坡");
+  await page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("button", { name: "管理排除…", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "设置机器" }).locator("option")).toHaveText([
+    "此计算机",
+    "甲骨文新加坡",
+    "build-server",
+  ]);
+  await page.getByRole("dialog").getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("tab", { name: "按 Agent" }).click();
+  await page
+    .locator(".skills-machine-group")
+    .filter({ has: page.getByRole("heading", { name: "甲骨文新加坡", exact: true }) })
+    .getByRole("button", { name: "一键链接", exact: true })
+    .click();
+  await expect(page.getByRole("dialog").getByRole("heading")).toHaveText(
+    "甲骨文新加坡 · 链接变更预览",
+  );
+});
+
+test("Agent groups only label offline machines and hide linking for machines without Agents", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.getByRole("tab", { name: "按 Agent" }).click();
+  const groups = page.locator(".skills-machine-group");
+  await expect(groups.locator(".skills-machine-heading h3")).toHaveText([
+    "此计算机",
+    "甲骨文新加坡",
+    "build-server",
+    "offline-server",
+  ]);
+  await expect(groups.locator(".skills-machine-heading .skills-chip")).toHaveText(["离线"]);
+  const empty = groups.filter({
+    has: page.getByRole("heading", { name: "build-server", exact: true }),
+  });
+  await expect(empty).toContainText("这台机器上没有已安装的 Agent");
+  await expect(empty.getByRole("button", { name: "一键链接", exact: true })).toHaveCount(0);
+  const offline = groups.filter({
+    has: page.getByRole("heading", { name: "offline-server", exact: true }),
+  });
+  await expect(offline.locator(".skills-chip")).toHaveText("离线");
+  await expect(offline.getByRole("button", { name: "重试", exact: true })).toBeVisible();
+  await expect(offline.getByRole("button", { name: "一键链接", exact: true })).toHaveCount(0);
+  await expect(groups.getByRole("button", { name: "一键链接", exact: true })).toHaveCount(2);
+});
+
+test("sync completion only offers linking on machines with installed Agents", async ({ page }) => {
+  await setup(page);
+  await page.getByRole("button", { name: "全部补齐", exact: true }).click();
+  await page.getByRole("dialog").locator('input[value="local"]').check();
+  await page.getByRole("dialog").getByRole("button", { name: "继续", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "开始同步", exact: true }).click();
+  const done = page.getByRole("dialog");
+  await expect(done.getByRole("heading")).toHaveText("同步完成");
+  await expect(done.getByRole("button", { name: "一键链接", exact: true })).toHaveCount(1);
+  await expect(
+    done
+      .locator(".skills-head")
+      .filter({ hasText: "甲骨文新加坡" })
+      .getByRole("button", { name: "一键链接", exact: true }),
+  ).toBeVisible();
+  await expect(
+    done
+      .locator(".skills-head")
+      .filter({ hasText: "build-server" })
+      .getByRole("button", { name: "一键链接", exact: true }),
+  ).toHaveCount(0);
+});

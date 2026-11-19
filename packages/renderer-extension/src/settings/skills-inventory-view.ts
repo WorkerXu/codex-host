@@ -304,10 +304,12 @@ function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node
     sections++;
     const section = node("section", "", "skills-machine-group");
     const head = node("div", "", "skills-machine-heading");
-    head.append(node("h3", machine.name), node("span", "已安装", "skills-chip"));
-    const linkAll = skillButton(document, "一键链接", () => options.linkAll(machine.hostId));
-    setClass(linkAll, "skills-chip-action");
-    head.append(linkAll);
+    head.append(node("h3", machine.name));
+    if (machine.inventory.agents.length) {
+      const linkAll = skillButton(document, "一键链接", () => options.linkAll(machine.hostId));
+      setClass(linkAll, "skills-chip-action");
+      head.append(linkAll);
+    }
     section.append(head);
     const progress = options.progress.get(machine.hostId);
     if (progress) {
@@ -356,8 +358,10 @@ function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node
   for (const machine of machines) {
     if (machine.inventory) continue;
     const section = node("section", "", "skills-machine-group");
+    const head = node("div", "", "skills-machine-heading");
+    head.append(node("h3", machine.name), node("span", "离线", "skills-chip"));
     section.append(
-      node("h3", machine.name),
+      head,
       node("p", skillsErrorText(machine.error), "skills-muted"),
       skillButton(document, "重试", options.refresh),
     );

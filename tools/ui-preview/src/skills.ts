@@ -1,3 +1,4 @@
+import { localMachineLabel } from "../../../packages/renderer-extension/src/renderer-cross-host-harness-catalog.js";
 import claudeIcon from "../../../packages/adapters/claude-code/assets/icon.svg";
 import cursorIcon from "../../../packages/adapters/cursor-cli/assets/icon.svg";
 import { writeCachedHarnessDirectory } from "../../../packages/renderer-extension/src/renderer-harness-directory-cache.js";
@@ -135,6 +136,12 @@ function fakeClient(): RendererSkillsClient {
           },
         ],
       },
+    },
+    {
+      hostId: "offline-server",
+      name: "offline-server",
+      error: "connection_failed",
+      inventory: null,
     },
     {
       hostId: "build-server",
@@ -350,7 +357,17 @@ export function mountSkillsPreview() {
     webUi: {},
   });
   const shell = installRendererSettingsShell(
-    [createSkillsSettingsPage({ createClient: fakeClient })],
+    [
+      createSkillsSettingsPage({
+        createClient: fakeClient,
+        resolveMachineName: async (hostId) =>
+          hostId === "local"
+            ? localMachineLabel("zh-CN")
+            : hostId === "oracle-main"
+              ? "甲骨文新加坡"
+              : undefined,
+      }),
+    ],
     rendererSettingsMessages("zh-CN"),
   );
   shell.openSettings(undefined, "skills");

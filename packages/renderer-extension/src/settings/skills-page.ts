@@ -20,6 +20,7 @@ import type { RendererSettingsPageDefinition } from "./core.js";
 import { skillsDialog, skillButton, skillNode } from "./skills-dialog.js";
 export interface RendererSkillsSettingsOptions {
   createClient(): RendererSkillsClient | null;
+  resolveMachineName?(hostId: string): Promise<string | undefined>;
 }
 type SyncRequest = Extract<
   SkillsHubRequest,
@@ -62,7 +63,8 @@ export function createSkillsSettingsPage(
         skillButton(document, label, action, primary);
       const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") =>
         skillNode(document, tag, text, className);
-      const machineName = (id: string) => machines.find((m) => m.hostId === id)?.name ?? id;
+      const machineName = (id: string, fallback = id) =>
+        machines.find((m) => m.hostId === id)?.name ?? fallback;
       const remember = (hostId: string, id: string) =>
         changes.set(hostId, [...(changes.get(hostId) ?? []), id]);
       async function perform<T>(
@@ -94,7 +96,14 @@ export function createSkillsSettingsPage(
           notice.textContent = "连接失败";
           return;
         }
-        machines = await client.status();
+        machines = await Promise.all(
+          (await client.status()).map(async (machine) => ({
+            ...machine,
+            name:
+              (await options.resolveMachineName?.(machine.hostId).catch(() => undefined)) ??
+              machine.name,
+          })),
+        );
         cachedMachines = machines;
         progress.clear();
         if (!context.signal.aborted) render();
@@ -300,7 +309,16 @@ export function createSkillsSettingsPage(
         if (plan.conflicts.length) {
           showSkillConflicts({
             root,
-            plan,
+            plan: {
+              ...plan,
+              conflicts: plan.conflicts.map((conflict) => ({
+                ...conflict,
+                versions: conflict.versions.map((version) => ({
+                  ...version,
+                  name: machineName(version.hostId, version.name),
+                })),
+              })),
+            },
             choices: input.choices,
             continueWith: (choices) => void previewSync({ ...input, choices, basedOn: plan.id }),
           });
@@ -339,13 +357,14 @@ export function createSkillsSettingsPage(
                 const done = skillsDialog(root, "同步完成");
                 for (const host of hosts) {
                   const row = node("div", "", "skills-head");
-                  row.append(
-                    node("span", `${machineName(host)} · ${progress.get(host)}`),
-                    button("一键链接", () => {
-                      done.close();
-                      void linkPreview(host);
-                    }),
-                  );
+                  row.append(node("span", `${machineName(host)} · ${progress.get(host)}`));
+                  if (machines.find((machine) => machine.hostId === host)?.inventory?.agents.length)
+                    row.append(
+                      button("一键链接", () => {
+                        done.close();
+                        void linkPreview(host);
+                      }),
+                    );
                   done.body.append(row);
                 }
                 done.footer.append(button("完成", done.close, true));

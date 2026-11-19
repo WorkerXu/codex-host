@@ -835,8 +835,8 @@ for (const scenario of scenarios) {
           );
           check(
             "skills-machine-chips",
-            queryAll(".skills-chips")[0]?.textContent?.includes("MacBook Pro") &&
-              queryAll(".skills-chips")[0]?.textContent?.includes("oracle-main"),
+            queryAll(".skills-chips")[0]?.textContent?.includes("此计算机") &&
+              queryAll(".skills-chips")[0]?.textContent?.includes("甲骨文新加坡"),
           );
           if (document.body.dataset.scenario === "skills-list")
             check("skills-list-layout", queryAll(".skills-card-list").length === 3);
