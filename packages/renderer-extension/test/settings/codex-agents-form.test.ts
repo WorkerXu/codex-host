@@ -156,6 +156,7 @@ describe("Codex agent form logic", () => {
           sectionId: "section-1",
           projectId: "project-1",
           projectPath: "/Users/me/project",
+          projectRoots: ["/Users/me/project"],
         },
       },
     };
@@ -166,6 +167,7 @@ describe("Codex agent form logic", () => {
       sectionId: "section-1",
       projectId: "project-1",
       projectPath: "/Users/me/project",
+      projectRoots: ["/Users/me/project"],
     });
 
     const next = withAgentDingTalk(saved, "writer.toml", {
@@ -174,6 +176,7 @@ describe("Codex agent form logic", () => {
       sectionId: "section-2",
       projectId: "project-2",
       projectPath: "/Users/me/other",
+      projectRoots: ["/Users/me/other"],
     });
     expect(next.agents["reviewer.toml"]).toEqual(saved.agents["reviewer.toml"]);
     expect(next.agents["writer.toml"]).toEqual({
@@ -182,6 +185,7 @@ describe("Codex agent form logic", () => {
       sectionId: "section-2",
       projectId: "project-2",
       projectPath: "/Users/me/other",
+      projectRoots: ["/Users/me/other"],
     });
   });
 
@@ -192,6 +196,7 @@ describe("Codex agent form logic", () => {
       sectionId: null,
       projectId: null,
       projectPath: null,
+      projectRoots: [],
     });
     const saved = defaultDingTalkDispatchSettings();
     expect(
@@ -201,6 +206,7 @@ describe("Codex agent form logic", () => {
         sectionId: null,
         projectId: null,
         projectPath: null,
+        projectRoots: [],
       }),
     ).toBe(saved);
   });
@@ -214,6 +220,7 @@ describe("Codex agent form logic", () => {
           sectionId: "section-1",
           projectId: "project-1",
           projectPath: "/Users/me/project",
+          projectRoots: ["/Users/me/project"],
         },
       },
     };
@@ -223,6 +230,7 @@ describe("Codex agent form logic", () => {
       sectionId: "section-1",
       projectId: "project-1",
       projectPath: "/Users/me/project",
+      projectRoots: ["/Users/me/project"],
     });
     expect(next.agents["reviewer.toml"]).toEqual({
       enabled: false,
@@ -230,6 +238,7 @@ describe("Codex agent form logic", () => {
       sectionId: "section-1",
       projectId: "project-1",
       projectPath: "/Users/me/project",
+      projectRoots: ["/Users/me/project"],
     });
   });
 });

@@ -973,6 +973,7 @@ export function createCodexAgentsSettingsPage(
         sectionId: null as string | null,
         projectId: null as string | null,
         projectPath: null as string | null,
+        projectRoots: [] as string[],
       };
 
       const renderDingtalkEnabled = (): void => {
@@ -1036,6 +1037,7 @@ export function createCodexAgentsSettingsPage(
           sectionId: draft.sectionId,
           projectId: draft.projectId,
           projectPath: draft.projectPath,
+          projectRoots: [...draft.projectRoots],
         };
         editor.dingtalkEnabled.checked = draft.enabled;
         renderDingtalkTargetOptions(draft.sectionId, draft.projectId);
@@ -1068,6 +1070,7 @@ export function createCodexAgentsSettingsPage(
           sectionId,
           projectId: project?.id ?? null,
           projectPath: project?.path ?? null,
+          projectRoots: project ? [...project.roots] : [],
         };
       };
 

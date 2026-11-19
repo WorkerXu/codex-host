@@ -61,6 +61,7 @@ function settingsWith(overrides: Record<string, DingTalkAgentDispatch> = {}) {
         sectionId: "section-1",
         projectId: "project-1",
         projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
       },
       "bare.toml": {
         enabled: true,
@@ -68,6 +69,7 @@ function settingsWith(overrides: Record<string, DingTalkAgentDispatch> = {}) {
         sectionId: null,
         projectId: null,
         projectPath: null,
+        projectRoots: [],
       },
       "off.toml": {
         enabled: false,
@@ -75,6 +77,7 @@ function settingsWith(overrides: Record<string, DingTalkAgentDispatch> = {}) {
         sectionId: "section-1",
         projectId: "project-1",
         projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
       },
       ...overrides,
     },
@@ -170,6 +173,7 @@ async function setup(
     async (input: {
       cwd: string;
       projectId: string | null;
+      projectRoots: readonly string[];
       title: string;
       prompt: string;
     }): Promise<{
@@ -263,6 +267,7 @@ describe("DingTalk manual dispatch", () => {
     expect(input).toMatchObject({
       cwd: "/Users/me/project",
       projectId: "project-1",
+      projectRoots: ["/Users/me/project"],
     });
     expect(input?.title.startsWith("qa · 技术群 · ")).toBe(true);
     expect(input?.prompt).toContain("触发：手动派发");

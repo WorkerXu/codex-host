@@ -6,6 +6,8 @@ export interface DingTalkDispatchThreadInput {
   cwd: string;
   /** Desktop project the Thread is assigned to; also places it in its section. */
   projectId: string | null;
+  /** Project roots; every one becomes a working folder of the Thread. */
+  projectRoots: readonly string[];
   title: string;
   developerInstructions: string;
   model: string | null;

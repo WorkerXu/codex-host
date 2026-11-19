@@ -73,6 +73,7 @@ function migrateLegacySettings(
       sectionId: null,
       projectId: null,
       projectPath: null,
+      projectRoots: [],
     };
   }
   return settings;

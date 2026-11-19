@@ -403,8 +403,14 @@ export class DingTalkDispatcher {
     let run: { threadId: string; completed: Promise<DingTalkDispatchTurnResult> };
     try {
       run = await this.#options.startThread({
-        cwd: route.projectPath ?? "",
+        cwd: route.projectPath ?? route.projectRoots[0] ?? "",
         projectId: route.projectId,
+        projectRoots:
+          route.projectRoots.length > 0
+            ? route.projectRoots
+            : route.projectPath
+              ? [route.projectPath]
+              : [],
         onProgress: (text) => card.progress(text),
         title: `${agent.name} · ${label} · ${truncate(message.text || "钉钉消息", 40)}`,
         developerInstructions: this.#developerInstructions(agent),

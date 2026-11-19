@@ -21,6 +21,7 @@ describe("DingTalk manual dispatch contract", () => {
       sectionId: null,
       projectId: null,
       projectPath: null,
+      projectRoots: [],
     });
     expect(DINGTALK_DISPATCH_DEFAULT_PICK_MIN).toBe(0.3);
   });
@@ -50,6 +51,7 @@ describe("DingTalk manual dispatch contract", () => {
           sectionId: null,
           projectId: null,
           projectPath: null,
+          projectRoots: [],
         },
       },
     });
@@ -80,6 +82,7 @@ describe("DingTalk manual dispatch contract", () => {
         sectionId: "section",
         projectId: "project",
         projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
       }),
     ).toBe(true);
     expect(
@@ -89,6 +92,7 @@ describe("DingTalk manual dispatch contract", () => {
         sectionId: "section",
         projectId: "project",
         projectPath: "/Users/me/project",
+        projectRoots: ["/Users/me/project"],
       }),
     ).toBe(false);
   });

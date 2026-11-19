@@ -50,6 +50,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: "section-1",
           projectId: "project-1",
           projectPath: "/Users/me/project",
+          projectRoots: ["/Users/me/project"],
         },
       },
     });
@@ -103,6 +104,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: null,
           projectId: null,
           projectPath: null,
+          projectRoots: [],
         },
         "off.toml": {
           enabled: false,
@@ -110,6 +112,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: null,
           projectId: null,
           projectPath: null,
+          projectRoots: [],
         },
       },
     });
@@ -141,6 +144,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: null,
           projectId: null,
           projectPath: null,
+          projectRoots: [],
         },
       },
     });
@@ -198,6 +202,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: "s",
           projectId: "p",
           projectPath: "/tmp/p",
+          projectRoots: ["/tmp/p"],
         },
       },
     });
@@ -217,6 +222,7 @@ describe("DingTalkDispatchSettingsStore", () => {
           sectionId: null,
           projectId: null,
           projectPath: null,
+          projectRoots: [],
         },
       },
     });
@@ -234,6 +240,7 @@ describe("DingTalkDispatchSettingsStore", () => {
             sectionId: null,
             projectId: null,
             projectPath: null,
+            projectRoots: [],
           },
         },
       }),

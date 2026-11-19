@@ -42,6 +42,8 @@ export const dingtalkAgentDispatchSchema = z
     projectId: identifierSchema.nullable().default(null),
     /** Primary root path of that project; becomes the Thread cwd. */
     projectPath: pathSchema.nullable().default(null),
+    /** Project roots become the Thread's working folders; primary first. */
+    projectRoots: z.array(pathSchema).max(32).default([]),
   })
   .strip();
 
@@ -92,6 +94,7 @@ export function defaultDingTalkAgentDispatch(): DingTalkAgentDispatch {
     sectionId: null,
     projectId: null,
     projectPath: null,
+    projectRoots: [],
   };
 }
 

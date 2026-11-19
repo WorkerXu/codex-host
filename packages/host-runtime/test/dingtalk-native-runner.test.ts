@@ -52,6 +52,7 @@ async function fixture(
     runner.start({
       cwd,
       projectId: "project-1",
+      projectRoots: [cwd],
       title: "知识库 · 技术群 · 接口问题",
       developerInstructions: "查询知识库",
       model: "gpt-test",
@@ -72,6 +73,7 @@ describe("native DingTalk Threads", () => {
       expect.objectContaining({
         projectId: "project-1",
         cwd: expect.any(String),
+        runtimeWorkspaceRoots: [expect.any(String)],
         developerInstructions: "查询知识库",
         sandbox: "read-only",
         approvalPolicy: "never",

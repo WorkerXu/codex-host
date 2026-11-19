@@ -14,6 +14,8 @@ export interface DingTalkAgentProject {
   name: string;
   /** Primary Mac-local root path; the dispatch Thread cwd. */
   path: string;
+  /** Every root of the project, primary first. */
+  roots: string[];
 }
 
 export interface DingTalkAgentSection {
@@ -38,6 +40,7 @@ export interface NativeLocalProject {
   id: string;
   label: string;
   cwd: string;
+  roots: string[];
 }
 
 /** Keeps only `codex:project:` items whose project exists in the local catalog. */
@@ -55,7 +58,12 @@ export function dingTalkSectionsOf(
       const project = local.get(projectId);
       if (!project || seen.has(projectId)) continue;
       seen.add(projectId);
-      contained.push({ id: project.id, name: project.label, path: project.cwd });
+      contained.push({
+        id: project.id,
+        name: project.label,
+        path: project.cwd,
+        roots: project.roots.length > 0 ? [...project.roots] : [project.cwd],
+      });
     }
     return { id: entry.id, name: entry.name, projects: contained };
   });

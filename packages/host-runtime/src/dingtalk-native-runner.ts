@@ -36,6 +36,7 @@ export class DingTalkNativeRunner {
     const started = await this.#request("thread/start", {
       cwd: input.cwd,
       ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.projectRoots.length > 0 ? { runtimeWorkspaceRoots: [...input.projectRoots] } : {}),
       config,
       ...(input.model ? { model: input.model } : {}),
       developerInstructions: input.developerInstructions,
