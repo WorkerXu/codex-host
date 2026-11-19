@@ -159,8 +159,18 @@ export const JARVIS_LOGIN_STOP_METHOD = "codexhost/jarvis/login/stop";
 
 /** Methods every Host can serve from its own machine. */
 export const JARVIS_STATUS_METHOD = "codexhost/jarvis/status";
+/**
+ * Legacy one-box search. Retained so older Renderers keep working; the current
+ * `@` panel never calls it, because its model interpretation is the slow path.
+ */
 export const JARVIS_BUG_SEARCH_METHOD = "codexhost/jarvis/bug/search";
 export const JARVIS_BUG_SEARCH_CANCEL_METHOD = "codexhost/jarvis/bug/search/cancel";
+/** Two-step search: pick a project, then search bugs inside it. */
+export const JARVIS_PROJECT_LIST_METHOD = "codexhost/jarvis/project/list";
+/** Instant title-only preview in the chosen project; no model is involved. */
+export const JARVIS_PROJECT_BUG_TITLE_METHOD = "codexhost/jarvis/project/bug/title";
+/** Condition search inside the chosen project; the project is never resolved. */
+export const JARVIS_PROJECT_BUG_SEARCH_METHOD = "codexhost/jarvis/project/bug/search";
 export const JARVIS_INSTALL_METHOD = "codexhost/jarvis/install";
 export const JARVIS_DOWNLOAD_START_METHOD = "codexhost/jarvis/download/start";
 export const JARVIS_DOWNLOAD_CHUNK_METHOD = "codexhost/jarvis/download/chunk";
@@ -170,7 +180,52 @@ export const JARVIS_LOGIN_START_METHOD = "codexhost/jarvis/login/start";
 export const DEFAULT_JARVIS_THRESHOLD = 0.5;
 export const JARVIS_MAX_SEARCH_BUGS = 200;
 export const JARVIS_MAX_SEARCH_PROJECTS = 40;
+export const JARVIS_MAX_PROJECT_ROWS = 40;
 export const JARVIS_KEY_MAX_LENGTH = 512;
+
+/** One project row in the `@` panel's first step. */
+export const jarvisProjectSchema = z
+  .object({ id: z.number().int().positive(), name: z.string().min(1).max(1_024) })
+  .strict();
+export type JarvisProject = z.infer<typeof jarvisProjectSchema>;
+
+export const jarvisProjectListParamsSchema = z
+  .object({ query: z.string().trim().max(56).optional() })
+  .strict();
+export type JarvisProjectListParams = z.infer<typeof jarvisProjectListParamsSchema>;
+
+export const jarvisProjectListResultSchema = z
+  .object({
+    available: z.boolean(),
+    errorCode: z.string().max(64).nullable(),
+    projects: z.array(jarvisProjectSchema).max(JARVIS_MAX_PROJECT_ROWS),
+    /** False when the CLI stopped at its own row limit. */
+    complete: z.boolean(),
+    /** Signed-in Jarvis user; the Renderer scopes its local cache by it. */
+    userId: z.number().int().positive().nullable(),
+  })
+  .strict();
+export type JarvisProjectListResult = z.infer<typeof jarvisProjectListResultSchema>;
+
+/** Fast title preview: raw text becomes `bug list --title`, no interpretation. */
+export const jarvisProjectBugTitleParamsSchema = z
+  .object({
+    projectId: z.number().int().positive(),
+    title: z.string().trim().max(200),
+  })
+  .strict();
+export type JarvisProjectBugTitleParams = z.infer<typeof jarvisProjectBugTitleParamsSchema>;
+
+/** Parsed condition search limited to one project chosen in step 1. */
+export const jarvisProjectBugSearchParamsSchema = z
+  .object({
+    projectId: z.number().int().positive(),
+    query: z.string().trim().max(200),
+    omit: z.array(z.string().min(1).max(64)).max(24).optional(),
+    requestId: z.string().uuid().optional(),
+  })
+  .strict();
+export type JarvisProjectBugSearchParams = z.infer<typeof jarvisProjectBugSearchParamsSchema>;
 
 export const jarvisBugSearchParamsSchema = z
   .object({

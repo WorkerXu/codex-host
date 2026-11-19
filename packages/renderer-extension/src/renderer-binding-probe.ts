@@ -3731,15 +3731,29 @@ export function installRendererBindingProbe(
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
     },
-    search: async (threadHostId, params, signal) => {
-      // The Desktop-local Host owns the Mac's Jarvis login; prefer it even when
-      // the Composer Thread lives on another machine. Fall back only when the
-      // local Host has no usable Jarvis.
+    // The Desktop-local Host owns the Mac's Jarvis login; prefer it even when
+    // the Composer Thread lives on another machine. Fall back only when the
+    // local Host has no usable Jarvis.
+    listProjects: async (threadHostId, params, signal) => {
       if (threadHostId !== "local" && jarvisClient.localAvailable()) {
-        const local = await jarvisClient.searchBugs("local", params, signal);
+        const local = await jarvisClient.listProjects("local", params, signal);
         if (!jarvisSearchShouldFallback(local)) return local;
       }
-      return jarvisClient.searchBugs(threadHostId, params, signal);
+      return await jarvisClient.listProjects(threadHostId, params, signal);
+    },
+    previewProjectBugTitle: async (threadHostId, params, signal) => {
+      if (threadHostId !== "local" && jarvisClient.localAvailable()) {
+        const local = await jarvisClient.previewProjectBugTitle("local", params, signal);
+        if (!jarvisSearchShouldFallback(local)) return local;
+      }
+      return await jarvisClient.previewProjectBugTitle(threadHostId, params, signal);
+    },
+    searchProjectBugs: async (threadHostId, params, signal) => {
+      if (threadHostId !== "local" && jarvisClient.localAvailable()) {
+        const local = await jarvisClient.searchProjectBugs("local", params, signal);
+        if (!jarvisSearchShouldFallback(local)) return local;
+      }
+      return await jarvisClient.searchProjectBugs(threadHostId, params, signal);
     },
     readLocale: () => settingsLifecycle.locale,
     anchorForEditor: (editor) =>

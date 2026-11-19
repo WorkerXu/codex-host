@@ -1,9 +1,13 @@
 /**
  * Structured Jarvis bug search behind the `@` entry.
  *
- * OpenAI interprets the full query; only its project names are resolved.
- * Interpretation failures are returned to the UI without running a search.
- * The search returns the matching set up to the documented cap.
+ * Two entry shapes share one execution path:
+ *  - the legacy whole-query search interprets the text and resolves projects;
+ *  - the two-step panel fixes the project first, then interprets only the
+ *    remaining conditions inside that project.
+ *
+ * Every bug list is read through `jarvis bug list`; the fixed-project path
+ * never calls `project list`.
  */
 import {
   JARVIS_MAX_SEARCH_BUGS,
@@ -13,11 +17,13 @@ import {
   type JarvisBugQuery,
   type JarvisBugSearchParams,
   type JarvisBugSearchResult,
+  type JarvisProjectBugSearchParams,
 } from "@codexhost/shared-contracts";
 
 import {
   bugFromJarvisRow,
   type JarvisBugListOptions,
+  type JarvisBugPageResult,
   type JarvisProjectRow,
 } from "./jarvis-cli.js";
 import { JarvisQueryError, type JarvisQueryInterpreter } from "./jarvis-query-parser.js";
@@ -31,15 +37,7 @@ export interface JarvisBugSearchCli {
   user(): Promise<{ id: number; name: string } | null>;
   projects(): Promise<JarvisProjectRow[]>;
   searchProjects(name: string): Promise<JarvisProjectRow[]>;
-  bugs(
-    projectId: number,
-    options?: JarvisBugListOptions,
-  ): Promise<{
-    list: Record<string, unknown>[];
-    total: number;
-    page: number;
-    pageSize: number;
-  }>;
+  bugList(projectId: number, options?: JarvisBugListOptions): Promise<JarvisBugPageResult>;
 }
 
 export interface JarvisBugSearchOptions {
@@ -82,6 +80,7 @@ interface FetchOutcome {
   total: number;
   capped: boolean;
   failed: boolean;
+  errorCode: string | null;
 }
 
 function uniqById(projects: readonly JarvisProjectRow[]): JarvisProjectRow[] {
@@ -195,6 +194,100 @@ export class JarvisBugSearcher {
     }
 
     const targets = [...resolution.targets.values()].slice(0, JARVIS_MAX_SEARCH_PROJECTS);
+    const result = await this.#execute(
+      targets,
+      projectNames,
+      plan,
+      this.#conditions(plan, resolution, omit),
+      signal,
+      resolution.targets.size > JARVIS_MAX_SEARCH_PROJECTS,
+    );
+    return result;
+  }
+
+  /**
+   * The two-step panel's condition search. The project is fixed by the
+   * Renderer: project names in the parse are ignored and `project list` is
+   * never called.
+   */
+  async searchInProject(
+    params: JarvisProjectBugSearchParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult> {
+    if (!this.#isLocalHost) return failedSearch("local_only");
+    let query: JarvisBugQuery;
+    try {
+      signal?.throwIfAborted();
+      query = await this.#interpreter.interpret(params.query, this.#now(), signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      return failedSearch(
+        error instanceof JarvisQueryError ? error.code : "provider_failed",
+        error instanceof JarvisQueryError ? error.provider : "model",
+      );
+    }
+    if (query.unrecognized !== null) return failedSearch("unrecognized_query");
+    const omit = new Set(params.omit ?? []);
+    const plan = this.#plan(query, omit);
+    const project: JarvisProjectRow = { id: params.projectId, name: "" };
+    return await this.#execute(
+      [project],
+      new Map(),
+      plan,
+      this.#conditions(plan, { tokens: [], targets: new Map() }, omit),
+      signal,
+      false,
+    );
+  }
+
+  /**
+   * Instant title preview for the chosen project. This is the only path that
+   * runs before the model answers, so it must stay a single CLI call.
+   */
+  async previewTitle(
+    projectId: number,
+    title: string,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult> {
+    if (!this.#isLocalHost) return failedSearch("local_only");
+    if (signal?.aborted) return failedSearch("cancelled");
+    const plan: SearchPlan = {
+      scope: "assigned",
+      statuses: null,
+      priorities: null,
+      severities: null,
+      order: "newest",
+      timeField: "update",
+      since: null,
+      until: null,
+      timeLabel: null,
+      titles: [],
+      scopeOmitted: true,
+      orderOmitted: true,
+    };
+    const outcome = await this.#fetch(projectId, false, plan, title.trim() || null);
+    if (outcome.failed) return failedSearch(outcome.errorCode ?? "cli_failed");
+    const bugs = this.#filterAndSort([outcome], new Map(), plan);
+    return {
+      available: true,
+      source: "model",
+      errorCode: null,
+      conditions: [],
+      bugs: bugs.slice(0, JARVIS_MAX_SEARCH_BUGS),
+      total: Math.max(outcome.total, bugs.length),
+      capped: outcome.capped || bugs.length > JARVIS_MAX_SEARCH_BUGS,
+    };
+  }
+
+  /** Shared execution: one or more project ids, one plan, one condition set. */
+  async #execute(
+    targets: readonly JarvisProjectRow[],
+    projectNames: ReadonlyMap<number, string>,
+    plan: SearchPlan,
+    conditions: JarvisBugCondition[],
+    signal: AbortSignal | undefined,
+    cappedByProjects: boolean,
+  ): Promise<JarvisBugSearchResult> {
     const scopes: boolean[] = plan.scope === "both" ? [false, true] : [plan.scope === "created"];
     const titles = plan.titles.length > 0 ? plan.titles : [null];
     const tasks = targets.flatMap((project) =>
@@ -202,7 +295,13 @@ export class JarvisBugSearcher {
         titles.map(
           (title) => () =>
             signal?.aborted
-              ? Promise.resolve({ rows: [], total: 0, capped: false, failed: true })
+              ? Promise.resolve({
+                  rows: [],
+                  total: 0,
+                  capped: false,
+                  failed: true,
+                  errorCode: "cancelled",
+                })
               : this.#fetch(project.id, createdByMe, plan, title),
         ),
       ),
@@ -212,10 +311,7 @@ export class JarvisBugSearcher {
     const cappedByFetch = outcomes.some((outcome) => outcome.capped);
 
     const bugs = this.#filterAndSort(outcomes, projectNames, plan);
-    const capped =
-      cappedByFetch ||
-      bugs.length > JARVIS_MAX_SEARCH_BUGS ||
-      resolution.targets.size > JARVIS_MAX_SEARCH_PROJECTS;
+    const capped = cappedByFetch || bugs.length > JARVIS_MAX_SEARCH_BUGS || cappedByProjects;
     const serverTotal = outcomes.reduce((sum, outcome) => sum + outcome.total, 0);
     const total =
       cappedByFetch &&
@@ -229,8 +325,10 @@ export class JarvisBugSearcher {
     return {
       available: true,
       source: "model",
-      errorCode: failed ? "cli_failed" : null,
-      conditions: this.#conditions(plan, resolution, omit),
+      errorCode: failed
+        ? (outcomes.find((outcome) => outcome.errorCode)?.errorCode ?? "cli_failed")
+        : null,
+      conditions,
       bugs: bugs.slice(0, JARVIS_MAX_SEARCH_BUGS),
       total,
       capped,
@@ -317,23 +415,30 @@ export class JarvisBugSearcher {
       const rows: Record<string, unknown>[] = [];
       let total = 0;
       let failed = false;
+      let errorCode: string | null = null;
       for (let page = 1; page <= MAX_PAGES_PER_QUERY; page += 1) {
         try {
           const options: JarvisBugListOptions = { createdByMe, page, pageSize: PAGE_SIZE };
           if (plan.statuses) options.statuses = plan.statuses;
           if (plan.priorities) options.priorities = plan.priorities;
           if (title) options.title = title;
-          const result = await this.#cli.bugs(projectId, options);
+          const result = await this.#cli.bugList(projectId, options);
+          if (result.errorCode) {
+            errorCode = result.errorCode;
+            failed = rows.length === 0;
+            break;
+          }
           rows.push(...result.list);
           total = result.total;
           if (result.list.length < PAGE_SIZE || page * PAGE_SIZE >= result.total) break;
         } catch {
+          errorCode = "cli_failed";
           failed = rows.length === 0;
           break;
         }
       }
       const capped = total > rows.length;
-      return { rows, total, capped, failed };
+      return { rows, total, capped, failed, errorCode };
     })();
   }
 

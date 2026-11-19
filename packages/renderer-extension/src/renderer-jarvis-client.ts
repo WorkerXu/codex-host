@@ -9,6 +9,9 @@ import {
   JARVIS_LOGIN_FORWARD_METHOD,
   JARVIS_LOGIN_START_METHOD,
   JARVIS_LOGIN_STOP_METHOD,
+  JARVIS_PROJECT_BUG_SEARCH_METHOD,
+  JARVIS_PROJECT_BUG_TITLE_METHOD,
+  JARVIS_PROJECT_LIST_METHOD,
   JARVIS_SETTINGS_GET_METHOD,
   JARVIS_SETTINGS_SET_METHOD,
   JARVIS_SETTINGS_TEST_METHOD,
@@ -20,6 +23,7 @@ import {
   jarvisInstallUploadResultSchema,
   jarvisLoginForwardResultSchema,
   jarvisLoginStartResultSchema,
+  jarvisProjectListResultSchema,
   jarvisSettingsResultSchema,
   jarvisSettingsTestResultSchema,
   jarvisStatusSchema,
@@ -28,6 +32,10 @@ import {
   type JarvisInstallResult,
   type JarvisLoginForwardResult,
   type JarvisLoginStartResult,
+  type JarvisProjectBugSearchParams,
+  type JarvisProjectBugTitleParams,
+  type JarvisProjectListParams,
+  type JarvisProjectListResult,
   type JarvisRelease,
   type JarvisSettingsResult,
   type JarvisSettingsSetParams,
@@ -92,6 +100,24 @@ export interface RendererJarvisClient {
   searchBugs(
     hostId: string,
     params: JarvisBugSearchParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult>;
+  /** Step 1: my projects or a visible-project search. */
+  listProjects(
+    hostId: string,
+    params: JarvisProjectListParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisProjectListResult>;
+  /** Step 2: raw text as a title in the chosen project; no model. */
+  previewProjectBugTitle(
+    hostId: string,
+    params: JarvisProjectBugTitleParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult>;
+  /** Step 2: parsed conditions inside the chosen project. */
+  searchProjectBugs(
+    hostId: string,
+    params: JarvisProjectBugSearchParams,
     signal?: AbortSignal,
   ): Promise<JarvisBugSearchResult>;
   install(
@@ -231,8 +257,42 @@ export function jarvisCodeFromError(error: unknown): string {
   return "jarvis_failed";
 }
 
+/** Stable Chinese text for the two-step panel; no provider or API wording. */
+export function jarvisStepErrorText(
+  code: string | null | undefined,
+  locale: RendererSettingsLocale,
+): string {
+  const zh: Record<string, string> = {
+    not_logged_in: "未登录 Jarvis",
+    auth_failed: "未登录 Jarvis",
+    not_installed: "未安装 Jarvis",
+    timeout: "网络失败，请稍后重试",
+    network: "网络失败，请稍后重试",
+    cli_failed: "网络失败，请稍后重试",
+    jarvis_failed: "网络失败，请稍后重试",
+    invalid_response: "Jarvis 返回的结果无法识别",
+    local_only: "只能在本机 Host 查询 Jarvis",
+  };
+  const en: Record<string, string> = {
+    not_logged_in: "Not signed in to Jarvis",
+    auth_failed: "Not signed in to Jarvis",
+    not_installed: "Jarvis is not installed",
+    timeout: "Network failed; try again",
+    network: "Network failed; try again",
+    cli_failed: "Network failed; try again",
+    jarvis_failed: "Network failed; try again",
+    invalid_response: "Jarvis returned an unreadable result",
+    local_only: "Jarvis can only be queried on the local Host",
+  };
+  const table = locale === "zh-CN" ? zh : en;
+  return (
+    (code && table[code]) ||
+    (locale === "zh-CN" ? "Jarvis 请求失败，请稍后重试" : "Jarvis request failed; try again")
+  );
+}
+
 /** Local Host has no usable Jarvis; try the Composer Thread's Host instead. */
-export function jarvisSearchShouldFallback(result: JarvisBugSearchResult): boolean {
+export function jarvisSearchShouldFallback(result: { errorCode: string | null }): boolean {
   return (
     result.errorCode === "not_installed" ||
     result.errorCode === "not_logged_in" ||
@@ -369,6 +429,78 @@ export function createRendererJarvisClient(
           requestId ? { ...params, requestId } : params,
           jarvisBugSearchResultSchema,
           { priority: "interactive", timeoutMs: 90_000 },
+          missing,
+        );
+      } finally {
+        signal?.removeEventListener("abort", cancel);
+      }
+    },
+    async listProjects(hostId, params, signal) {
+      const missing: JarvisProjectListResult = {
+        available: false,
+        errorCode: "jarvis_failed",
+        projects: [],
+        complete: false,
+        userId: null,
+      };
+      if (signal?.aborted) return missing;
+      return await request(
+        hostId,
+        JARVIS_PROJECT_LIST_METHOD,
+        params,
+        jarvisProjectListResultSchema,
+        { priority: "interactive", timeoutMs: 20_000 },
+        missing,
+      );
+    },
+    async previewProjectBugTitle(hostId, params, signal) {
+      const missing: JarvisBugSearchResult = {
+        available: false,
+        errorCode: "jarvis_failed",
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
+      };
+      if (signal?.aborted) return missing;
+      return await request(
+        hostId,
+        JARVIS_PROJECT_BUG_TITLE_METHOD,
+        params,
+        jarvisBugSearchResultSchema,
+        { priority: "interactive", timeoutMs: 20_000 },
+        missing,
+      );
+    },
+    async searchProjectBugs(hostId, params, signal) {
+      const missing: JarvisBugSearchResult = {
+        available: false,
+        errorCode: "jarvis_failed",
+        conditions: [],
+        bugs: [],
+        total: 0,
+        capped: false,
+      };
+      if (signal?.aborted) return missing;
+      const requestId = signal ? crypto.randomUUID() : undefined;
+      const cancel = () => {
+        void request(
+          hostId,
+          JARVIS_BUG_SEARCH_CANCEL_METHOD,
+          { requestId },
+          { parse: () => ({}) },
+          { priority: "interactive", timeoutMs: 5_000 },
+          {},
+        );
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        return await request(
+          hostId,
+          JARVIS_PROJECT_BUG_SEARCH_METHOD,
+          requestId ? { ...params, requestId } : params,
+          jarvisBugSearchResultSchema,
+          { priority: "interactive", timeoutMs: 30_000 },
           missing,
         );
       } finally {

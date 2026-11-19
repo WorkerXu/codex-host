@@ -5,6 +5,7 @@ import {
   jarvisBugSearchResultSchema,
   jarvisLoginForwardResultSchema,
   jarvisLoginStartResultSchema,
+  jarvisProjectListResultSchema,
   jarvisSettingsResultSchema,
   jarvisSettingsTestResultSchema,
   jarvisStatusSchema,
@@ -16,6 +17,10 @@ import {
   type JarvisLoginForwardParams,
   type JarvisLoginForwardResult,
   type JarvisLoginStartResult,
+  type JarvisProjectBugSearchParams,
+  type JarvisProjectBugTitleParams,
+  type JarvisProjectListParams,
+  type JarvisProjectListResult,
   type JarvisRelease,
   type JarvisSettingsResult,
   type JarvisSettingsSetParams,
@@ -61,7 +66,7 @@ export interface JarvisServiceOptions {
   cli?: JarvisCli;
   settings?: JarvisSettingsStore;
   interpreter?: JarvisQueryInterpreter;
-  searcher?: Pick<JarvisBugSearcher, "search">;
+  searcher?: Pick<JarvisBugSearcher, "search" | "searchInProject" | "previewTitle">;
   login?: JarvisLoginManager;
   forwarder?: JarvisLoginForwarder;
   fetchImpl?: typeof fetch;
@@ -90,7 +95,7 @@ export class JarvisService {
   readonly #cli: JarvisCli;
   readonly #settings: JarvisSettingsStore;
   readonly #interpreter: JarvisQueryInterpreter;
-  readonly #searcher: Pick<JarvisBugSearcher, "search">;
+  readonly #searcher: Pick<JarvisBugSearcher, "search" | "searchInProject" | "previewTitle">;
   readonly #login: JarvisLoginManager;
   readonly #forwarder: JarvisLoginForwarder;
   readonly #fetchImpl: typeof fetch;
@@ -156,6 +161,66 @@ export class JarvisService {
 
   cancelSearch(requestId: string): void {
     this.#searches.get(requestId)?.abort();
+  }
+
+  /**
+   * Step 1: my projects, or a visible-project search while the user types.
+   * The signed-in user id lets the Renderer keep its display cache per user.
+   */
+  async listProjects(params: JarvisProjectListParams): Promise<JarvisProjectListResult> {
+    if (!this.#isLocalHost) {
+      return {
+        available: false,
+        errorCode: "local_only",
+        projects: [],
+        complete: false,
+        userId: null,
+      };
+    }
+    const auth = await this.#cli.auth();
+    if (!auth.user) {
+      return {
+        available: false,
+        errorCode: auth.errorCode ?? "not_logged_in",
+        projects: [],
+        complete: false,
+        userId: null,
+      };
+    }
+    const page = await this.#cli.projectList(params.query);
+    return jarvisProjectListResultSchema.parse({
+      available: page.errorCode === null,
+      errorCode: page.errorCode,
+      projects: page.projects,
+      complete: page.complete,
+      userId: auth.user.id,
+    });
+  }
+
+  /** Step 2 instant preview: the raw text as a title, one project, one call. */
+  async previewProjectBugTitle(
+    params: JarvisProjectBugTitleParams,
+  ): Promise<JarvisBugSearchResult> {
+    return jarvisBugSearchResultSchema.parse(
+      await this.#searcher.previewTitle(params.projectId, params.title),
+    );
+  }
+
+  /**
+   * Step 2 condition search. The project id is fixed; only the text is parsed,
+   * and the requestId lets the Renderer cancel a slow interpretation.
+   */
+  async searchProjectBugs(params: JarvisProjectBugSearchParams): Promise<JarvisBugSearchResult> {
+    const controller = new AbortController();
+    if (params.requestId) this.#searches.set(params.requestId, controller);
+    try {
+      return jarvisBugSearchResultSchema.parse(
+        await this.#searcher.searchInProject(params, controller.signal),
+      );
+    } finally {
+      if (params.requestId && this.#searches.get(params.requestId) === controller)
+        this.#searches.delete(params.requestId);
+    }
   }
 
   async settings(): Promise<JarvisSettingsResult> {

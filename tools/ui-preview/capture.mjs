@@ -72,14 +72,19 @@ const allScenarios = [
   "thread-folders-limited",
   "jarvis-entry",
   "jarvis-entry-query",
-  "jarvis-mode-prefilled",
-  "jarvis-mode-detached",
-  "jarvis-mode-loading",
-  "jarvis-mode-results",
-  "jarvis-mode-single",
-  "jarvis-mode-many",
-  "jarvis-mode-empty",
-  "jarvis-mode-error",
+  "jarvis-projects",
+  "jarvis-projects-search",
+  "jarvis-projects-loading",
+  "jarvis-projects-empty",
+  "jarvis-projects-error",
+  "jarvis-bugs-preview",
+  "jarvis-bugs-conditions",
+  "jarvis-bugs-unparsed",
+  "jarvis-bugs-empty",
+  "jarvis-bugs-error",
+  "jarvis-bugs-loading",
+  "jarvis-bugs-many",
+  "jarvis-bugs-chip-removed",
   "model-service-empty",
   "model-service-configured",
   "model-service-testing",
@@ -88,12 +93,6 @@ const allScenarios = [
   "model-service-hover",
   "model-service-edit",
   "model-service-add",
-  "jarvis-mode-gemini-missing-key",
-  "jarvis-mode-gemini-quota",
-  "jarvis-mode-gemini-timeout",
-  "jarvis-mode-slow",
-  "jarvis-mode-conditions",
-  "jarvis-mode-chip-removed",
 ];
 
 const args = process.argv.slice(2);
@@ -162,9 +161,10 @@ const hoverSelectors = new Map([
   ["agents-menu", ".agent-menu-item"],
   ["at-entry", "[data-codexhost-jarvis-entry-row]"],
   ["at-entry-native-visible", "[data-codexhost-dingtalk-entry]"],
-  ["jarvis-mode-results", "[data-codexhost-jarvis-bug]"],
-  ["jarvis-mode-single", "[data-codexhost-jarvis-bug]"],
-  ["jarvis-mode-many", "[data-codexhost-jarvis-bug]"],
+  ["jarvis-projects", "[data-codexhost-jarvis-project]"],
+  ["jarvis-bugs-preview", "[data-codexhost-jarvis-bug]"],
+  ["jarvis-bugs-conditions", "[data-codexhost-jarvis-bug]"],
+  ["jarvis-bugs-many", "[data-codexhost-jarvis-bug]"],
   ["harness-picker", '#preview-harness-picker-agent-menu button[data-agent="grok"]'],
 ]);
 
@@ -283,7 +283,7 @@ for (const scenario of scenarios) {
     );
     await runPreviewInputs(page);
     await page.waitForSelector('body[data-ready="true"]', { timeout: 20_000 });
-    const wheelScenario = scenario === "jarvis-mode-many";
+    const wheelScenario = scenario === "jarvis-bugs-many";
     if (wheelScenario) {
       const box = await page.evaluate(() => {
         const element = document.querySelector('[data-jarvis-results="true"]');
@@ -1558,19 +1558,8 @@ for (const scenario of scenarios) {
         );
       }
       if (
-        document.body.dataset.scenario === "jarvis-mode-loading" ||
-        document.body.dataset.scenario === "jarvis-mode-results" ||
-        document.body.dataset.scenario === "jarvis-mode-prefilled" ||
-        document.body.dataset.scenario === "jarvis-mode-empty" ||
-        document.body.dataset.scenario === "jarvis-mode-error" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-missing-key" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-timeout" ||
-        document.body.dataset.scenario === "jarvis-mode-slow" ||
-        document.body.dataset.scenario === "jarvis-mode-conditions" ||
-        document.body.dataset.scenario === "jarvis-mode-single" ||
-        document.body.dataset.scenario === "jarvis-mode-many" ||
-        document.body.dataset.scenario === "jarvis-mode-chip-removed"
+        document.body.dataset.scenario?.startsWith("jarvis-projects") ||
+        document.body.dataset.scenario?.startsWith("jarvis-bugs")
       ) {
         const mode = query("[data-codexhost-jarvis-mode]");
         const host = query("[data-codexhost-jarvis-detached]");
@@ -1593,7 +1582,7 @@ for (const scenario of scenarios) {
           "mode-header",
           Boolean(
             mode?.textContent?.includes("Jarvis") &&
-            mode.textContent.includes("Bug") &&
+            (mode.textContent.includes("项目") || mode.textContent.includes("Bug")) &&
             mode.querySelector("svg"),
           ),
         );
@@ -1607,43 +1596,84 @@ for (const scenario of scenarios) {
           Boolean(input) && document.activeElement === input,
           document.activeElement?.tagName ?? "",
         );
-        const row = mode?.querySelector("[data-codexhost-jarvis-bug]");
+        check(
+          "single-step-mounted",
+          Boolean(mode?.matches("[data-codexhost-jarvis-step]")) &&
+            document.querySelectorAll("[data-codexhost-jarvis-step]").length === 1,
+        );
+        const row = mode?.querySelector(
+          "[data-codexhost-jarvis-bug], [data-codexhost-jarvis-project]",
+        );
         if (row) {
           const rowRect = row.getBoundingClientRect();
-          check("mode-row-native-density", rowRect.height >= 44, `${Math.round(rowRect.height)}px`);
+          check("mode-row-density", rowRect.height >= 40, `${Math.round(rowRect.height)}px`);
           check(
             "mode-row-horizontal-padding",
             getComputedStyle(row).paddingLeft === "12px",
             getComputedStyle(row).paddingLeft,
           );
-          check("mode-row-bug-icon", Boolean(row.querySelector("svg")));
-          check("mode-status-pill", Boolean(row.querySelector("[data-jarvis-status]")));
-          check("mode-project-tag", Boolean(row.querySelector("[data-jarvis-project]")));
         }
-        if (document.body.dataset.scenario === "jarvis-mode-single") {
-          check(
-            "mode-single-shrinks",
-            Boolean(hostRect) && hostRect.height < 300,
-            hostRect ? `${Math.round(hostRect.height)}px` : "missing",
-          );
+        const bugRow = mode?.querySelector("[data-codexhost-jarvis-bug]");
+        if (bugRow) {
+          check("mode-row-bug-icon", Boolean(bugRow.querySelector("svg")));
+          check("mode-status-pill", Boolean(bugRow.querySelector("[data-jarvis-status]")));
+          check("mode-no-project-tag", !bugRow.querySelector("[data-jarvis-project]"));
         }
-        if (document.body.dataset.scenario === "jarvis-mode-many") {
-          const statuses = [...(mode?.querySelectorAll("[data-jarvis-status]") ?? [])].map(
-            (pill) => pill.textContent,
-          );
-          check(
-            "mode-status-matches-conditions",
-            statuses.length > 0 && statuses.every((status) => status === "未解决"),
-            statuses.join(","),
-          );
-          const results = mode?.querySelector("[data-jarvis-results]");
-          check(
-            "mode-results-scrollable",
-            Boolean(results) && results.scrollHeight > results.clientHeight,
-            results ? `${results.scrollHeight}/${results.clientHeight}` : "missing",
-          );
-          check("mode-wheel-scrolled", document.body.dataset.jarvisScrolled === "true");
-        }
+        const projectRow = mode?.querySelector("[data-codexhost-jarvis-project]");
+        if (projectRow) check("mode-project-folder-icon", Boolean(projectRow.querySelector("svg")));
+      }
+      if (document.body.dataset.scenario === "jarvis-projects") {
+        check("project-rows", queryAll("[data-codexhost-jarvis-project]").length === 8);
+        check(
+          "project-list-label",
+          query("[data-jarvis-list-label]")?.textContent === "我的项目",
+          query("[data-jarvis-list-label]")?.textContent ?? "",
+        );
+        check(
+          "project-no-duplicate-count",
+          (query("[data-jarvis-summary]")?.textContent ?? "missing") === "",
+          query("[data-jarvis-summary]")?.textContent ?? "",
+        );
+        check("project-no-condition-chips", queryAll("[data-jarvis-chip]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-projects-search") {
+        check("project-search-rows", queryAll("[data-codexhost-jarvis-project]").length === 4);
+        check(
+          "project-search-label",
+          query("[data-jarvis-list-label]")?.textContent === "搜索结果",
+          query("[data-jarvis-list-label]")?.textContent ?? "",
+        );
+        check(
+          "project-search-typed",
+          query("[data-codexhost-jarvis-step='project'] input")?.value === "发货",
+          query("[data-codexhost-jarvis-step='project'] input")?.value ?? "",
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-projects-loading") {
+        check("project-loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
+        const nativePanel = document
+          .querySelector("[data-mention-list-scroll-area]")
+          ?.closest('[class*="suggestionMenu"]');
+        check(
+          "native-rows-hidden",
+          Boolean(nativePanel) && getComputedStyle(nativePanel).visibility === "hidden",
+        );
+      }
+      if (document.body.dataset.scenario === "jarvis-projects-empty") {
+        const step = query("[data-codexhost-jarvis-step='project']");
+        check("project-empty-state", Boolean(step?.textContent?.includes("无结果")));
+        check("project-empty-no-rows", queryAll("[data-codexhost-jarvis-project]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-projects-error") {
+        const step = query("[data-codexhost-jarvis-step='project']");
+        check("project-error-message", Boolean(step?.textContent?.includes("未登录 Jarvis")));
+        check("project-error-action", query("[data-jarvis-action]")?.textContent === "去设置");
+        check("project-error-no-rows", queryAll("[data-codexhost-jarvis-project]").length === 0);
+        check(
+          "project-error-no-count",
+          (query("[data-jarvis-summary]")?.textContent ?? "missing") === "",
+          query("[data-jarvis-summary]")?.textContent ?? "",
+        );
       }
       if (document.body.dataset.scenario === "jarvis-entry-query") {
         const row = query("[data-codexhost-jarvis-entry-row]");
@@ -1668,120 +1698,74 @@ for (const scenario of scenarios) {
           Boolean(query("[data-mention-list-scroll-area]")?.contains(row)),
         );
       }
-      if (document.body.dataset.scenario === "jarvis-mode-prefilled") {
-        const mode = query("[data-codexhost-jarvis-mode]");
-        const input = mode?.querySelector("input");
-        check("prefilled-query", input?.value === "示例买的最近的bug", input?.value ?? "");
+      if (document.body.dataset.scenario === "jarvis-bugs-preview") {
+        check("project-chip", Boolean(query("[data-jarvis-project-chip]")));
+        check("preview-rows", queryAll("[data-codexhost-jarvis-bug]").length === 4);
+        check("preview-no-condition-chips", queryAll("[data-jarvis-chip]").length === 0);
         check(
-          "prefill-token-removed",
-          document.body.dataset.jarvisEditorText?.includes("@示例买") !== true,
-          document.body.dataset.jarvisEditorText ?? "",
-        );
-        check(
-          "prefill-search-started",
-          document.body.dataset.jarvisSearchCalls === "1",
-          document.body.dataset.jarvisSearchCalls ?? "",
-        );
-        check("prefill-result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
-      }
-      if (document.body.dataset.scenario === "jarvis-mode-detached") {
-        const mode = query("[data-codexhost-jarvis-mode]");
-        const host = query("[data-codexhost-jarvis-detached]");
-        check("detached-mode-survives", Boolean(mode) && Boolean(host?.contains(mode)));
-        check("detached-native-menu-gone", !query(".preview-at-menu"));
-        check("detached-results-kept", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
-        check(
-          "detached-search-focused",
-          document.activeElement === mode?.querySelector("input"),
-          document.activeElement?.tagName ?? "",
-        );
-      }
-      if (document.body.dataset.scenario === "jarvis-mode-loading") {
-        check("loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
-        const nativePanel = document
-          .querySelector("[data-mention-list-scroll-area]")
-          ?.closest('[class*="suggestionMenu"]');
-        check(
-          "native-rows-hidden",
-          Boolean(nativePanel) && getComputedStyle(nativePanel).visibility === "hidden",
-        );
-      }
-      if (document.body.dataset.scenario === "jarvis-mode-results") {
-        check("result-rows", queryAll("[data-codexhost-jarvis-bug]").length >= 4);
-        check("result-chips", queryAll("[data-jarvis-chip]").length >= 2);
-        check(
-          "result-count",
-          query("[data-jarvis-summary]")?.textContent === "4 条",
+          "preview-hint",
+          Boolean(query("[data-jarvis-summary]")?.textContent?.includes("回车识别条件")),
           query("[data-jarvis-summary]")?.textContent ?? "",
         );
       }
-      if (document.body.dataset.scenario === "jarvis-mode-empty") {
+      if (document.body.dataset.scenario === "jarvis-bugs-conditions") {
+        check("condition-chips", queryAll("[data-jarvis-chip]").length >= 4);
+        check("condition-results", queryAll("[data-codexhost-jarvis-bug]").length === 2);
         check(
-          "empty-state",
-          Boolean(
-            query("[data-codexhost-jarvis-mode]")?.textContent?.includes("没有符合条件的 Bug"),
-          ),
+          "condition-count",
+          query("[data-jarvis-summary]")?.textContent === "共 2 条",
+          query("[data-jarvis-summary]")?.textContent ?? "",
         );
-        check("empty-keeps-chips", queryAll("[data-jarvis-chip]").length >= 2);
-        check("no-result-rows", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+        check(
+          "condition-query-typed",
+          query("[data-codexhost-jarvis-step='bug'] input")?.value === "发货",
+          query("[data-codexhost-jarvis-step='bug'] input")?.value ?? "",
+        );
       }
-      if (document.body.dataset.scenario === "jarvis-mode-error") {
+      if (document.body.dataset.scenario === "jarvis-bugs-unparsed") {
         check(
-          "error-message",
-          Boolean(
-            query("[data-codexhost-jarvis-mode]")?.textContent?.includes("Jarvis 未安装或未登录"),
-          ),
+          "unparsed-notice",
+          query("[data-jarvis-summary]")?.textContent === "条件未识别，已按标题搜索",
+          query("[data-jarvis-summary]")?.textContent ?? "",
         );
+        check("unparsed-keeps-title-rows", queryAll("[data-codexhost-jarvis-bug]").length === 4);
+        check("unparsed-no-condition-chips", queryAll("[data-jarvis-chip]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-bugs-empty") {
         check(
-          "error-not-empty-state",
-          !query("[data-codexhost-jarvis-mode]")?.textContent?.includes("没有符合条件的 Bug"),
+          "bug-empty-state",
+          Boolean(query("[data-codexhost-jarvis-step='bug']")?.textContent?.includes("无结果")),
         );
+        check("bug-empty-no-rows", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+      }
+      if (document.body.dataset.scenario === "jarvis-bugs-error") {
+        const step = query("[data-codexhost-jarvis-step='bug']");
+        check("bug-error-message", Boolean(step?.textContent?.includes("未登录 Jarvis")));
+        check("bug-error-action", query("[data-jarvis-action]")?.textContent === "去设置");
+        check("bug-error-no-rows", queryAll("[data-codexhost-jarvis-bug]").length === 0);
+        check("bug-error-no-chips", queryAll("[data-jarvis-chip]").length === 0);
         check(
-          "error-no-count",
+          "bug-error-no-count",
           (query("[data-jarvis-summary]")?.textContent ?? "missing") === "",
           query("[data-jarvis-summary]")?.textContent ?? "",
         );
-        check("error-settings-link", Boolean(query("[data-jarvis-settings]")));
       }
-      if (
-        document.body.dataset.scenario === "jarvis-mode-gemini-missing-key" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-quota" ||
-        document.body.dataset.scenario === "jarvis-mode-gemini-timeout"
-      ) {
-        const mode = query("[data-codexhost-jarvis-mode]");
-        const expected =
-          document.body.dataset.scenario === "jarvis-mode-gemini-quota"
-            ? "Gemini 额度不足"
-            : document.body.dataset.scenario === "jarvis-mode-gemini-missing-key"
-              ? "未配置 Gemini Key"
-              : "解析超时";
-        const results = mode?.querySelector('[data-jarvis-results="true"]');
+      if (document.body.dataset.scenario === "jarvis-bugs-loading") {
+        check("bug-loading-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
+      }
+      if (document.body.dataset.scenario === "jarvis-bugs-many") {
+        check("many-rows", queryAll("[data-codexhost-jarvis-bug]").length === 14);
+        const results = query('[data-jarvis-results="true"]');
         check(
-          "model-query-typed",
-          mode?.querySelector("input")?.value === "我还没处理的标题有发货的",
+          "mode-results-scrollable",
+          Boolean(results) && results.scrollHeight > results.clientHeight,
+          results ? `${results.scrollHeight}/${results.clientHeight}` : "missing",
         );
-        check(
-          "model-query-searched",
-          document.body.dataset.jarvisLastQuery === "我还没处理的标题有发货的",
-        );
-        check(
-          "model-chinese-reason-and-settings-only",
-          results?.textContent?.trim() === `${expected}去设置`,
-          results?.textContent ?? "",
-        );
-        check("model-no-results", queryAll("[data-codexhost-jarvis-bug]").length === 0);
-        check("model-no-chips", queryAll("[data-jarvis-chip]").length === 0);
-        check("model-no-count", (query("[data-jarvis-summary]")?.textContent ?? "missing") === "");
-        check(
-          "model-no-english-error",
-          !/prepayment|credits|depleted|timed?\s*out|timeout|Error|failed/iu.test(
-            results?.textContent ?? "",
-          ),
-        );
-        check(
-          "model-settings-link",
-          mode?.querySelector("[data-jarvis-settings]")?.textContent === "去设置",
-        );
+        check("mode-wheel-scrolled", document.body.dataset.jarvisScrolled === "true");
+      }
+      if (document.body.dataset.scenario === "jarvis-bugs-chip-removed") {
+        check("status-chip-removed", !query('[data-jarvis-chip="status:1"]'));
+        check("other-chips-kept", queryAll("[data-jarvis-chip]").length === 3);
       }
       if (document.body.dataset.scenario?.startsWith("model-service-")) {
         const section = query(".settings-model-service");
@@ -1889,21 +1873,6 @@ for (const scenario of scenarios) {
           check("change-hover", query("#model-service-edit-gemini")?.matches(":hover") === true);
       }
 
-      if (document.body.dataset.scenario === "jarvis-mode-slow") {
-        check(
-          "slow-notice",
-          Boolean(query("[data-codexhost-jarvis-mode]")?.textContent?.includes("正在解析…")),
-        );
-        check("slow-keeps-skeleton", queryAll("[data-codexhost-jarvis-skeleton]").length >= 3);
-      }
-      if (document.body.dataset.scenario === "jarvis-mode-conditions") {
-        check("condition-chips", queryAll("[data-jarvis-chip]").length >= 4);
-        check("condition-results", queryAll("[data-codexhost-jarvis-bug]").length >= 2);
-      }
-      if (document.body.dataset.scenario === "jarvis-mode-chip-removed") {
-        check("status-chip-removed", !query('[data-jarvis-chip="status:1"]'));
-        check("other-chips-kept", queryAll("[data-jarvis-chip]").length >= 3);
-      }
       if (
         document.body.dataset.scenario === "at-entry-native" ||
         document.body.dataset.scenario === "at-entry-native-visible"

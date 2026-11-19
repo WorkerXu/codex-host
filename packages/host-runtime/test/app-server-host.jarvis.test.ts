@@ -31,6 +31,29 @@ function fakeService(overrides: Partial<Record<keyof JarvisService, unknown>> = 
       total: 1,
       capped: false,
     })),
+    listProjects: vi.fn(async () => ({
+      available: true,
+      errorCode: null,
+      projects: [{ id: 9001, name: "示例后台 · 迭代 B" }],
+      complete: true,
+      userId: 10058,
+    })),
+    previewProjectBugTitle: vi.fn(async () => ({
+      available: true,
+      errorCode: null,
+      conditions: [],
+      bugs: [{ id: 9102, projectId: 9001, title: "示例：发货失败" }],
+      total: 1,
+      capped: false,
+    })),
+    searchProjectBugs: vi.fn(async () => ({
+      available: true,
+      errorCode: null,
+      conditions: [{ key: "status:1", kind: "status", label: "未解决" }],
+      bugs: [{ id: 9102, projectId: 9001, title: "示例：发货失败" }],
+      total: 1,
+      capped: false,
+    })),
     settings: vi.fn(async () => ({ hasKey: true, threshold: 0.5 })),
     updateSettings: vi.fn(async () => ({ hasKey: true, threshold: 0.4 })),
     testSettings: vi.fn(async () => ({ ok: true, latencyMs: 30, errorCode: null })),
@@ -85,7 +108,14 @@ describe("Host Jarvis RPC", () => {
           signal?.addEventListener("abort", () => resolve(cancelled), { once: true });
         }),
     );
-    const service = new LocalJarvisService({ isLocalHost: true, searcher: { search } });
+    const service = new LocalJarvisService({
+      isLocalHost: true,
+      searcher: {
+        search,
+        searchInProject: vi.fn(async () => cancelled),
+        previewTitle: vi.fn(async () => cancelled),
+      },
+    });
     const fixture = createFixture({ jarvis: service });
     const id = "a7dcdbaa-74a0-4486-89d6-87e8aceb45be";
     try {
@@ -166,6 +196,30 @@ describe("Host Jarvis RPC", () => {
         result: { available: true, total: 1, bugs: [{ id: 9101 }] },
       });
       writeRequest(fixture.desktopInput, {
+        id: 3,
+        method: "codexhost/jarvis/project/list",
+        params: { query: "发货" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 3))).toMatchObject({
+        result: { available: true, projects: [{ id: 9001 }], userId: 10058 },
+      });
+      writeRequest(fixture.desktopInput, {
+        id: 5,
+        method: "codexhost/jarvis/project/bug/title",
+        params: { projectId: 9001, title: "发货" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 5))).toMatchObject({
+        result: { available: true, bugs: [{ id: 9102 }], conditions: [] },
+      });
+      writeRequest(fixture.desktopInput, {
+        id: 6,
+        method: "codexhost/jarvis/project/bug/search",
+        params: { projectId: 9001, query: "未解决的发货bug" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 6))).toMatchObject({
+        result: { available: true, conditions: [{ key: "status:1" }] },
+      });
+      writeRequest(fixture.desktopInput, {
         id: 4,
         method: "codexhost/jarvis/settings/get",
         params: {},
@@ -188,6 +242,14 @@ describe("Host Jarvis RPC", () => {
         params: { query: 42 },
       });
       expect(await fixture.collector.waitFor((message) => requestId(message, 1))).toMatchObject({
+        error: { code: -32094, message: "invalid_params" },
+      });
+      writeRequest(fixture.desktopInput, {
+        id: 3,
+        method: "codexhost/jarvis/project/bug/title",
+        params: { projectId: 0, title: "发货" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 3))).toMatchObject({
         error: { code: -32094, message: "invalid_params" },
       });
       writeRequest(fixture.desktopInput, {

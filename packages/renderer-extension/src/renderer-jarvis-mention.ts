@@ -2,30 +2,55 @@
  * Jarvis inside Codex Desktop's native `@` menu.
  *
  * Typing after `@` only reveals one 「Jarvis」 row in the 「工作台」 group; it
- * never searches by itself. Selecting the row switches the same native popup
- * list into a bug search mode: a back header, a focused search field and the
- * complete matching set below. Choosing a bug inserts the native mention chip
- * whose `jarvis://bug/<projectId>/<bugId>` path the Host expands on submit.
+ * never searches by itself. Selecting the row opens a two-step panel inside the
+ * same popup area:
+ *
+ *   1. projects — 「我的项目」 paints from a short-lived local cache while the
+ *      Host revalidates it; typing searches visible projects;
+ *   2. bugs — the chosen project becomes a removable chip. Typing only runs a
+ *      title preview inside that project; pressing Enter asks the existing
+ *      Gemini parser for the remaining conditions. A slow or failed parse keeps
+ *      the title result and says so, so the panel never waits on the model.
+ *
+ * Choosing a bug inserts the native mention chip whose
+ * `jarvis://bug/<projectId>/<bugId>` path the Host expands on submit.
  */
 import {
   formatJarvisMentionLink,
   jarvisMentionPath,
   type JarvisBug,
   type JarvisBugCondition,
-  type JarvisBugSearchParams,
   type JarvisBugSearchResult,
+  type JarvisProject,
+  type JarvisProjectBugSearchParams,
+  type JarvisProjectListParams,
+  type JarvisProjectListResult,
 } from "@codexhost/shared-contracts";
 
 import {
-  JARVIS_MODE_ATTRIBUTE,
   createJarvisConditionChip,
   createJarvisEntryRow,
-  createJarvisModeChrome,
+  createJarvisProjectChip,
   jarvisBugLabel,
   renderJarvisBugRows,
-  renderJarvisEmpty,
-  renderJarvisLoading,
 } from "./renderer-jarvis-bug-view.js";
+import {
+  JARVIS_MODE_ATTRIBUTE,
+  TEXT_PRIMARY,
+  type JarvisStepChrome,
+  createJarvisStepChrome,
+  renderJarvisLoading,
+  renderJarvisMessage,
+} from "./renderer-jarvis-panel-view.js";
+import { renderJarvisProjectRows } from "./renderer-jarvis-project-view.js";
+import {
+  clearJarvisProjectCache,
+  isJarvisProjectCacheFresh,
+  readJarvisLastProject,
+  readJarvisProjectCache,
+  writeJarvisLastProject,
+  writeJarvisProjectCache,
+} from "./renderer-jarvis-project-store.js";
 import {
   ensureWorkbenchSection,
   findNativeSuggestionList,
@@ -40,6 +65,7 @@ import {
   insertNativeAgentMentionAtSelection,
   type NativeTextRange,
 } from "./renderer-native-composer-controller.js";
+import { jarvisStepErrorText } from "./renderer-jarvis-client.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
 export {
@@ -58,6 +84,7 @@ export { findNativeSuggestionList } from "./renderer-native-at-menu.js";
 const MODE_ATTRIBUTE = JARVIS_MODE_ATTRIBUTE;
 const TRIGGER_PATTERN = /(?:^|\s)@([^\s@]{0,64})$/u;
 const DEBOUNCE_MS = 300;
+const PARSE_TIMEOUT_MS = 8_000;
 const MAX_QUERY_LENGTH = 64;
 
 export interface RendererJarvisTrigger {
@@ -116,10 +143,22 @@ export interface RendererJarvisMentionOptions {
   isComposerEditor(editor: HTMLElement): boolean;
   /** Desktop Host that runs the Composer's Thread; null while unknown. */
   readHostId(editor: HTMLElement): string | null;
-  /** Runs the structured Host search; only called after Jarvis was selected. */
-  search(
+  /** Step 1: my projects, or a visible-project search while typing. */
+  listProjects(
     hostId: string,
-    params: JarvisBugSearchParams,
+    params: JarvisProjectListParams,
+    signal?: AbortSignal,
+  ): Promise<JarvisProjectListResult>;
+  /** Step 2: raw text as a title in the chosen project; no model. */
+  previewProjectBugTitle(
+    hostId: string,
+    params: { projectId: number; title: string },
+    signal?: AbortSignal,
+  ): Promise<JarvisBugSearchResult>;
+  /** Step 2: parsed conditions inside the chosen project. */
+  searchProjectBugs(
+    hostId: string,
+    params: JarvisProjectBugSearchParams,
     signal?: AbortSignal,
   ): Promise<JarvisBugSearchResult>;
   readLocale(): RendererSettingsLocale;
@@ -148,23 +187,47 @@ interface EntryState {
   unregister: () => void;
 }
 
+type StepState =
+  | {
+      kind: "project";
+      entries: { project: JarvisProject; row: HTMLElement }[];
+      selected: number;
+    }
+  | {
+      kind: "bug";
+      entries: { bug: JarvisBug; row: HTMLElement }[];
+      selected: number;
+    };
+
 interface ModeState {
   trigger: Trigger;
-  section: HTMLElement;
-  back: HTMLButtonElement;
-  input: HTMLInputElement;
-  clear: HTMLButtonElement;
-  chips: HTMLElement;
-  summary: HTMLElement;
-  results: HTMLElement;
-  entries: { bug: JarvisBug; row: HTMLElement }[];
-  selected: number;
-  generation: number;
-  loading: boolean;
-  omit: Set<string>;
-  lastQuery: string;
-  hiddenPanel: { element: HTMLElement; visibility: string } | null;
+  hostId: string | null;
   locale: RendererSettingsLocale;
+  projectChrome: JarvisStepChrome;
+  bugChrome: JarvisStepChrome;
+  step: StepState;
+  /** Section currently attached to the panel host. */
+  visibleKind: StepState["kind"];
+  /** Chosen project; stays when returning to the project step. */
+  project: JarvisProject | null;
+  projectQuery: string;
+  projectRows: JarvisProject[];
+  /** Jarvis user that owns the project cache and the remembered project. */
+  projectUserId: number | null;
+  /** Condition chips removed by the user; sent as `omit` on the next parse. */
+  omit: Set<string>;
+  /** Title preview = the raw text; the parse replaces it when it answers. */
+  previewText: string;
+  previewGeneration: number;
+  previewRequest: AbortController | null;
+  previewError: string | null;
+  parse: "idle" | "pending" | "done" | "failed";
+  parseText: string;
+  parseGeneration: number;
+  parseRequest: AbortController | null;
+  parseTimer: number | null;
+  generation: number;
+  hiddenPanel: { element: HTMLElement; visibility: string } | null;
   timer: number | null;
   request: AbortController | null;
   /** The `@query` text was already removed; insert the mention at the caret. */
@@ -196,6 +259,16 @@ export function installRendererJarvisMention(
   const nativeList = (editor: HTMLElement): HTMLElement | null =>
     findNativeSuggestionList(ownerDocument, options.anchorForEditor(editor));
 
+  const storage = (): Storage | null => {
+    try {
+      return view.localStorage ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const now = (): number => Date.now();
+
   const removeEntry = (): void => {
     cancelEntryWait?.();
     cancelEntryWait = null;
@@ -211,7 +284,8 @@ export function installRendererJarvisMention(
     if (!mode) return;
     if (mode.timer !== null) view.clearTimeout(mode.timer);
     mode.request?.abort();
-    mode.section.remove();
+    mode.projectChrome.section.remove();
+    mode.bugChrome.section.remove();
     mode.detachedHost?.remove();
     mode.detachedHost = null;
     const hiddenPanel = mode.hiddenPanel;
@@ -315,19 +389,48 @@ export function installRendererJarvisMention(
 
   const buildMode = (trigger: Trigger): ModeState => {
     const locale = options.readLocale();
-    const chrome = createJarvisModeChrome(ownerDocument, locale);
-    chrome.section.setAttribute(MODE_ATTRIBUTE, "true");
+    const projectChrome = createJarvisStepChrome(ownerDocument, locale, {
+      step: "project",
+      subtitle: locale === "zh-CN" ? "项目" : "Project",
+      placeholder: locale === "zh-CN" ? "搜索项目" : "Search projects",
+      listLabel: locale === "zh-CN" ? "我的项目" : "My projects",
+      withChips: false,
+    });
+    const bugChrome = createJarvisStepChrome(ownerDocument, locale, {
+      step: "bug",
+      subtitle: "Bug",
+      placeholder:
+        locale === "zh-CN" ? "搜索标题，回车识别条件" : "Search titles; Enter reads conditions",
+      listLabel: "",
+      withChips: true,
+    });
+    for (const chrome of [projectChrome, bugChrome]) {
+      chrome.section.setAttribute(MODE_ATTRIBUTE, "true");
+    }
     return {
-      ...chrome,
       trigger,
-      entries: [],
-      selected: -1,
-      generation: 0,
-      loading: false,
-      omit: new Set(),
-      lastQuery: "",
-      hiddenPanel: null,
+      hostId: options.readHostId(trigger.editor),
       locale,
+      projectChrome,
+      bugChrome,
+      step: { kind: "project", entries: [], selected: -1 },
+      visibleKind: "project",
+      project: null,
+      projectQuery: "",
+      projectRows: [],
+      projectUserId: null,
+      omit: new Set(),
+      previewText: "",
+      previewGeneration: 0,
+      previewRequest: null,
+      previewError: null,
+      parse: "idle",
+      parseText: "",
+      parseGeneration: 0,
+      parseRequest: null,
+      parseTimer: null,
+      generation: 0,
+      hiddenPanel: null,
       timer: null,
       request: null,
       insertAtSelection: false,
@@ -336,21 +439,35 @@ export function installRendererJarvisMention(
     };
   };
 
-  const renderLoading = (state: ModeState): void => {
-    state.loading = true;
-    state.section.setAttribute("aria-busy", "true");
-    state.entries = [];
-    state.selected = -1;
-    state.summary.textContent = state.locale === "zh-CN" ? "正在解析…" : "Parsing…";
-    state.chips.replaceChildren();
-    state.chips.hidden = true;
-    renderJarvisLoading(ownerDocument, state.results);
+  const chromeOf = (state: ModeState, kind: StepState["kind"]): JarvisStepChrome =>
+    kind === "project" ? state.projectChrome : state.bugChrome;
+
+  const showStep = (state: ModeState, step: StepState): void => {
+    // Track the attached section separately: callers replace `state.step`
+    // before switching, and the old section must still be removed.
+    const previous = chromeOf(state, state.visibleKind);
+    const next = chromeOf(state, step.kind);
+    if (previous !== next) previous.section.remove();
+    if (next.section.parentElement !== state.detachedHost) {
+      state.detachedHost?.append(next.section);
+    }
+    state.visibleKind = step.kind;
+    state.step = step;
+    next.input.focus({ preventScroll: true });
+  };
+
+  const setBusy = (state: ModeState, busy: boolean): void => {
+    const chrome = chromeOf(state, state.step.kind);
+    if (busy) chrome.section.setAttribute("aria-busy", "true");
+    else chrome.section.removeAttribute("aria-busy");
   };
 
   const selectRow = (state: ModeState, index: number): void => {
-    state.selected = index >= 0 && index < state.entries.length ? index : -1;
-    state.entries.forEach(({ row }, current) => {
-      const selected = current === state.selected;
+    const step = state.step;
+    const entries = step.entries;
+    step.selected = index >= 0 && index < entries.length ? index : -1;
+    entries.forEach(({ row }, current) => {
+      const selected = current === step.selected;
       row.setAttribute("aria-selected", String(selected));
       row.style.background = selected
         ? "var(--color-token-interactive-bg-secondary-hover, rgba(127, 127, 127, 0.08))"
@@ -359,116 +476,518 @@ export function installRendererJarvisMention(
     });
   };
 
-  const renderChips = (state: ModeState, conditions: readonly JarvisBugCondition[]): void => {
-    state.chips.replaceChildren();
-    for (const condition of conditions) {
-      const chip = createJarvisConditionChip(ownerDocument, condition);
-      chip.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        state.omit.add(condition.key);
-        state.input.focus({ preventScroll: true });
-        void requestSearch(state, state.input.value);
-      });
-      state.chips.append(chip);
-    }
-    state.chips.hidden = conditions.length === 0;
+  const projectLabel = (state: ModeState): string => {
+    if (state.projectQuery) return state.locale === "zh-CN" ? "搜索结果" : "Search results";
+    return state.locale === "zh-CN" ? "我的项目" : "My projects";
   };
 
-  const renderRows = (state: ModeState, bugs: readonly JarvisBug[]): void => {
-    state.selected = -1;
-    state.entries = renderJarvisBugRows(ownerDocument, state.results, bugs, state.locale, {
-      onSelect: (index) => selectRow(state, index),
-      onChoose: (bug) => void choose(state, bug),
+  /** The list label already names the section; only a truncation needs a line. */
+  const projectSummary = (state: ModeState, result: JarvisProjectListResult | null): string => {
+    if (!result || result.complete) return "";
+    const count = result.projects.length;
+    return state.locale === "zh-CN" ? `已显示前 ${count} 个` : `Showing the first ${count}`;
+  };
+
+  const resultCount = (state: ModeState, result: JarvisBugSearchResult): string => {
+    if (result.capped) {
+      return state.locale === "zh-CN"
+        ? `已显示前 ${result.bugs.length} 条`
+        : `Showing the first ${result.bugs.length}`;
+    }
+    return state.locale === "zh-CN" ? `共 ${result.total} 条` : `${result.total} bugs`;
+  };
+
+  const previewSummary = (state: ModeState, result: JarvisBugSearchResult): string => {
+    const count = resultCount(state, result);
+    if (state.locale === "zh-CN") {
+      return state.previewText ? `${count} · 回车识别条件` : count;
+    }
+    return state.previewText ? `${count} · Enter reads conditions` : count;
+  };
+
+  const unparsedNotice = (state: ModeState): string =>
+    state.locale === "zh-CN"
+      ? "条件未识别，已按标题搜索"
+      : "Conditions were not recognized; searched titles instead";
+
+  const failureMessage = (state: ModeState, errorCode: string | null): string =>
+    jarvisStepErrorText(errorCode, state.locale);
+
+  const emptyMessage = (state: ModeState, kind: StepState["kind"]): string =>
+    kind === "project"
+      ? state.locale === "zh-CN"
+        ? "无结果，换个项目名试试。"
+        : "No matching projects. Try another name."
+      : state.locale === "zh-CN"
+        ? state.bugChrome.input.value.trim()
+          ? state.parse === "done"
+            ? "无结果。换个说法，或点掉一个条件。"
+            : "无结果。按回车让 Jarvis 识别条件，或换个关键词。"
+          : "无结果。这个项目里没有指派给你的 Bug。"
+        : state.parse === "done"
+          ? "No results. Rephrase the search or remove a condition."
+          : state.bugChrome.input.value.trim()
+            ? "No results. Press Enter to read conditions, or change the keyword."
+            : "No results. No bugs in this project are assigned to you.";
+
+  const failureAction = (
+    state: ModeState,
+    errorCode: string | null,
+    retry: () => void,
+  ): { label: string; onClick(opener: HTMLElement): void } | undefined => {
+    if (errorCode === "not_logged_in" || errorCode === "not_installed") {
+      if (!options.openSettings) return undefined;
+      return {
+        label: state.locale === "zh-CN" ? "去设置" : "Open settings",
+        onClick: (opener) => {
+          options.openSettings?.(opener);
+          exitMode(false);
+        },
+      };
+    }
+    return {
+      label: state.locale === "zh-CN" ? "重试" : "Retry",
+      onClick: () => retry(),
+    };
+  };
+
+  const renderProjectRows = (state: ModeState, projects: readonly JarvisProject[]): void => {
+    const chrome = state.projectChrome;
+    state.step = { kind: "project", entries: [], selected: -1 };
+    chrome.listLabel.textContent = projectLabel(state);
+    chrome.listLabel.hidden = false;
+    state.projectRows = [...projects];
+    const entries = renderJarvisProjectRows(ownerDocument, chrome.results, projects, {
+      onSelect: (index) => {
+        if (state.step.kind === "project") selectRow(state, index);
+      },
+      onChoose: (project) => {
+        openProject(state, project);
+      },
     });
+    if (state.step.kind === "project") state.step.entries = entries;
   };
 
-  const renderEmpty = (state: ModeState, result: JarvisBugSearchResult): void => {
-    state.entries = [];
-    state.selected = -1;
-    renderJarvisEmpty(
-      ownerDocument,
-      state.results,
-      result,
-      state.locale,
-      options.openSettings
-        ? (opener) => {
-            options.openSettings?.(opener);
-            exitMode(false);
-          }
-        : undefined,
-    );
-  };
-
-  const renderResult = (state: ModeState, result: JarvisBugSearchResult): void => {
-    state.loading = false;
-    state.section.removeAttribute("aria-busy");
-    state.lastQuery = state.input.value.trim();
-    renderChips(state, !result.available || result.errorCode ? [] : result.conditions);
+  const applyProjectResult = (state: ModeState, result: JarvisProjectListResult): void => {
+    setBusy(state, false);
     if (!result.available || result.errorCode) {
-      state.summary.textContent = "";
-    } else if (result.capped) {
-      state.summary.textContent =
-        state.locale === "zh-CN"
-          ? `已显示前 ${result.bugs.length} 条`
-          : `Showing the first ${result.bugs.length}`;
-    } else {
-      state.summary.textContent =
-        state.locale === "zh-CN" ? `${result.total} 条` : `${result.total} bugs`;
+      state.projectChrome.summary.textContent = "";
+      state.projectChrome.listLabel.hidden = true;
+      renderJarvisMessage(
+        ownerDocument,
+        state.projectChrome.results,
+        failureMessage(state, result.errorCode),
+        failureAction(state, result.errorCode, () => {
+          void requestProjects(state, state.projectQuery);
+        }),
+      );
+      return;
     }
-    if (!result.available || result.errorCode || result.bugs.length === 0) {
-      renderEmpty(state, result);
+    state.projectChrome.listLabel.hidden = false;
+    state.projectChrome.summary.textContent = projectSummary(state, result);
+    if (result.projects.length === 0) {
+      renderJarvisMessage(
+        ownerDocument,
+        state.projectChrome.results,
+        emptyMessage(state, "project"),
+      );
     } else {
-      renderRows(state, result.bugs);
+      renderProjectRows(state, result.projects);
     }
   };
 
-  const requestSearch = async (state: ModeState, query: string): Promise<void> => {
+  const requestProjects = async (state: ModeState, query: string): Promise<void> => {
     state.generation += 1;
     state.request?.abort();
     state.request = new AbortController();
     const generation = state.generation;
-    renderLoading(state);
-    const hostId = options.readHostId(state.trigger.editor);
+    if (state.step.kind !== "project") {
+      state.step = { kind: "project", entries: [], selected: -1 };
+      showStep(state, state.step);
+    }
+    setBusy(state, true);
+    state.projectChrome.listLabel.textContent = projectLabel(state);
+    if (state.step.entries.length === 0) {
+      state.projectChrome.summary.textContent = "";
+      renderJarvisLoading(ownerDocument, state.projectChrome.results);
+    } else {
+      state.projectChrome.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
+    }
+    const hostId = state.hostId;
     if (!hostId) {
-      state.loading = false;
-      state.section.removeAttribute("aria-busy");
-      state.summary.textContent = "";
-      renderEmpty(state, {
-        available: false,
-        errorCode: "jarvis_failed",
-        conditions: [],
-        bugs: [],
-        total: 0,
-        capped: false,
-      });
+      setBusy(state, false);
+      state.projectChrome.summary.textContent = "";
+      renderJarvisMessage(
+        ownerDocument,
+        state.projectChrome.results,
+        failureMessage(state, "jarvis_failed"),
+        failureAction(state, "jarvis_failed", () => {
+          void requestProjects(state, state.projectQuery);
+        }),
+      );
       return;
     }
     const result = await options
-      .search(hostId, { query, omit: [...state.omit] }, state.request.signal)
-      .catch((): JarvisBugSearchResult => ({
+      .listProjects(hostId, query ? { query } : {}, state.request.signal)
+      .catch((): JarvisProjectListResult => ({
         available: false,
         errorCode: "jarvis_failed",
-        conditions: [],
-        bugs: [],
-        total: 0,
-        capped: false,
+        projects: [],
+        complete: false,
+        userId: null,
       }));
-    if (mode !== state || generation !== state.generation || !state.section.isConnected) return;
+    if (mode !== state || generation !== state.generation) return;
     state.request = null;
-    renderResult(state, result);
+    if (state.step.kind !== "project") return;
+    if (result.userId) state.projectUserId = result.userId;
+    applyProjectResult(state, result);
+    if (result.available && result.userId) {
+      if (!query) {
+        writeJarvisProjectCache(storage(), hostId, result.userId, result.projects, now());
+      }
+    }
+    if (state.projectUserId !== null) {
+      const cache = readJarvisProjectCache(storage(), hostId);
+      if (cache && cache.userId !== state.projectUserId) {
+        clearJarvisProjectCache(storage(), hostId);
+      }
+    }
   };
 
-  const scheduleSearch = (state: ModeState): void => {
+  const scheduleProjectSearch = (state: ModeState): void => {
     state.generation += 1;
     state.request?.abort();
-    renderLoading(state);
+    setBusy(state, true);
+    state.projectQuery = state.projectChrome.input.value.trim();
+    if (state.step.kind === "project") {
+      state.projectChrome.listLabel.textContent = projectLabel(state);
+      state.projectChrome.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
+    }
     if (state.timer !== null) view.clearTimeout(state.timer);
     state.timer = view.setTimeout(() => {
       state.timer = null;
       if (mode !== state) return;
-      void requestSearch(state, state.input.value.trim());
+      void requestProjects(state, state.projectQuery);
     }, DEBOUNCE_MS);
+  };
+
+  const renderBugChips = (state: ModeState, conditions: readonly JarvisBugCondition[]): void => {
+    const chips = state.bugChrome.chips;
+    chips.replaceChildren();
+    chips.hidden = false;
+    if (!state.project) return;
+    chips.append(
+      createJarvisProjectChip(ownerDocument, state.project, () => {
+        returnToProjects(state);
+      }),
+    );
+    for (const condition of conditions) {
+      if (state.omit.has(condition.key)) continue;
+      chips.append(
+        createJarvisConditionChip(ownerDocument, condition, () => {
+          state.omit.add(condition.key);
+          void submitBugSearch(state);
+        }),
+      );
+    }
+  };
+
+  const renderBugRows = (state: ModeState, bugs: readonly JarvisBug[]): void => {
+    state.step = { kind: "bug", entries: [], selected: -1 };
+    const entries = renderJarvisBugRows(
+      ownerDocument,
+      state.bugChrome.results,
+      bugs,
+      state.locale,
+      {
+        onSelect: (index) => {
+          if (state.step.kind === "bug") selectRow(state, index);
+        },
+        onChoose: (bug) => void choose(state, bug),
+      },
+    );
+    if (state.step.kind === "bug") state.step.entries = entries;
+  };
+
+  const missingResult = (): JarvisBugSearchResult => ({
+    available: false,
+    errorCode: "jarvis_failed",
+    conditions: [],
+    bugs: [],
+    total: 0,
+    capped: false,
+  });
+
+  /** Keep the current title preview visible and explain why conditions lost. */
+  const failParse = (state: ModeState): void => {
+    state.parse = "failed";
+    setBusy(state, false);
+    renderBugChips(state, []);
+    if (state.previewError) return;
+    const hasRows = state.step.kind === "bug" && state.step.entries.length > 0;
+    if (hasRows) {
+      state.bugChrome.summary.textContent = unparsedNotice(state);
+      return;
+    }
+    state.bugChrome.summary.textContent = "";
+    renderJarvisMessage(
+      ownerDocument,
+      state.bugChrome.results,
+      `${unparsedNotice(state)}。`,
+      failureAction(state, null, () => {
+        void submitBugSearch(state);
+      }),
+    );
+  };
+
+  const applyParsedResult = (state: ModeState, result: JarvisBugSearchResult): void => {
+    if (state.step.kind !== "bug") return;
+    if (!result.available || result.errorCode) {
+      failParse(state);
+      return;
+    }
+    state.parse = "done";
+    state.previewError = null;
+    setBusy(state, false);
+    state.bugChrome.summary.textContent =
+      result.bugs.length === 0 ? "" : resultCount(state, result);
+    renderBugChips(state, result.conditions);
+    if (result.bugs.length === 0) {
+      renderJarvisMessage(ownerDocument, state.bugChrome.results, emptyMessage(state, "bug"));
+      return;
+    }
+    renderBugRows(state, result.bugs);
+  };
+
+  const requestTitlePreview = async (
+    state: ModeState,
+    text: string,
+    silent: boolean,
+  ): Promise<void> => {
+    if (!state.project) return;
+    state.previewGeneration += 1;
+    const generation = state.previewGeneration;
+    state.previewRequest?.abort();
+    state.previewRequest = new AbortController();
+    const hadRows = state.step.kind === "bug" && state.step.entries.length > 0;
+    setBusy(state, true);
+    if (!hadRows) {
+      // Entering the step or typing after an empty state still needs a
+      // skeleton, even when this preview was started silently.
+      state.step = { kind: "bug", entries: [], selected: -1 };
+      state.bugChrome.summary.textContent = "";
+      renderJarvisLoading(ownerDocument, state.bugChrome.results);
+    } else {
+      state.bugChrome.summary.textContent = state.locale === "zh-CN" ? "搜索中…" : "Searching…";
+    }
+    const hostId = state.hostId;
+    if (!hostId) {
+      state.previewRequest = null;
+      setBusy(state, false);
+      state.bugChrome.summary.textContent = "";
+      renderJarvisMessage(
+        ownerDocument,
+        state.bugChrome.results,
+        failureMessage(state, "jarvis_failed"),
+        failureAction(state, "jarvis_failed", () => {
+          void requestTitlePreview(state, text, silent);
+        }),
+      );
+      return;
+    }
+    const result = await options
+      .previewProjectBugTitle(
+        hostId,
+        { projectId: state.project.id, title: text },
+        state.previewRequest.signal,
+      )
+      .catch(missingResult);
+    if (mode !== state || generation !== state.previewGeneration) return;
+    state.previewRequest = null;
+    if (state.step.kind !== "bug") return;
+    if (state.parse === "done" && state.parseText === text) return;
+    state.previewText = text;
+    if (!result.available || result.errorCode) {
+      state.previewError = result.errorCode;
+      setBusy(state, state.parse === "pending");
+      state.bugChrome.summary.textContent = "";
+      renderJarvisMessage(
+        ownerDocument,
+        state.bugChrome.results,
+        failureMessage(state, result.errorCode),
+        failureAction(state, result.errorCode, () => {
+          void requestTitlePreview(state, text, silent);
+        }),
+      );
+      return;
+    }
+    state.previewError = null;
+    setBusy(state, state.parse === "pending");
+    if (result.bugs.length === 0) {
+      if (state.parse === "failed") {
+        state.bugChrome.summary.textContent = unparsedNotice(state);
+      } else {
+        state.bugChrome.summary.textContent = "";
+      }
+      renderJarvisMessage(ownerDocument, state.bugChrome.results, emptyMessage(state, "bug"));
+      return;
+    }
+    state.bugChrome.summary.textContent =
+      state.parse === "failed" ? unparsedNotice(state) : previewSummary(state, result);
+    renderBugRows(state, result.bugs);
+  };
+
+  /**
+   * Enter runs the model interpretation once. The title preview is already on
+   * screen, so the 8 s deadline can only keep it, never leave a blank panel.
+   */
+  const submitBugSearch = async (state: ModeState): Promise<void> => {
+    if (!state.project) return;
+    const text = state.bugChrome.input.value.trim();
+    if (!text) return;
+    state.parseGeneration += 1;
+    const generation = state.parseGeneration;
+    state.parseRequest?.abort();
+    state.parseRequest = new AbortController();
+    state.parse = "pending";
+    state.parseText = text;
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = view.setTimeout(() => {
+      state.parseTimer = null;
+      if (mode !== state || generation !== state.parseGeneration) return;
+      state.parseGeneration += 1;
+      state.parseRequest?.abort();
+      state.parseRequest = null;
+      failParse(state);
+    }, PARSE_TIMEOUT_MS);
+    setBusy(state, true);
+    state.bugChrome.summary.textContent =
+      state.locale === "zh-CN" ? "正在识别条件…" : "Reading conditions…";
+    if (state.previewText !== text) void requestTitlePreview(state, text, true);
+    const hostId = state.hostId;
+    if (!hostId) {
+      if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+      state.parseTimer = null;
+      state.parseRequest = null;
+      failParse(state);
+      return;
+    }
+    const params: JarvisProjectBugSearchParams = {
+      projectId: state.project.id,
+      query: text,
+      ...(state.omit.size > 0 ? { omit: [...state.omit] } : {}),
+    };
+    const result = await options
+      .searchProjectBugs(hostId, params, state.parseRequest.signal)
+      .catch(missingResult);
+    if (mode !== state || generation !== state.parseGeneration) return;
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = null;
+    state.parseRequest = null;
+    applyParsedResult(state, result);
+  };
+
+  /**
+   * Typing only previews titles. Gemini runs on Enter, so the panel stays
+   * responsive and one slow interpretation cannot block the next keystroke.
+   */
+  const scheduleBugSearch = (state: ModeState): void => {
+    state.previewGeneration += 1;
+    state.previewRequest?.abort();
+    state.previewRequest = null;
+    state.parseGeneration += 1;
+    state.parseRequest?.abort();
+    state.parseRequest = null;
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = null;
+    state.parse = "idle";
+    state.parseText = "";
+    state.omit.clear();
+    state.previewError = null;
+    renderBugChips(state, []);
+    if (state.step.kind === "bug") {
+      state.bugChrome.summary.textContent = "";
+    }
+    if (state.timer !== null) view.clearTimeout(state.timer);
+    state.timer = view.setTimeout(() => {
+      state.timer = null;
+      if (mode !== state) return;
+      void requestTitlePreview(state, state.bugChrome.input.value.trim(), false);
+    }, DEBOUNCE_MS);
+  };
+
+  const openProjectStep = (state: ModeState, prefill: string, focus: boolean): void => {
+    state.generation += 1;
+    state.request?.abort();
+    state.step = { kind: "project", entries: [], selected: -1 };
+    const chrome = state.projectChrome;
+    if (chrome.input.value !== prefill) chrome.input.value = prefill;
+    state.projectQuery = prefill.trim();
+    chrome.clear.style.display = prefill.length === 0 ? "none" : "inline-flex";
+    chrome.listLabel.textContent = projectLabel(state);
+    chrome.listLabel.hidden = false;
+    chrome.summary.textContent = "";
+    if (state.projectRows.length > 0 && !state.projectQuery) {
+      renderProjectRows(state, state.projectRows);
+    } else {
+      renderJarvisLoading(ownerDocument, chrome.results);
+    }
+    showStep(state, state.step);
+    setBusy(state, false);
+    if (focus) chrome.input.focus({ preventScroll: true });
+  };
+
+  const returnToProjects = (state: ModeState): void => {
+    state.generation += 1;
+    state.request?.abort();
+    state.request = null;
+    state.previewGeneration += 1;
+    state.previewRequest?.abort();
+    state.previewRequest = null;
+    state.parseGeneration += 1;
+    state.parseRequest?.abort();
+    state.parseRequest = null;
+    if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+    state.parseTimer = null;
+    state.parse = "idle";
+    state.parseText = "";
+    state.omit.clear();
+    setBusy(state, false);
+    openProjectStep(state, state.projectChrome.input.value, true);
+    // The cached list is display data; refresh it without blocking the switch.
+    void requestProjects(state, state.projectQuery);
+  };
+
+  const openBugStep = (state: ModeState, project: JarvisProject): void => {
+    state.project = project;
+    state.omit.clear();
+    state.parse = "idle";
+    state.parseText = "";
+    state.previewText = "";
+    state.previewError = null;
+    const chrome = state.bugChrome;
+    chrome.input.value = "";
+    chrome.clear.style.display = "none";
+    renderBugChips(state, []);
+    state.step = { kind: "bug", entries: [], selected: -1 };
+    showStep(state, state.step);
+    // The whole project opens with its assigned bugs; typing narrows titles.
+    void requestTitlePreview(state, "", true);
+  };
+
+  const openProject = (state: ModeState, project: JarvisProject): void => {
+    if (mode !== state) return;
+    state.projectQuery = state.projectChrome.input.value.trim();
+    if (state.projectUserId !== null) {
+      writeJarvisLastProject(
+        storage(),
+        state.hostId ?? "local",
+        state.projectUserId,
+        project,
+        now(),
+      );
+    }
+    openBugStep(state, project);
   };
 
   const deleteTriggerText = async (trigger: Trigger): Promise<boolean> => {
@@ -494,7 +1013,6 @@ export function installRendererJarvisMention(
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
   };
 
-  const TEXT_PRIMARY = "var(--color-token-text-primary, #0d0d0d)";
   const BORDER = "var(--color-token-border-default, rgba(13, 13, 13, 0.08))";
 
   /**
@@ -543,10 +1061,41 @@ export function installRendererJarvisMention(
       `border:1px solid ${BORDER};border-radius:12px;` +
       "background:var(--color-token-dropdown-background, var(--color-surface-elevated-secondary, #fff));" +
       `color:${TEXT_PRIMARY};box-shadow:0 12px 32px rgba(0, 0, 0, 0.18);`;
-    host.append(state.section);
+    host.append(state.projectChrome.section);
     ownerDocument.body.append(host);
     state.detachedHost = host;
-    state.input.focus({ preventScroll: true });
+    state.projectChrome.input.focus({ preventScroll: true });
+  };
+
+  const wireChrome = (state: ModeState, chrome: JarvisStepChrome, kind: StepState["kind"]) => {
+    chrome.back.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (kind === "bug") void returnToProjects(state);
+      else exitMode(true);
+    });
+    chrome.input.addEventListener("pointerdown", (event) => event.stopPropagation());
+    chrome.input.addEventListener("input", () => {
+      chrome.clear.style.display = chrome.input.value.length === 0 ? "none" : "inline-flex";
+      if (state.step.kind !== kind) return;
+      if (kind === "project") scheduleProjectSearch(state);
+      else scheduleBugSearch(state);
+    });
+    chrome.clear.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (chrome.input.value.length === 0) return;
+      chrome.input.value = "";
+      chrome.clear.style.display = "none";
+      chrome.input.focus({ preventScroll: true });
+      if (kind === "project") {
+        state.projectQuery = "";
+        void requestProjects(state, "");
+      } else {
+        scheduleBugSearch(state);
+      }
+    });
+    chrome.input.addEventListener("keydown", (event) => event.stopPropagation());
   };
 
   const startMode = (
@@ -559,37 +1108,81 @@ export function installRendererJarvisMention(
     if (!list && !fallbackRect) return;
     const state = buildMode(trigger);
     state.insertAtSelection = insertAtSelection;
-    if (prefill) state.input.value = prefill;
-    state.clear.style.display = state.input.value.length === 0 ? "none" : "inline-flex";
     state.lastRect = list ? panelRectOf(list) : fallbackRect;
     if (list) hideNativePanel(state, list);
     detachMode(state);
     mode = state;
+    wireChrome(state, state.projectChrome, "project");
+    wireChrome(state, state.bugChrome, "bug");
 
-    state.back.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      exitMode(true);
-    });
-    state.input.addEventListener("pointerdown", (event) => event.stopPropagation());
-    state.input.addEventListener("input", () => {
-      state.clear.style.display = state.input.value.length === 0 ? "none" : "inline-flex";
-      if (state.input.value.trim() !== state.lastQuery) state.omit.clear();
-      scheduleSearch(state);
-    });
-    state.clear.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (state.input.value.length === 0) return;
-      state.input.value = "";
-      state.clear.style.display = "none";
+    const hostId = state.hostId;
+    const cache = hostId ? readJarvisProjectCache(storage(), hostId) : null;
+    if (cache) {
+      state.projectUserId = cache.userId;
+      if (isJarvisProjectCacheFresh(cache, now())) {
+        state.projectRows = cache.projects;
+      }
+    }
+    const lastProject =
+      hostId && cache && !prefill
+        ? readJarvisLastProject(storage(), hostId, cache.userId, now())
+        : null;
+    if (lastProject) {
+      state.project = lastProject;
+      renderBugChips(state, []);
+      state.step = { kind: "bug", entries: [], selected: -1 };
+      showStep(state, state.step);
+      void requestTitlePreview(state, "", true);
+      // Revalidate the owner in the background so another account's cache is
+      // never used for a later search.
+      if (hostId) void revalidateProjects(state, hostId);
+      return;
+    }
+    openProjectStep(state, prefill, true);
+    if (prefill) {
+      void requestProjects(state, prefill.trim());
+    } else if (cache && isJarvisProjectCacheFresh(cache, now())) {
+      if (hostId) void revalidateProjects(state, hostId);
+    } else if (hostId) {
+      void requestProjects(state, "");
+    } else {
+      state.projectChrome.listLabel.hidden = true;
+      renderJarvisMessage(
+        ownerDocument,
+        state.projectChrome.results,
+        failureMessage(state, "jarvis_failed"),
+        failureAction(state, "jarvis_failed", () => {
+          void requestProjects(state, "");
+        }),
+      );
+    }
+  };
+
+  /** Refresh the project cache without touching whichever step is visible. */
+  const revalidateProjects = async (state: ModeState, hostId: string): Promise<void> => {
+    const result = await options.listProjects(hostId, {}).catch(() => null);
+    if (mode !== state || !result) return;
+    if (!result.available || !result.userId) return;
+    const ownerChanged = state.projectUserId !== null && state.projectUserId !== result.userId;
+    state.projectUserId = result.userId;
+    state.projectRows = result.projects;
+    writeJarvisProjectCache(storage(), hostId, result.userId, result.projects, now());
+    if (ownerChanged) {
+      // Drop the previous user's remembered project and show the correct list.
+      state.previewGeneration += 1;
+      state.previewRequest?.abort();
+      state.previewRequest = null;
+      state.parseGeneration += 1;
+      state.parseRequest?.abort();
+      state.parseRequest = null;
+      if (state.parseTimer !== null) view.clearTimeout(state.parseTimer);
+      state.parseTimer = null;
+      state.parse = "idle";
+      state.project = null;
       state.omit.clear();
-      state.input.focus({ preventScroll: true });
-      void requestSearch(state, "");
-    });
-    state.input.addEventListener("keydown", (event) => event.stopPropagation());
-    state.input.focus({ preventScroll: true });
-    void requestSearch(state, prefill);
+      openProjectStep(state, "", true);
+      applyProjectResult(state, result);
+    }
   };
 
   function enterMode(trigger: Trigger, prefill = "", consumeTrigger = false): void {
@@ -687,7 +1280,7 @@ export function installRendererJarvisMention(
     if (inserting || composing) return;
     if (mode) {
       const target = event?.target ?? null;
-      if (target && isInside(target as Node, mode.section)) return;
+      if (target && isInside(target as Node, mode.detachedHost)) return;
       if (event?.type === "input") {
         // Focus moved back to the Composer; the search field is no longer the
         // active surface, so leave the submenu.
@@ -715,26 +1308,37 @@ export function installRendererJarvisMention(
     if (event.isComposing) return;
     if (mode) {
       const state = mode;
+      const step = state.step;
       let handled = true;
       if (event.key === "Escape") {
-        exitMode(true);
+        if (step.kind === "bug") void returnToProjects(state);
+        else exitMode(true);
       } else if (event.key === "ArrowDown") {
-        if (state.entries.length === 0) {
+        if (step.entries.length === 0) {
           event.preventDefault();
           event.stopImmediatePropagation();
           return;
         }
-        selectRow(state, state.selected < 0 ? 0 : (state.selected + 1) % state.entries.length);
+        selectRow(state, step.selected < 0 ? 0 : (step.selected + 1) % step.entries.length);
       } else if (event.key === "ArrowUp") {
-        if (state.entries.length === 0) {
+        if (step.entries.length === 0) {
           event.preventDefault();
           event.stopImmediatePropagation();
           return;
         }
-        selectRow(state, state.selected <= 0 ? state.entries.length - 1 : state.selected - 1);
+        selectRow(state, step.selected <= 0 ? step.entries.length - 1 : step.selected - 1);
       } else if (event.key === "Enter" || event.key === "Tab") {
-        const picked = state.selected >= 0 ? state.entries[state.selected] : undefined;
-        if (picked) void choose(state, picked.bug);
+        const picked = step.selected >= 0 ? step.entries[step.selected] : undefined;
+        if (picked) {
+          if (step.kind === "project" && "project" in picked) {
+            openProject(state, picked.project);
+          } else if ("bug" in picked) {
+            void choose(state, picked.bug);
+          }
+        } else if (step.kind === "bug" && event.key === "Enter") {
+          // No row is highlighted: Enter interprets the text instead.
+          void submitBugSearch(state);
+        }
       } else {
         handled = false;
       }
@@ -756,7 +1360,7 @@ export function installRendererJarvisMention(
   const onPointerDown = (event: PointerEvent): void => {
     const target = event.target as Node | null;
     if (mode) {
-      if (isInside(target, mode.section)) return;
+      if (isInside(target, mode.detachedHost)) return;
       exitMode(false);
       return;
     }
