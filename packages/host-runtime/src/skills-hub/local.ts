@@ -73,15 +73,16 @@ export class LocalSkillsHub {
     if (op === "import-begin") return this.#transfers.begin(body);
     if (op === "import-chunk") return this.#transfers.append(body);
     if (op === "import-finish") return this.#import(this.#transfers.finish(body));
+    const available = await this.options.availableHarnessIds?.();
     if (op === "inventory") {
       empty.parse(body);
-      return this.#inventory.inventory(this.paths, await this.options.availableHarnessIds?.());
+      return this.#inventory.inventory(this.paths, available);
     }
     if (op === "link-plan") {
       const request = linkPlanInput.parse(body);
-      const plan = await planLinks(this.paths, request);
+      const plan = await planLinks(this.paths, request, available);
       // Fingerprints, exclusions, and every agent path participate in preview freshness.
-      const snapshot = await this.#snapshot(plan);
+      const snapshot = await this.#snapshot(plan, available);
       for (const [id, value] of this.plans)
         if (Date.now() - value.created > 600000) this.plans.delete(id);
       if (this.plans.size >= 100) fail("too_many_plans");
@@ -93,15 +94,15 @@ export class LocalSkillsHub {
         stored = this.plans.get(id);
       this.plans.delete(id);
       if (!stored || Date.now() - stored.created > 600000) fail("expired_plan");
-      const fresh = await planLinks(this.paths, stored.request);
-      if ((await this.#snapshot(fresh)) !== stored.snapshot) fail("stale_plan");
+      const fresh = await planLinks(this.paths, stored.request, available);
+      if ((await this.#snapshot(fresh, available)) !== stored.snapshot) fail("stale_plan");
       await this.#safeState();
-      return applyLinks(this.paths, stored.plan);
+      return applyLinks(this.paths, stored.plan, available);
     }
     if (op === "undo") {
       const { id } = idInput.parse(body);
       await this.#safeState();
-      return undoChanges(this.paths, id);
+      return undoChanges(this.paths, id, available);
     }
     if (op === "exclusions") {
       const { agents } = z
@@ -110,14 +111,16 @@ export class LocalSkillsHub {
         .parse(body);
       await this.#safeState();
       await this.#writeJson("exclusions.json", [...new Set(agents)]);
-      return inventory(this.paths);
+      return inventory(this.paths, available);
     }
     if (op === "export") {
       const { skill, expected } = z
         .object({ skill: skillKeySchema, expected: z.string() })
         .strict()
         .parse(body);
-      const entry = (await inventory(this.paths)).skills.find((item) => item.key === skill);
+      const entry = (await inventory(this.paths, available)).skills.find(
+        (item) => item.key === skill,
+      );
       if (!entry || entry.fingerprint !== expected) fail("stale_plan");
       const files = await readSkillFiles(path.join(library(this.paths), skill));
       if (fingerprint(files) !== expected) fail("stale_plan");
@@ -132,8 +135,11 @@ export class LocalSkillsHub {
     if (op === "import") return this.#import(skillImportSchema.parse(body));
     fail("unknown_operation");
   }
-  async #snapshot(plan: SkillLinkPlan): Promise<string> {
-    return JSON.stringify({ inventory: await inventory(this.paths), actions: plan.actions });
+  async #snapshot(plan: SkillLinkPlan, available?: ReadonlySet<string>): Promise<string> {
+    return JSON.stringify({
+      inventory: await inventory(this.paths, available),
+      actions: plan.actions,
+    });
   }
   async #safeState(): Promise<void> {
     await safePath(this.paths.home, this.paths.state);
@@ -157,8 +163,9 @@ export class LocalSkillsHub {
     const destination = path.join(library(this.paths), bundle.skill);
     await safePath(this.paths.home, destination);
     const previousSource =
-      (await inventory(this.paths)).skills.find((entry) => entry.key === bundle.skill)?.source ??
-      null;
+      (await inventory(this.paths, await this.options.availableHarnessIds?.())).skills.find(
+        (entry) => entry.key === bundle.skill,
+      )?.source ?? null;
     const present = await exists(destination);
     if ((present ? fingerprint(await readSkillFiles(destination)) : null) !== expected)
       fail("stale_plan");

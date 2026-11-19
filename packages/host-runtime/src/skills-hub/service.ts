@@ -292,9 +292,8 @@ export function getSkillsHub(environment: NodeJS.ProcessEnv): SkillsHubService {
   const key = codexhostUserDirectory(environment);
   let service = services.get(key);
   if (!service) {
-    const availability = new HarnessAvailabilityStore(environment);
     service = new SkillsHubService(environment, {
-      availableHarnessIds: () => availability.availableHarnessIds(),
+      availableHarnessIds: () => new HarnessAvailabilityStore(environment).availableHarnessIds(),
     });
     services.set(key, service);
   }

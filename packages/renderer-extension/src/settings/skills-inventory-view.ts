@@ -1,5 +1,5 @@
 import type { SkillAgent, SkillInventoryEntry, SkillMachine } from "@codexhost/shared-contracts";
-import { createRendererAgentIcon } from "../renderer-agent-icon.js";
+import { skillsAgentIcons } from "./skills-agent-icon.js";
 import { skillsErrorText } from "../renderer-skills-client.js";
 import { createRendererSettingsIcon, type RendererSettingsIconName } from "./icons.js";
 import { skillButton, skillNode } from "./skills-dialog.js";
@@ -26,6 +26,9 @@ export interface SkillsInventoryOptions {
   refresh(): void;
   editExclusions(): void;
 }
+interface SkillsRenderOptions extends SkillsInventoryOptions {
+  agentIcon: ReturnType<typeof skillsAgentIcons>;
+}
 type NodeFn = (tag: string, text?: string, className?: string) => HTMLElement;
 type AgentState = SkillAgent["states"][string];
 const STATUS: Record<AgentState, { label: string; className: string }> = {
@@ -38,19 +41,6 @@ const STATUS: Record<AgentState, { label: string; className: string }> = {
 function setClass(element: HTMLElement, name: string): void {
   element.className = skillsClass(name);
 }
-function agentMonogram(agent: SkillAgent, document: Document, size = 18): Node {
-  if (agent.id === "codex") return createRendererAgentIcon(agent.id, size, document) as HTMLElement;
-  const parts = agent.name.split(/\s+/u).filter(Boolean);
-  const initials =
-    parts.length > 1
-      ? parts
-          .map((part) => part[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase()
-      : (parts[0]?.slice(0, 2) ?? "?").replace(/^./u, (letter) => letter.toUpperCase());
-  return document.createTextNode(initials);
-}
 function ownIconButton(
   document: Document,
   label: string,
@@ -62,6 +52,7 @@ function ownIconButton(
   setClass(button, "skills-layout-button");
   button.setAttribute("aria-label", label);
   button.title = label;
+  button.dataset.skillsFocus = label;
   button.setAttribute("aria-pressed", String(pressed));
   button.append(createRendererSettingsIcon(icon, 15));
   return button;
@@ -71,7 +62,8 @@ export function renderSkillsInventory(options: SkillsInventoryOptions): void {
   const document = container.ownerDocument;
   const node: NodeFn = (tag, text = "", className = "") =>
     skillNode(document, tag as keyof HTMLElementTagNameMap, text, className);
-  const focused = document.activeElement as HTMLElement | null;
+  const tree = container.getRootNode() as Document | ShadowRoot;
+  const focused = tree.activeElement as HTMLElement | null;
   const focusKey = focused?.dataset.skillsFocus;
   const selection =
     focused instanceof HTMLInputElement ? (focused.selectionStart ?? focused.value.length) : null;
@@ -86,6 +78,7 @@ export function renderSkillsInventory(options: SkillsInventoryOptions): void {
     setClass(button, "skills-tab");
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(state.tab === value));
+    button.dataset.skillsFocus = `tab-${value}`;
     tabs.append(button);
   }
   container.append(tabs);
@@ -95,25 +88,41 @@ export function renderSkillsInventory(options: SkillsInventoryOptions): void {
     line.setAttribute("role", "status");
     container.append(line);
   }
-  if (state.tab === "library") renderLibrary(options, container, node);
-  else if (state.agent) {
+  const renderOptions = {
+    ...options,
+    agentIcon: skillsAgentIcons(
+      document,
+      machines.map((machine) => machine.hostId),
+    ),
+  };
+  if (state.tab === "library") {
+    renderLibrary(renderOptions, container, node);
+    const footer = node("div", "", "skills-footer");
+    const excluded = machines.flatMap((machine) =>
+      (machine.inventory?.agents ?? [])
+        .filter((agent) => agent.excluded)
+        .map((agent) => `${machine.name} · ${agent.name}`),
+    );
+    if (excluded.length)
+      footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
+    footer.append(skillButton(document, "管理排除…", options.editExclusions));
+    container.append(footer);
+  } else if (state.agent) {
     const machine = machines.find((item) => item.hostId === state.agent?.hostId);
     const agent = machine?.inventory?.agents.find((item) => item.id === state.agent?.agentId);
-    if (machine && agent) renderAgentDetail(options, container, node, machine, agent);
+    if (machine && agent) renderAgentDetail(renderOptions, container, node, machine, agent);
     else options.onState({ agent: null });
-  } else renderAgents(options, container, node);
+  } else renderAgents(renderOptions, container, node);
   if (focusKey) {
-    const target = container.querySelector<HTMLElement>(`[data-skills-focus="${focusKey}"]`);
+    const target = container.querySelector<HTMLElement>(
+      `[data-skills-focus="${CSS.escape(focusKey)}"]`,
+    );
     target?.focus();
     if (target instanceof HTMLInputElement && selection !== null)
       target.setSelectionRange(selection, selection);
   }
 }
-function renderLibrary(
-  options: SkillsInventoryOptions,
-  container: HTMLElement,
-  node: NodeFn,
-): void {
+function renderLibrary(options: SkillsRenderOptions, container: HTMLElement, node: NodeFn): void {
   const document = container.ownerDocument;
   const { machines, state } = options;
   const toolbar = node("div", "", "skills-toolbar");
@@ -123,7 +132,10 @@ function renderLibrary(
   search.setAttribute("aria-label", "搜索技能");
   search.dataset.skillsFocus = "search";
   search.value = state.search;
-  search.addEventListener("input", () => options.onState({ search: search.value }));
+  search.addEventListener("input", (event) => {
+    if (!(event as InputEvent).isComposing) options.onState({ search: search.value });
+  });
+  search.addEventListener("compositionend", () => options.onState({ search: search.value }));
   const filters = node("div", "", "skills-segmented");
   for (const [value, label] of [
     ["all", "全部"],
@@ -133,6 +145,7 @@ function renderLibrary(
     const button = skillButton(document, label, () => options.onState({ link: value }));
     setClass(button, "skills-filter");
     button.setAttribute("aria-pressed", String(state.link === value));
+    button.dataset.skillsFocus = `filter-${value}`;
     filters.append(button);
   }
   const machine = node("select", "", "skills-select") as HTMLSelectElement;
@@ -214,12 +227,16 @@ function renderLibrary(
       state.layout === "grid" ? "skills-card" : "skills-card skills-card-list",
     );
     const head = node("div", "", "skills-card-head");
-    head.append(node("h3", skill.name, "skills-card-name"));
+    const title = node("h3", skill.name, "skills-card-name");
+    title.title = skill.name;
+    head.append(title);
     const version = [...skill.entries.values()].find((entry) => entry.version)?.version;
     if (version) head.append(node("span", version, "skills-version-chip"));
     card.append(head, node("p", skill.description || "暂无描述", "skills-card-description"));
     const meta = node("div", "", "skills-card-meta");
-    meta.append(node("span", skill.source ? `git · ${skill.source}` : "本地", "skills-source"));
+    const source = node("span", skill.source ? `git · ${skill.source}` : "本地", "skills-source");
+    source.title = source.textContent ?? "";
+    meta.append(source);
     card.append(meta);
     const chips = node("div", "", "skills-chips");
     for (const item of machines) {
@@ -263,7 +280,13 @@ function renderLibrary(
           }`,
         );
         if (native || managed) button.setAttribute("aria-disabled", "true");
-        button.append(agentMonogram(agent, document));
+        button.dataset.skillsFocus = `badge-${badgeMachine.hostId}-${agent.id}-${skill.key}`;
+        if (!skill.entries.has(badgeMachine.hostId)) {
+          button.disabled = true;
+          button.title = `请先同步到 ${badgeMachine.name}`;
+          button.setAttribute("aria-label", `${agent.name} · 请先同步到 ${badgeMachine.name}`);
+        }
+        button.append(options.agentIcon(agent, badgeMachine.hostId));
         badges.append(button);
       }
       card.append(badges);
@@ -271,19 +294,8 @@ function renderLibrary(
     grid.append(card);
   }
   container.append(grid);
-  const excluded = machines.flatMap((item) =>
-    (item.inventory?.agents ?? [])
-      .filter((agent) => agent.excluded)
-      .map((agent) => `${item.name} · ${agent.name}`),
-  );
-  if (excluded.length) {
-    const footer = node("div", "", "skills-footer");
-    footer.append(node("span", `已排除：${excluded.join("、")}`, "skills-muted"));
-    footer.append(skillButton(document, "管理排除…", options.editExclusions));
-    container.append(footer);
-  }
 }
-function renderAgents(options: SkillsInventoryOptions, container: HTMLElement, node: NodeFn): void {
+function renderAgents(options: SkillsRenderOptions, container: HTMLElement, node: NodeFn): void {
   const document = container.ownerDocument;
   const { machines } = options;
   let sections = 0;
@@ -311,7 +323,7 @@ function renderAgents(options: SkillsInventoryOptions, container: HTMLElement, n
         options.onState({ agent: { hostId: machine.hostId, agentId: agent.id } }),
       );
       const icon = node("span", "", "skills-agent-icon");
-      icon.append(agentMonogram(agent, document, 22));
+      icon.append(options.agentIcon(agent, machine.hostId, 22));
       const info = node("div", "", "skills-agent-info");
       const title = node("div", "", "skills-agent-title");
       title.append(
@@ -364,7 +376,7 @@ function renderAgents(options: SkillsInventoryOptions, container: HTMLElement, n
   container.append(footer);
 }
 function renderAgentDetail(
-  options: SkillsInventoryOptions,
+  options: SkillsRenderOptions,
   container: HTMLElement,
   node: NodeFn,
   machine: SkillMachine,
@@ -378,7 +390,7 @@ function renderAgentDetail(
   back.append(createRendererSettingsIcon("chevron-left", 16));
   const title = node("div", "", "skills-detail-title");
   const icon = node("span", "", "skills-agent-icon");
-  icon.append(agentMonogram(agent, document, 24));
+  icon.append(options.agentIcon(agent, machine.hostId, 24));
   const info = node("div", "", "skills-agent-info");
   const line = node("div", "", "skills-agent-title");
   line.append(node("h3", agent.name));

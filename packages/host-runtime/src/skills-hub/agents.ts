@@ -240,7 +240,7 @@ export async function countAgent(
   return {
     id: rule.id,
     name: rule.name,
-    skillsDir,
+    skillsDir: rule.native === true ? path.join(home, ".agents/skills") : skillsDir,
     native: rule.native,
     evidence: rule.evidence,
     excluded: exclusions.includes(rule.id),

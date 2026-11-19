@@ -1,3 +1,6 @@
+import claudeIcon from "../../../packages/adapters/claude-code/assets/icon.svg";
+import cursorIcon from "../../../packages/adapters/cursor-cli/assets/icon.svg";
+import { writeCachedHarnessDirectory } from "../../../packages/renderer-extension/src/renderer-harness-directory-cache.js";
 import type { SkillMachine, SkillSyncPlan } from "@codexhost/shared-contracts";
 import type { RendererSkillsClient } from "../../../packages/renderer-extension/src/renderer-skills-client.js";
 import { createSkillsSettingsPage } from "../../../packages/renderer-extension/src/settings/skills-page.js";
@@ -40,7 +43,7 @@ function fakeClient(): RendererSkillsClient {
           {
             id: "codex",
             name: "Codex",
-            skillsDir: "~/.codex/skills",
+            skillsDir: "~/.agents/skills",
             native: true,
             evidence: "Codex 用户技能目录",
             excluded: false,
@@ -331,7 +334,21 @@ function fakeClient(): RendererSkillsClient {
     },
   };
 }
+function previewIcon(source: string): string {
+  return source.includes(";base64,")
+    ? source
+    : `data:image/svg+xml;base64,${btoa(decodeURIComponent(source.slice(source.indexOf(",") + 1)))}`;
+}
 export function mountSkillsPreview() {
+  writeCachedHarnessDirectory("local", {
+    fingerprint: "preview-artwork",
+    plugins: [
+      { id: "claude-code", name: "Claude Code", version: "1.0.0", icon: previewIcon(claudeIcon) },
+      { id: "cursor-cli", name: "Cursor", version: "1.0.0", icon: previewIcon(cursorIcon) },
+    ],
+    availability: {},
+    webUi: {},
+  });
   const shell = installRendererSettingsShell(
     [createSkillsSettingsPage({ createClient: fakeClient })],
     rendererSettingsMessages("zh-CN"),

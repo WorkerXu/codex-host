@@ -21,24 +21,24 @@ const classes: Record<string, string> = {
   "skills-grid": "skills-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-3",
   "skills-list": "skills-list flex flex-col gap-2",
   "skills-card":
-    "skills-card flex flex-col gap-2.5 rounded-xl border border-settings-border bg-settings-panel p-4 transition-colors hover:border-settings-focus/40",
+    "skills-card min-w-0 flex flex-col gap-2.5 rounded-xl border border-settings-border bg-settings-panel p-4 transition-colors hover:border-settings-focus/40",
   "skills-card-list":
-    "skills-card-list sm:grid sm:grid-cols-[minmax(140px,180px)_minmax(160px,1fr)_110px_auto_auto] sm:items-center sm:gap-3",
-  "skills-card-head": "skills-card-head flex items-center gap-2",
-  "skills-card-name": "skills-card-name m-0 whitespace-nowrap text-sm font-semibold",
+    "skills-card-list sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.8fr)_minmax(0,2fr)_auto] sm:items-center sm:gap-3",
+  "skills-card-head": "skills-card-head flex min-w-0 items-center gap-2",
+  "skills-card-name": "skills-card-name m-0 min-w-0 truncate text-sm font-semibold",
   "skills-version-chip":
-    "skills-version-chip rounded bg-settings-hover px-1.5 py-0.5 text-[10px] font-normal text-settings-muted",
+    "skills-version-chip shrink-0 rounded bg-settings-hover px-1.5 py-0.5 text-[10px] font-normal text-settings-muted",
   "skills-card-description":
     "skills-card-description m-0 truncate text-xs leading-4 text-settings-muted",
   "skills-card-meta":
-    "skills-card-meta whitespace-nowrap text-[11px] leading-4 text-settings-subtle",
-  "skills-source": "skills-source whitespace-nowrap",
+    "skills-card-meta min-w-0 truncate text-[11px] leading-4 text-settings-subtle",
+  "skills-source": "skills-source truncate",
   "skills-chips": "skills-chips flex flex-wrap items-center gap-1.5 text-[11px] leading-4",
   "skills-chip":
     "skills-chip rounded-md bg-settings-hover px-1.5 py-0.5 text-[11px] leading-4 text-settings-muted data-[state=same]:text-settings-success data-[state=different]:text-settings-warning data-[state=missing]:text-settings-subtle",
   "skills-chip-action":
-    "skills-chip-action rounded-md border border-settings-border px-2 py-0.5 text-[11px] leading-4 text-settings-muted hover:bg-settings-hover",
-  "skills-badges": "skills-badges flex items-center gap-1 pt-0.5",
+    "skills-chip-action rounded-md border border-settings-border bg-transparent px-2 py-0.5 text-[11px] leading-4 text-settings-muted hover:bg-settings-hover",
+  "skills-badges": "skills-badges flex flex-wrap items-center gap-1 pt-0.5",
   "skills-badge":
     "skills-badge inline-flex size-6 items-center justify-center rounded-full border border-settings-border bg-settings-panel opacity-40 transition-opacity hover:opacity-100 data-[linked=true]:border-settings-focus/50 data-[linked=true]:opacity-100 data-[native=true]:border-settings-success/40 [&_span]:text-[10px]",
   "skills-footer":
