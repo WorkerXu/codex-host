@@ -9,7 +9,12 @@ import type {
   DingTalkMessage,
 } from "@codexhost/shared-contracts";
 
-import { dingtalkA2uiCreate, dingtalkA2uiUpdate, DINGTALK_A2UI_ARTIFACT } from "./dingtalk-a2ui.js";
+import {
+  dingtalkA2uiCreate,
+  dingtalkA2uiUpdate,
+  DINGTALK_A2UI_ARTIFACT,
+  type DingTalkCardState,
+} from "./dingtalk-a2ui.js";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 25_000;
@@ -717,7 +722,7 @@ export type DingTalkCardTarget = { group: string } | { openDingTalkId: string };
 
 export interface DingTalkCardInput {
   target: DingTalkCardTarget;
-  content: string;
+  state: DingTalkCardState;
   atOpenDingTalkIds?: readonly string[];
   /** Display names for `atOpenDingTalkIds`, shown in the card's mention line. */
   atNames?: Readonly<Record<string, string>>;
@@ -726,7 +731,7 @@ export interface DingTalkCardInput {
 
 export interface DingTalkCardUpdate {
   bizId: string;
-  content: string;
+  state: DingTalkCardState;
   flowStatus: "INPUTTING" | "FINISH";
 }
 
@@ -1194,12 +1199,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
         "--summary",
         "任务进度与结果",
         "--content",
-        dingtalkA2uiCreate(
-          input.content,
-          "group" in input.target ? input.atOpenDingTalkIds : [],
-          "group" in input.target && input.atAll === true,
-          input.atNames,
-        ),
+        dingtalkA2uiCreate(input.state),
         "--yes",
       );
       const result = await run(args, 30_000);
@@ -1218,7 +1218,7 @@ export function createDingTalkCli(options: DingTalkCliOptions = {}): DingTalkCli
           "--biz-id",
           input.bizId,
           "--content",
-          dingtalkA2uiUpdate(input.content, input.flowStatus === "FINISH"),
+          dingtalkA2uiUpdate(input.state),
           "--flow-status",
           input.flowStatus,
           ...(input.flowStatus === "FINISH" ? ["--a2ui-annotations", DINGTALK_A2UI_ARTIFACT] : []),

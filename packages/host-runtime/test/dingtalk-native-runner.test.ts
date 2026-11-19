@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonObject } from "@codexhost/protocol-core";
+import type { DingTalkProgressEvent } from "../src/dingtalk-dispatch-types.js";
 import { DingTalkNativeRunner } from "../src/dingtalk-native-runner.js";
 
 const directories: string[] = [];
@@ -18,7 +19,7 @@ async function fixture(
     approval?: boolean;
     missingConfig?: boolean;
     wrongProject?: boolean;
-    onProgress?: (text: string) => void;
+    onProgress?: (event: DingTalkProgressEvent) => void;
   } = {},
 ) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "codexhost-native-dispatch-"));
@@ -203,9 +204,15 @@ it("keeps long Turns running, reports elapsed progress and stops card tracking a
   });
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(complete).not.toHaveBeenCalled();
-  expect(onProgress).toHaveBeenLastCalledWith("仍在处理，已用时 10 分钟");
+  expect(onProgress).toHaveBeenLastCalledWith({
+    type: "status",
+    text: "仍在处理，已用时 10 分钟",
+  });
   await vi.advanceTimersByTimeAsync(40 * 60_000);
-  expect(onProgress).toHaveBeenLastCalledWith("仍在处理，已用时 50 分钟");
+  expect(onProgress).toHaveBeenLastCalledWith({
+    type: "status",
+    text: "仍在处理，已用时 50 分钟",
+  });
   expect(complete).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(await active.completed).toMatchObject({
@@ -229,19 +236,116 @@ it("cleans elapsed reminders after completion", async () => {
   f.runner.dispose();
 });
 
-it("reports only complete public commentary and public plan steps", async () => {
-  const onProgress = vi.fn();
+it("maps public tool items to sanitized steps and never exposes reasoning or output", async () => {
+  const onProgress = vi.fn<(event: DingTalkProgressEvent) => void>();
   const f = await fixture({ onProgress });
   await f.run();
-  for (const item of [
-    { type: "reasoning", text: "内部推理" },
-    { type: "commandExecution", text: "工具原始输出" },
-    { type: "agentMessage", phase: "commentary", text: "正在核对资料" },
-  ])
+  const observe = (method: string, item: JsonObject) =>
     f.runner.observe({
-      method: "item/completed",
+      method,
       params: { threadId: "native-thread", turnId: "native-turn", item },
     });
+  observe("item/completed", { type: "reasoning", id: "r1", text: "内部推理" });
+  observe("item/started", {
+    type: "commandExecution",
+    id: "cmd-1",
+    command: "dws chat message list --limit 5",
+    status: "inProgress",
+  });
+  observe("item/completed", {
+    type: "commandExecution",
+    id: "cmd-1",
+    command: "dws chat message list --limit 5",
+    status: "failed",
+    exitCode: 1,
+    aggregatedOutput: "RAW TOOL OUTPUT",
+  });
+  observe("item/completed", { type: "mcpToolCall", id: "tool-1", server: "dws", tool: "chat" });
+  observe("item/completed", {
+    type: "fileChange",
+    id: "file-1",
+    changes: [{ path: "docs/a.md" }, { path: "docs/b.md" }],
+  });
+  observe("item/completed", { type: "webSearch", id: "search-1", query: "钉钉 审批" });
+  observe("item/completed", {
+    type: "agentMessage",
+    id: "answer-1",
+    phase: "final_answer",
+    text: "最终答案",
+  });
+  observe("item/completed", {
+    type: "agentMessage",
+    id: "note-1",
+    phase: "commentary",
+    text: "正在核对资料",
+  });
+  const calls = onProgress.mock.calls.map(([event]) => event);
+  expect(calls).toEqual([
+    {
+      type: "step",
+      step: {
+        id: "item:cmd-1",
+        kind: "command",
+        title: "执行命令",
+        detail: "dws chat message list --limit 5",
+        status: "running",
+      },
+    },
+    {
+      type: "step",
+      step: {
+        id: "item:cmd-1",
+        kind: "command",
+        title: "执行命令",
+        detail: "dws chat message list --limit 5",
+        status: "failed",
+      },
+    },
+    {
+      type: "step",
+      step: {
+        id: "item:tool-1",
+        kind: "tool",
+        title: "调用工具",
+        detail: "dws · chat",
+        status: "done",
+      },
+    },
+    {
+      type: "step",
+      step: {
+        id: "item:file-1",
+        kind: "file",
+        title: "修改文件",
+        detail: "docs/a.md、docs/b.md",
+        status: "done",
+      },
+    },
+    {
+      type: "step",
+      step: {
+        id: "item:search-1",
+        kind: "search",
+        title: "搜索资料",
+        detail: "钉钉 审批",
+        status: "done",
+      },
+    },
+    {
+      type: "step",
+      step: {
+        id: "item:answer-1",
+        kind: "answer",
+        title: "撰写回答",
+        detail: "整理最终回答",
+        status: "done",
+      },
+    },
+    { type: "status", text: "正在核对资料" },
+  ]);
+  expect(JSON.stringify(calls)).not.toContain("内部推理");
+  expect(JSON.stringify(calls)).not.toContain("RAW TOOL OUTPUT");
+  onProgress.mockClear();
   f.runner.observe({
     method: "turn/plan/updated",
     params: {
@@ -250,6 +354,6 @@ it("reports only complete public commentary and public plan steps", async () => 
       plan: [{ step: "整理可公开的结论", status: "in_progress" }],
     },
   });
-  expect(onProgress.mock.calls).toEqual([["正在核对资料"], ["整理可公开的结论"]]);
+  expect(onProgress).toHaveBeenCalledWith({ type: "status", text: "整理可公开的结论" });
   f.runner.dispose();
 });

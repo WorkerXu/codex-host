@@ -12,3 +12,12 @@ it("never exposes raw English errors or arbitrary provider text", () => {
     "智能体处理失败，请在 Desktop 查看对话",
   );
 });
+it.each([
+  ["Desktop did not confirm the DingTalk project", "智能体处理失败，请在 Desktop 查看对话"],
+  ["Host connection closed", "与 Desktop 的连接已断开"],
+  ["Official thread/start returned no Thread identity", "未能创建智能体对话"],
+  ["interrupted", "处理已中断"],
+  ["处理时间过长，已停止", "处理时间过长，已停止"],
+])("keeps every card reason Chinese: %s", (raw, text) => {
+  expect(dingtalkRunError(raw)).toBe(text);
+});

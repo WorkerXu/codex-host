@@ -683,7 +683,17 @@ it.each(["missing-json", "truncated", "lost-exit"])(
       }),
     });
     expect(
-      await cli.updateCard({ bizId: "server-id", content: "已读取", flowStatus: "INPUTTING" }),
+      await cli.updateCard({
+        bizId: "server-id",
+        state: {
+          phase: "running",
+          steps: [],
+          status: "正在读取上下文…",
+          answer: "",
+          mentions: null,
+        },
+        flowStatus: "INPUTTING",
+      }),
     ).toMatchObject({ ok: false, errorCode: "unknown_result" });
   },
 );

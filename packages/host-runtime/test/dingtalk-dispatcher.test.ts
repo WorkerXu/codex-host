@@ -53,6 +53,26 @@ const conversation: DingTalkConversation = {
   muted: false,
 };
 
+interface CardComponent {
+  id: string;
+  component: string;
+  [key: string]: unknown;
+}
+
+interface WireMessage {
+  updateComponents?: { components: CardComponent[] };
+  updateDataModel?: { value: string };
+}
+
+function cardMessages(args: string[] | undefined): WireMessage[] {
+  const payload = args?.[args.indexOf("--content") + 1] ?? "null";
+  return (JSON.parse(payload) as string[]).map((message) => JSON.parse(message) as WireMessage);
+}
+
+function cardComponents(args: string[] | undefined): CardComponent[] {
+  return cardMessages(args).flatMap((message) => message.updateComponents?.components ?? []);
+}
+
 function settingsWith(overrides: Record<string, DingTalkAgentDispatch> = {}) {
   return {
     agents: {
@@ -193,7 +213,7 @@ async function setup(
   };
   const finish = Promise.withResolvers<{
     answer: string;
-    status: "completed" | "failed";
+    status: "completed" | "failed" | "interrupted";
     errorMessage: string | null;
   }>();
   let started = 0;
@@ -260,6 +280,14 @@ async function setup(
         expect(
           Object.values(await state.status()).some((value) => value.result === "replied"),
         ).toBe(true),
+      );
+    },
+    finishInterrupted: async () => {
+      finish.resolve({ answer: "", status: "interrupted", errorMessage: null });
+      await vi.waitFor(async () =>
+        expect(Object.values(await state.status()).some((value) => value.result === "failed")).toBe(
+          true,
+        ),
       );
     },
   };
@@ -488,5 +516,61 @@ describe("DingTalk manual dispatch", () => {
     const result = await f.dispatcher.run("cid-fixture", "missing", ["qa.toml"]);
     expect(result.results[0]?.error).toBe("无法读取这条消息，未派发");
     expect(f.startThread).not.toHaveBeenCalled();
+  });
+
+  it("creates the progress card expanded with the real context step", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-context.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages });
+    await f.dispatcher.run(conversation.conversationId, target.messageId, ["qa.toml"]);
+    const list = cardComponents(f.commands[0]);
+    expect(list.find((entry) => entry.id === "executionPanel")).toMatchObject({
+      title: "[AIGenerating]正在读取上下文…",
+      textEffect: "shimmer",
+      defaultExpanded: true,
+      children: ["executionTimeline"],
+    });
+    expect(list.find((entry) => entry.id === "step_1")).toMatchObject({
+      title: "读取会话上下文",
+    });
+    expect(list.find((entry) => entry.id === "mentions")?.content).toContain(
+      '<a atId="open-fixture-1">成员A</a>',
+    );
+    expect(list.find((entry) => entry.id === "root")?.children).toEqual([
+      "mentions",
+      "executionPanel",
+    ]);
+  });
+
+  it("reveals the finished answer outside the panel", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-context.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages });
+    await f.dispatcher.run(conversation.conversationId, target.messageId, ["qa.toml"]);
+    await f.finish();
+    const final = f.commands.at(-1);
+    const list = cardComponents(final);
+    expect(list.find((entry) => entry.id === "executionPanel")).toMatchObject({
+      title: "已完成 · 1 步",
+    });
+    expect(list.find((entry) => entry.id === "executionPanel")?.textEffect).toBeUndefined();
+    const root = list.find((entry) => entry.id === "root")?.children as string[];
+    expect(root.indexOf("answer")).toBeGreaterThan(root.indexOf("executionPanel"));
+    expect(cardMessages(final)[1]?.updateDataModel?.value).toBe("# 答案");
+  });
+
+  it("names an interrupted run 已取消 and explains it outside the panel", async () => {
+    const messages = fixtureMessages("dingtalk-message-list-context.json");
+    const target = messages[0];
+    if (!target) throw new Error("fixture target missing");
+    const f = await setup({ messages });
+    await f.dispatcher.run(conversation.conversationId, target.messageId, ["qa.toml"]);
+    await f.finishInterrupted();
+    const final = f.commands.at(-1);
+    const list = cardComponents(final);
+    expect(list.find((entry) => entry.id === "executionPanel")?.title).toBe("已取消");
+    expect(cardMessages(final)[1]?.updateDataModel?.value).toBe("处理已中断，可重新派发");
   });
 });
