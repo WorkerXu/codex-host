@@ -38,6 +38,16 @@ function fixture(
     mcpConnection: connection,
     mcpHeaderName: header,
     fetch: fetcher as typeof fetch,
+    remote: {
+      endpoints: async () => ({
+        memhub: "http://127.0.0.1:8765",
+        mcphub: "http://127.0.0.1:3000",
+      }),
+      readFile: async () => "",
+      token: async () => "",
+      forgetToken: async () => {},
+      stop: async () => {},
+    },
   });
   return { connection, fetcher, header, service };
 }

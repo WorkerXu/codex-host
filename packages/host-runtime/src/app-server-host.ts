@@ -879,6 +879,7 @@ export class AppServerHost {
   readonly #desktopRequests = new DesktopRequestQueue();
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
+  readonly #hubAdmin: Pick<HubAdminService, "request" | "stop">;
 
   constructor(options: AppServerHostOptions) {
     this.#options = {
@@ -888,6 +889,8 @@ export class AppServerHost {
       ...options,
     };
     this.#threadFolders = new ThreadFolders(options.environment ?? process.env);
+    this.#hubAdmin =
+      options.hubAdmin ?? new HubAdminService({ environment: options.environment ?? process.env });
     this.#modelPrices = options.modelPrices ?? new ModelPriceCatalog();
     this.#observedSessionUsage = new ObservedSessionUsage(
       () =>
@@ -1270,6 +1273,7 @@ export class AppServerHost {
       this.#unregisterDelegationApi = undefined;
       this.#unsubscribeAccountState?.();
       this.#unsubscribeAccountState = undefined;
+      await this.#hubAdmin.stop().catch((error) => this.#diagnose(error));
       if (this.#options.closeMappingStoreOnExit !== false) {
         await this.#repository.close().catch((error) => this.#diagnose(error));
       }
@@ -1678,7 +1682,7 @@ export class AppServerHost {
     if (request.method === HUB_ADMIN_METHOD) {
       this.#dispatchDesktopReply(request, async () => {
         try {
-          const service = this.#options.hubAdmin ?? new HubAdminService();
+          const service = this.#hubAdmin;
           const result = await service.request(request.params);
           await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
         } catch (error) {

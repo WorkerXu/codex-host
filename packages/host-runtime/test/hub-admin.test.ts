@@ -14,7 +14,18 @@ function service(handler: (url: string, init?: RequestInit) => Response | Promis
       fetch: fetcher as typeof fetch,
       mcpConnection: { read: async () => secret, write: async () => {} },
       mcpHeaderName: async () => "X-Test-Key",
-      memoryCredentials: async () => ({ Authorization: secret }),
+      memoryToken: async () => secret,
+      forgetMemoryToken: async () => {},
+      remote: {
+        endpoints: async () => ({
+          memhub: "http://127.0.0.1:8765",
+          mcphub: "http://127.0.0.1:3000",
+        }),
+        readFile: async () => "",
+        token: async () => secret,
+        forgetToken: async () => {},
+        stop: async () => {},
+      },
     }),
   };
 }
@@ -219,5 +230,44 @@ describe("Hub admin boundary", () => {
         {},
       ),
     ).rejects.toThrow(String(message));
+  });
+});
+
+describe("MemHub token rotation", () => {
+  function rotated() {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockResolvedValue(Response.json({ memories: [], total: 0, offset: 0, window_id: null }));
+    const memoryToken = vi.fn().mockResolvedValueOnce("old").mockResolvedValueOnce("new");
+    const forgetMemoryToken = vi.fn(async () => {});
+    const service = new HubAdminService({
+      fetch: fetcher as typeof fetch,
+      memoryToken,
+      forgetMemoryToken,
+      remote: {
+        endpoints: async () => ({
+          memhub: "http://127.0.0.1:8765",
+          mcphub: "http://127.0.0.1:3000",
+        }),
+        readFile: async () => "",
+        token: memoryToken,
+        forgetToken: forgetMemoryToken,
+        stop: async () => {},
+      },
+    });
+    return { service, fetcher, memoryToken, forgetMemoryToken };
+  }
+  it("re-reads the token once after a 401 and retries", async () => {
+    const fixture = rotated();
+    await expect(
+      fixture.service.request({ op: "search", query: "", source: "", offset: 0 }),
+    ).resolves.toEqual({ memories: [], total: 0, offset: 0, windowId: null });
+    expect(fixture.memoryToken).toHaveBeenCalledTimes(2);
+    expect(fixture.forgetMemoryToken).toHaveBeenCalledTimes(1);
+    const headers = fixture.fetcher.mock.calls.map(
+      ([, init]) => (init?.headers as Record<string, string>).Authorization,
+    );
+    expect(headers).toEqual(["Bearer old", "Bearer new"]);
   });
 });

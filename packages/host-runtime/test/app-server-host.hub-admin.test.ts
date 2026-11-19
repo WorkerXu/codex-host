@@ -8,6 +8,16 @@ it("serves Hub RPCs without forwarding them and suppresses secret-bearing failur
     mcpConnection: { read: async () => "fake-key-not-real", write: async () => {} },
     mcpHeaderName: async () => "Authorization",
     fetch: async () => Response.json({ success: true, data: [] }),
+    remote: {
+      endpoints: async () => ({
+        memhub: "http://127.0.0.1:8765",
+        mcphub: "http://127.0.0.1:3000",
+      }),
+      readFile: async () => "",
+      token: async () => "",
+      forgetToken: async () => {},
+      stop: async () => {},
+    },
   });
   const fixture = createFixture({ hubAdmin });
   try {
@@ -48,6 +58,16 @@ it("keeps administrator keys out of RPC replies, diagnostics and the official pr
     },
     mcpHeaderName: async () => "Authorization",
     fetch: async () => Response.json({ success: true, data: [] }),
+    remote: {
+      endpoints: async () => ({
+        memhub: "http://127.0.0.1:8765",
+        mcphub: "http://127.0.0.1:3000",
+      }),
+      readFile: async () => "",
+      token: async () => "",
+      forgetToken: async () => {},
+      stop: async () => {},
+    },
   });
   const fixture = createFixture({ hubAdmin });
   let diagnostics = "";

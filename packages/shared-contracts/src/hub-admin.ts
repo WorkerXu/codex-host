@@ -11,6 +11,8 @@ export const HUB_ERROR_MESSAGES = {
   failed: "操作失败",
   missing: "内容不存在",
   conflict: "配置已变化，请刷新后重试",
+  connecting: "正在连接 India…",
+  retrying: "连接失败，重试中",
 } as const;
 const name = z
   .string()
@@ -59,6 +61,7 @@ const mcpConnection = z.strictObject({
   last4: z.string().length(4).nullable(),
 });
 export const hubAdminParamsSchema = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("mcpOverview") }),
   z.strictObject({ op: z.literal("mcpConnection") }),
   z.strictObject({ op: z.literal("mcpConnect"), key: hubMcpKeySchema }),
   z.strictObject({ op: z.literal("mcpDisconnect"), confirmed: z.literal(true) }),
@@ -135,6 +138,18 @@ export const hubMemorySchema = z.strictObject({
 export type HubMemory = z.infer<typeof hubMemorySchema>;
 const saved = z.strictObject({ ok: z.literal(true), token: z.string().optional() });
 export const hubResultSchemas = {
+  mcpOverview: z.strictObject({
+    configured: z.boolean(),
+    last4: z.string().length(4).nullable(),
+    servers: z.array(hubServerSchema).nullable(),
+    keys: z
+      .strictObject({
+        enabled: z.boolean(),
+        headerName: z.string(),
+        keys: z.array(hubKeySchema),
+      })
+      .nullable(),
+  }),
   mcpConnection,
   mcpConnect: mcpConnection,
   mcpDisconnect: mcpConnection,

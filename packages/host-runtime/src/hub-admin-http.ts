@@ -7,15 +7,16 @@ export class HubAdminError extends Error {
   }
 }
 
-/** Fixed local service endpoints; redirects may never carry credentials elsewhere. */
+/** A codexhost-managed loopback forward; redirects may never carry credentials elsewhere. */
 export async function hubJson(
   fetcher: typeof fetch,
-  base: "http://127.0.0.1:3000" | "http://127.0.0.1:8765",
+  base: string,
   path: string,
   headers: Record<string, string>,
   method = "GET",
   body?: unknown,
 ): Promise<unknown> {
+  if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(base)) throw new HubAdminError("failed");
   try {
     const response = await fetcher(`${base}${path}`, {
       method,
