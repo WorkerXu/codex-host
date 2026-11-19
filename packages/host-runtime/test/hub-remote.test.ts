@@ -117,8 +117,10 @@ describe("Hub SSH forward", () => {
     await instance.endpoints();
     expect(await instance.readToken("/token")).toBe("token-value\n");
     expect(await instance.readToken("/token")).toBe("token-value\n");
+    await instance.readToken("/tmp/with space/it's");
+    expect(execFile.mock.calls.at(-1)?.[1].at(-1)).toBe("cat -- '/tmp/with space/it'\\''s'");
     expect(spawned).toHaveLength(1);
-    expect(execFile).toHaveBeenCalledTimes(2);
+    expect(execFile).toHaveBeenCalledTimes(3);
     for (const [, args] of execFile.mock.calls) {
       expect(args).toEqual(
         expect.arrayContaining([
