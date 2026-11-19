@@ -203,6 +203,71 @@
   gap: 4px;
   margin: 16px 0;
 }
+.hub-page-tabs {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.hub-page-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-bottom: -1px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.hub-page-tabs button:hover {
+  color: var(--color-text);
+}
+.hub-page-tabs button[aria-selected="true"] {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.hub-page-tabs button[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-text);
+}
+.hub-tab-count {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.hub-tab-panel {
+  min-width: 0;
+}
+.hub-key-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+.hub-key-head p {
+  margin: 0;
+}
+.hub-keys-state > .hub-empty {
+  padding-bottom: 0;
+}
+.hub-keys-state > button {
+  display: flex;
+  margin: 0 auto;
+}
 .hub-tabs button {
   min-height: 28px;
   border-color: transparent;

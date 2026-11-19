@@ -54,6 +54,14 @@ export const hubScenarioNames = [
   "hub-auth-header",
   "hub-memory-hover",
   "hub-memory-focus",
+  "hub-mcp-servers",
+  "hub-mcp-page-2",
+  "hub-mcp-keys",
+  "hub-mcp-keys-page-2",
+  "hub-mcp-tab-hover",
+  "hub-mcp-keys-tab-hover",
+  "hub-mcp-pager-hover",
+  "hub-mcp-tab-focus",
 ];
 export function hubAdminScenarios(harness: PreviewHarness): Record<string, () => Promise<void>> {
   const { click, type, key, hover, waitFor } = harness;
@@ -118,6 +126,27 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
           return;
         }
         await waitFor(() => query(memory ? ".hub-memory-row" : ".hub-server"));
+        if (name.startsWith("hub-mcp-")) {
+          const pageButton = (text: string) =>
+            queryAll<HTMLButtonElement>(".hub-tab-panel:not([hidden]) .hub-pagination button").find(
+              (item) => item.textContent === text,
+            );
+          const next = () => pageButton("下一页");
+          const previous = () => pageButton("上一页");
+          if (name === "hub-mcp-page-2" || name === "hub-mcp-pager-hover") {
+            await click(await waitFor(next));
+          }
+          if (["hub-mcp-keys", "hub-mcp-keys-tab-hover", "hub-mcp-keys-page-2"].includes(name)) {
+            await click(required("#hub-mcp-tab-keys"));
+            await waitFor(() => query(".hub-key"));
+          }
+          if (name === "hub-mcp-keys-page-2") await click(await waitFor(next));
+          if (name === "hub-mcp-tab-hover") await hover(required("#hub-mcp-tab-keys"));
+          if (name === "hub-mcp-keys-tab-hover") await hover(required("#hub-mcp-tab-servers"));
+          if (name === "hub-mcp-pager-hover") await hover(await waitFor(previous));
+          if (name === "hub-mcp-tab-focus")
+            await key(required('[aria-label="MCPHub 连接设置"]'), "Tab");
+        }
         if (
           [
             "hub-connection-menu",

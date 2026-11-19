@@ -99,6 +99,68 @@ export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
     "hub-connection-test-error",
     "hub-connection-saved",
   ].includes(scenario);
+  if (scenario.startsWith("hub-mcp-")) {
+    const names = [
+      "文档搜索",
+      "代码仓库",
+      "网页检索",
+      "本地文件",
+      "归档服务",
+      "知识库",
+      "发布助手",
+      "日志查询",
+      "截图服务",
+      "数据库",
+      "邮件网关",
+      "日程",
+      "翻译",
+    ];
+    servers = names.map((name, index) => ({
+      name,
+      version: index % 4 === 3 ? "—" : `1.${index % 5}.0`,
+      status: ["online", "online", "offline", "inactive", "disabled"][
+        index % 5
+      ] as HubServer["status"],
+      type: ["streamable-http", "stdio", "sse"][index % 3] as HubServer["type"],
+      tools: 12 - index,
+      prompts: index % 3,
+      resources: index % 2,
+      calls: null,
+    }));
+    const keyNames = [
+      "工作助手",
+      "只读检索",
+      "发布流水线",
+      "移动端",
+      "数据分析",
+      "客服机器人",
+      "定时任务",
+      "审计",
+      "测试环境",
+      "演示",
+      "备用",
+      "临时",
+      "周报",
+      "营销",
+      "财务",
+      "招聘",
+      "法务",
+      "运营",
+      "设计",
+      "研发",
+      "外部",
+    ];
+    keys = keyNames.map((name, index) => ({
+      id: `key-${index}`,
+      name,
+      masked: "••••••••",
+      enabled: index % 6 !== 5,
+      accessType: index % 3 === 0 ? "all" : index % 3 === 1 ? "servers" : "exclude",
+      servers: index % 3 === 1 ? ["文档搜索"] : index % 3 === 2 ? ["归档服务"] : [],
+      groups: [],
+      kind: "system",
+    }));
+  }
   let invalid = scenario === "hub-error" || scenario === "hub-auth-error";
   let last4 = "1234";
   let enabled = true;

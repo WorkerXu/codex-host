@@ -79,6 +79,18 @@ export function hubSwitch(
   button.setAttribute("aria-checked", String(checked));
   return button;
 }
+export function hubPager(
+  document: Document,
+  options: { page: number; pages: number; summary: string; onPage: (page: number) => void },
+): HTMLElement {
+  const root = hubElement(document, "div", "hub-row hub-pagination");
+  const previous = hubButton(document, "上一页", () => options.onPage(options.page - 1));
+  previous.disabled = options.page <= 1;
+  const next = hubButton(document, "下一页", () => options.onPage(options.page + 1));
+  next.disabled = options.page >= options.pages;
+  root.append(hubElement(document, "span", "hub-muted", options.summary), previous, next);
+  return root;
+}
 export function hubDate(time: number | null, now = new Date()): string {
   if (time === null) return "—";
   const date = new Date(time < 100000000000 ? time * 1000 : time);

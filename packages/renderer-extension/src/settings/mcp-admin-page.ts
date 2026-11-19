@@ -1,4 +1,4 @@
-import type { HubKey, HubServer, HubResult } from "@codexhost/shared-contracts";
+import type { HubKey, HubResult, HubServer } from "@codexhost/shared-contracts";
 import type { RendererHubAdminClient } from "../renderer-hub-admin-client.js";
 import { hubErrorText } from "../renderer-hub-admin-client.js";
 import type { RendererSettingsPageDefinition } from "./core.js";
@@ -9,11 +9,28 @@ import {
   hubElement,
   hubField,
   hubIconButton,
+  hubPager,
   hubSwitch,
 } from "./hub-admin-ui.js";
 import { openAgentMenu, type AgentMenuHandle, type AgentMenuItem } from "./agent-card-menu.js";
 import { createMcpConnectionUi } from "./mcp-connection-ui.js";
 import { mcpDialogs } from "./mcp-admin-dialogs.js";
+import { renderMcpKeysPanel, type McpKeysState } from "./mcp-keys-panel.js";
+import {
+  MCP_KEY_PAGE_SIZE,
+  MCP_PANEL_IDS,
+  MCP_SERVER_PAGE_SIZE,
+  MCP_TAB_IDS,
+  clampPage,
+  createMcpPageTabs,
+  mcpTabStorage,
+  pageCount,
+  pageSlice,
+  readMcpAdminTab,
+  writeMcpAdminTab,
+  type McpAdminTab,
+  type McpPageTabsHandle,
+} from "./mcp-page-tabs.js";
 
 export interface HubAdminPageOptions {
   createClient(): RendererHubAdminClient | null;
@@ -22,14 +39,9 @@ type McpView = {
   configured: boolean;
   last4: string | null;
   servers: HubServer[];
-  keys: HubResult<"keys">;
+  keyTotal: number;
 };
 const statuses = { online: "在线", offline: "离线", inactive: "未激活", disabled: "禁用" };
-const emptyKeys: HubResult<"keys"> = {
-  enabled: true,
-  headerName: "Authorization",
-  keys: [],
-};
 export function createMcpAdminPage(
   options: HubAdminPageOptions,
   label = "MCP 服务器",
@@ -46,10 +58,19 @@ export function createMcpAdminPage(
         return;
       }
       const document = ui.document;
+      const storage = mcpTabStorage(document);
+      let tab: McpAdminTab = readMcpAdminTab(storage);
       let servers: HubServer[] = [];
-      let keys: HubResult<"keys"> = emptyKeys;
+      let keys: HubResult<"keys"> | null = null;
+      let keyTotal = 0;
+      let keysState: McpKeysState = "idle";
       let query = "";
       let filter = "all";
+      let serverPage = 1;
+      let keyPage = 1;
+      let tabs: McpPageTabsHandle | null = null;
+      let serverPanel: HTMLElement | null = null;
+      let keysPanel: HTMLElement | null = null;
       let menu: AgentMenuHandle | null = null;
       const closeMenu = () => {
         menu?.close();
@@ -87,9 +108,303 @@ export function createMcpAdminPage(
         else ui.status.textContent = hubErrorText(error);
         if (visible) throw error;
       };
+      const showPanels = () => {
+        if (serverPanel) serverPanel.hidden = tab !== "servers";
+        if (keysPanel) keysPanel.hidden = tab !== "keys";
+      };
+      const panel = (id: string, labelledBy: string) => {
+        const element = hubElement(document, "div", "hub-tab-panel");
+        element.id = id;
+        element.setAttribute("role", "tabpanel");
+        element.setAttribute("aria-labelledby", labelledBy);
+        return element;
+      };
+      const regenerateKey = (key: HubKey) => {
+        const host = ui.hostId;
+        const revision = ui.revision();
+        ui.confirm("重新生成密钥", `重新生成 ${key.name}？旧密钥将立即失效。`, async () => {
+          const result = await client.request(host, {
+            op: "keyRegenerate",
+            id: key.id,
+            confirmed: true,
+          });
+          if (ui.valid(host, revision) && result.token) dialogs.reveal(result.token);
+          await refresh();
+        });
+      };
+      const deleteKey = (key: HubKey) => {
+        const host = ui.hostId;
+        ui.confirm("删除密钥", `删除 ${key.name}？使用此密钥的连接将失去权限。`, async () => {
+          await client.request(host, { op: "keyDelete", id: key.id, confirmed: true });
+          await refresh();
+        });
+      };
+      const editAuth = () => {
+        const current = keys;
+        if (!current) return;
+        const host = ui.hostId;
+        const modal = ui.dialog("认证请求头");
+        const header = hubField(document, modal.content, "请求头名称", current.headerName);
+        modal.footer.append(
+          hubButton(
+            document,
+            "保存",
+            () => {
+              void ui.load(async () => {
+                await client.request(host, {
+                  op: "authSave",
+                  enabled: current.enabled,
+                  headerName: header.value,
+                  confirmed: !current.enabled,
+                });
+                modal.close();
+                await refresh();
+              });
+            },
+            true,
+          ),
+        );
+      };
+      const toggleAuth = () => {
+        const current = keys;
+        if (!current) return;
+        const host = ui.hostId;
+        const action = async () => {
+          await client.request(host, {
+            op: "authSave",
+            enabled: !current.enabled,
+            headerName: current.headerName,
+            confirmed: current.enabled,
+          });
+          await refresh();
+        };
+        if (current.enabled)
+          ui.confirm("关闭 Bearer 认证", "关闭后，服务将不再校验 Bearer 密钥。", action);
+        else void ui.load(action);
+      };
+      const renderKeys = () => {
+        closeMenu();
+        if (!keysPanel) return;
+        if (keys) keyPage = clampPage(keyPage, keys.keys.length, MCP_KEY_PAGE_SIZE);
+        renderMcpKeysPanel(keysPanel, {
+          data: keys,
+          total: keyTotal,
+          state: keysState,
+          page: keyPage,
+          actions,
+          onPage(next) {
+            keyPage = next;
+            renderKeys();
+          },
+          onCreate: () => dialogs.key(),
+          onEdit: (key) => dialogs.key(key),
+          onRegenerate: regenerateKey,
+          onDelete: deleteKey,
+          onAuthEdit: editAuth,
+          onAuthToggle: toggleAuth,
+          onRetry() {
+            keysState = "idle";
+            openKeys();
+          },
+        });
+      };
+      const serverCard = (server: HubServer) => {
+        const card = hubElement(document, "article", "hub-server");
+        card.dataset.disabled = String(server.status === "disabled");
+        const top = hubElement(document, "div", "hub-server-top");
+        const title = hubButton(document, server.name, () => {
+          void dialogs.tools(server);
+        });
+        title.className = "hub-server-title";
+        const controls = hubElement(document, "div", "hub-card-controls");
+        const toggle = hubSwitch(
+          document,
+          `${server.name} 启用状态`,
+          server.status !== "disabled",
+          () => {
+            const host = ui.hostId;
+            const enabled = server.status === "disabled";
+            const action = async () => {
+              await client.request(host, {
+                op: "serverToggle",
+                name: server.name,
+                enabled,
+                confirmed: !enabled,
+              });
+              await refresh();
+            };
+            if (enabled) void ui.load(action);
+            else ui.confirm("禁用服务器", `禁用 ${server.name} 后，将无法调用其工具。`, action);
+          },
+        );
+        const items: AgentMenuItem[] = [];
+        if (["streamable-http", "sse", "stdio"].includes(server.type))
+          items.push({ label: "编辑", run: () => dialogs.server(server) });
+        items.push({
+          label: "删除",
+          danger: true,
+          run() {
+            const host = ui.hostId;
+            ui.confirm("删除服务器", `删除 ${server.name}？此操作无法撤销。`, async () => {
+              await client.request(host, {
+                op: "serverDelete",
+                name: server.name,
+                confirmed: true,
+              });
+              await refresh();
+            });
+          },
+        });
+        controls.append(toggle, actions(`${server.name} 的操作`, items));
+        top.append(title, controls);
+        const status = hubElement(document, "span", "hub-status-dot", statuses[server.status]);
+        status.dataset.status = server.status;
+        const protocol =
+          server.type === "streamable-http"
+            ? "流式 HTTP"
+            : server.type === "sse"
+              ? "SSE"
+              : server.type;
+        const meta = hubElement(document, "div", "hub-server-meta");
+        meta.append(status, hubElement(document, "span", "", protocol));
+        if (server.version && server.version !== "—")
+          meta.append(hubElement(document, "span", "", `v${server.version.replace(/^v/u, "")}`));
+        const counts = [
+          `${server.tools} 工具`,
+          `${server.prompts} 提示词`,
+          `${server.resources} 资源`,
+        ];
+        if (server.calls !== null) counts.push(`${server.calls} 次调用`);
+        card.append(top, meta, hubElement(document, "p", "hub-server-counts", counts.join(" · ")));
+        card.addEventListener("click", (event) => {
+          if (!(event.target as Element).closest("button")) void dialogs.tools(server);
+        });
+        return card;
+      };
+      const renderServers = (root: HTMLElement) => {
+        const toolbar = hubElement(document, "div", "hub-row hub-toolbar");
+        const search = hubElement(document, "input");
+        search.type = "search";
+        search.placeholder = "搜索服务器";
+        search.setAttribute("aria-label", "搜索服务器");
+        search.value = query;
+        const list = hubElement(document, "div", "hub-server-list");
+        const pager = hubElement(document, "div", "hub-pager");
+        const renderPage = () => {
+          const visible = servers.filter(
+            (server) =>
+              server.name.toLowerCase().includes(query.toLowerCase()) &&
+              (filter === "all" || server.status === filter),
+          );
+          serverPage = clampPage(serverPage, visible.length, MCP_SERVER_PAGE_SIZE);
+          list.replaceChildren();
+          for (const server of pageSlice(visible, serverPage, MCP_SERVER_PAGE_SIZE))
+            list.append(serverCard(server));
+          if (!visible.length)
+            list.append(hubElement(document, "p", "hub-empty", "没有匹配的服务器"));
+          pager.replaceChildren();
+          if (visible.length > MCP_SERVER_PAGE_SIZE) {
+            const pages = pageCount(visible.length, MCP_SERVER_PAGE_SIZE);
+            pager.append(
+              hubPager(document, {
+                page: serverPage,
+                pages,
+                summary: `共 ${visible.length} 个服务器 · 第 ${serverPage} / ${pages} 页`,
+                onPage(next) {
+                  serverPage = next;
+                  renderPage();
+                },
+              }),
+            );
+          }
+        };
+        search.addEventListener("input", () => {
+          query = search.value;
+          serverPage = 1;
+          renderPage();
+        });
+        toolbar.append(
+          search,
+          hubIconButton(document, "刷新", "refresh", () => {
+            void refresh();
+          }),
+          hubButton(document, "添加服务器", () => dialogs.server(), true),
+        );
+        const filters = hubElement(document, "div", "hub-tabs");
+        filters.setAttribute("aria-label", "服务器状态");
+        for (const [value, text] of [["all", "全部"] as const, ...Object.entries(statuses)]) {
+          const button = hubButton(document, text, () => {
+            filter = value;
+            serverPage = 1;
+            for (const candidate of filters.querySelectorAll("button"))
+              candidate.setAttribute("aria-pressed", String(candidate === button));
+            renderPage();
+          });
+          button.setAttribute("aria-pressed", String(filter === value));
+          filters.append(button);
+        }
+        root.replaceChildren(toolbar, filters, list, pager);
+        renderPage();
+      };
+      const render = () => {
+        closeMenu();
+        tabs = createMcpPageTabs(document, {
+          selected: tab,
+          serverCount: servers.length,
+          keyCount: keys?.keys.length ?? keyTotal,
+          onSelect(next) {
+            tab = next;
+            writeMcpAdminTab(storage, next);
+            closeMenu();
+            showPanels();
+            if (next === "keys") openKeys();
+          },
+        });
+        serverPanel = panel(MCP_PANEL_IDS.servers, MCP_TAB_IDS.servers);
+        keysPanel = panel(MCP_PANEL_IDS.keys, MCP_TAB_IDS.keys);
+        ui.body.replaceChildren(tabs.root, serverPanel, keysPanel);
+        renderServers(serverPanel);
+        renderKeys();
+        showPanels();
+        if (tab === "keys") openKeys();
+      };
+      const applyKeys = (view: HubCacheView<HubResult<"keys">>) => {
+        keys = view.value;
+        keysState = "ready";
+        tabs?.setCounts(servers.length, view.value.keys.length);
+        renderKeys();
+        ui.status.textContent = "";
+      };
+      const keysController = new HubCacheController<HubResult<"keys">>(
+        "hub-mcp-keys",
+        () => client.request(ui.hostId, { op: "keys" }),
+        applyKeys,
+      );
+      const openKeys = () => {
+        if (keysState !== "idle") return;
+        const cached = keysController.peek();
+        keysState = cached ? "ready" : "loading";
+        if (cached) {
+          applyKeys(cached);
+          void keysController.refresh().catch((error: unknown) => fail(error, false));
+          return;
+        }
+        renderKeys();
+        void (async () => {
+          try {
+            await keysController.refresh();
+          } catch (error) {
+            keysState = "error";
+            scheduleRetry(error);
+            fail(error, false);
+          } finally {
+            renderKeys();
+          }
+        })();
+      };
       const applyView = (view: HubCacheView<McpView>) => {
         servers = view.value.servers;
-        keys = view.value.keys;
+        keyTotal = view.value.keyTotal;
         connection.show({ configured: view.value.configured, last4: view.value.last4 });
         ui.updated.hidden = !view.value.configured;
         if (view.value.configured) {
@@ -106,7 +421,7 @@ export function createMcpAdminPage(
             configured: result.configured,
             last4: result.last4,
             servers: result.servers ?? [],
-            keys: result.keys ?? emptyKeys,
+            keyTotal: result.keys?.keys.length ?? 0,
           };
         },
         applyView,
@@ -130,6 +445,13 @@ export function createMcpAdminPage(
             fail(error, true);
           }
         }, pending);
+        if (keysState === "ready") {
+          try {
+            await keysController.refresh();
+          } catch (error) {
+            fail(error, false);
+          }
+        }
       };
       const background = () => {
         void controller.refresh().catch((error: unknown) => {
@@ -147,256 +469,6 @@ export function createMcpAdminPage(
       );
       const connection = createMcpConnectionUi(ui, client, refresh, actions);
       const dialogs = mcpDialogs(ui, client, refresh, () => servers);
-      const list = hubElement(document, "div", "hub-server-list");
-      const renderServers = () => {
-        closeMenu();
-        list.replaceChildren();
-        const visible = servers.filter(
-          (server) =>
-            server.name.toLowerCase().includes(query.toLowerCase()) &&
-            (filter === "all" || server.status === filter),
-        );
-        for (const server of visible) {
-          const card = hubElement(document, "article", "hub-server");
-          card.dataset.disabled = String(server.status === "disabled");
-          const top = hubElement(document, "div", "hub-server-top");
-          const title = hubButton(document, server.name, () => {
-            void dialogs.tools(server);
-          });
-          title.className = "hub-server-title";
-          const controls = hubElement(document, "div", "hub-card-controls");
-          const toggle = hubSwitch(
-            document,
-            `${server.name} 启用状态`,
-            server.status !== "disabled",
-            () => {
-              const host = ui.hostId;
-              const enabled = server.status === "disabled";
-              const action = async () => {
-                await client.request(host, {
-                  op: "serverToggle",
-                  name: server.name,
-                  enabled,
-                  confirmed: !enabled,
-                });
-                await refresh();
-              };
-              if (enabled) void ui.load(action);
-              else ui.confirm("禁用服务器", `禁用 ${server.name} 后，将无法调用其工具。`, action);
-            },
-          );
-          const items: AgentMenuItem[] = [];
-          if (["streamable-http", "sse", "stdio"].includes(server.type))
-            items.push({ label: "编辑", run: () => dialogs.server(server) });
-          items.push({
-            label: "删除",
-            danger: true,
-            run() {
-              const host = ui.hostId;
-              ui.confirm("删除服务器", `删除 ${server.name}？此操作无法撤销。`, async () => {
-                await client.request(host, {
-                  op: "serverDelete",
-                  name: server.name,
-                  confirmed: true,
-                });
-                await refresh();
-              });
-            },
-          });
-          controls.append(toggle, actions(`${server.name} 的操作`, items));
-          top.append(title, controls);
-          const status = hubElement(document, "span", "hub-status-dot", statuses[server.status]);
-          status.dataset.status = server.status;
-          const protocol =
-            server.type === "streamable-http"
-              ? "流式 HTTP"
-              : server.type === "sse"
-                ? "SSE"
-                : server.type;
-          const meta = hubElement(document, "div", "hub-server-meta");
-          meta.append(status, hubElement(document, "span", "", protocol));
-          if (server.version && server.version !== "—")
-            meta.append(hubElement(document, "span", "", `v${server.version.replace(/^v/u, "")}`));
-          const counts = [
-            `${server.tools} 工具`,
-            `${server.prompts} 提示词`,
-            `${server.resources} 资源`,
-          ];
-          if (server.calls !== null) counts.push(`${server.calls} 次调用`);
-          card.append(
-            top,
-            meta,
-            hubElement(document, "p", "hub-server-counts", counts.join(" · ")),
-          );
-          card.addEventListener("click", (event) => {
-            if (!(event.target as Element).closest("button")) void dialogs.tools(server);
-          });
-          list.append(card);
-        }
-        if (!visible.length)
-          list.append(hubElement(document, "p", "hub-empty", "没有匹配的服务器"));
-      };
-      const keyRow = (key: HubKey) => {
-        const row = hubElement(document, "article", "hub-key");
-        const info = hubElement(document, "div", "hub-key-info");
-        const scope =
-          key.accessType === "all"
-            ? "全部服务器"
-            : key.accessType === "exclude"
-              ? `排除：${key.servers.join("、")}`
-              : key.accessType === "servers"
-                ? `仅限：${key.servers.join("、")}`
-                : "自定义范围";
-        const top = hubElement(document, "div", "hub-row");
-        const status = hubElement(
-          document,
-          "span",
-          "hub-status-dot",
-          key.enabled ? "启用" : "禁用",
-        );
-        status.dataset.status = key.enabled ? "online" : "disabled";
-        top.append(hubElement(document, "strong", "", key.name), status);
-        info.append(
-          top,
-          hubElement(
-            document,
-            "p",
-            "hub-muted",
-            `${key.masked} · ${scope}${key.groups.length ? ` · 组：${key.groups.join("、")}` : ""}${key.kind === "user" ? " · 用户密钥" : ""}`,
-          ),
-        );
-        const items: AgentMenuItem[] = [];
-        if (
-          key.kind !== "user" &&
-          !key.groups.length &&
-          ["all", "exclude", "servers"].includes(key.accessType)
-        )
-          items.push({ label: "编辑", run: () => dialogs.key(key) });
-        items.push(
-          {
-            label: "重新生成",
-            run() {
-              const host = ui.hostId;
-              const revision = ui.revision();
-              ui.confirm("重新生成密钥", `重新生成 ${key.name}？旧密钥将立即失效。`, async () => {
-                const result = await client.request(host, {
-                  op: "keyRegenerate",
-                  id: key.id,
-                  confirmed: true,
-                });
-                if (ui.valid(host, revision) && result.token) dialogs.reveal(result.token);
-                await refresh();
-              });
-            },
-          },
-          {
-            label: "删除",
-            danger: true,
-            run() {
-              const host = ui.hostId;
-              ui.confirm("删除密钥", `删除 ${key.name}？使用此密钥的连接将失去权限。`, async () => {
-                await client.request(host, { op: "keyDelete", id: key.id, confirmed: true });
-                await refresh();
-              });
-            },
-          },
-        );
-        row.append(info, actions(`${key.name} 的操作`, items));
-        return row;
-      };
-      const render = () => {
-        closeMenu();
-        ui.body.replaceChildren();
-        const toolbar = hubElement(document, "div", "hub-row hub-toolbar");
-        const search = hubElement(document, "input");
-        search.type = "search";
-        search.placeholder = "搜索服务器";
-        search.setAttribute("aria-label", "搜索服务器");
-        search.value = query;
-        search.addEventListener("input", () => {
-          query = search.value;
-          renderServers();
-        });
-        toolbar.append(
-          search,
-          hubIconButton(document, "刷新", "refresh", () => {
-            void refresh();
-          }),
-          hubButton(document, "添加服务器", () => dialogs.server(), true),
-        );
-        const tabs = hubElement(document, "div", "hub-tabs");
-        tabs.setAttribute("aria-label", "服务器状态");
-        for (const [value, text] of [["all", "全部"] as const, ...Object.entries(statuses)]) {
-          const tab = hubButton(document, text, () => {
-            filter = value;
-            for (const button of tabs.querySelectorAll("button"))
-              button.setAttribute("aria-pressed", String(button === tab));
-            renderServers();
-          });
-          tab.setAttribute("aria-pressed", String(filter === value));
-          tabs.append(tab);
-        }
-        ui.body.append(toolbar, tabs, list);
-        renderServers();
-        const keyHeader = hubElement(document, "div", "hub-row hub-section-head");
-        keyHeader.append(
-          hubElement(document, "h3", "", "密钥"),
-          hubButton(document, "创建密钥", () => dialogs.key()),
-        );
-        ui.body.append(keyHeader);
-        const auth = hubElement(document, "div", "hub-setting-row");
-        const copy = hubElement(document, "div", "hub-setting-copy");
-        copy.append(
-          hubElement(document, "strong", "", "Bearer 认证"),
-          hubElement(document, "p", "hub-muted", "连接服务器时校验访问密钥"),
-        );
-        const controls = hubElement(document, "div", "hub-row");
-        controls.append(
-          hubIconButton(document, "编辑认证请求头", "settings", () => {
-            const host = ui.hostId;
-            const modal = ui.dialog("认证请求头");
-            const header = hubField(document, modal.content, "请求头名称", keys.headerName);
-            modal.footer.append(
-              hubButton(
-                document,
-                "保存",
-                () => {
-                  void ui.load(async () => {
-                    await client.request(host, {
-                      op: "authSave",
-                      enabled: keys.enabled,
-                      headerName: header.value,
-                      confirmed: !keys.enabled,
-                    });
-                    modal.close();
-                    await refresh();
-                  });
-                },
-                true,
-              ),
-            );
-          }),
-          hubSwitch(document, "Bearer 认证", keys.enabled, () => {
-            const host = ui.hostId;
-            const action = async () => {
-              await client.request(host, {
-                op: "authSave",
-                enabled: !keys.enabled,
-                headerName: keys.headerName,
-                confirmed: keys.enabled,
-              });
-              await refresh();
-            };
-            if (keys.enabled)
-              ui.confirm("关闭 Bearer 认证", "关闭后，服务将不再校验 Bearer 密钥。", action);
-            else void ui.load(action);
-          }),
-        );
-        auth.append(copy, controls);
-        ui.body.append(auth);
-        for (const key of keys.keys) ui.body.append(keyRow(key));
-        if (!keys.keys.length) ui.body.append(hubElement(document, "p", "hub-empty", "暂无密钥"));
-      };
       const tick = setInterval(() => {
         const view = controller.peek();
         if (view && !ui.updated.hidden)
