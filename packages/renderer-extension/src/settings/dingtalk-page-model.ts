@@ -1,8 +1,11 @@
-import type {
-  DingTalkConversation,
-  DingTalkMessage,
-  DingTalkMention,
-  DingTalkSearchResult,
+import {
+  compactDingTalkPreview,
+  formatDingTalkCardSummary,
+  parseDingTalkCardSummary,
+  type DingTalkConversation,
+  type DingTalkMessage,
+  type DingTalkMention,
+  type DingTalkSearchResult,
 } from "@codexhost/shared-contracts";
 
 const MINUTE = 60_000;
@@ -128,13 +131,18 @@ export function conversationMention(
 }
 
 export function messagePreview(message: DingTalkMessage): string {
+  const card = parseDingTalkCardSummary(message.text);
+  if (card) return formatDingTalkCardSummary(card);
+  if (message.cardTitle) return `[卡片] ${message.cardTitle}`;
   if (message.unsupported) return "非文本消息，请在手机上查看";
-  const text = message.text.replace(/\s+/gu, " ").trim();
-  return text.length > 160 ? `${text.slice(0, 159)}…` : text;
+  return compactDingTalkPreview(message.text);
 }
 
 /** One-line summary for a card or other message the workbench cannot render. */
 export function unsupportedSummary(message: DingTalkMessage): string {
+  const card = parseDingTalkCardSummary(message.text);
+  if (card) return formatDingTalkCardSummary(card);
+  if (message.cardTitle) return `[卡片] ${message.cardTitle} · 在手机上查看`;
   const title = message.text.replace(/\s+/gu, " ").trim().slice(0, 80);
   return title ? `[卡片] ${title} · 在手机上查看` : "[卡片] 在手机上查看";
 }
@@ -187,6 +195,38 @@ export function formatDingTalkFileSize(bytes: number | null | undefined): string
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * One conversation row reconciled against what the page already knows. The
+ * preview and row time only move forward: a list read that omits the preview
+ * or carries an older message must not blank a row the page has filled.
+ */
+export function mergeDingTalkConversationRow(
+  previous: DingTalkConversation,
+  incoming: DingTalkConversation,
+): DingTalkConversation {
+  const lastMessageAt = Math.max(previous.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || null;
+  const incomingIsNewer = (incoming.lastMessageAt ?? 0) >= (previous.lastMessageAt ?? 0);
+  const incomingPreview = incoming.preview?.trim() ? incoming.preview : undefined;
+  const preview =
+    incomingPreview && incomingIsNewer ? incomingPreview : (previous.preview ?? incomingPreview);
+  return {
+    ...incoming,
+    lastMessageAt,
+    ...(preview !== undefined ? { preview } : {}),
+  };
+}
+
+export function mergeDingTalkConversationRows(
+  current: readonly DingTalkConversation[],
+  incoming: readonly DingTalkConversation[],
+): DingTalkConversation[] {
+  const previous = new Map(current.map((row) => [row.conversationId, row]));
+  return incoming.map((row) => {
+    const old = previous.get(row.conversationId);
+    return old ? mergeDingTalkConversationRow(old, row) : { ...row };
+  });
 }
 
 export interface DingTalkPageState {

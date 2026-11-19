@@ -5,10 +5,13 @@ import EllipsisIcon from "lucide/dist/esm/icons/ellipsis.mjs";
 import MessagesSquareIcon from "lucide/dist/esm/icons/messages-square.mjs";
 import ReplyIcon from "lucide/dist/esm/icons/reply.mjs";
 
-import type {
-  DingTalkConversation,
-  DingTalkMessage,
-  DingTalkMessageResource,
+import {
+  compactDingTalkPreview,
+  formatDingTalkCardSummary,
+  parseDingTalkCardSummary,
+  type DingTalkConversation,
+  type DingTalkMessage,
+  type DingTalkMessageResource,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -82,6 +85,13 @@ export function createIcon(
   for (const child of icon) appendIconNode(document, node, child);
   node.classList.add(...className.split(" ").filter(Boolean));
   return node;
+}
+
+/** Icon actions in the transcript use the page's styled tooltip, not the OS one. */
+function withPageTooltip(button: HTMLButtonElement, label: string): HTMLButtonElement {
+  button.dataset.tooltip = label;
+  button.title = "";
+  return button;
 }
 
 export function createIconButton(
@@ -278,8 +288,10 @@ function messageSearchSummary(message: DingTalkMessage): string {
   if (image) return "[图片]";
   const file = message.resources?.find(({ kind }) => kind === "file");
   if (file) return file.name ? `[文件] ${file.name}` : "[文件]";
+  const card = parseDingTalkCardSummary(message.text);
+  if (card) return formatDingTalkCardSummary(card);
   if (message.cardTitle) return message.cardTitle;
-  return message.text.replace(/\s+/gu, " ").trim();
+  return compactDingTalkPreview(message.text);
 }
 
 export function createSearchMessageRow(
@@ -470,36 +482,54 @@ function bubbleContent(
     if (resource.kind === "image") appendImage(document, bubble, message, resource, options);
     else appendFileChip(document, bubble, resource);
   }
-  if (message.cardTitle) {
+  const card = parseDingTalkCardSummary(message.text);
+  if (card) {
+    bubble.classList.add("dingtalk-message-bubble--card");
+    const block = createElementNode(document, "div", "dingtalk-message-card");
+    block.append(
+      createElementNode(document, "span", "dingtalk-message-card-label", card.label),
+      createElementNode(document, "span", "dingtalk-message-card-name", card.title),
+    );
+    if (card.description) {
+      block.append(
+        createElementNode(document, "span", "dingtalk-message-card-desc", card.description),
+      );
+    }
+    bubble.append(block);
+  } else if (message.cardTitle) {
     bubble.classList.add("dingtalk-message-bubble--card");
     bubble.append(
       createElementNode(document, "div", "dingtalk-message-card-title", message.cardTitle),
     );
   }
-  if (message.text.length > LONG_TEXT_LIMIT) {
-    // Very long bodies are kept as one plain text node; building markdown for
-    // tens of thousands of characters is what froze the Desktop.
-    const preview = createElementNode(
-      document,
-      "div",
-      "dingtalk-message-text dingtalk-message-text--long",
-      `${message.text.slice(0, LONG_TEXT_PREVIEW)}…`,
-    );
-    const expand = document.createElement("button");
-    expand.type = "button";
-    expand.className = "dingtalk-message-expand";
-    expand.textContent = "展开";
-    expand.addEventListener("click", () => {
-      preview.textContent = message.text;
-      expand.remove();
-    });
-    bubble.append(preview, expand);
-  } else if (message.format === "markdown") {
-    const markdown = createElementNode(document, "div", "dingtalk-message-markdown");
-    appendDingTalkMarkdown(document, markdown, message.text);
-    bubble.append(markdown);
-  } else if (message.text) {
-    bubble.append(createElementNode(document, "span", "dingtalk-message-text", message.text));
+  // A card payload is fully represented by the summary above; never print its
+  // raw text, JSON or long links as well.
+  if (!card) {
+    if (message.text.length > LONG_TEXT_LIMIT) {
+      // Very long bodies are kept as one plain text node; building markdown for
+      // tens of thousands of characters is what froze the Desktop.
+      const preview = createElementNode(
+        document,
+        "div",
+        "dingtalk-message-text dingtalk-message-text--long",
+        `${message.text.slice(0, LONG_TEXT_PREVIEW)}…`,
+      );
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.className = "dingtalk-message-expand";
+      expand.textContent = "展开";
+      expand.addEventListener("click", () => {
+        preview.textContent = message.text;
+        expand.remove();
+      });
+      bubble.append(preview, expand);
+    } else if (message.format === "markdown") {
+      const markdown = createElementNode(document, "div", "dingtalk-message-markdown");
+      appendDingTalkMarkdown(document, markdown, message.text);
+      bubble.append(markdown);
+    } else if (message.text) {
+      bubble.append(createElementNode(document, "span", "dingtalk-message-text", message.text));
+    }
   }
   if (!message.text && !message.cardTitle && !(message.resources?.length ?? 0)) {
     bubble.append(
@@ -649,26 +679,35 @@ function buildMessageRow(
   if (options.onDispatch || options.onReply || options.onMenu) {
     const actions = createElementNode(document, "div", "dingtalk-message-actions");
     if (options.onDispatch) {
-      const dispatch = createIconButton(document, text.dispatchAgent, BotIcon, {
-        className: "dingtalk-message-action",
-        size: 15,
-      });
+      const dispatch = withPageTooltip(
+        createIconButton(document, text.dispatchAgent, BotIcon, {
+          className: "dingtalk-message-action",
+          size: 15,
+        }),
+        text.dispatchAgent,
+      );
       dispatch.addEventListener("click", () => options.onDispatch?.(message));
       actions.append(dispatch);
     }
     if (options.onReply) {
-      const reply = createIconButton(document, text.replyMessage, ReplyIcon, {
-        className: "dingtalk-message-action",
-        size: 15,
-      });
+      const reply = withPageTooltip(
+        createIconButton(document, text.replyMessage, ReplyIcon, {
+          className: "dingtalk-message-action",
+          size: 15,
+        }),
+        text.replyMessage,
+      );
       reply.addEventListener("click", () => options.onReply?.(message));
       actions.append(reply);
     }
     if (options.onMenu) {
-      const more = createIconButton(document, text.messageMenu, EllipsisIcon, {
-        className: "dingtalk-message-action dingtalk-message-action--menu",
-        size: 15,
-      });
+      const more = withPageTooltip(
+        createIconButton(document, text.messageMenu, EllipsisIcon, {
+          className: "dingtalk-message-action dingtalk-message-action--menu",
+          size: 15,
+        }),
+        text.messageMenu,
+      );
       more.addEventListener("click", (event) => {
         event.stopPropagation();
         options.onMenu?.(message, more);

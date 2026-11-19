@@ -586,6 +586,43 @@
   line-height: var(--font-text-sm-line-height);
 }
 
+/* A card payload becomes a compact card: label, title and one short line. */
+.dingtalk-message-card {
+  display: flex;
+  max-width: 320px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--color-token-list-hover-background);
+  border-radius: 10px;
+}
+
+.dingtalk-message-card-label {
+  color: var(--color-text-accent);
+  font-size: var(--font-text-xs-size);
+  font-weight: 600;
+  line-height: var(--font-text-xs-line-height);
+}
+
+.dingtalk-message-card-name {
+  overflow: hidden;
+  color: var(--color-token-text-primary);
+  font-size: var(--font-text-sm-size);
+  font-weight: 600;
+  line-height: var(--font-text-sm-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dingtalk-message-card-desc {
+  overflow: hidden;
+  color: var(--color-token-text-secondary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dingtalk-message-markdown {
   color: var(--color-token-text-primary);
   font-size: var(--font-text-sm-size);
@@ -1744,6 +1781,20 @@
 .dingtalk-message-action:hover {
   color: var(--color-token-text-primary);
   background: var(--color-token-list-hover-background);
+}
+
+.dingtalk-tooltip {
+  position: fixed;
+  z-index: 90;
+  padding: 4px 8px;
+  color: #fff;
+  background: var(--color-token-tooltip-background, rgb(32 32 32 / 92%));
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  font-size: 12px;
+  line-height: 16px;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .dingtalk-message-menu {

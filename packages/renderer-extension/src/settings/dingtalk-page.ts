@@ -14,6 +14,7 @@ import type { RendererSettingsPageDefinition, RendererSettingsPageMountContext }
 import type { RendererSettingsLocale, RendererSettingsMessages } from "./localization.js";
 import {
   conversationMention,
+  mergeDingTalkConversationRows,
   mergeDingTalkMessages,
   messagePreview,
   type DingTalkPageState,
@@ -116,6 +117,10 @@ export function createDingTalkSettingsPage(
       let searchCursor = -1;
       let loadingOlderRequest = false;
       let loadedOlderPages = false;
+      /** Last real scroll intent; a rebuild must not look like scrolling up. */
+      let userScrollAt = Number.NEGATIVE_INFINITY;
+      /** Rebuilding the list moves scrollTop; older pages wait for the user. */
+      let ignoreOlderUntil = 0;
       const prefetchedIds = new Set<string>();
       const hoverBound = new WeakSet<HTMLElement>();
       const hoverTimers = new Map<string, number>();
@@ -124,7 +129,8 @@ export function createDingTalkSettingsPage(
       let skeletonTimer: number | null = null;
       const previewQueue: string[] = [];
       const previewPending = new Set<string>();
-      const previewAttempted = new Set<string>();
+      /** Row time the last preview attempt described; a newer message retries. */
+      const previewAttempted = new Map<string, number>();
       let previewActive = 0;
       const dispatchMarks = new Map<string, MessageDispatchedAgent[]>();
       const dispatchKey = (message: DingTalkMessage): string =>
@@ -228,6 +234,9 @@ export function createDingTalkSettingsPage(
       const messageListView = createDingTalkMessageList({
         document,
         container: messageList,
+        // Menus live beside the workbench so `dingtalk.css` (inside the
+        // settings shadow root) styles them.
+        overlayHost: root,
         text,
         onDispatch: (message) => {
           if (state.selectedId === null) return;
@@ -323,9 +332,59 @@ export function createDingTalkSettingsPage(
         },
       });
 
+      const tooltip = createElementNode(document, "div", "dingtalk-tooltip");
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.hidden = true;
+
       main.append(mainHead.element, notice, pane, composer.element);
-      root.append(sidebar, pageMenu.element, main, panel.element);
+      root.append(sidebar, pageMenu.element, main, panel.element, tooltip);
       context.content.append(root);
+
+      const tooltipAnchor = (event: Event): HTMLElement | null => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return null;
+        const anchor = target.closest<HTMLElement>("[data-tooltip]");
+        return anchor && root.contains(anchor) ? anchor : null;
+      };
+      const showTooltip = (anchor: HTMLElement): void => {
+        const label = anchor.dataset.tooltip?.trim();
+        if (!label) return;
+        tooltip.textContent = label;
+        tooltip.hidden = false;
+        const rect = anchor.getBoundingClientRect();
+        const size = tooltip.getBoundingClientRect();
+        const gap = 6;
+        const left = Math.min(
+          Math.max(8, rect.left + rect.width / 2 - size.width / 2),
+          view.innerWidth - size.width - 8,
+        );
+        const above = rect.top - gap - size.height;
+        tooltip.style.left = `${Math.round(left)}px`;
+        tooltip.style.top = `${Math.round(above >= 8 ? above : rect.bottom + gap)}px`;
+      };
+      const hideTooltip = (): void => {
+        tooltip.hidden = true;
+      };
+      root.addEventListener("pointerover", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (anchor) showTooltip(anchor);
+      });
+      root.addEventListener("pointerout", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (!anchor) return;
+        const related = event.relatedTarget;
+        if (related instanceof Node && anchor.contains(related)) return;
+        hideTooltip();
+      });
+      root.addEventListener("focusin", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (anchor) showTooltip(anchor);
+      });
+      root.addEventListener("focusout", hideTooltip);
+      messageList.addEventListener("scroll", () => {
+        hideTooltip();
+        messageListView.closeMenus();
+      });
 
       const lightbox = createDingTalkLightbox({
         document,
@@ -398,34 +457,42 @@ export function createDingTalkSettingsPage(
         if (searchCursor >= 0) rows[searchCursor]?.scrollIntoView({ block: "nearest" });
       };
 
-      const applyPreview = (conversationId: string, preview: string | null): void => {
-        previewAttempted.add(conversationId);
+      const applyPreview = (conversationId: string, preview: string): void => {
         const row = state.conversations.find(
           (conversation) => conversation.conversationId === conversationId,
         );
-        if (row) row.preview = preview ?? undefined;
+        if (row) row.preview = preview;
         const target = conversationList.querySelector<HTMLElement>(
           `[data-conversation-id="${CSS.escape(conversationId)}"] .dingtalk-conversation-preview`,
         );
-        if (target) target.textContent = preview ?? "";
+        if (target) target.textContent = preview;
       };
 
       const pumpPreviews = (): void => {
         while (previewActive < PREVIEW_CONCURRENCY && previewQueue.length > 0) {
           const conversationId = previewQueue.shift();
-          if (
-            !conversationId ||
-            previewPending.has(conversationId) ||
-            previewAttempted.has(conversationId)
-          )
-            continue;
+          if (!conversationId || previewPending.has(conversationId)) continue;
+          const requested = state.conversations.find(
+            (conversation) => conversation.conversationId === conversationId,
+          );
+          const requestedAt = requested?.lastMessageAt ?? 0;
+          if ((previewAttempted.get(conversationId) ?? -1) >= requestedAt) continue;
           previewPending.add(conversationId);
+          previewAttempted.set(conversationId, requestedAt);
           previewActive += 1;
           void (async () => {
             const generation = listGeneration;
             const result = await client?.preview(conversationId).catch(() => null);
             if (disposed || generation !== listGeneration) return;
-            applyPreview(conversationId, result?.preview ?? null);
+            const preview = result?.preview?.trim();
+            // An empty or failed read never blanks a preview the row already
+            // shows, and a newer message keeps its newer preview.
+            if (!preview) return;
+            const current = state.conversations.find(
+              (conversation) => conversation.conversationId === conversationId,
+            );
+            if (current && (current.lastMessageAt ?? 0) > requestedAt && current.preview) return;
+            applyPreview(conversationId, preview);
           })().finally(() => {
             previewPending.delete(conversationId);
             previewActive -= 1;
@@ -438,8 +505,11 @@ export function createDingTalkSettingsPage(
       };
 
       const requestPreview = (conversationId: string): void => {
-        if (!client || previewPending.has(conversationId) || previewAttempted.has(conversationId))
-          return;
+        if (!client || previewPending.has(conversationId)) return;
+        const row = state.conversations.find(
+          (conversation) => conversation.conversationId === conversationId,
+        );
+        if ((previewAttempted.get(conversationId) ?? -1) >= (row?.lastMessageAt ?? 0)) return;
         previewQueue.push(conversationId);
         pumpPreviews();
       };
@@ -562,7 +632,8 @@ export function createDingTalkSettingsPage(
         conversationRows.render(state.conversations, state.selectedId);
         warmVisibleConversations();
         for (const conversation of state.conversations) {
-          if (previewAttempted.has(conversation.conversationId)) continue;
+          const attemptedAt = previewAttempted.get(conversation.conversationId) ?? -1;
+          if (attemptedAt >= (conversation.lastMessageAt ?? 0)) continue;
           const row = conversationRows.elementFor(conversation.conversationId);
           if (!row) continue;
           if (!conversation.preview && previewObserver) previewObserver.observe(row);
@@ -620,6 +691,14 @@ export function createDingTalkSettingsPage(
         )}`;
       };
 
+      const resetMessages = (
+        messages: readonly ViewMessage[],
+        behavior?: { scroll?: "bottom"; distance?: number },
+      ): void => {
+        ignoreOlderUntil = view.performance.now() + 300;
+        messageListView.reset(messages, behavior);
+      };
+
       const renderMessages = (behavior?: { scroll?: "bottom"; distance?: number }): void => {
         if (state.selectedId === null) {
           messageListView.clear();
@@ -660,7 +739,7 @@ export function createDingTalkSettingsPage(
           return;
         }
         renderMainState(null);
-        messageListView.reset(state.messages, behavior);
+        resetMessages(state.messages, behavior);
         if (state.messages.length === 0) {
           messageList.append(
             createElementNode(document, "div", "dingtalk-message-empty", text.emptyMessages),
@@ -840,6 +919,7 @@ export function createDingTalkSettingsPage(
         const generation = messageGeneration;
         const nearBottom = distanceFromBottom() <= 80;
         const distance = distanceFromBottom();
+        const knownNewestAt = state.messages.at(-1)?.createdAt ?? 0;
         const result = await client
           .messages({ conversationId, limit: INITIAL_MESSAGE_LIMIT })
           .catch(() => null);
@@ -871,7 +951,7 @@ export function createDingTalkSettingsPage(
           messageListView.removeOldest(overflow);
         }
         if ([...known].some((id) => !state.messages.some((message) => message.messageId === id))) {
-          messageListView.reset(state.messages, nearBottom ? { scroll: "bottom" } : { distance });
+          resetMessages(state.messages, nearBottom ? { scroll: "bottom" } : { distance });
         } else
           messageListView.append(
             result.messages.filter((message) =>
@@ -881,7 +961,9 @@ export function createDingTalkSettingsPage(
         if (nearBottom) {
           scrollToBottom();
         } else {
-          state.pendingNewCount += fresh.length;
+          state.pendingNewCount += fresh.filter(
+            (message) => message.createdAt > knownNewestAt,
+          ).length;
           renderPill();
         }
         const newest = state.messages.at(-1);
@@ -925,8 +1007,12 @@ export function createDingTalkSettingsPage(
         }
         previewObserver?.disconnect();
         previewQueue.length = 0;
-        previewAttempted.clear();
-        state.conversations = result.conversations.map((row) => ({ ...row }));
+        // Rows keep what the page already learned; a list read that omits the
+        // preview must not blank the row and restart the queue.
+        state.conversations = mergeDingTalkConversationRows(
+          state.conversations,
+          result.conversations,
+        );
         // Keep only the row that is actually open; never reuse it after leaving the page.
         if (
           state.currentConversation &&
@@ -1231,8 +1317,22 @@ export function createDingTalkSettingsPage(
         clearSearch();
         searchInput.focus();
       });
+      const noteUserScroll = (): void => {
+        userScrollAt = view.performance.now();
+      };
+      messageList.addEventListener("wheel", noteUserScroll, { passive: true });
+      messageList.addEventListener("touchmove", noteUserScroll, { passive: true });
+      messageList.addEventListener("pointerdown", noteUserScroll);
+      messageList.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+          noteUserScroll();
+        }
+      });
       messageList.addEventListener("scroll", () => {
-        if (messageList.scrollTop < 80) {
+        // Only a real scroll up asks for history. A rebuild sets scrollTop to 0
+        // for a frame, and lazy images change heights; neither is the user.
+        const now = view.performance.now();
+        if (messageList.scrollTop < 80 && now - userScrollAt < 600 && now >= ignoreOlderUntil) {
           scrollRequest += 1;
           void loadOlder();
         }
