@@ -198,16 +198,26 @@ export class DingTalkDispatcher {
       Object.fromEntries(
         Object.entries(status)
           .filter(([fileName]) => this.#settings.agents[fileName])
-          .map(([fileName, value]) => [
-            fileName,
-            {
-              ...value,
-              ...(value.detail &&
-              /[a-z]{3,}/iu.test(value.detail.replace(/Gemini|Desktop|Key|openDingTalkId/gu, ""))
-                ? { detail: dingtalkRunError(value.detail) }
-                : {}),
-            },
-          ]),
+          .map(([fileName, value]) => {
+            // Automatic scoring used to persist "匹配度 … 阈值 …"; that text must
+            // not survive on a card that now shows manual results only.
+            const retired = /匹配度|阈值/u.test(value.detail ?? "");
+            return [
+              fileName,
+              {
+                ...value,
+                ...(value.detail && !retired
+                  ? /[a-z]{3,}/iu.test(
+                      value.detail.replace(/Gemini|Desktop|Key|openDingTalkId/gu, ""),
+                    )
+                    ? { detail: dingtalkRunError(value.detail) }
+                    : {}
+                  : retired
+                    ? { detail: undefined }
+                    : {}),
+              },
+            ];
+          }),
       ),
     );
   }

@@ -293,6 +293,18 @@ describe("DingTalk manual dispatch", () => {
     );
   });
 
+  it("hides threshold text persisted by the automatic dispatcher", async () => {
+    const f = await setup();
+    await f.state.setStatus("qa.toml", {
+      lastDispatchAt: 900,
+      result: "replied",
+      detail: "匹配度 0.90，已达阈值 0.85",
+    });
+    const status = await f.dispatcher.status();
+    expect(status["qa.toml"]).toMatchObject({ lastDispatchAt: 900, result: "replied" });
+    expect(status["qa.toml"]?.detail).toBeUndefined();
+  });
+
   it("does not dispatch anything from the event stream", async () => {
     const messages = fixtureMessages("dingtalk-message-list-single.json");
     const f = await setup({ messages });
