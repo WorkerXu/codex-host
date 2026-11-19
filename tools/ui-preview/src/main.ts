@@ -6,6 +6,10 @@ import { mountThreadFoldersPreview } from "./thread-folders.js";
 import { mountSidebarSectionsPreview } from "./sidebar-sections.js";
 import { createRepositoryPreviewClient } from "./code-repositories.js";
 import { mountSkillsPreview } from "./skills.js";
+import { hubAdminScenarios } from "./hub-admin-scenarios.js";
+import { createMcpAdminPage } from "../../../packages/renderer-extension/src/settings/mcp-admin-page.js";
+import { createMemoryAdminPage } from "../../../packages/renderer-extension/src/settings/memory-admin-page.js";
+import { createHubPreviewClient } from "./hub-admin.js";
 import previewCss from "./preview.css";
 import { applyDesktopTheme } from "./desktop-theme.js";
 import {
@@ -125,7 +129,7 @@ async function waitFor<T>(read: () => T | null | undefined, timeout = 4_000): Pr
 }
 
 function prepareSettings(
-  pageId: "dingtalk" | "codex-agents" | "jarvis",
+  pageId: "dingtalk" | "codex-agents" | "jarvis" | "mcp-servers" | "memory",
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
@@ -187,7 +191,17 @@ function prepareSettings(
   const jarvisPage = createJarvisSettingsPage(messages, {
     createClient: () => createFakeJarvisClient(),
   });
-  const shell = installRendererSettingsShell([dingtalkPage, agentsPage, jarvisPage], messages);
+  const hubOptions = { createClient: () => createHubPreviewClient(scenarioName) };
+  const shell = installRendererSettingsShell(
+    [
+      dingtalkPage,
+      agentsPage,
+      jarvisPage,
+      createMcpAdminPage(hubOptions),
+      createMemoryAdminPage(hubOptions),
+    ],
+    messages,
+  );
   const shadow = shell.root.shadowRoot;
   if (!shadow) throw new Error("Settings shell shadow root is missing");
   const query = <T extends Element>(selector: string) => shadow.querySelector<T>(selector);
@@ -204,7 +218,7 @@ function prepareSettings(
 }
 
 function mountSettings(
-  pageId: "dingtalk" | "codex-agents" | "jarvis",
+  pageId: "dingtalk" | "codex-agents" | "jarvis" | "mcp-servers" | "memory",
   dingtalkEmpty = false,
   dingtalkError = false,
   dingtalkStatus: FakeDingTalkStatus = "connected",
@@ -811,6 +825,14 @@ const scenarios: Record<string, () => Promise<void>> = {
     );
     shell.root.shadowRoot?.querySelector("#code-repositories")?.scrollIntoView({ block: "center" });
   },
+  ...hubAdminScenarios({
+    mount: (id) => mountSettings(id),
+    click: previewClick,
+    type: previewType,
+    key: previewKey,
+    hover: previewHover,
+    waitFor,
+  }),
   async "dingtalk-heavy"() {
     interface HeavyMetrics {
       openToListMs: number;

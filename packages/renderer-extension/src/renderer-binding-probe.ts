@@ -4,6 +4,7 @@ import { installDingTalkDispatchProject } from "./renderer-dingtalk-dispatch-pro
 import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
 import { mountRendererThreadFolders } from "./renderer-thread-folders.js";
 import { createRendererSkillsClient, SKILLS_HUB_METHOD } from "./renderer-skills-client.js";
+import { createRendererHubAdminClient } from "./renderer-hub-admin-client.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
 import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
@@ -889,6 +890,19 @@ export function installRendererBindingProbe(
   });
   let connectionDiagnostics: RendererConnectionDiagnostics | null = null;
   const remoteConnections = createRemoteConnectionsControl(window, modelClientForHost);
+  const hubAdminClient = createRendererHubAdminClient({
+    forHost: (hostId) => window.__codexhostHostRoutingV1?.forHost(hostId) ?? null,
+    async listHosts() {
+      const connections = await remoteConnections.ssh.list();
+      return [
+        { hostId: "local", displayName: "Local" },
+        ...connections.map((connection) => ({
+          hostId: connection.hostId,
+          displayName: connection.displayName,
+        })),
+      ];
+    },
+  });
   const codexAgentsClient = createRendererCodexAgentsClient({
     forHost(hostId) {
       const route = window.__codexhostHostRoutingV1?.forHost(hostId);
@@ -998,6 +1012,7 @@ export function installRendererBindingProbe(
       embed: (mention) => embedDingTalkMention(mention),
     },
     codexAgents: { createClient: () => codexAgentsClient },
+    hubAdmin: { createClient: () => hubAdminClient },
     onLocaleChange() {
       for (const mounted of mountedByComposer.values()) renderMounted(mounted);
     },

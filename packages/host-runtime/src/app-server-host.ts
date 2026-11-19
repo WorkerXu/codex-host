@@ -15,6 +15,9 @@ import {
 } from "@codexhost/shared-contracts";
 import { SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
 import { getSkillsHub, skillsError, type SkillsHubService } from "./skills-hub/service.js";
+import { HUB_ADMIN_METHOD } from "@codexhost/shared-contracts";
+import { HubAdminService } from "./hub-admin-service.js";
+import { HubAdminError } from "./hub-admin-http.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -502,6 +505,8 @@ export interface AppServerHostOptions {
   codeRepositories?: CodeRepositories;
   /** Central skills inventory, agent discovery and per-skill sync. */
   skillsHub?: Pick<SkillsHubService, "request">;
+  /** MCP server and memory administration through allowlisted localhost services. */
+  hubAdmin?: HubAdminService;
   /** DingTalk workbench, mention expansion and dws routing. */
   dingtalk?: DingTalkService;
   /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
@@ -1668,6 +1673,24 @@ export class AppServerHost {
           await this.#writer.json(rpcError(request, -32096, skillsError(error)));
         }
       });
+      return;
+    }
+    if (request.method === HUB_ADMIN_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service = this.#options.hubAdmin ?? new HubAdminService();
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(request, -32096, error instanceof HubAdminError ? error.code : "failed"),
+          );
+        }
+      });
+      return;
+    }
+    if (request.method.startsWith("codexhost/hub-admin/")) {
+      await this.#writer.json(rpcError(request, -32601, "invalid"));
       return;
     }
     if (request.method.startsWith("codexhost/jarvis/")) {

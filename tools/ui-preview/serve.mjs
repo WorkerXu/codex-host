@@ -15,6 +15,9 @@ const distFile = path.join(previewRoot, "dist/preview.js");
 const shadowContextPath = process.env.CODEX_SHADOW_CONTEXT ?? "";
 // Exported Desktop stylesheet supplies theme variables and native-DOM scenarios.
 const desktopCssPath = process.env.CODEX_DESKTOP_CSS ?? "";
+const nativeTheme = process.env.CODEX_PREVIEW_NATIVE_THEME === "1";
+if (nativeTheme && (!desktopCssPath || !existsSync(desktopCssPath)))
+  throw new Error("Native theme preview requires CODEX_DESKTOP_CSS");
 const host = "127.0.0.1";
 const port = Number(process.env.UI_PREVIEW_PORT ?? 4417);
 
@@ -48,8 +51,8 @@ function readShadowContext() {
 
 function shadowContextCss() {
   const context = readShadowContext();
-  const theme = readDesktopTheme();
-  const declarations = Object.entries(context.vars ?? {})
+  const theme = nativeTheme ? null : readDesktopTheme();
+  const declarations = Object.entries(nativeTheme ? {} : (context.vars ?? {}))
     .filter(([name]) => !theme?.declared.has(name))
     .map(([name, value]) => `  ${name}: ${value};`)
     .join("\n");
@@ -64,8 +67,11 @@ function shadowContextMetadata() {
     colorScheme: context.colorScheme ?? "light",
     themeSource: readDesktopTheme() ? "desktop-css" : "shadow-export",
     nativeThemeStylesheet: desktopCssPath,
-    darkApproximate:
-      !readDesktopTheme()?.colorSchemes && (context.colorScheme ?? "light") !== "dark",
+    // The native Desktop stylesheet resolves real dark values; the export does not.
+    darkApproximate: nativeTheme
+      ? false
+      : !readDesktopTheme()?.colorSchemes && (context.colorScheme ?? "light") !== "dark",
+    nativeTheme,
   };
 }
 
@@ -77,7 +83,17 @@ function send(response, status, type, body) {
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
   if (url.pathname === "/" || url.pathname === "/index.html") {
-    send(response, 200, types.get(".html"), readFileSync(path.join(previewRoot, "index.html")));
+    send(
+      response,
+      200,
+      types.get(".html"),
+      readFileSync(path.join(previewRoot, "index.html"), "utf8").replace(
+        '<html lang="zh-CN"',
+        nativeTheme
+          ? '<html lang="zh-CN" data-native-theme="true" data-codex-window-type="electron" data-codex-os="darwin" data-appearance-preset="codex"'
+          : '<html lang="zh-CN"',
+      ),
+    );
     return;
   }
   if (url.pathname === "/shadow-context.css") {

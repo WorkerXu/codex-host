@@ -603,6 +603,114 @@ for (const scenario of scenarios) {
         "native-desktop-theme",
         document.body.dataset.nativeTheme === document.body.dataset.theme,
       );
+      if (document.body.dataset.scenario?.startsWith("hub-")) {
+        check("hub-native-theme", document.documentElement.dataset.nativeTheme === "true");
+        check("hub-no-native-select", queryAll(".hub-page select").length === 0);
+        check(
+          "hub-no-developer-fields",
+          !query(".hub-page")?.textContent.includes("session-") &&
+            !query(".hub-page")?.textContent.includes("调用 —"),
+        );
+        const scenario = document.body.dataset.scenario;
+        if (scenario === "hub-servers") {
+          const disabled = query('.hub-server[data-disabled="true"]');
+          check(
+            "hub-disabled-content-dimmed",
+            disabled &&
+              Number(getComputedStyle(disabled.querySelector(".hub-server-title")).opacity) < 1 &&
+              !disabled.querySelector('[role="switch"]').disabled,
+          );
+          check(
+            "hub-metadata-separators",
+            getComputedStyle(query(".hub-server-meta span + span"), "::before").content.includes(
+              "·",
+            ),
+          );
+        }
+        if (["hub-memory", "hub-memory-search", "hub-memory-empty"].includes(scenario)) {
+          const values = queryAll(".hub-stat-value").map((element) => {
+            const style = getComputedStyle(element);
+            return `${style.fontSize}/${style.fontWeight}`;
+          });
+          check("hub-uniform-statistics", values.length === 3 && new Set(values).size === 1);
+          if (scenario !== "hub-memory")
+            check(
+              "hub-search-count-heading",
+              /搜索结果 · \d+ 条/u.test(query(".hub-section-head")?.textContent ?? ""),
+            );
+        }
+        if (scenario === "hub-header-rows") {
+          const add = query(".hub-header-editor > button");
+          check(
+            "hub-header-add-aligned",
+            Math.abs(
+              add.getBoundingClientRect().left -
+                query(".hub-header-row input").getBoundingClientRect().left,
+            ) < 2 && add.querySelector("svg"),
+          );
+        }
+        if (
+          [
+            "hub-connection-connect",
+            "hub-connection-replace",
+            "hub-connection-test-error",
+          ].includes(scenario)
+        ) {
+          const input = query('.hub-dialog input[type="password"]');
+          check("hub-key-masked", input && input.autocomplete === "off");
+          if (scenario === "hub-connection-test-error")
+            check("hub-failed-key-cleared", input?.value === "");
+        }
+        if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
+          check(
+            "hub-unconfigured-state",
+            query(".hub-connection-state h3")?.textContent === "尚未连接 MCPHub" &&
+              !visible(query('[aria-label="MCPHub 连接设置"]')),
+          );
+        if (scenario === "hub-connection-empty") {
+          const state = query(".hub-connection-state--empty");
+          const icon = state?.querySelector("svg");
+          const button = state?.querySelector("button");
+          check(
+            "hub-empty-content",
+            icon &&
+              button?.textContent === "连接" &&
+              state?.textContent.includes("填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥"),
+          );
+          const pageRect = query(".settings-page").getBoundingClientRect();
+          const center =
+            icon && button
+              ? (icon.getBoundingClientRect().top + button.getBoundingClientRect().bottom) / 2
+              : 0;
+          check(
+            "hub-empty-centered",
+            Math.abs(center - (pageRect.top + pageRect.bottom) / 2) < 48,
+            String(center),
+          );
+        }
+        if (scenario === "hub-connection-connect")
+          check(
+            "hub-connection-host-guidance",
+            query(".hub-dialog-content")?.textContent.includes(
+              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在 oracle-main 上。",
+            ),
+          );
+        if (["hub-auth-error", "hub-error"].includes(scenario))
+          check(
+            "hub-auth-recovery",
+            query(".hub-connection-state")?.textContent.includes("密钥无效或权限不足") &&
+              query(".hub-connection-state button")?.textContent === "更换密钥",
+          );
+        const primary = query(".hub-primary");
+        if (primary) {
+          const color = getComputedStyle(primary).backgroundColor;
+          check(
+            "hub-neutral-primary",
+            !/rgb\(\s*0,\s*(105|106),\s*(204|205)\s*\)/u.test(color),
+            color,
+          );
+        }
+      }
 
       // Every custom property used by the workbench must resolve inside the
       // shadow root, or carry an explicit fallback.

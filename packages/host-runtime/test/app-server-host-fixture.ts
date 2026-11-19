@@ -293,6 +293,7 @@ export function createFixture(
     desktopProjects?: DesktopProjectCatalogReader;
     externalOnly?: boolean;
     delegationPeers?: AppServerHostOptions["delegationPeers"];
+    hubAdmin?: AppServerHostOptions["hubAdmin"];
     jarvis?: AppServerHostOptions["jarvis"];
     modelService?: AppServerHostOptions["modelService"];
     codeRepositories?: AppServerHostOptions["codeRepositories"];
@@ -365,6 +366,7 @@ export function createFixture(
           },
         }
       : {}),
+    ...(options.hubAdmin ? { hubAdmin: options.hubAdmin } : {}),
     ...(options.jarvis ? { jarvis: options.jarvis } : {}),
     ...(options.modelService ? { modelService: options.modelService } : {}),
     ...(options.codeRepositories ? { codeRepositories: options.codeRepositories } : {}),
