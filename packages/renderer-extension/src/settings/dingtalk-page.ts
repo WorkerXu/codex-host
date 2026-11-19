@@ -228,6 +228,9 @@ export function createDingTalkSettingsPage(
       const messageListView = createDingTalkMessageList({
         document,
         container: messageList,
+        // Menus live beside the workbench so `dingtalk.css` (inside the
+        // settings shadow root) styles them.
+        overlayHost: root,
         text,
         onDispatch: (message) => {
           if (state.selectedId === null) return;
@@ -323,9 +326,59 @@ export function createDingTalkSettingsPage(
         },
       });
 
+      const tooltip = createElementNode(document, "div", "dingtalk-tooltip");
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.hidden = true;
+
       main.append(mainHead.element, notice, pane, composer.element);
-      root.append(sidebar, pageMenu.element, main, panel.element);
+      root.append(sidebar, pageMenu.element, main, panel.element, tooltip);
       context.content.append(root);
+
+      const tooltipAnchor = (event: Event): HTMLElement | null => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return null;
+        const anchor = target.closest<HTMLElement>("[data-tooltip]");
+        return anchor && root.contains(anchor) ? anchor : null;
+      };
+      const showTooltip = (anchor: HTMLElement): void => {
+        const label = anchor.dataset.tooltip?.trim();
+        if (!label) return;
+        tooltip.textContent = label;
+        tooltip.hidden = false;
+        const rect = anchor.getBoundingClientRect();
+        const size = tooltip.getBoundingClientRect();
+        const gap = 6;
+        const left = Math.min(
+          Math.max(8, rect.left + rect.width / 2 - size.width / 2),
+          view.innerWidth - size.width - 8,
+        );
+        const above = rect.top - gap - size.height;
+        tooltip.style.left = `${Math.round(left)}px`;
+        tooltip.style.top = `${Math.round(above >= 8 ? above : rect.bottom + gap)}px`;
+      };
+      const hideTooltip = (): void => {
+        tooltip.hidden = true;
+      };
+      root.addEventListener("pointerover", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (anchor) showTooltip(anchor);
+      });
+      root.addEventListener("pointerout", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (!anchor) return;
+        const related = event.relatedTarget;
+        if (related instanceof Node && anchor.contains(related)) return;
+        hideTooltip();
+      });
+      root.addEventListener("focusin", (event) => {
+        const anchor = tooltipAnchor(event);
+        if (anchor) showTooltip(anchor);
+      });
+      root.addEventListener("focusout", hideTooltip);
+      messageList.addEventListener("scroll", () => {
+        hideTooltip();
+        messageListView.closeMenus();
+      });
 
       const lightbox = createDingTalkLightbox({
         document,

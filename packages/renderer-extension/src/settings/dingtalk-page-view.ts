@@ -84,6 +84,13 @@ export function createIcon(
   return node;
 }
 
+/** Icon actions in the transcript use the page's styled tooltip, not the OS one. */
+function withPageTooltip(button: HTMLButtonElement, label: string): HTMLButtonElement {
+  button.dataset.tooltip = label;
+  button.title = "";
+  return button;
+}
+
 export function createIconButton(
   document: Document,
   label: string,
@@ -649,26 +656,35 @@ function buildMessageRow(
   if (options.onDispatch || options.onReply || options.onMenu) {
     const actions = createElementNode(document, "div", "dingtalk-message-actions");
     if (options.onDispatch) {
-      const dispatch = createIconButton(document, text.dispatchAgent, BotIcon, {
-        className: "dingtalk-message-action",
-        size: 15,
-      });
+      const dispatch = withPageTooltip(
+        createIconButton(document, text.dispatchAgent, BotIcon, {
+          className: "dingtalk-message-action",
+          size: 15,
+        }),
+        text.dispatchAgent,
+      );
       dispatch.addEventListener("click", () => options.onDispatch?.(message));
       actions.append(dispatch);
     }
     if (options.onReply) {
-      const reply = createIconButton(document, text.replyMessage, ReplyIcon, {
-        className: "dingtalk-message-action",
-        size: 15,
-      });
+      const reply = withPageTooltip(
+        createIconButton(document, text.replyMessage, ReplyIcon, {
+          className: "dingtalk-message-action",
+          size: 15,
+        }),
+        text.replyMessage,
+      );
       reply.addEventListener("click", () => options.onReply?.(message));
       actions.append(reply);
     }
     if (options.onMenu) {
-      const more = createIconButton(document, text.messageMenu, EllipsisIcon, {
-        className: "dingtalk-message-action dingtalk-message-action--menu",
-        size: 15,
-      });
+      const more = withPageTooltip(
+        createIconButton(document, text.messageMenu, EllipsisIcon, {
+          className: "dingtalk-message-action dingtalk-message-action--menu",
+          size: 15,
+        }),
+        text.messageMenu,
+      );
       more.addEventListener("click", (event) => {
         event.stopPropagation();
         options.onMenu?.(message, more);

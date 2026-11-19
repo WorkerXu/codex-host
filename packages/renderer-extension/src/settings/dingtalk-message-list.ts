@@ -24,6 +24,11 @@ export interface DingTalkMessageListOptions {
   document: Document;
   /** The scrolling transcript element. */
   container: HTMLElement;
+  /**
+   * Where message menus mount. The settings page lives in a shadow root, so a
+   * menu appended to `document.body` would render without `dingtalk.css`.
+   */
+  overlayHost?: HTMLElement;
   text: DingTalkPageText;
   loadResource(
     message: DingTalkMessage,
@@ -226,7 +231,7 @@ export function createDingTalkMessageList(
     if (options.onDispatch) item(text.dispatchAgent, () => options.onDispatch?.(message));
     item(text.copyMessage, () => copyText(message.text));
     if (options.onReply) item(text.replyMessage, () => options.onReply?.(message));
-    document.body.append(menu);
+    (options.overlayHost ?? document.body).append(menu);
     const placement = createDingTalkAnchoredMenu(menu, anchor, "right");
     menuPlacements.set(menu, placement);
     placement.toggle();

@@ -1746,6 +1746,20 @@
   background: var(--color-token-list-hover-background);
 }
 
+.dingtalk-tooltip {
+  position: fixed;
+  z-index: 90;
+  padding: 4px 8px;
+  color: #fff;
+  background: var(--color-token-tooltip-background, rgb(32 32 32 / 92%));
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  font-size: 12px;
+  line-height: 16px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .dingtalk-message-menu {
   position: fixed;
   inset: auto;
