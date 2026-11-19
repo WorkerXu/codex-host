@@ -4,15 +4,26 @@ import { HubAdminError, hubJson } from "../src/hub-admin-http.js";
 
 const secret = "test-secret-that-must-not-leak";
 const success = (data?: unknown) => Response.json({ success: true, data });
-function service(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+function service(
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  saved: string | null = secret,
+) {
   const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) =>
     handler(String(url), init),
   );
+  let stored = saved;
+  const connection = {
+    read: vi.fn(async () => stored),
+    write: vi.fn(async (value: string | null) => {
+      stored = value;
+    }),
+  };
   return {
     fetcher,
+    connection,
     service: new HubAdminService({
       fetch: fetcher as typeof fetch,
-      mcpConnection: { read: async () => secret, write: async () => {} },
+      mcpConnection: connection,
       mcpHeaderName: async () => "X-Test-Key",
       memoryToken: async () => secret,
       forgetMemoryToken: async () => {},
@@ -286,5 +297,45 @@ describe("MCP page overview", () => {
       keys: { headerName: "Authorization", keys: [] },
     });
     expect(f.fetcher.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("MCP connection state", () => {
+  it("reports a never-connected Host without contacting MCPHub", async () => {
+    const f = service(() => success(), null);
+    await expect(f.service.request({ op: "mcpOverview" })).resolves.toEqual({
+      configured: false,
+      last4: null,
+      servers: null,
+      keys: null,
+    });
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects a 401 key as incorrect and does not store it", async () => {
+    const f = service(() => new Response("", { status: 401 }), null);
+    await expect(
+      f.service.request({ op: "mcpConnect", key: "mcphub_fake_candidate_1234" }),
+    ).rejects.toMatchObject({ code: "mcp-key-invalid" });
+    expect(f.connection.write).not.toHaveBeenCalled();
+    await expect(f.connection.read()).resolves.toBeNull();
+  });
+
+  it("rejects a scoped key with the all-access message", async () => {
+    const f = service(
+      () => new Response("this is not a system-level all-access key", { status: 403 }),
+      null,
+    );
+    await expect(
+      f.service.request({ op: "mcpConnect", key: "mcphub_fake_candidate_1234" }),
+    ).rejects.toMatchObject({ code: "mcp-key-scoped" });
+    expect(f.connection.write).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored-key failure path distinct from a new connection", async () => {
+    const f = service(() => new Response("", { status: 401 }));
+    await expect(f.service.request({ op: "servers" })).rejects.toMatchObject({
+      code: "mcp-auth",
+    });
   });
 });

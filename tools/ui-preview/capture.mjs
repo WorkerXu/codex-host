@@ -672,7 +672,7 @@ for (const scenario of scenarios) {
         if (["hub-connection-empty", "hub-connection-disconnected"].includes(scenario))
           check(
             "hub-unconfigured-state",
-            query(".hub-connection-state h3")?.textContent === "尚未连接 MCPHub" &&
+            query(".hub-connection-state h3")?.textContent === "连接 MCPHub" &&
               !visible(query('[aria-label="MCPHub 连接设置"]')),
           );
         if (scenario === "hub-connection-empty") {
@@ -683,7 +683,9 @@ for (const scenario of scenarios) {
             "hub-empty-content",
             icon &&
               button?.textContent === "连接" &&
-              state?.textContent.includes("填入 MCPHub 管理员密钥后，可在这里管理服务器和密钥"),
+              state?.textContent.includes(
+                "需要“全部访问”类型的密钥（MCPHub 设置 › 密钥 中 accessType 为全部的密钥，例如 admin）",
+              ),
           );
           const pageRect = query(".settings-page").getBoundingClientRect();
           const center =
@@ -700,7 +702,7 @@ for (const scenario of scenarios) {
           check(
             "hub-connection-host-guidance",
             query(".hub-dialog-content")?.textContent.includes(
-              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在本机。",
+              "需要系统级、全部访问（accessType 为全部）的密钥。密钥只保存在本机。",
             ),
           );
         if (["hub-auth-error", "hub-error"].includes(scenario))

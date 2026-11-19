@@ -26,6 +26,10 @@ it("localizes stable codes and hides raw errors", () => {
   expect(hubErrorText(new Error("forbidden"))).toBe("无权限");
   expect(hubErrorText(new Error("timeout"))).toBe("连接超时");
   expect(hubErrorText(new Error("secret in upstream error"))).toBe("连接失败");
+  expect(hubErrorText(new Error("mcp-key-invalid"))).toBe("密钥不正确");
+  expect(hubErrorText(new Error("mcp-key-scoped"))).toBe(
+    "这个密钥只能访问部分服务器，管理需要“全部访问”类型的密钥",
+  );
 });
 it("sends a candidate only to the selected Host and rejects credential-bearing responses", async () => {
   const key = "mcphub_fake_candidate_1234";

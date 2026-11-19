@@ -15,6 +15,7 @@ export async function hubJson(
   headers: Record<string, string>,
   method = "GET",
   body?: unknown,
+  mapError?: (response: Response, text: string) => HubAdminError | null,
 ): Promise<unknown> {
   if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(base)) throw new HubAdminError("failed");
   try {
@@ -26,6 +27,16 @@ export async function hubJson(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) {
+      if (mapError) {
+        let text = "";
+        try {
+          text = await response.text();
+        } catch {
+          /* The status still decides. */
+        }
+        const mapped = mapError(response, text);
+        if (mapped) throw mapped;
+      }
       throw new HubAdminError(
         response.status === 401 || response.status === 403
           ? "forbidden"
