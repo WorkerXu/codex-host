@@ -54,9 +54,20 @@
 - 本机目标：`appServices.projects.createLocal({appearance:null, initializeDefaultWorkspaceGitRepository:false, name, setActive:false, sources:[]})`。`sources` 为空时 Desktop 自己创建默认项目目录；返回 `{projectId, rootPaths}`。`setActive:false` 不改变用户当前选中的项目。
 - 若目标机已有同名但不同路径的项目，不复用；按候选规则新建。
 - 兼容层：在目标 Host 调用 `project/create {name, roots:[{path}], metadata:{}, idempotencyKey:<remoteProjectId>}`；失败只写日志，不影响主流程。使用 remote project id 作为幂等键，未来 Desktop 迁移时不会重复建项目。
-- 创建后等待侧栏出现 `data-app-action-sidebar-project-id="<id>"`，再点击该项目行的原生新对话按钮。
+- 创建后等待侧栏出现 `data-app-action-sidebar-project-id="<id>"`，再点击该项目行的原生新对话按钮。等待使用 `MutationObserver` 观察侧栏，不做固定间隔轮询。
 
-## 自动分区
+## 进度反馈
+
+- 点击「其他机器」里的 Harness 后立即（同一事件循环内，远小于 100ms）在 Composer 上方显示一张紧凑状态卡：`data-codexhost-project-mirror-progress`，`role="status"`、`pointer-events:none`，不抢焦点也不拦截信任弹窗的点击。
+- 步骤文案依次为「正在 <机器> 上创建项目…」→「加入分区…」→「打开新对话…」，结束时显示「已在新对话中打开」约 1.6 秒后自动消失；失败显示中文原因约 8 秒。
+- 远程目标的创建步骤下常驻提示「接下来 Desktop 会请你确认信任这个文件夹」：`createRemote` 内部会触发 Desktop 原生的文件夹信任弹窗，等待用户确认的时间属于该步骤，不会被跳过或代为确认。本机目标不显示该提示。
+- 卡片宽度按内容自适应，上限 360px，并随窗口缩放/滚动重新定位；上方空间不足时翻到 Composer 下方，始终留在视口内。
+- 本机目标文案为「正在本机创建项目…」。
+
+## 自动分区与登记
+
+- 分区加入和登记表写入在项目创建成功后立即并行启动，不阻塞新对话打开；任一步失败都在对话打开后通过既有提示/诊断报告。
+- `chooseMirrorDestination` 返回它实际探测到的目录状态，避免创建前再次 `fs/getMetadata` 重复一次远程往返。
 
 - 镜像项目与源项目放进同一个 Desktop 原生分区。运行期按窗口实际暴露的接口选路径：
   - 有 `appServices.savedCustomSections` 时，使用 `applySavedCustomSectionCommand`：源项目已在某分区就把远程项目的 `codex:project:<remoteProjectId>` 移入该分区，否则新建以项目名命名的分区并同时包含两个项目；命令返回的 transition 在 `local` 和目标 Host 上补齐分区副本（`createSection` + `saveReplica`，已有 `hostSectionIds` 时跳过）。
@@ -108,12 +119,12 @@ Host 只提供本地 RPC：
 | 失败点 | 行为 |
 | --- | --- |
 | 机器离线/无路由 | 菜单中整行置灰；不创建 |
-| home/dir 读取失败 | toast，结束 |
-| `createRemote` 返回 null（用户取消信任确认） | toast，结束 |
-| `createLocal` 返回 null（用户取消） | toast，结束 |
-| 项目已创建但侧栏未出现（5s） | toast「项目已创建，请稍后手动打开」 |
-| 原生新对话按钮不存在/禁用 | toast，项目保留 |
-| 自动分区失败 | toast「项目已创建，但未能自动加入同一分区」，不阻塞 |
+| home/dir 读取失败 | 状态卡显示中文原因，结束 |
+| `createRemote` 返回 null（用户取消信任确认） | 状态卡显示中文原因，结束 |
+| `createLocal` 返回 null（用户取消） | 状态卡显示中文原因，结束 |
+| 项目已创建但侧栏未出现（5s） | 状态卡「项目已创建，但侧栏尚未显示，请稍后手动打开」 |
+| 原生新对话按钮不存在/禁用 | 状态卡「该项目当前不可用，可能已离线」，项目保留 |
+| 自动分区失败 | 对话打开后提示「项目已创建，但未能自动加入同一分区」，不阻塞 |
 | Harness 切换失败/超时 | 新对话保留默认 Codex，不阻塞 |
 | `project/create` 失败 | 仅日志，继续 |
 

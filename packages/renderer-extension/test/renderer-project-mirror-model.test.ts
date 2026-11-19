@@ -219,7 +219,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({}),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: "remote-alpha" });
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: "remote-alpha", state: "directory" });
   });
 
   it("skips a path owned by a differently named project", async () => {
@@ -233,7 +233,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null, state: "missing" });
   });
 
   it("reuses an existing directory without a project", async () => {
@@ -247,7 +247,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: null, state: "directory" });
   });
 
   it("skips a file and uses the next numbered directory", async () => {
@@ -261,6 +261,6 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "other" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null, state: "missing" });
   });
 });

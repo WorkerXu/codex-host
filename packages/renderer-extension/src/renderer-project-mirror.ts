@@ -15,29 +15,26 @@ import {
   type CrossHostAgentSelection,
 } from "./renderer-cross-host-agent-section.js";
 import {
-  chooseMirrorDestination,
-  findNameOnlyLocalProject,
-  mirrorDirectoryCandidates,
   readComposerProject,
   resolveMirrorSource,
   type MirrorProjectSource,
   type ProjectEligibilityReason,
 } from "./renderer-project-mirror-model.js";
+import {
+  createProjectMirrorProgress,
+  projectMirrorProgressText,
+  type ProjectMirrorProgressControl,
+} from "./renderer-project-mirror-progress.js";
 import { showProjectMirrorNotice } from "./renderer-project-mirror-notice.js";
-import { joinMirroredProjectSection } from "./renderer-project-mirror-section.js";
+import { runProjectMirror } from "./renderer-project-mirror-run.js";
 import {
   createProjectMirrorRpc,
   localProjectMirrorManager,
-  type ProjectMirrorRpc,
 } from "./renderer-project-mirror-rpc.js";
 import {
   loadProjectMirrorDesktopServices,
   type ProjectMirrorDesktopServices,
 } from "./renderer-project-mirror-services.js";
-
-type HostRoute = {
-  manager: { sendRequest(method: string, params: unknown): Promise<unknown> };
-};
 
 type ProjectSource = "composer" | "catalog";
 
@@ -84,11 +81,7 @@ declare global {
 
 const PENDING_TTL_MS = 60_000;
 const PENDING_RETRY_MS = 800;
-const SIDEBAR_TIMEOUT_MS = 5_000;
 const HARNESS_CATALOG_TTL_MS = 10_000;
-
-const record = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -96,10 +89,6 @@ function errorMessage(error: unknown): string {
 
 function localManager(): ReturnType<typeof localProjectMirrorManager> {
   return localProjectMirrorManager(window.__codexhostHostRoutingV1);
-}
-
-function hostRoute(hostId: string): HostRoute | null {
-  return (window.__codexhostHostRoutingV1?.forHost(hostId) as HostRoute | null) ?? null;
 }
 
 interface ContextResult {
@@ -139,31 +128,6 @@ async function readContext(composer: Element): Promise<ContextResult> {
     };
   } catch (error) {
     return { context: null, source: null, reason: "catalog-error", error: errorMessage(error) };
-  }
-}
-
-async function upsertRegistry(
-  rpc: ProjectMirrorRpc,
-  input: {
-    sourceProjectId: string;
-    record?: {
-      hostId: string;
-      remoteProjectId: string;
-      remotePath: string;
-      label: string;
-      createdAt: string;
-      updatedAt: string;
-    } | null;
-  },
-): Promise<void> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const current = await rpc.list();
-    try {
-      await rpc.upsert({ revision: current.revision, ...input });
-      return;
-    } catch (error) {
-      if (attempt === 1) throw error;
-    }
   }
 }
 
@@ -223,79 +187,6 @@ function loadHarnessCatalog(
   return value;
 }
 
-async function listAppProjects(
-  route: HostRoute,
-): Promise<Array<{ id: string; name: string; roots: Array<{ path: string }> }>> {
-  const projects: Array<{ id: string; name: string; roots: Array<{ path: string }> }> = [];
-  let cursor: string | null = null;
-  do {
-    const response = await route.manager.sendRequest("project/list", {
-      cursor,
-      limit: 100,
-    });
-    const rows = record(response) && Array.isArray(response.data) ? response.data : [];
-    for (const row of rows) {
-      if (!record(row) || typeof row.id !== "string" || typeof row.name !== "string") continue;
-      const roots = Array.isArray(row.roots)
-        ? row.roots
-            .filter(
-              (root): root is { path: string } => record(root) && typeof root.path === "string",
-            )
-            .map((root) => ({ path: root.path }))
-        : [];
-      projects.push({ id: row.id, name: row.name, roots });
-    }
-    cursor =
-      record(response) && typeof response.nextCursor === "string" ? response.nextCursor : null;
-  } while (cursor);
-  return projects;
-}
-
-type DirectoryState = "directory" | "missing" | "other";
-
-async function directoryState(route: HostRoute, path: string): Promise<DirectoryState> {
-  try {
-    const metadata = await route.manager.sendRequest("fs/getMetadata", { path });
-    return record(metadata) && metadata.isDirectory === true ? "directory" : "other";
-  } catch (error) {
-    return /No such file|os error 2|not found/iu.test(errorMessage(error)) ? "missing" : "other";
-  }
-}
-
-function sidebarProjectRow(projectId: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    `[data-app-action-sidebar-project-id="${CSS.escape(projectId)}"]`,
-  );
-}
-
-async function waitForSidebarProject(projectId: string): Promise<HTMLElement | null> {
-  const existing = sidebarProjectRow(projectId);
-  if (existing) return existing;
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
-      observer.disconnect();
-      resolve(null);
-    }, SIDEBAR_TIMEOUT_MS);
-    const observer = new MutationObserver(() => {
-      const row = sidebarProjectRow(projectId);
-      if (!row) return;
-      window.clearTimeout(timeout);
-      observer.disconnect();
-      resolve(row);
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  });
-}
-
-function newChatButton(row: HTMLElement): HTMLButtonElement | null {
-  const buttons = [
-    ...row.querySelectorAll<HTMLButtonElement>(
-      "button:not([aria-haspopup]):not([data-app-action-sidebar-select-project])",
-    ),
-  ];
-  return buttons.length === 1 ? (buttons[0] ?? null) : null;
-}
-
 export function installRendererProjectMirror(): RendererProjectMirrorApi {
   const existing = window.__codexhostProjectMirrorV1;
   if (existing) return existing;
@@ -313,162 +204,45 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
   };
   let disposed = false;
 
-  const runMirror = async (
+  let activeProgress: ProjectMirrorProgressControl | null = null;
+  const startMirror = (
+    composer: Element,
     context: ProjectMirrorContext,
     selection: CrossHostAgentSelection,
     services: ProjectMirrorDesktopServices,
-    rpc: ProjectMirrorRpc,
-  ): Promise<{ ok: boolean; message: string | null }> => {
-    const fail = (message: string): { ok: false; message: string } => {
-      showProjectMirrorNotice(document, message, "error");
-      return { ok: false, message };
-    };
-    const sourceId = context.source.id;
-    if (inFlight.has(sourceId)) {
-      return { ok: false, message: "正在添加这台机器，请稍候。" };
+    rpc: ReturnType<typeof createProjectMirrorRpc>,
+  ): void => {
+    if (inFlight.has(context.source.id)) {
+      showProjectMirrorNotice(document, "正在添加这台机器，请稍候。");
+      return;
     }
-    inFlight.add(sourceId);
-    const hostId = selection.machine.hostId;
-    const name = context.source.name.trim() || context.source.name;
-    try {
-      const route = hostRoute(hostId);
-      if (!route) return fail(`${selection.machine.label} 当前离线`);
-      const registry = await rpc.list();
-      const known = registry.projects[sourceId];
-      const now = new Date().toISOString();
-      let projectId: string | null;
-      let chosenPath: string;
-
-      if (hostId === "local") {
-        // The mirror runs the other way: Desktop creates `~/Documents/ChatGPT/<name>`
-        // here, so the Mac reuses its own same-name project when it exists.
-        const existing =
-          (known?.hostId === "local"
-            ? context.catalog.localProjects[known.remoteProjectId]
-            : undefined) ??
-          findNameOnlyLocalProject(
-            Object.values(context.catalog.localProjects),
-            name,
-            context.catalog.defaultProjectParent,
-          );
-        if (existing) {
-          projectId = existing.id;
-          chosenPath = existing.rootPaths[0] ?? "";
-        } else {
-          const created = await services.projects.createLocal({
-            appearance: null,
-            initializeDefaultWorkspaceGitRepository: false,
-            name,
-            setActive: false,
-            sources: [],
-          });
-          if (!created) return fail("创建本机项目被取消");
-          projectId = created.projectId;
-          chosenPath = created.rootPaths[0] ?? "";
-        }
-      } else {
-        const { homeDirectory } = await services.executionPaths.readHomeDirectory(hostId);
-        const parent = `${homeDirectory.replace(/\/+$/u, "")}/Documents/ChatGPT`;
-        const remoteProjects = context.catalog.remoteProjects.filter(
-          (project) => project.hostId === hostId,
-        );
-        const appProjects = await listAppProjects(route).catch(() => []);
-        const destination = await chooseMirrorDestination({
-          name,
-          hostId,
-          candidates: mirrorDirectoryCandidates(parent, name),
-          known:
-            known && known.hostId === hostId
-              ? {
-                  hostId: known.hostId,
-                  remotePath: known.remotePath,
-                  remoteProjectId: known.remoteProjectId,
-                }
-              : null,
-          desktopProjects: remoteProjects,
-          appProjects,
-          directoryState: (path) => directoryState(route, path),
-        });
-        if (!destination) return fail("找不到可用的远程目录名");
-        chosenPath = destination.path;
-        projectId = destination.projectId;
-
-        if (!projectId) {
-          if ((await directoryState(route, chosenPath)) === "missing") {
-            await services.workspaceFiles.createDirectory({ hostId, path: chosenPath });
-            if ((await directoryState(route, chosenPath)) !== "directory") {
-              return fail("远程目录创建失败");
-            }
-          }
-          const created = await services.projects.createRemote({
-            appearance: null,
-            hostId,
-            label: name,
-            remotePath: chosenPath,
-            reuseExisting: true,
-          });
-          if (!created) return fail("创建远程项目被取消");
-          projectId = created.id;
-        }
-
-        if (!projectId) return fail("创建远程项目失败");
-        const appProject = appProjects.find((project) =>
-          project.roots.some((root) => root.path === chosenPath),
-        );
-        if (!appProject) {
-          void route.manager
-            .sendRequest("project/create", {
-              name,
-              roots: [{ path: chosenPath }],
-              metadata: {},
-              idempotencyKey: projectId,
-            })
-            .catch((error: unknown) =>
-              console.warn("codexhost project mirror: project/create failed", error),
-            );
-        }
-      }
-
-      if (!projectId || !chosenPath) return fail("创建项目失败，请稍后重试");
-      await upsertRegistry(rpc, {
-        sourceProjectId: sourceId,
-        record: {
-          hostId,
-          remoteProjectId: projectId,
-          remotePath: chosenPath,
-          label: name,
-          createdAt: known?.createdAt ?? now,
-          updatedAt: now,
-        },
-      });
-
-      try {
-        await joinMirroredProjectSection({
-          services,
-          sourceProjectId: sourceId,
-          remoteProjectId: projectId,
-          projectName: name,
-          targetHostId: hostId,
-        });
-      } catch (error) {
-        // The remote conversation is still usable; only the shared section failed.
+    activeProgress?.dispose();
+    const progress = createProjectMirrorProgress({
+      document,
+      anchor: composer,
+      text: projectMirrorProgressText({
+        machineLabel: selection.machine.label,
+        local: selection.machine.hostId === "local",
+      }),
+    });
+    activeProgress = progress;
+    void runProjectMirror({
+      document,
+      routing: window.__codexhostHostRoutingV1,
+      context,
+      selection,
+      services,
+      rpc,
+      progress,
+      inFlight,
+      pending,
+      onBackgroundError: (error) => {
         status.lastError = errorMessage(error);
-        showProjectMirrorNotice(document, "项目已创建，但未能自动加入同一分区", "error");
-      }
-
-      const row = await waitForSidebarProject(projectId);
-      if (!row) return fail("项目已创建，但侧栏尚未显示，请稍后手动打开");
-      const button = newChatButton(row);
-      if (!button || button.disabled) return fail("该项目当前不可用，可能已离线");
-      pending.set(hostId, { agentId: selection.harness.id, createdAt: Date.now() });
-      button.click();
-    } catch (error) {
+      },
+    }).catch((error: unknown) => {
       status.lastError = errorMessage(error);
-      return { ok: false, message: "添加机器失败，请稍后重试。" };
-    } finally {
-      inFlight.delete(sourceId);
-    }
-    return { ok: true, message: null };
+      progress.fail("添加机器失败，请稍后重试。");
+    });
   };
   const openForAgentPicker: RendererProjectMirrorApi["openForAgentPicker"] = (input) => {
     if (disposed) return;
@@ -501,12 +275,22 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
         loading: true,
         onClose: () => input.picker.close(),
         onSelect: (selection) => {
+          input.picker.close();
           if (!services) {
-            showProjectMirrorNotice(document, "Desktop 项目服务尚未就绪，请稍后重试", "error");
+            activeProgress?.dispose();
+            const progress = createProjectMirrorProgress({
+              document,
+              anchor: input.composer,
+              text: projectMirrorProgressText({
+                machineLabel: selection.machine.label,
+                local: selection.machine.hostId === "local",
+              }),
+            });
+            activeProgress = progress;
+            progress.fail("Desktop 项目服务尚未就绪，请稍后重试");
             return;
           }
-          input.picker.close();
-          void runMirror(context, selection, services, rpc);
+          startMirror(input.composer, context, selection, services, rpc);
         },
       });
       menu.append(section.element);
@@ -573,6 +357,8 @@ export function installRendererProjectMirror(): RendererProjectMirrorApi {
     },
     dispose() {
       disposed = true;
+      activeProgress?.dispose();
+      activeProgress = null;
       pending.clear();
       delete window.__codexhostProjectMirrorV1;
     },
