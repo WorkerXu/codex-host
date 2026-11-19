@@ -60,7 +60,7 @@ export function createHarnessAccounts(
     const byAccount = new Map(accounts.map((account) => [accountKey(account), account]));
     await Promise.all(
       sources.sources
-        .filter((source) => options.shouldInspect?.(source.harnessId) !== false)
+        .filter((source) => force || options.shouldInspect?.(source.harnessId) !== false)
         .map(async (source) => {
           try {
             const result = await client.inspectHarnessAccount({

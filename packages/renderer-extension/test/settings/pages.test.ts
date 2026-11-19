@@ -802,6 +802,11 @@ describe("Read-only Harness accounts", () => {
       harnessId: "claude-code",
     });
     expect(mounted.accounts.map(({ harnessId }) => harnessId)).toEqual(["claude-code"]);
+    // A manual refresh bypasses the not-installed filter.
+    await mounted.refresh(true);
+    expect(inspectHarnessAccount.mock.calls.some(([input]) => input.harnessId === "grok")).toBe(
+      true,
+    );
     scope.dispose();
   });
 
