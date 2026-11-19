@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SkillsHubRequest } from "@codexhost/shared-contracts";
 import { createRendererSkillsClient } from "../src/renderer-skills-client.js";
 
+const changeId = "00000000-0000-4000-8000-000000000001";
 function machine(hostId: string) {
   return {
     hostId,
@@ -12,18 +13,13 @@ function machine(hostId: string) {
 }
 
 describe("Renderer skills routing", () => {
-  it("asks each machine's own Host for its status and keeps the configured machine id", async () => {
+  it("sends local bodies to each machine's own Host and restores the machine id", async () => {
     const request = vi.fn(async (machineId: string, params: SkillsHubRequest) => {
       if (params.op === "status") return { machines: [machine(params.hostId ?? "local")] };
       if (params.op === "link-plan")
-        return {
-          id: "00000000-0000-4000-8000-000000000001",
-          hostId: machineId,
-          actions: [],
-          warnings: [],
-        };
-      if (params.op === "sync-plan")
-        return { id: "00000000-0000-4000-8000-000000000001", actions: [], conflicts: [] };
+        return { id: changeId, hostId: params.hostId, actions: [], warnings: [] };
+      if (params.op === "link-apply" || params.op === "undo") return { id: changeId, changed: 1 };
+      if (params.op === "sync-plan") return { id: changeId, actions: [], conflicts: [] };
       throw new Error("unexpected_request");
     });
     const client = createRendererSkillsClient({ request });
@@ -32,10 +28,25 @@ describe("Renderer skills routing", () => {
     expect(remote.hostId).toBe("oracle-main");
     expect(request).toHaveBeenCalledWith("oracle-main", { op: "status", hostId: "local" });
 
-    await client.linkPlan("oracle-main");
+    const plan = await client.linkPlan("oracle-main");
+    expect(plan.hostId).toBe("oracle-main");
     expect(request).toHaveBeenLastCalledWith("oracle-main", {
       op: "link-plan",
-      hostId: "oracle-main",
+      hostId: "local",
+    });
+
+    await client.linkApply("oracle-main", changeId);
+    expect(request).toHaveBeenLastCalledWith("oracle-main", {
+      op: "link-apply",
+      hostId: "local",
+      id: changeId,
+    });
+
+    await client.undo("oracle-main", changeId);
+    expect(request).toHaveBeenLastCalledWith("oracle-main", {
+      op: "undo",
+      hostId: "local",
+      id: changeId,
     });
 
     await client.syncPlan({ op: "sync-plan", mode: "fill", skill: "--all", to: ["oracle-main"] });

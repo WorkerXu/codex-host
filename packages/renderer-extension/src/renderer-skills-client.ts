@@ -49,18 +49,19 @@ export function createRendererSkillsClient(
       return { ...machine, hostId };
     },
     async linkPlan(hostId, options) {
-      return skillLinkPlanSchema.parse(
-        await transport.request(hostId, { op: "link-plan", hostId, ...(options ?? {}) }),
+      const plan = skillLinkPlanSchema.parse(
+        await transport.request(hostId, { op: "link-plan", hostId: "local", ...(options ?? {}) }),
       );
+      return { ...plan, hostId };
     },
     async linkApply(hostId, id) {
       return skillChangeResultSchema.parse(
-        await transport.request(hostId, { op: "link-apply", hostId, id }),
+        await transport.request(hostId, { op: "link-apply", hostId: "local", id }),
       );
     },
     async undo(hostId, id) {
       return skillChangeResultSchema.parse(
-        await transport.request(hostId, { op: "undo", hostId, id }),
+        await transport.request(hostId, { op: "undo", hostId: "local", id }),
       );
     },
     async syncPlan(input) {
