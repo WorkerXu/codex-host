@@ -1076,7 +1076,9 @@ describe("AppServerHost installed Harness plugins", () => {
         result: { plugins: Array<{ id: string }>; fingerprint: string };
       };
       expect(refreshed.result.plugins.map(({ id }) => id)).toContain("sample-agent");
-      expect(refreshed.result.fingerprint).not.toBe(first.result.fingerprint);
+      // The forced recheck saw the same ready status, so the generation and the
+      // directory fingerprint stay stable; only checkedAt moves.
+      expect(refreshed.result.fingerprint).toBe(first.result.fingerprint);
       expect(
         (globalThis as { __sampleAvailabilityInspections?: number })
           .__sampleAvailabilityInspections,
@@ -1251,6 +1253,72 @@ describe("AppServerHost installed Harness plugins", () => {
       expect(healed.result.fingerprint).not.toBe(failed.result.fingerprint);
     } finally {
       delete (globalThis as { __sampleStatus?: string }).__sampleStatus;
+      await stopFixture(fixture);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("returns unchanged after a repeated inspection observes the same status", async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "codexhost-plugin-stable-"));
+    const location = path.join(directory, "sample-agent");
+    mkdirSync(location);
+    writeFileSync(
+      path.join(directory, "enabled.json"),
+      JSON.stringify({ version: 1, enabled: ["sample-agent"] }),
+    );
+    writeFileSync(
+      path.join(location, "manifest.json"),
+      JSON.stringify({
+        manifestVersion: 1,
+        id: "sample-agent",
+        name: "Sample Agent",
+        version: "1.0.0",
+        adapterApiVersion: 1,
+        entry: "index.mjs",
+      }),
+    );
+    writeFileSync(
+      path.join(location, "index.mjs"),
+      `
+      import { FakeHarnessAdapter } from ${JSON.stringify(pathToFileURL(path.resolve("packages/harness-adapter/dist/testing.js")).href)};
+      export function createHarnessAdapter() {
+        return new FakeHarnessAdapter("sample-agent");
+      }
+    `,
+    );
+    const fixture = createFixture({ pluginDirectory: directory, externalAdapters: new Map() });
+    try {
+      await fixture.ready;
+      writeRequest(fixture.desktopInput, {
+        id: 951,
+        method: "codexhost/harness/plugins/list",
+        params: { ifNoneMatch: "" },
+      });
+      const first = (await fixture.collector.waitFor((message) => requestId(message, 951))) as {
+        result: { fingerprint: string; availability: Record<string, string> };
+      };
+      expect(first.result.availability).toMatchObject({ "sample-agent": "ready" });
+
+      // Opening an external Thread inspects the selected Harness; the same
+      // ready status must not invalidate the directory fingerprint.
+      writeRequest(fixture.desktopInput, {
+        id: 952,
+        method: "codexhost/harness/inspect",
+        params: { harnessId: "sample-agent" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 952))).toMatchObject({
+        result: { status: "ready" },
+      });
+
+      writeRequest(fixture.desktopInput, {
+        id: 953,
+        method: "codexhost/harness/plugins/list",
+        params: { ifNoneMatch: first.result.fingerprint },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 953))).toMatchObject({
+        result: { unchanged: true, fingerprint: first.result.fingerprint },
+      });
+    } finally {
       await stopFixture(fixture);
       rmSync(directory, { recursive: true, force: true });
     }
