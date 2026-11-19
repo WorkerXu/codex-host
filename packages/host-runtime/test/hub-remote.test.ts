@@ -1,7 +1,9 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HubForward, settingsFromEnvironment } from "../src/hub-remote.js";
+import { HubForward, HubRemote, settingsFromEnvironment } from "../src/hub-remote.js";
 
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -13,32 +15,24 @@ class FakeChild extends EventEmitter {
     return true;
   });
 }
-function child(): FakeChild {
-  return new FakeChild();
-}
-function forward(
-  options: {
-    probe?: () => Promise<boolean>;
-    execFile?: (
-      file: string,
-      args: readonly string[],
-    ) => Promise<{ stdout: string; stderr: string }>;
-  } = {},
-) {
+type Exec = (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
+function forward(options: { probe?: () => Promise<boolean>; execFile?: Exec } = {}) {
   const spawned: { args: readonly string[]; child: FakeChild }[] = [];
+  const execFile = options.execFile ?? (async () => ({ stdout: "", stderr: "" }));
+  const settings = { sshAlias: "india", memhubPort: 8765, mcphubPort: 3000, tokenPath: "/token" };
   const instance = new HubForward({
-    settings: { sshAlias: "india", memhubPort: 8765, mcphubPort: 3000, tokenPath: "/token" },
+    settings,
     spawn: (_command, args) => {
-      const value = child();
+      const value = new FakeChild();
       spawned.push({ args, child: value });
       return value as unknown as ChildProcess;
     },
     probe: options.probe ?? (async () => true),
     delay: async () => undefined,
-    execFile: options.execFile,
+    execFile,
     readinessTimeoutMs: 100,
   });
-  return { instance, spawned };
+  return { instance, spawned, execFile, settings };
 }
 afterEach(() => vi.useRealTimers());
 
@@ -56,6 +50,12 @@ describe("Hub SSH forward", () => {
         "ExitOnForwardFailure=yes",
         "-o",
         "ServerAliveInterval=30",
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        expect.stringMatching(/^ControlPath=\/.+$/u),
+        "-o",
+        "ControlPersist=no",
         "-L",
         expect.stringMatching(/^127\.0\.0\.1:\d+:127\.0\.0\.1:8765$/u),
         "-L",
@@ -63,11 +63,16 @@ describe("Hub SSH forward", () => {
         "india",
       ],
     });
+    const option = spawned[0]?.args.find((value) => value.startsWith("ControlPath="));
+    if (!option) throw new Error("missing control path");
+    const directory = path.dirname(option.slice("ControlPath=".length));
+    expect((await stat(directory)).mode & 0o777).toBe(0o700);
     expect(instance.state()).toBe("ready");
     expect(await instance.endpoints()).toEqual(first);
     expect(spawned).toHaveLength(1);
     await instance.stop();
     expect(spawned[0]?.child.kill).toHaveBeenCalled();
+    await expect(stat(directory)).rejects.toThrow();
   });
 
   it("reconnects with backoff after the session drops", async () => {
@@ -95,16 +100,103 @@ describe("Hub SSH forward", () => {
     await instance.stop();
   });
 
-  it("reads a secret once and forgets it on demand", async () => {
-    const execFile = vi.fn(async () => ({ stdout: "token-value\n", stderr: "" }));
+  it("closes the master connection on stop", async () => {
+    const execFile = vi.fn(async () => ({ stdout: "", stderr: "" }));
     const { instance } = forward({ execFile });
-    expect(await instance.readFile("/token")).toBe("token-value\n");
-    expect(await instance.readFile("/token")).toBe("token-value\n");
-    expect(execFile).toHaveBeenCalledTimes(1);
-    instance.forget("/token");
-    await instance.readFile("/token");
-    expect(execFile).toHaveBeenCalledTimes(2);
+    await instance.endpoints();
     await instance.stop();
+    expect(execFile).toHaveBeenCalledWith("ssh", expect.arrayContaining(["-O", "exit", "india"]));
+    expect(execFile.mock.calls.flatMap(([, args]) => args)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^ControlPath=\/.+$/u)]),
+    );
+  });
+
+  it("reads the token through the master and never re-handshakes", async () => {
+    const execFile = vi.fn(async () => ({ stdout: "token-value\n", stderr: "" }));
+    const { instance, spawned } = forward({ execFile });
+    await instance.endpoints();
+    expect(await instance.readToken("/token")).toBe("token-value\n");
+    expect(await instance.readToken("/token")).toBe("token-value\n");
+    expect(spawned).toHaveLength(1);
+    expect(execFile).toHaveBeenCalledTimes(2);
+    for (const [, args] of execFile.mock.calls) {
+      expect(args).toEqual(
+        expect.arrayContaining([
+          "-o",
+          "ControlMaster=no",
+          expect.stringMatching(/^ControlPath=\/.+$/u),
+        ]),
+      );
+    }
+    await instance.stop();
+  });
+
+  it("returns only MCPHub's routing fields", async () => {
+    const execFile = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        enableBearerAuth: true,
+        bearerAuthHeaderName: "X-Mcp-Key",
+        leaked: "secret-value",
+      }),
+      stderr: "",
+    }));
+    const { instance } = forward({ execFile });
+    const routing = await instance.readMcpRouting();
+    expect(routing).toEqual({ enableBearerAuth: true, bearerAuthHeaderName: "X-Mcp-Key" });
+    expect(JSON.stringify(routing)).not.toContain("secret-value");
+    const command = execFile.mock.calls[0]?.[1].at(-1);
+    expect(command).toContain("base64.b64decode");
+    expect(command).not.toContain("cat /etc/mcphub.env");
+    await instance.stop();
+  });
+});
+
+describe("Hub remote secrets", () => {
+  it("reads the token once and forgets it on demand", async () => {
+    const execFile = vi.fn(async () => ({ stdout: "token-value\n", stderr: "" }));
+    const remote = new HubRemote(
+      {},
+      {
+        settings: { sshAlias: "india", memhubPort: 8765, mcphubPort: 3000, tokenPath: "/token" },
+        execFile,
+        spawn: () => new FakeChild() as unknown as ChildProcess,
+        probe: async () => true,
+        delay: async () => undefined,
+      },
+    );
+    expect(await remote.token()).toBe("token-value");
+    expect(await remote.token()).toBe("token-value");
+    expect(execFile).toHaveBeenCalledTimes(1);
+    await remote.forgetToken();
+    await remote.token();
+    expect(execFile).toHaveBeenCalledTimes(2);
+    await remote.stop();
+  });
+
+  it("keeps only the derived header name", async () => {
+    const execFile = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        enableBearerAuth: true,
+        bearerAuthHeaderName: "X-Mcp-Key",
+        leaked: "secret-value",
+      }),
+      stderr: "",
+    }));
+    const remote = new HubRemote(
+      {},
+      {
+        settings: { sshAlias: "india", memhubPort: 8765, mcphubPort: 3000, tokenPath: "/token" },
+        execFile,
+        spawn: () => new FakeChild() as unknown as ChildProcess,
+        probe: async () => true,
+        delay: async () => undefined,
+      },
+    );
+    expect(await remote.mcphubHeaderName()).toBe("X-Mcp-Key");
+    expect(await remote.mcphubHeaderName()).toBe("X-Mcp-Key");
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(await remote.mcphubHeaderName())).not.toContain("secret-value");
+    await remote.stop();
   });
 });
 

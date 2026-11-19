@@ -13,9 +13,9 @@ it("serves Hub RPCs without forwarding them and suppresses secret-bearing failur
         memhub: "http://127.0.0.1:8765",
         mcphub: "http://127.0.0.1:3000",
       }),
-      readFile: async () => "",
       token: async () => "",
       forgetToken: async () => {},
+      mcphubHeaderName: async () => "Authorization",
       stop: async () => {},
     },
   });
@@ -63,9 +63,9 @@ it("keeps administrator keys out of RPC replies, diagnostics and the official pr
         memhub: "http://127.0.0.1:8765",
         mcphub: "http://127.0.0.1:3000",
       }),
-      readFile: async () => "",
       token: async () => "",
       forgetToken: async () => {},
+      mcphubHeaderName: async () => "Authorization",
       stop: async () => {},
     },
   });

@@ -1,12 +1,12 @@
 import { hubAdminParamsSchema, hubResultSchemas } from "@codexhost/shared-contracts";
 import { HubAdminError, hubJson } from "./hub-admin-http.js";
-import { McpHubConnectionStore, mcphubHeaderName } from "./mcphub-connection.js";
+import { McpHubConnectionStore } from "./mcphub-connection.js";
 import { HubRemote } from "./hub-remote.js";
 import { z } from "zod";
 import { runMcpAdmin } from "./mcphub-admin.js";
 import { runMemAdmin } from "./memhub-admin.js";
 
-type Remote = Pick<HubRemote, "endpoints" | "readFile" | "token" | "forgetToken" | "stop">;
+type Remote = Pick<HubRemote, "endpoints" | "token" | "forgetToken" | "mcphubHeaderName" | "stop">;
 export interface HubAdminServiceOptions {
   environment?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
@@ -50,8 +50,8 @@ export class HubAdminService {
             const key = params.op === "mcpConnect" ? params.key : await this.connection.read();
             if (!key) throw new HubAdminError("mcp-auth");
             if (params.op === "mcpOverview") {
-              const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
               const endpoints = await this.remote.endpoints();
+              const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
               const request = (path: string, method?: string, body?: unknown) =>
                 hubJson(
                   fetcher,
@@ -71,8 +71,8 @@ export class HubAdminService {
                 keys,
               };
             } else {
-              const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
               const endpoints = await this.remote.endpoints();
+              const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
               const request = (path: string, method?: string, body?: unknown) =>
                 hubJson(
                   fetcher,
@@ -106,7 +106,7 @@ export class HubAdminService {
     }
   }
   async #header(): Promise<string> {
-    return mcphubHeaderName((path) => this.remote.readFile(path));
+    return this.remote.mcphubHeaderName();
   }
   async #memory(
     fetcher: typeof fetch,

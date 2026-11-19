@@ -1,10 +1,11 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { HubAdminError } from "./hub-admin-http.js";
+import { headerNameFromRouting, type McpHubRouting } from "./mcphub-connection.js";
 
 /**
  * The hubs live behind one SSH alias, outside the codexhost Hosts. The Host
@@ -33,6 +34,41 @@ const settingsSchema = z
     tokenPath: z.string().max(1024).regex(/^\//u).optional(),
   })
   .strict();
+const mcpRoutingSchema = z.object({
+  enableBearerAuth: z.boolean().optional(),
+  skipAuth: z.boolean().optional(),
+  bearerAuthHeaderName: z.string().optional(),
+});
+/** Runs on India: only the routing fields leave the Host. */
+const MCP_ROUTING_SCRIPT = `import json,re
+path='/opt/mcphub/data/mcp_settings.json'
+try:
+  with open('/etc/mcphub.env') as f:
+    for line in f:
+      m=re.match(r'\s*(?:export\s+)?MCPHUB_SETTING_PATH\s*=\s*(.*?)\s*$',line)
+      if m:
+        v=m.group(1)
+        if len(v)>=2 and v[0]==v[-1] and v[0] in ('"',"'"): v=v[1:-1]
+        path=v
+        break
+except Exception:
+  pass
+try:
+  with open(path) as f: s=json.load(f)
+  r=(s.get('systemConfig') or {}).get('routing') or {}
+  o={}
+  for k in ('enableBearerAuth','skipAuth','bearerAuthHeaderName'):
+    if k in r: o[k]=r[k]
+  print(json.dumps(o))
+except FileNotFoundError:
+  print(json.dumps({'_error':'missing'}))
+except Exception:
+  print(json.dumps({'_error':'failed'}))
+`;
+const MCP_ROUTING_COMMAND = `python3 -c "import base64;exec(base64.b64decode('${Buffer.from(
+  MCP_ROUTING_SCRIPT,
+).toString("base64")}'))"`;
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 const port = (value: string | undefined): number | undefined => {
   if (!value) return undefined;
   const parsed = Number(value);
@@ -146,7 +182,8 @@ export class HubForward {
   readonly #probe: (port: number) => Promise<boolean>;
   readonly #delay: (ms: number) => Promise<void>;
   readonly #readinessTimeoutMs: number;
-  readonly #files = new Map<string, string>();
+  #controlDirectory: string | null = null;
+  #controlPath: string | null = null;
   #child: ChildProcess | null = null;
   #endpoints: HubForwardEndpoints | null = null;
   #state: HubForwardState = "idle";
@@ -177,29 +214,43 @@ export class HubForward {
       throw new HubAdminError(this.#state === "retrying" ? "retrying" : "connecting");
     }
   }
-  /** Reads a fixed config file over the same alias; the value stays in memory. */
-  async readFile(file: string): Promise<string> {
-    const cached = this.#files.get(file);
-    if (cached !== undefined) return cached;
+  /** Reads the MemHub token over the master connection; callers cache the value, not the file. */
+  async readToken(file: string): Promise<string> {
+    const control = await this.#control();
     try {
-      const { stdout } = await this.#execFile("ssh", [
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=15",
-        this.#settings.sshAlias,
-        "cat",
-        file,
-      ]);
-      this.#files.set(file, stdout);
+      const { stdout } = await this.#execFile(
+        "ssh",
+        this.#remoteArgs(control, `cat -- ${shellQuote(file)}`),
+      );
       return stdout;
     } catch (error) {
       const message = String((error as { stderr?: string }).stderr ?? "");
       throw new HubAdminError(message.includes("No such file") ? "unavailable" : "forbidden");
     }
   }
-  forget(file: string): void {
-    this.#files.delete(file);
+  /** Extracts only MCPHub's routing fields on the remote; raw config never returns. */
+  async readMcpRouting(): Promise<McpHubRouting> {
+    const control = await this.#control();
+    let stdout: string;
+    try {
+      ({ stdout } = await this.#execFile("ssh", this.#remoteArgs(control, MCP_ROUTING_COMMAND)));
+    } catch {
+      throw new HubAdminError("unavailable");
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(stdout);
+    } catch {
+      throw new HubAdminError("failed");
+    }
+    if (typeof value !== "object" || value === null) throw new HubAdminError("failed");
+    if ("_error" in value)
+      throw new HubAdminError(
+        (value as { _error?: string })._error === "missing" ? "unavailable" : "failed",
+      );
+    const parsed = mcpRoutingSchema.safeParse(value);
+    if (!parsed.success) throw new HubAdminError("failed");
+    return parsed.data;
   }
   async stop(): Promise<void> {
     this.#stopped = true;
@@ -208,13 +259,51 @@ export class HubForward {
     this.#attempt = null;
     this.#endpoints = null;
     this.#state = "idle";
+    if (this.#controlPath) {
+      await this.#execFile("ssh", [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        `ControlPath=${this.#controlPath}`,
+        "-O",
+        "exit",
+        this.#settings.sshAlias,
+      ]).catch(() => undefined);
+    }
     const child = this.#child;
     this.#child = null;
     if (child && child.exitCode === null && !child.killed) child.kill("SIGTERM");
+    const directory = this.#controlDirectory;
+    this.#controlDirectory = null;
+    this.#controlPath = null;
+    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+  async #control(): Promise<string> {
+    if (this.#controlPath) return this.#controlPath;
+    const directory = await mkdtemp(path.join(tmpdir(), "codexhost-hub-"));
+    await chmod(directory, 0o700);
+    this.#controlDirectory = directory;
+    this.#controlPath = path.join(directory, "control");
+    return this.#controlPath;
+  }
+  #remoteArgs(control: string, command: string): string[] {
+    return [
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ControlMaster=no",
+      "-o",
+      `ControlPath=${control}`,
+      this.#settings.sshAlias,
+      command,
+    ];
   }
   async #open(): Promise<HubForwardEndpoints> {
     this.#state = "connecting";
     this.#endpoints = null;
+    const control = await this.#control();
     const [memhubPort, mcphubPort] = await Promise.all([freePort(), freePort()]);
     const args = [
       "-N",
@@ -222,6 +311,12 @@ export class HubForward {
       "ExitOnForwardFailure=yes",
       "-o",
       "ServerAliveInterval=30",
+      "-o",
+      "ControlMaster=auto",
+      "-o",
+      `ControlPath=${control}`,
+      "-o",
+      "ControlPersist=no",
       "-L",
       `127.0.0.1:${memhubPort}:127.0.0.1:${this.#settings.memhubPort}`,
       "-L",
@@ -293,6 +388,7 @@ export class HubRemote {
   readonly #settings: Promise<HubRemoteSettings>;
   readonly #forward: Promise<HubForward>;
   #token: string | null = null;
+  #header: string | null = null;
   constructor(environment: NodeJS.ProcessEnv, options: HubForwardOptions = {}) {
     this.#settings = options.settings
       ? Promise.resolve(options.settings)
@@ -302,26 +398,29 @@ export class HubRemote {
   async endpoints(): Promise<HubForwardEndpoints> {
     return (await this.#forward).endpoints();
   }
-  async readFile(file: string): Promise<string> {
-    return (await this.#forward).readFile(file);
-  }
-  /** Read once over SSH, keep in memory, never write to disk or logs. */
+  /** Read once over the master connection, keep in memory, never write to disk or logs. */
   async token(): Promise<string> {
     if (this.#token !== null) return this.#token;
     const settings = await this.#settings;
     const forward = await this.#forward;
-    const value = (await forward.readFile(settings.tokenPath)).trim();
+    const value = (await forward.readToken(settings.tokenPath)).trim();
     if (!value || /[\r\n]/u.test(value)) throw new HubAdminError("forbidden");
     this.#token = value;
     return value;
   }
   async forgetToken(): Promise<void> {
     this.#token = null;
-    const settings = await this.#settings;
-    (await this.#forward).forget(settings.tokenPath);
+  }
+  /** Keep only the derived header name; MCPHub's raw routing never stays in memory. */
+  async mcphubHeaderName(): Promise<string> {
+    if (this.#header !== null) return this.#header;
+    const routing = await (await this.#forward).readMcpRouting();
+    this.#header = headerNameFromRouting(routing);
+    return this.#header;
   }
   async stop(): Promise<void> {
     this.#token = null;
+    this.#header = null;
     return (await this.#forward).stop();
   }
 }

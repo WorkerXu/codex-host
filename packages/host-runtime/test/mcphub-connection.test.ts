@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   McpHubConnectionStore,
   MCPHUB_KEY_FILE,
-  mcphubHeaderName,
+  headerNameFromRouting,
 } from "../src/mcphub-connection.js";
 import { HubAdminService } from "../src/hub-admin-service.js";
 
@@ -46,6 +46,7 @@ function fixture(
       readFile: async () => "",
       token: async () => "",
       forgetToken: async () => {},
+      mcphubHeaderName: async () => "X-Mcp-Key",
       stop: async () => {},
     },
   });
@@ -79,26 +80,15 @@ describe("Host-local MCPHub key", () => {
       expect(String(error)).not.toContain(key);
     }
   });
-  it("derives only the native header name and refuses anonymous or disabled Bearer policy", async () => {
-    const read = vi.fn(async (path: string) =>
-      path === "/etc/mcphub.env"
-        ? "MCPHUB_SETTING_PATH=/data/settings.json"
-        : JSON.stringify({
-            users: [{ password: key }],
-            systemConfig: { routing: { bearerAuthHeaderName: "X-Mcp-Key" } },
-          }),
-    );
-    expect(await mcphubHeaderName(read)).toBe("X-Mcp-Key");
-    expect(read).toHaveBeenLastCalledWith("/data/settings.json");
-    expect(await mcphubHeaderName(async () => "{}")).toBe("Authorization");
+  it("derives only the native header name and refuses anonymous or disabled Bearer policy", () => {
+    expect(headerNameFromRouting({ bearerAuthHeaderName: "X-Mcp-Key" })).toBe("X-Mcp-Key");
+    expect(headerNameFromRouting({})).toBe("Authorization");
     for (const routing of [
       { skipAuth: true },
       { enableBearerAuth: false },
       { bearerAuthHeaderName: "Bad\nName" },
     ]) {
-      await expect(
-        mcphubHeaderName(async () => JSON.stringify({ systemConfig: { routing } })),
-      ).rejects.toThrow();
+      expect(() => headerNameFromRouting(routing)).toThrow();
     }
   });
 });
