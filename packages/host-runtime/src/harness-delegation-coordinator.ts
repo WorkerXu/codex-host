@@ -52,12 +52,14 @@ import {
   type ExternalThreadRepository,
 } from "./external-thread-repository.js";
 import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-runtime.js";
-import { HarnessAvailabilityStore } from "./harness-availability-store.js";
+import {
+  HarnessAvailabilityStore,
+  harnessAvailabilityTtlMs,
+} from "./harness-availability-store.js";
 import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
-const AVAILABILITY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
 const AVAILABILITY_CONCURRENCY = 6;
 const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
@@ -365,9 +367,21 @@ export class HarnessDelegationCoordinator {
         pending.push(harnessId);
         continue;
       }
-      availability[harnessId] = cached.status;
-      if (input.refresh) pending.push(harnessId);
-      else if (Date.now() - cached.checkedAt >= AVAILABILITY_CACHE_TTL_MS) stale.push(harnessId);
+      const expired = Date.now() - cached.checkedAt >= harnessAvailabilityTtlMs(cached.status);
+      if (input.refresh) {
+        availability[harnessId] = cached.status;
+        pending.push(harnessId);
+      } else if (!expired) {
+        availability[harnessId] = cached.status;
+      } else if (cached.status === "ready" || cached.status === "notInstalled") {
+        // A stale positive answer still paints immediately; revalidate behind it.
+        availability[harnessId] = cached.status;
+        stale.push(harnessId);
+      } else {
+        // A transient failure is rechecked before answering, so it cannot hide a
+        // working Harness for the rest of its short lifetime.
+        pending.push(harnessId);
+      }
     }
     await forEachConcurrent(pending, AVAILABILITY_CONCURRENCY, async (harnessId) => {
       availability[harnessId] = await this.#inspectAvailability(

@@ -10,6 +10,20 @@ const FORMAT_VERSION = 1;
 const CACHE_DIRECTORY = "cache";
 const CACHE_FILE = "harness-availability.json";
 
+/** A ready Harness stays valid for a day; its catalog follows upstream releases separately. */
+export const READY_AVAILABILITY_TTL_MS = 24 * 60 * 60_000;
+/** A missing CLI usually means the user has not installed it yet; the plugin fingerprint
+ * still invalidates this entry when the plugin itself changes. */
+export const NOT_INSTALLED_AVAILABILITY_TTL_MS = 24 * 60 * 60_000;
+/** A transient failure must not hide a working Harness for a day. */
+export const FAILURE_AVAILABILITY_TTL_MS = 10 * 60_000;
+
+export function harnessAvailabilityTtlMs(status: HarnessInspection["status"]): number {
+  if (status === "ready") return READY_AVAILABILITY_TTL_MS;
+  if (status === "notInstalled") return NOT_INSTALLED_AVAILABILITY_TTL_MS;
+  return FAILURE_AVAILABILITY_TTL_MS;
+}
+
 const STATUSES: ReadonlySet<string> = new Set(["ready", "notInstalled", "unavailable", "error"]);
 
 export interface HarnessAvailabilityEntry {
@@ -60,6 +74,10 @@ export class HarnessAvailabilityStore {
 
   async set(harnessId: string, entry: HarnessAvailabilityEntry): Promise<void> {
     await this.#ensureLoaded();
+    // Two paths inspect the same Harness (interactive and background). The later
+    // observation wins even if the earlier one finishes last.
+    const existing = this.#entries.get(harnessId);
+    if (existing && existing.checkedAt > entry.checkedAt) return;
     this.#entries.set(harnessId, entry);
     this.#generation += 1;
     await this.#persist();

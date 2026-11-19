@@ -439,6 +439,45 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
+  it("rechecks a cached transient failure after ten minutes and recovers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const original = adapter.inspect.bind(adapter);
+    let failing = true;
+    const inspect = vi.spyOn(adapter, "inspect").mockImplementation(async (input) =>
+      failing
+        ? {
+            status: "unavailable" as const,
+            error: { code: "unavailable", message: "temporary", retryable: true },
+          }
+        : original(input),
+    );
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      // Inside the short failure window the cached answer is reused.
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(1_000_000 + 10 * 60_000 + 1);
+      failing = false;
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("bypasses the availability cache when refresh is requested", async () => {
     const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
     const inspect = vi.spyOn(adapter, "inspect");

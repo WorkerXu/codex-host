@@ -1,10 +1,16 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { HarnessAvailabilityStore } from "../src/harness-availability-store.js";
+import {
+  FAILURE_AVAILABILITY_TTL_MS,
+  HarnessAvailabilityStore,
+  harnessAvailabilityTtlMs,
+  NOT_INSTALLED_AVAILABILITY_TTL_MS,
+  READY_AVAILABILITY_TTL_MS,
+} from "../src/harness-availability-store.js";
 
 const roots: string[] = [];
 
@@ -54,6 +60,34 @@ describe("HarnessAvailabilityStore", () => {
       },
     });
     expect((await stat(filePath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("uses short-lived failures and long-lived ready/notInstalled answers", () => {
+    expect(harnessAvailabilityTtlMs("ready")).toBe(READY_AVAILABILITY_TTL_MS);
+    expect(harnessAvailabilityTtlMs("notInstalled")).toBe(NOT_INSTALLED_AVAILABILITY_TTL_MS);
+    expect(harnessAvailabilityTtlMs("unavailable")).toBe(FAILURE_AVAILABILITY_TTL_MS);
+    expect(harnessAvailabilityTtlMs("error")).toBe(FAILURE_AVAILABILITY_TTL_MS);
+    expect(FAILURE_AVAILABILITY_TTL_MS).toBeLessThan(READY_AVAILABILITY_TTL_MS);
+  });
+
+  it("loads an old cache file without a generation", async () => {
+    const directory = await root();
+    const filePath = path.join(directory, "cache", "harness-availability.json");
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      `${JSON.stringify({
+        formatVersion: 1,
+        entries: { grok: { status: "unavailable", checkedAt: 1_700_000_000_000 } },
+      })}\n`,
+      "utf8",
+    );
+    const store = new HarnessAvailabilityStore({ CODEXHOST_USER_DIR: directory });
+    await expect(store.get("grok")).resolves.toEqual({
+      status: "unavailable",
+      checkedAt: 1_700_000_000_000,
+    });
+    await expect(store.generation()).resolves.toBe(0);
   });
 
   it("invalidates one entry and ignores a corrupt cache", async () => {

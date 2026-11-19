@@ -1099,6 +1099,85 @@ describe("AppServerHost installed Harness plugins", () => {
     }
   });
 
+  it("writes a live interactive inspection back into the availability cache", async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "codexhost-plugin-writeback-"));
+    const location = path.join(directory, "sample-agent");
+    mkdirSync(location);
+    writeFileSync(
+      path.join(directory, "enabled.json"),
+      JSON.stringify({ version: 1, enabled: ["sample-agent"] }),
+    );
+    writeFileSync(
+      path.join(location, "manifest.json"),
+      JSON.stringify({
+        manifestVersion: 1,
+        id: "sample-agent",
+        name: "Sample Agent",
+        version: "1.0.0",
+        adapterApiVersion: 1,
+        entry: "index.mjs",
+      }),
+    );
+    writeFileSync(
+      path.join(location, "index.mjs"),
+      `
+      import { FakeHarnessAdapter } from ${JSON.stringify(pathToFileURL(path.resolve("packages/harness-adapter/dist/testing.js")).href)};
+      export function createHarnessAdapter() {
+        const adapter = new FakeHarnessAdapter("sample-agent");
+        const original = adapter.inspect.bind(adapter);
+        adapter.inspect = async (input) => {
+          if (globalThis.__sampleStatus === "unavailable") {
+            return { status: "unavailable", error: { code: "unavailable", message: "temporary", retryable: true } };
+          }
+          return original(input);
+        };
+        return adapter;
+      }
+    `,
+    );
+    (globalThis as { __sampleStatus?: string }).__sampleStatus = "unavailable";
+    const fixture = createFixture({ pluginDirectory: directory, externalAdapters: new Map() });
+    try {
+      await fixture.ready;
+      writeRequest(fixture.desktopInput, {
+        id: 931,
+        method: "codexhost/harness/plugins/list",
+        params: { ifNoneMatch: "" },
+      });
+      const failed = (await fixture.collector.waitFor((message) => requestId(message, 931))) as {
+        result: { fingerprint: string; availability: Record<string, string> };
+      };
+      expect(failed.result.availability).toMatchObject({ "sample-agent": "unavailable" });
+
+      // The Host is repaired outside the plugin files; the next live inspection
+      // must heal the cached failure without waiting for the failure TTL.
+      (globalThis as { __sampleStatus?: string }).__sampleStatus = "ready";
+      writeRequest(fixture.desktopInput, {
+        id: 932,
+        method: "codexhost/harness/inspect",
+        params: { harnessId: "sample-agent" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 932))).toMatchObject({
+        result: { status: "ready" },
+      });
+
+      writeRequest(fixture.desktopInput, {
+        id: 933,
+        method: "codexhost/harness/plugins/list",
+        params: { ifNoneMatch: failed.result.fingerprint },
+      });
+      const healed = (await fixture.collector.waitFor((message) => requestId(message, 933))) as {
+        result: { fingerprint: string; availability: Record<string, string> };
+      };
+      expect(healed.result.availability).toMatchObject({ "sample-agent": "ready" });
+      expect(healed.result.fingerprint).not.toBe(failed.result.fingerprint);
+    } finally {
+      delete (globalThis as { __sampleStatus?: string }).__sampleStatus;
+      await stopFixture(fixture);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("validates catalog parameters and leaves uninstalled routes out of the official stream", async () => {
     const fixture = createFixture();
     try {
