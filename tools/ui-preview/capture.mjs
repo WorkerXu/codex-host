@@ -606,6 +606,14 @@ for (const scenario of scenarios) {
       if (document.body.dataset.scenario?.startsWith("hub-")) {
         check("hub-native-theme", document.documentElement.dataset.nativeTheme === "true");
         check("hub-no-native-select", queryAll(".hub-page select").length === 0);
+        check("hub-no-host-select", !query('.hub-select[aria-label="主机"]'));
+        if (["hub-servers", "hub-memory"].includes(document.body.dataset.scenario))
+          check(
+            "hub-updated-age",
+            /^更新于 (刚刚|\d+ 分钟前|\d+ 小时前|\d+ 天前)$/u.test(
+              query(".hub-updated")?.textContent ?? "",
+            ),
+          );
         check(
           "hub-no-developer-fields",
           !query(".hub-page")?.textContent.includes("session-") &&
@@ -692,7 +700,7 @@ for (const scenario of scenarios) {
           check(
             "hub-connection-host-guidance",
             query(".hub-dialog-content")?.textContent.includes(
-              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在 oracle-main 上。",
+              "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在本机。",
             ),
           );
         if (["hub-auth-error", "hub-error"].includes(scenario))

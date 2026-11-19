@@ -16,7 +16,7 @@ it("routes each call through the selected host and never falls back to local", a
   expect(sendRequest).toHaveBeenCalledWith(
     HUB_ADMIN_METHOD,
     { op: "servers" },
-    { priority: "interactive", timeoutMs: 20000 },
+    { priority: "interactive", timeoutMs: 30000 },
   );
   await expect(client.request("oracle-main", { op: "overview" })).rejects.toThrow("connection");
   expect(sendRequest).toHaveBeenCalledTimes(1);

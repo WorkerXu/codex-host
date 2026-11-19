@@ -53,7 +53,7 @@ export function mcpDialogs(
     modal: ReturnType<HubPage["dialog"]>,
     operation: () => Promise<HubResult<"keySave">>,
   ) => {
-    const host = ui.hosts.value;
+    const host = ui.hostId;
     const revision = ui.revision();
     const submit = hubButton(
       document,
@@ -94,7 +94,7 @@ export function mcpDialogs(
   return {
     reveal,
     server(server?: HubServer) {
-      const host = ui.hosts.value;
+      const host = ui.hostId;
       const modal = ui.dialog(server ? "编辑服务器" : "添加服务器");
       const name = hubField(document, modal.content, "名称", server?.name ?? "");
       const type = hubSelect(document, "协议", [
@@ -211,7 +211,7 @@ export function mcpDialogs(
       });
     },
     key(key?: HubKey) {
-      const host = ui.hosts.value;
+      const host = ui.hostId;
       const modal = ui.dialog(key ? "编辑密钥" : "创建密钥");
       const name = hubField(document, modal.content, "名称", key?.name ?? "");
       const enabled = hubSelect(document, "状态", [
@@ -273,7 +273,7 @@ export function mcpDialogs(
       });
     },
     async tools(server: HubServer) {
-      const host = ui.hosts.value;
+      const host = ui.hostId;
       const revision = ui.revision();
       const modal = ui.dialog(server.name, true);
       modal.content.textContent = "正在加载…";

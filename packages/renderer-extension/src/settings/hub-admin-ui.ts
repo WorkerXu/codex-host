@@ -1,4 +1,3 @@
-import { hubSelect } from "./hub-admin-menu.js";
 import { createRendererSettingsIcon, type RendererSettingsIconName } from "./icons.js";
 export { hubSelect } from "./hub-admin-menu.js";
 import { hubErrorText, type RendererHubAdminClient } from "../renderer-hub-admin-client.js";
@@ -99,24 +98,25 @@ export function hubDate(time: number | null, now = new Date()): string {
 export function createHubPage(
   context: RendererSettingsPageMountContext,
   title: string,
-  target: string,
   client: RendererHubAdminClient | null,
 ) {
   const document = context.content.ownerDocument;
   const page = hubElement(document, "div", "hub-page");
   const header = hubElement(document, "header", "agents-page-head");
-  header.append(hubElement(document, "h2", "agents-page-title", title));
-  const hosts = hubSelect(document, "主机", [["", "选择主机"]]);
+  const heading = hubElement(document, "div", "hub-heading");
+  heading.append(hubElement(document, "h2", "agents-page-title", title));
+  const updated = hubElement(document, "p", "hub-updated");
+  updated.hidden = true;
+  heading.append(updated);
   const headerControls = hubElement(document, "div", "hub-header-controls");
-  headerControls.append(hosts);
-  header.append(headerControls);
+  header.append(heading, headerControls);
   const status = hubElement(document, "p", "hub-status", "正在连接…");
   status.setAttribute("role", "status");
   const body = hubElement(document, "div", "hub-body");
   page.append(header, status, body);
   context.content.append(page);
   let generation = 0;
-  let selectionRevision = 0;
+  const selectionRevision = 0;
   let activeDialog: HTMLDialogElement | null = null;
   const closeDialog = () => {
     if (activeDialog) {
@@ -177,9 +177,9 @@ export function createHubPage(
     );
     modal.footer.append(submit);
   };
-  const load = async (operation: () => Promise<void>) => {
+  const load = async (operation: () => Promise<void>, pending = "正在加载…") => {
     const current = ++generation;
-    status.textContent = "正在加载…";
+    status.textContent = pending;
     body.inert = true;
     try {
       await operation();
@@ -192,33 +192,11 @@ export function createHubPage(
     }
   };
   const initialize = async (refresh: () => void) => {
-    hosts.addEventListener("change", () => {
-      ++generation;
-      ++selectionRevision;
-      closeDialog();
-      body.replaceChildren();
-      refresh();
-    });
     if (!client) {
       status.textContent = "连接失败";
       return;
     }
-    try {
-      const values = await client.hosts();
-      if (context.signal.aborted) return;
-      hosts.setOptions([
-        ["", "选择主机"],
-        ...values.map((host) => [host.hostId, host.displayName] as const),
-      ]);
-      const preferred = values.find(
-        (host) => host.displayName.toLowerCase() === target || host.hostId === target,
-      );
-      hosts.value = preferred?.hostId ?? "";
-      if (preferred) refresh();
-      else status.textContent = `请选择 ${target} 所在主机`;
-    } catch {
-      status.textContent = "连接失败";
-    }
+    refresh();
   };
   context.signal.addEventListener(
     "abort",
@@ -236,7 +214,8 @@ export function createHubPage(
     headerControls,
     body,
     status,
-    hosts,
+    updated,
+    hostId: "local",
     dialog,
     confirm,
     load,
@@ -244,7 +223,7 @@ export function createHubPage(
     current: () => !context.signal.aborted,
     revision: () => selectionRevision,
     valid: (host: string, revision: number) =>
-      !context.signal.aborted && hosts.value === host && revision === selectionRevision,
+      !context.signal.aborted && host === "local" && revision === selectionRevision,
   };
 }
 export type HubPage = ReturnType<typeof createHubPage>;

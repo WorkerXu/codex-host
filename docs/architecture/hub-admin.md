@@ -4,13 +4,19 @@
 
 ## 连接与所有权
 
-Renderer 每次请求按选定的 Host ID 调用 `__codexhostHostRoutingV1.forHost(hostId).manager.sendRequest`，方法为 `codexhost/hub-admin/request`。连接不可用时直接报错，不回退到本机或当前 Composer 的主机。两个页面默认匹配显示名或 ID 为 `oracle-main` 的连接；显示名不同或服务在别的主机时需手动选择。
+两个页面由 **Mac Host** 负责，不再提供主机选择。Renderer 固定调用 `__codexhostHostRoutingV1.forHost("local").manager.sendRequest`，方法为 `codexhost/hub-admin/request`；连接不可用时直接报错。India 只是 hub 的远端端点，不是 codexhost Host。
 
-Host Runtime 的 `HubAdminService` 校验共享契约中的操作枚举和严格参数，再调用固定的 localhost 地址。请求不能携带目标地址、HTTP 方法、任意路径或任意配置字段；不新增端口、隧道或公共端点。HTTP 禁止重定向，单次请求超时 8 秒。上游异常文本和校验错误不进入 RPC 或诊断日志；错误码在页面映射为「连接超时」「连接失败」「无权限」「服务未运行」等中文提示。
+Mac Host 首次被需要时建立一条常驻 SSH 转发，之后在整个 Host 生命周期内复用：`ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 127.0.0.1:<空闲>:127.0.0.1:8765 -L 127.0.0.1:<空闲>:127.0.0.1:3000 <别名>`，使用用户 ssh config 中的别名（默认 `india`）及其 HY2 路由。断线后按 1/2/4/8/16/30 秒退避重连；页面显示「正在连接 India…」或「连接失败，重试中」。Host 退出时停止转发。
+
+配置位于 `~/.config/codexhost/hub-remote.json`，可用环境变量覆盖：`CODEXHOST_HUB_SSH_ALIAS`、`CODEXHOST_HUB_MEMHUB_PORT`、`CODEXHOST_HUB_MCPHUB_PORT`、`CODEXHOST_HUB_TOKEN_PATH`。默认值见 `DEFAULT_HUB_REMOTE_SETTINGS`；逻辑中不写死机器名。
+
+Host Runtime 的 `HubAdminService` 校验共享契约中的操作枚举和严格参数，再请求转发出来的 loopback 端口。请求不能携带目标地址、HTTP 方法、任意路径或任意配置字段；转发只暴露两个固定端口。HTTP 禁止重定向，单次请求超时 8 秒。上游异常文本和校验错误不进入 RPC 或诊断日志；错误码在页面映射为「连接超时」「连接失败」「无权限」「服务未运行」「正在连接 India…」「连接失败，重试中」等中文提示。
+
+MCP 页面用一次 `mcpOverview` 取连接状态、服务器和密钥；记忆页面用一次 `overview` 取概览和最近 4 条，首次打开不再额外搜索。两个页面先用上次结果立即渲染，显示「更新于 X 前」，再在后台刷新；整页只在用户操作时显示加载态。
 
 ## MCPHub
 
-服务位于 Host 的 `127.0.0.1:3000`，使用 MCPHub 官方管理 REST API：
+MCPHub 服务位于 India 的 `127.0.0.1:3000`，经 Mac Host 的转发访问，使用 MCPHub 官方管理 REST API：
 
 | 操作 | REST 路径 |
 | --- | --- |
@@ -32,7 +38,7 @@ Host Runtime 的 `HubAdminService` 校验共享契约中的操作枚举和严格
 
 ## MemHub
 
-服务位于 oracle-main。Host 读取当前用户的 `~/.one-memory/runtime-token`，仅通过 `127.0.0.1:8765` 调用 Core API；不读取 codexhost runtime 目录，不经过 18765 runtime API，也不向 Renderer 回传 token。
+MemHub 服务位于 India 的 `127.0.0.1:8765`，经同一条转发访问。Host 首次需要时通过 `ssh <别名> cat <tokenPath>` 读取运行时令牌，令牌只保存在内存中，磁盘、日志和 RPC 都不出现；401 时丢弃并重读一次。不读取 codexhost runtime 目录，不经过 18765 runtime API。
 
 - 概览：`GET /api/v2/home-summary`、`GET /api/v1/memory-processing`、最近 4 条的 `GET /api/v2/memory-library`、`GET /api/v1/sources`。
 - 列表与搜索：`GET /api/v2/memory-library`，固定 `scene=all`，每页 10 条，支持 query/source/offset。搜索保留上游 `window_id`，修改关键词或来源清空窗口；上游重置窗口时遵循返回的 offset。
@@ -44,4 +50,4 @@ Host Runtime 的 `HubAdminService` 校验共享契约中的操作枚举和严格
 
 聚焦测试覆盖 RPC 截获、严格白名单、确认标记、Host 密钥隔离、0600 原子替换、只读验证后保存、验证失败保留旧值、投影脱敏、配置保留、错误映射、搜索窗口和命名空间。`tools/ui-preview` 的 `hub-*` 场景使用隔离假数据；capture runner 通过真实鼠标和键盘执行筛选、输入、打开对话框及确认，分别输出 light/dark 截图。设置 `CODEX_PREVIEW_NATIVE_THEME=1` 与 `CODEX_DESKTOP_CSS` 后，预览直接加载导出的 Desktop CSS，并禁用静态浅色 token 与近似深色覆盖；报告标记为真实主题变量。下拉菜单、悬停、键盘焦点、表单错误与只读详情均有场景，最终仍需在真实 Desktop 窗口复核。
 
-真实 Desktop 需核对：连接列表里的 oracle-main 是否选中正确 Host、断连时是否留在正确页面、长列表滚动、明暗外观、Tab/Escape 的焦点恢复，以及原生连接上自定义 RPC 的往返。MCPHub 管理写操作需在具备认证的测试实例验证；生产排查只读，不能用截图假数据的成功替代生产验证。
+真实 Desktop 需核对：首次打开时「正在连接 India…」到数据的过渡、断开后台重连的状态、长列表滚动、明暗外观、Tab/Escape 的焦点恢复，以及「更新于 X 前」的时间。MCPHub 管理写操作需在具备认证的测试实例验证；生产排查只读，不能用截图假数据的成功替代生产验证。

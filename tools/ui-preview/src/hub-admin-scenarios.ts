@@ -45,7 +45,6 @@ export const hubScenarioNames = [
   "hub-focus",
   "hub-server-menu",
   "hub-key-menu",
-  "hub-host-menu",
   "hub-protocol-menu",
   "hub-source-menu",
   "hub-scope-menu",
@@ -207,7 +206,14 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
           await key(input, "Enter");
         }
         if (name === "hub-memory-source") await choose("来源", "Codex");
-        if (name === "hub-memory-page") await click(button("下一页"));
+        if (name === "hub-memory-page") {
+          const next = await waitFor(() =>
+            queryAll<HTMLButtonElement>(".hub-pagination button").find(
+              (item) => item.textContent === "下一页",
+            ),
+          );
+          await click(next);
+        }
         if (name === "hub-memory-detail") {
           await click(required(".hub-memory-title"));
           await waitFor(() => query(".hub-memory-text"));
@@ -221,10 +227,6 @@ export function hubAdminScenarios(harness: PreviewHarness): Record<string, () =>
           await key(required('.hub-page input[type="search"]'), "Tab");
         if (name === "hub-server-menu") await action(".hub-server");
         if (name === "hub-key-menu") await action(".hub-key");
-        if (name === "hub-host-menu") {
-          await key(required('.hub-select[aria-label="主机"]'), "ArrowDown");
-          await waitFor(() => query(".hub-select-menu:popover-open"));
-        }
         if (name === "hub-source-menu") await click(required('.hub-select[aria-label="来源"]'));
       },
     ]),

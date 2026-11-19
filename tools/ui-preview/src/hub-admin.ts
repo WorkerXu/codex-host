@@ -131,6 +131,14 @@ export function createHubPreviewClient(scenario = ""): RendererHubAdminClient {
           configured = false;
           result = { configured, last4: null };
           break;
+        case "mcpOverview":
+          result = {
+            configured,
+            last4: configured ? last4 : null,
+            servers: configured ? structuredClone(servers) : null,
+            keys: configured ? { enabled, headerName, keys: structuredClone(keys) } : null,
+          };
+          break;
         case "servers":
           result = { servers: structuredClone(servers) };
           break;

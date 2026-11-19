@@ -2,6 +2,7 @@ import type { HubMemory, HubResult } from "@codexhost/shared-contracts";
 import { hubErrorText } from "../renderer-hub-admin-client.js";
 import type { RendererSettingsPageDefinition } from "./core.js";
 import type { HubAdminPageOptions } from "./mcp-admin-page.js";
+import { HubCacheController, hubAgeLabel, type HubCacheView } from "./hub-cache.js";
 import { createHubPage, hubButton, hubDate, hubElement, hubSelect } from "./hub-admin-ui.js";
 
 export function createMemoryAdminPage(
@@ -14,7 +15,7 @@ export function createMemoryAdminPage(
     icon: "logs",
     mount(context) {
       const client = options.createClient();
-      const ui = createHubPage(context, label, "oracle-main", client);
+      const ui = createHubPage(context, label, client);
       if (!client) {
         ui.status.textContent = "连接失败";
         return;
@@ -29,7 +30,7 @@ export function createMemoryAdminPage(
       const results = hubElement(document, "div", "hub-memory-results");
       const heading = hubElement(document, "h3", "hub-section-head", "最近更新");
       const openMemory = async (memory: HubMemory) => {
-        const host = ui.hosts.value;
+        const host = ui.hostId;
         const revision = ui.revision();
         const modal = ui.dialog(memory.title, true);
         modal.content.textContent = "正在加载…";
@@ -69,11 +70,11 @@ export function createMemoryAdminPage(
         );
         return item;
       };
-      const search = async () => {
-        const host = ui.hosts.value;
+      const search = async (quiet = false) => {
+        const host = ui.hostId;
         const revision = ui.revision();
         const generation = ++searchGeneration;
-        await ui.load(async () => {
+        const run = async () => {
           const value = await client.request(host, {
             op: "search",
             query,
@@ -112,29 +113,56 @@ export function createMemoryAdminPage(
             next,
           );
           results.append(pagination);
+        };
+        if (quiet) {
+          try {
+            await run();
+          } catch (error) {
+            ui.status.textContent = hubErrorText(error);
+          }
+        } else await ui.load(run);
+      };
+      let mounted = false;
+      const statValues: HTMLElement[] = [];
+      const renderRecent = () => {
+        if (!summary) return;
+        results.replaceChildren();
+        if (!summary.recent.length) {
+          results.append(hubElement(document, "p", "hub-empty", "暂无记忆"));
+          return;
+        }
+        for (const memory of summary.recent) results.append(row(memory));
+      };
+      const updateSummary = () => {
+        if (!summary) return;
+        const values = [
+          String(summary.total),
+          { idle: "已完成", running: "整理中", blocked: "已暂停", waiting: "等待处理" }[
+            summary.consolidation
+          ],
+          hubDate(summary.updatedAt),
+        ];
+        values.forEach((value, index) => {
+          const target = statValues[index];
+          if (target) target.textContent = value;
         });
+        ui.updated.hidden = false;
       };
       const render = () => {
-        if (!summary) return;
+        if (!summary || mounted) return;
+        mounted = true;
         ui.body.replaceChildren();
         const overview = hubElement(document, "div", "hub-overview");
-        for (const [label, value] of [
-          ["记忆总数", String(summary.total)],
-          [
-            "整理状态",
-            { idle: "已完成", running: "整理中", blocked: "已暂停", waiting: "等待处理" }[
-              summary.consolidation
-            ],
-          ],
-          ["最近更新", hubDate(summary.updatedAt)],
-        ]) {
+        for (const label of ["记忆总数", "整理状态", "最近更新"]) {
           const card = hubElement(document, "div", "hub-overview-card");
           card.append(
             hubElement(document, "span", "hub-muted", label),
-            hubElement(document, "strong", "hub-stat-value", value),
+            hubElement(document, "strong", "hub-stat-value", ""),
           );
+          statValues.push(card.lastElementChild as HTMLElement);
           overview.append(card);
         }
+        updateSummary();
         ui.body.append(overview);
         heading.textContent = "最近更新";
         ui.body.append(heading);
@@ -170,27 +198,66 @@ export function createMemoryAdminPage(
           void search();
         });
         ui.body.append(form, results);
+        renderRecent();
       };
-      const refresh = async () => {
-        ++searchGeneration;
-        const host = ui.hosts.value;
-        const revision = ui.revision();
-        if (!host) return;
-        summary = null;
-        query = "";
-        source = "";
-        offset = 0;
-        windowId = undefined;
+      const applyView = (view: HubCacheView<HubResult<"overview">>) => {
+        summary = view.value;
+        render();
+        updateSummary();
+        ui.updated.textContent = `更新于 ${hubAgeLabel(view.updatedAt)}`;
+        if (!query.trim() && !source) renderRecent();
+        ui.status.textContent = "";
+      };
+      const controller = new HubCacheController<HubResult<"overview">>(
+        "hub-memory",
+        () => client.request(ui.hostId, { op: "overview" }),
+        applyView,
+      );
+      const afterOverview = () => {
+        if (!query.trim() && !source) void search(true);
+      };
+      const refresh = async (pending?: string) => {
         await ui.load(async () => {
-          const result = await client.request(host, { op: "overview" });
-          if (!ui.valid(host, revision)) return;
-          summary = result;
-          render();
-        });
-        if (ui.valid(host, revision) && summary) await search();
+          await controller.refresh();
+        }, pending);
+        afterOverview();
       };
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      const background = () => {
+        void controller
+          .refresh()
+          .then(afterOverview)
+          .catch((error: unknown) => {
+            ui.status.textContent = hubErrorText(error);
+            const code = (error as { message?: string } | null)?.message;
+            if (code !== "connecting" && code !== "retrying") return;
+            if (retry) clearTimeout(retry);
+            retry = setTimeout(() => {
+              retry = null;
+              background();
+            }, 3_000);
+          });
+      };
+      context.signal.addEventListener(
+        "abort",
+        () => {
+          if (retry) clearTimeout(retry);
+          retry = null;
+        },
+        { once: true },
+      );
+      const tick = setInterval(() => {
+        const view = controller.peek();
+        if (view && !ui.updated.hidden)
+          ui.updated.textContent = `更新于 ${hubAgeLabel(view.updatedAt)}`;
+      }, 30_000);
+      context.signal.addEventListener("abort", () => clearInterval(tick), { once: true });
       void ui.initialize(() => {
-        void refresh();
+        const cached = controller.peek();
+        if (cached) {
+          applyView(cached);
+          background();
+        } else void refresh("正在连接 India…");
       });
     },
   });

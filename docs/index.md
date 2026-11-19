@@ -32,7 +32,7 @@
 | [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、Gemini 整句结构化查询、共享模型服务与错误处理、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
 | [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、智能体监听派发和卡片回复、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
 | [`architecture/codex-agents.md`](architecture/codex-agents.md) | 工作台「智能体」页的 `$CODEX_HOME/agents` 读写、TOML 未知键保留、模型目录、钉钉分发设置与审批边界；修改自定义 Agent 或钉钉设置时阅读。 |
-| [`architecture/hub-admin.md`](architecture/hub-admin.md) | MCPHub 与 MemHub 管理页的按 Host 路由、localhost API、凭据保留、操作白名单与只读记忆查询。 |
+| [`architecture/hub-admin.md`](architecture/hub-admin.md) | MCPHub 与 MemHub 管理页的 Mac Host 常驻转发、内存令牌、操作白名单、只读记忆查询与缓存刷新。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
 | [`architecture/turn-activity-folding.md`](architecture/turn-activity-folding.md) | 回合完成后过程折叠的 Desktop 条件与 `final_answer` 推断规则；修改 Agent 消息阶段投影或排查过程无法收起时阅读。 |

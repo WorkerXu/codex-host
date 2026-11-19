@@ -50,7 +50,7 @@ export function createRendererHubAdminClient(options: {
       if (!route) throw new Error("connection");
       const value = await route.manager.sendRequest(HUB_ADMIN_METHOD, params, {
         priority: "interactive",
-        timeoutMs: 20000,
+        timeoutMs: 30000,
       });
       return hubResultSchemas[params.op].parse(value) as HubResult<O>;
     },

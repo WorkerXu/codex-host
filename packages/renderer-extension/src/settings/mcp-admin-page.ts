@@ -1,6 +1,8 @@
 import type { HubKey, HubServer, HubResult } from "@codexhost/shared-contracts";
 import type { RendererHubAdminClient } from "../renderer-hub-admin-client.js";
+import { hubErrorText } from "../renderer-hub-admin-client.js";
 import type { RendererSettingsPageDefinition } from "./core.js";
+import { HubCacheController, hubAgeLabel, type HubCacheView } from "./hub-cache.js";
 import {
   createHubPage,
   hubButton,
@@ -16,7 +18,18 @@ import { mcpDialogs } from "./mcp-admin-dialogs.js";
 export interface HubAdminPageOptions {
   createClient(): RendererHubAdminClient | null;
 }
+type McpView = {
+  configured: boolean;
+  last4: string | null;
+  servers: HubServer[];
+  keys: HubResult<"keys">;
+};
 const statuses = { online: "在线", offline: "离线", inactive: "未激活", disabled: "禁用" };
+const emptyKeys: HubResult<"keys"> = {
+  enabled: true,
+  headerName: "Authorization",
+  keys: [],
+};
 export function createMcpAdminPage(
   options: HubAdminPageOptions,
   label = "MCP 服务器",
@@ -27,14 +40,14 @@ export function createMcpAdminPage(
     icon: "connections",
     mount(context) {
       const client = options.createClient();
-      const ui = createHubPage(context, label, "oracle-main", client);
+      const ui = createHubPage(context, label, client);
       if (!client) {
         ui.status.textContent = "连接失败";
         return;
       }
       const document = ui.document;
       let servers: HubServer[] = [];
-      let keys: HubResult<"keys"> = { enabled: true, headerName: "Authorization", keys: [] };
+      let keys: HubResult<"keys"> = emptyKeys;
       let query = "";
       let filter = "all";
       let menu: AgentMenuHandle | null = null;
@@ -69,28 +82,65 @@ export function createMcpAdminPage(
         anchor.setAttribute("aria-expanded", "false");
         return anchor;
       };
-      const refresh = async () => {
-        const host = ui.hosts.value;
-        const revision = ui.revision();
-        if (!host) return;
+      const fail = (error: unknown, visible: boolean) => {
+        if (error instanceof Error && error.message === "mcp-auth") connection.authFailed();
+        else ui.status.textContent = hubErrorText(error);
+        if (visible) throw error;
+      };
+      const applyView = (view: HubCacheView<McpView>) => {
+        servers = view.value.servers;
+        keys = view.value.keys;
+        connection.show({ configured: view.value.configured, last4: view.value.last4 });
+        ui.updated.hidden = !view.value.configured;
+        if (view.value.configured) {
+          ui.updated.textContent = `更新于 ${hubAgeLabel(view.updatedAt)}`;
+          render();
+        }
+        ui.status.textContent = "";
+      };
+      const controller = new HubCacheController<McpView>(
+        "hub-mcp",
+        async () => {
+          const result = await client.request(ui.hostId, { op: "mcpOverview" });
+          return {
+            configured: result.configured,
+            last4: result.last4,
+            servers: result.servers ?? [],
+            keys: result.keys ?? emptyKeys,
+          };
+        },
+        applyView,
+      );
+      const refresh = async (pending?: string) => {
         await ui.load(async () => {
-          if (!(await connection.ready())) return;
           try {
-            const [serverResult, keyResult] = await Promise.all([
-              client.request(host, { op: "servers" }),
-              client.request(host, { op: "keys" }),
-            ]);
-            if (!ui.valid(host, revision)) return;
-            servers = serverResult.servers;
-            keys = keyResult;
-            render();
+            await controller.refresh();
           } catch (error) {
-            if (!ui.valid(host, revision)) return;
-            if (error instanceof Error && error.message === "mcp-auth") connection.authFailed();
-            else throw error;
+            fail(error, true);
           }
+        }, pending);
+      };
+      let retry: ReturnType<typeof setTimeout> | null = null;
+      const background = () => {
+        void controller.refresh().catch((error: unknown) => {
+          fail(error, false);
+          const code = (error as { message?: string } | null)?.message;
+          if (code !== "connecting" && code !== "retrying") return;
+          if (retry) clearTimeout(retry);
+          retry = setTimeout(() => {
+            retry = null;
+            background();
+          }, 3_000);
         });
       };
+      context.signal.addEventListener(
+        "abort",
+        () => {
+          if (retry) clearTimeout(retry);
+          retry = null;
+        },
+        { once: true },
+      );
       const connection = createMcpConnectionUi(ui, client, refresh, actions);
       const dialogs = mcpDialogs(ui, client, refresh, () => servers);
       const list = hubElement(document, "div", "hub-server-list");
@@ -116,7 +166,7 @@ export function createMcpAdminPage(
             `${server.name} 启用状态`,
             server.status !== "disabled",
             () => {
-              const host = ui.hosts.value;
+              const host = ui.hostId;
               const enabled = server.status === "disabled";
               const action = async () => {
                 await client.request(host, {
@@ -138,7 +188,7 @@ export function createMcpAdminPage(
             label: "删除",
             danger: true,
             run() {
-              const host = ui.hosts.value;
+              const host = ui.hostId;
               ui.confirm("删除服务器", `删除 ${server.name}？此操作无法撤销。`, async () => {
                 await client.request(host, {
                   op: "serverDelete",
@@ -222,7 +272,7 @@ export function createMcpAdminPage(
           {
             label: "重新生成",
             run() {
-              const host = ui.hosts.value;
+              const host = ui.hostId;
               const revision = ui.revision();
               ui.confirm("重新生成密钥", `重新生成 ${key.name}？旧密钥将立即失效。`, async () => {
                 const result = await client.request(host, {
@@ -239,7 +289,7 @@ export function createMcpAdminPage(
             label: "删除",
             danger: true,
             run() {
-              const host = ui.hosts.value;
+              const host = ui.hostId;
               ui.confirm("删除密钥", `删除 ${key.name}？使用此密钥的连接将失去权限。`, async () => {
                 await client.request(host, { op: "keyDelete", id: key.id, confirmed: true });
                 await refresh();
@@ -299,7 +349,7 @@ export function createMcpAdminPage(
         const controls = hubElement(document, "div", "hub-row");
         controls.append(
           hubIconButton(document, "编辑认证请求头", "settings", () => {
-            const host = ui.hosts.value;
+            const host = ui.hostId;
             const modal = ui.dialog("认证请求头");
             const header = hubField(document, modal.content, "请求头名称", keys.headerName);
             modal.footer.append(
@@ -323,7 +373,7 @@ export function createMcpAdminPage(
             );
           }),
           hubSwitch(document, "Bearer 认证", keys.enabled, () => {
-            const host = ui.hosts.value;
+            const host = ui.hostId;
             const action = async () => {
               await client.request(host, {
                 op: "authSave",
@@ -343,9 +393,18 @@ export function createMcpAdminPage(
         for (const key of keys.keys) ui.body.append(keyRow(key));
         if (!keys.keys.length) ui.body.append(hubElement(document, "p", "hub-empty", "暂无密钥"));
       };
-      ui.hosts.addEventListener("change", closeMenu);
+      const tick = setInterval(() => {
+        const view = controller.peek();
+        if (view && !ui.updated.hidden)
+          ui.updated.textContent = `更新于 ${hubAgeLabel(view.updatedAt)}`;
+      }, 30_000);
+      context.signal.addEventListener("abort", () => clearInterval(tick), { once: true });
       void ui.initialize(() => {
-        void refresh();
+        const cached = controller.peek();
+        if (cached) {
+          applyView(cached);
+          background();
+        } else void refresh("正在连接 India…");
       });
       return closeMenu;
     },

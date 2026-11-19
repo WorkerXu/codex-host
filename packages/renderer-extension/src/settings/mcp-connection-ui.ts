@@ -13,7 +13,7 @@ export function createMcpConnectionUi(
 ) {
   const document = ui.document;
   const connect = (replace = false) => {
-    const host = ui.hosts.value;
+    const host = ui.hostId;
     const revision = ui.revision();
     const modal = ui.dialog(replace ? "更换密钥" : "连接 MCPHub");
     const input = hubField(document, modal.content, "管理员密钥") as HTMLInputElement;
@@ -21,13 +21,12 @@ export function createMcpConnectionUi(
     input.autocomplete = "off";
     input.spellcheck = false;
     input.placeholder = "输入专用的全权限管理员密钥";
-    const hostName = ui.hosts.textContent?.trim() || host;
     modal.content.append(
       hubElement(
         document,
         "p",
         "hub-muted",
-        `在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在 ${hostName} 上。`,
+        "在 MCPHub 后台创建一个启用的系统级、全部权限密钥。密钥只保存在本机。",
       ),
     );
     const submit = hubButton(
@@ -93,7 +92,7 @@ export function createMcpConnectionUi(
     {
       label: "断开",
       run: () => {
-        const host = ui.hosts.value;
+        const host = ui.hostId;
         const revision = ui.revision();
         ui.confirm("断开 MCPHub", "移除此主机保存的管理员密钥？", async () => {
           await client.request(host, { op: "mcpDisconnect", confirmed: true });
@@ -129,21 +128,13 @@ export function createMcpConnectionUi(
     state.append(hubButton(document, invalid ? "更换密钥" : "连接", () => connect(invalid), true));
     ui.body.append(state);
   };
-  ui.hosts.addEventListener("change", () => {
-    menu.hidden = true;
-  });
   return {
-    async ready() {
-      const host = ui.hosts.value;
-      const revision = ui.revision();
-      const state = await client.request(host, { op: "mcpConnection" });
-      if (!ui.valid(host, revision)) return false;
+    show(state: { configured: boolean; last4: string | null }) {
       menu.hidden = !state.configured;
       menu.dataset.tooltip = state.last4
         ? `MCPHub 连接设置 · ••••${state.last4}`
         : "MCPHub 连接设置";
       if (!state.configured) empty();
-      return state.configured;
     },
     authFailed: () => empty(true),
   };
