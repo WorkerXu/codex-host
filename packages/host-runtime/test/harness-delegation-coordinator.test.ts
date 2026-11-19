@@ -413,32 +413,6 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
-  it("times out a slow availability inspection and caches the result", async () => {
-    vi.useFakeTimers();
-    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
-    const inspect = vi
-      .spyOn(adapter, "inspect")
-      .mockImplementation(() => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>);
-    const value = await fixture(adapter);
-    try {
-      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
-      await vi.advanceTimersByTimeAsync(2_000);
-      await expect(pending).resolves.toMatchObject({
-        harnesses: ["codex", "pi"],
-        availability: { codex: "ready", pi: "unavailable" },
-      });
-      expect(inspect).toHaveBeenCalledTimes(1);
-
-      await expect(
-        value.coordinator.listHarnesses({ includeAvailability: true }),
-      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
-      expect(inspect).toHaveBeenCalledTimes(1);
-    } finally {
-      await value.close();
-      vi.useRealTimers();
-    }
-  });
-
   it("rechecks a cached transient failure after ten minutes and recovers", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
@@ -520,6 +494,60 @@ describe("HarnessDelegationCoordinator", () => {
       await expect(
         value.coordinator.listHarnesses({ includeAvailability: true }),
       ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a ready status when a refresh check times out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi.spyOn(adapter, "inspect");
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      const generation = await value.coordinator.availabilityGeneration();
+      inspect.mockImplementation(
+        () => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>,
+      );
+
+      const pending = value.coordinator.listHarnesses({
+        includeAvailability: true,
+        refresh: true,
+      });
+      await vi.advanceTimersByTimeAsync(8_000);
+      // The slow concurrent CLI start did not turn a ready answer into unavailable.
+      await expect(pending).resolves.toMatchObject({ availability: { pi: "ready" } });
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(generation);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not cache a first-check timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi
+      .spyOn(adapter, "inspect")
+      .mockImplementation(() => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>);
+    const value = await fixture(adapter);
+    try {
+      const first = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(first).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(0);
+
+      // With no cached timeout entry, the next read must inspect again.
+      const second = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(second).resolves.toMatchObject({ availability: { pi: "unavailable" } });
       expect(inspect).toHaveBeenCalledTimes(2);
     } finally {
       await value.close();

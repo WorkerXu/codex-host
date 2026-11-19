@@ -60,8 +60,8 @@ import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
-const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
-const AVAILABILITY_CONCURRENCY = 6;
+const AVAILABILITY_INSPECT_TIMEOUT_MS = 8_000;
+const AVAILABILITY_CONCURRENCY = 3;
 /** A stale non-ready answer may wait this long before the cached value is returned. */
 const AVAILABILITY_LIMITED_WAIT_MS = 300;
 const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
@@ -442,7 +442,12 @@ export class HarnessDelegationCoordinator {
           adapter.inspect({ purpose: "availability" }),
           AVAILABILITY_INSPECT_TIMEOUT_MS,
         );
-        status = inspection === AVAILABILITY_TIMEOUT ? "unavailable" : inspection.status;
+        if (inspection === AVAILABILITY_TIMEOUT) {
+          // A slow concurrent CLI start is not evidence that the Harness is
+          // unavailable. Keep the last observation and do not rewrite the cache.
+          return (await this.#availabilityStore.get(harnessId))?.status ?? "unavailable";
+        }
+        status = inspection.status;
       } catch {
         status = "error";
       }
