@@ -287,7 +287,7 @@ export function jarvisStepErrorText(
   const table = locale === "zh-CN" ? zh : en;
   return (
     (code && table[code]) ||
-    (locale === "zh-CN" ? "Jarvis 请求失败，请稍后重试" : "Jarvis request failed; try again")
+    (locale === "zh-CN" ? "Jarvis 请求失败，请重试" : "Jarvis request failed; try again")
   );
 }
 
