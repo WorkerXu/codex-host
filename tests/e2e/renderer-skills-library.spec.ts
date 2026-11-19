@@ -35,6 +35,7 @@ async function setup(page: Page, mode: "normal" | "slow" = "normal") {
     mode === "slow",
   );
   await expect(page.locator(".skills-card")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "管理排除…" })).toHaveCount(0);
 }
 
 test("local machine paints first and remote machines fill in when they answer", async ({
