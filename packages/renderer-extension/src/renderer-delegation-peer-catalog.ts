@@ -1,10 +1,11 @@
 import type {
   DelegationPeerCatalog,
   DelegationPeerCatalogEntry,
+  HarnessPluginDescriptor,
 } from "@codexhost/shared-contracts";
 
-import type { HarnessPluginDescriptor } from "@codexhost/shared-contracts";
-
+import type { RendererSettingsLocale } from "./settings/localization.js";
+import { localMachineLabel } from "./renderer-cross-host-harness-catalog.js";
 import type {
   RendererDelegationPeerNotice,
   RendererDelegationTarget,
@@ -15,14 +16,32 @@ export interface RendererDelegationPeerTargets {
   notices: RendererDelegationPeerNotice[];
 }
 
+/** A peer that is this Mac: its mention still carries the peer name. */
+export function isLocalDelegationPeer(peer: DelegationPeerCatalogEntry): boolean {
+  return peer.hostIds.includes("local");
+}
+
+/** Desktop folder-bar name for a peer, falling back to its `peers.json` name. */
+export function delegationPeerLabel(
+  peer: DelegationPeerCatalogEntry,
+  locale: RendererSettingsLocale,
+  desktopNameFor?: (peer: DelegationPeerCatalogEntry) => string | undefined,
+): string {
+  if (isLocalDelegationPeer(peer)) return localMachineLabel(locale);
+  return desktopNameFor?.(peer) ?? peer.name;
+}
+
 /**
- * Turn the Host Runtime's peer catalog into `#` menu rows. A peer that is
+ * Turn the conversation Host's peer catalog into `#` menu rows. A peer that is
  * offline keeps its last known Harnesses as disabled rows; a peer that has no
  * known Harnesses becomes a disabled machine group instead.
  */
 export function delegationPeerTargets(
   catalog: DelegationPeerCatalog | null,
-  pluginFor: (harnessId: string) => HarnessPluginDescriptor | undefined,
+  pluginFor: (
+    harnessId: string,
+    peer: DelegationPeerCatalogEntry,
+  ) => HarnessPluginDescriptor | undefined,
   labelFor: (harnessId: string, plugin?: HarnessPluginDescriptor) => string,
   displayNameForPeer?: (peer: DelegationPeerCatalogEntry) => string | undefined,
 ): RendererDelegationPeerTargets {
@@ -41,7 +60,7 @@ export function delegationPeerTargets(
       continue;
     }
     for (const harnessId of peer.harnesses) {
-      const plugin = pluginFor(harnessId);
+      const plugin = pluginFor(harnessId, peer);
       targets.push({
         agent: harnessId,
         label: labelFor(harnessId, plugin),

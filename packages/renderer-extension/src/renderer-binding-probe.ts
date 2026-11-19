@@ -26,7 +26,7 @@ import {
   type ThreadUsageInspection,
   type ThreadUsageSnapshot,
   type CodexhostError,
-  type DelegationPeerCatalog,
+  type DelegationPeerCatalogEntry,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -133,7 +133,8 @@ import {
   installRendererJarvisMention,
   type RendererJarvisMentionControl,
 } from "./renderer-jarvis-mention.js";
-import { delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
+import { delegationPeerLabel, delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
+import { createDelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
 import {
   createNativeScheduleWorkspaceThread,
@@ -918,7 +919,7 @@ export function installRendererBindingProbe(
         });
       }
       // Peers configured for `#` delegation may not have a Desktop SSH row yet.
-      for (const peer of peerDelegationCatalog?.peers ?? []) {
+      for (const peer of peerDelegationCatalogs.get("local")?.peers ?? []) {
         const hostId = peer.hostIds[0] ?? peer.name;
         if (hosts.some((host) => host.hostId === hostId)) continue;
         hosts.push({
@@ -1299,36 +1300,26 @@ export function installRendererBindingProbe(
     const route = window.__codexhostHostRoutingV1?.forHost("local");
     return route ? { hostId: "local", manager: route.manager } : null;
   });
-  let peerDelegationCatalog: DelegationPeerCatalog | null = null;
-  let peerDelegationCatalogAt = 0;
-  let peerDelegationCatalogRequest: Promise<void> | null = null;
-  const PEER_DELEGATION_REVALIDATE_MS = 60 * 60_000;
-  const refreshPeerDelegationCatalog = (): void => {
+  const peerDelegationCatalogs = createDelegationPeerCatalogSource({
+    load: (hostId, { refresh }) => {
+      const client = modelClientForHost(hostId);
+      if (!client?.listDelegationPeers) {
+        throw new Error(`Peer catalog is unavailable for Host ${hostId}`);
+      }
+      return client.listDelegationPeers(refresh ? { refresh: true } : {});
+    },
+    onUpdate: () => delegationMention?.refresh(),
+  });
+  const refreshPeerDelegationCatalog = (hostId: string): void => {
     // Populate Desktop display names before the menu can render peer groups.
     void reconcileSshConnectionHosts();
-    if (peerDelegationCatalogRequest) return;
-    if (
-      peerDelegationCatalog &&
-      Date.now() - peerDelegationCatalogAt < PEER_DELEGATION_REVALIDATE_MS
-    )
-      return;
-    const client = modelClientForHost("local");
-    if (!client?.listDelegationPeers) return;
-    const revalidate = peerDelegationCatalog !== null;
-    peerDelegationCatalogRequest = client
-      .listDelegationPeers(revalidate ? { refresh: true } : {})
-      .then((catalog) => {
-        peerDelegationCatalog = catalog;
-        peerDelegationCatalogAt = Date.now();
-        delegationMention?.refresh();
-      })
-      .catch(() => {
-        // Retry later; an older Host may not implement the catalog yet.
-        peerDelegationCatalogAt = Date.now() - PEER_DELEGATION_REVALIDATE_MS + 10_000;
-      })
-      .finally(() => {
-        peerDelegationCatalogRequest = null;
-      });
+    peerDelegationCatalogs.refresh(hostId);
+  };
+  /** The Host whose Runtime owns the conversation, so its peers and this menu agree. */
+  const conversationHostId = (editor: HTMLElement): string | null => {
+    const composer = composerForElement(editor);
+    if (!composer) return null;
+    return activeModelHostId(composer) ?? mountedByComposer.get(composer)?.hostId ?? null;
   };
   /**
    * Workspace of each Host's current draft, published by the draft prewarm
@@ -3639,18 +3630,25 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
-  const peerDelegationMenu = () =>
+  const desktopDisplayNameForPeer = (peer: DelegationPeerCatalogEntry): string | undefined => {
+    for (const hostId of peer.hostIds) {
+      const displayName = sshConnectionDisplayNames.get(hostId);
+      if (displayName) return displayName;
+    }
+    return peer.ssh ? sshConnectionDisplayNamesByAlias.get(peer.ssh) : undefined;
+  };
+  const peerDelegationMenu = (hostId: string) =>
     delegationPeerTargets(
-      peerDelegationCatalog,
-      (harnessId) => pluginForHost("local", harnessId),
-      rendererAgentLabel,
-      (peer) => {
-        for (const hostId of peer.hostIds) {
-          const displayName = sshConnectionDisplayNames.get(hostId);
-          if (displayName) return displayName;
-        }
-        return peer.ssh ? sshConnectionDisplayNamesByAlias.get(peer.ssh) : undefined;
+      peerDelegationCatalogs.get(hostId),
+      (harnessId, peer) => {
+        const peerHostId = peer.hostIds[0];
+        return (
+          (peerHostId ? pluginForHost(peerHostId, harnessId) : undefined) ??
+          pluginForHost("local", harnessId)
+        );
       },
+      rendererAgentLabel,
+      (peer) => delegationPeerLabel(peer, settingsLifecycle.locale, desktopDisplayNameForPeer),
     );
   delegationMention = installRendererDelegationMention(document, {
     onOpen: (editor) => {
@@ -3659,7 +3657,7 @@ export function installRendererBindingProbe(
       if (mounted && controller.get(mounted.composer).agent !== "codex") {
         void refreshCommands(mounted, { keepCurrent: true });
       }
-      refreshPeerDelegationCatalog();
+      refreshPeerDelegationCatalog(conversationHostId(editor) ?? "local");
     },
     readTargets: (editor) => {
       const composer = composerForElement(editor);
@@ -3671,9 +3669,13 @@ export function installRendererBindingProbe(
           const plugin = mounted?.hostId ? pluginForHost(mounted.hostId, agent) : undefined;
           return { agent, label: rendererAgentLabel(agent, plugin), ...(plugin ? { plugin } : {}) };
         });
-      return [...localTargets, ...peerDelegationMenu().targets];
+      const hostId = conversationHostId(editor);
+      return [...localTargets, ...(hostId ? peerDelegationMenu(hostId).targets : [])];
     },
-    readPeerNotices: () => peerDelegationMenu().notices,
+    readPeerNotices: (editor) => {
+      const hostId = conversationHostId(editor);
+      return hostId ? peerDelegationMenu(hostId).notices : [];
+    },
     isComposerEditor: (editor) => {
       const composer = composerForElement(editor);
       return composer !== null && isMountedComposer(composer);
@@ -3767,7 +3769,7 @@ export function installRendererBindingProbe(
       return openDingTalkWorkbench(editor, hostId);
     },
   });
-  refreshPeerDelegationCatalog();
+  refreshPeerDelegationCatalog("local");
 
   const connectedComposers = (): MountedComposer[] =>
     [...mountedByComposer.values()].filter(
@@ -3913,6 +3915,7 @@ export function installRendererBindingProbe(
       delegationProjects.dispose();
       if (disposed) return;
       disposed = true;
+      peerDelegationCatalogs.dispose();
       questions.dispose();
       usageNotificationDispose();
       adapterDispose?.();
