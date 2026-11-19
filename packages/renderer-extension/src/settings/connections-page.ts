@@ -1201,6 +1201,10 @@ export function createConnectionsSettingsPage(
       };
 
       render(diagnostics?.snapshot() ?? null);
+      if (selectedHostId) {
+        // Paint the cached directory first, then revalidate one Host in the background.
+        void diagnostics?.revalidateHarnessDirectory?.(selectedHostId).catch(() => undefined);
+      }
       recordRendererPageOpen("connections", pageStartedAt, selectedHostId);
       void getRemoteConnections()
         ?.ssh.list(context.signal)
