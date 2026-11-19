@@ -85,6 +85,40 @@ describe("cross-host harness catalog", () => {
     ]);
   });
 
+  it("offers this Mac and skips the machine that owns the project", async () => {
+    const catalog = await loadCrossHostHarnessCatalog({
+      connections: [
+        { hostId: "remote-ssh-discovered:oracle-main", displayName: "甲骨文新加坡" },
+        { hostId: "remote-ssh-codex-managed:colab", displayName: "colab" },
+      ],
+      knownHostIds: ["local", "remote-ssh-discovered:oracle-main"],
+      includeLocal: true,
+      excludeHostIds: ["remote-ssh-discovered:oracle-main"],
+      isOnline: () => true,
+      refresh: async () => undefined,
+      directory: () => ({
+        plugins: [claudeCode, notInstalled],
+        availability: { "claude-code": "ready", grok: "notInstalled" },
+        error: null,
+      }),
+    });
+    expect(
+      catalog.machines.map(({ hostId, label, harnesses }) => ({
+        hostId,
+        label,
+        harnesses: harnesses.map(({ id }) => id),
+      })),
+    ).toEqual([
+      { hostId: "local", label: "此计算机", harnesses: ["codex", "claude-code"] },
+      {
+        hostId: "remote-ssh-codex-managed:colab",
+        label: "colab",
+        harnesses: ["codex", "claude-code"],
+      },
+    ]);
+    expect(catalog.loadedPeers).toBe(2);
+  });
+
   it("keeps only ready Harnesses and always exposes Codex", () => {
     expect(
       readyHarnessPlugins([claudeCode, notInstalled, usageOnly], {

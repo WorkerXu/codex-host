@@ -1,12 +1,15 @@
 # 跨机同名项目（Cross-host Project Mirror）
 
-本功能让本机「只填名字」创建的原生项目，在 Agent/Harness 选择器里提供「其他机器」入口：选中某台远程机器的 Harness 后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该 Harness（模型使用其默认值）。
+本功能让「只填名字」创建的原生项目，在 Agent/Harness 选择器里提供「其他机器」入口：选中某台机器的 Harness 后，codexhost 在该机器创建同名项目，打开该项目的空白新对话并预选该 Harness（模型使用其默认值）。源项目可以是本机项目，也可以是另一台机器上的同名项目；后者的「其他机器」里会出现本机（「此计算机」）。
 
 对应 A 阶段调研与拍板见 [`docs/proposals/cross-host-project-mirror.md`](../proposals/cross-host-project-mirror.md)。本文只描述当前行为。
 
 ## 边界
 
-- 仅针对**本机**、单 root、位于 `defaultProjectParent`（默认 `~/Documents/ChatGPT`）下、basename 与项目名匹配的项目；远程项目不能作为源项目。
+- 源项目必须是单 root、位于默认项目目录下、basename 与项目名匹配的项目：
+  - 本机项目：父目录等于 `defaultProjectParent`（默认 `~/Documents/ChatGPT`）。
+  - 远程项目：父目录以 `/Documents/ChatGPT` 结尾（远端 home 与本机不同，无法比较绝对路径）。
+- 目标机器包含本机和所有已连接的其它机器，但排除源项目所在机器。
 - 只在「新对话」Composer 中提供入口；已有对话不显示。
 - 不迁移草稿、附件、引用；不自动发送。
 - 目标机必须是已连接的 SSH Host；离线时机器置灰。
@@ -30,12 +33,12 @@
 ## 只填名字识别
 
 - 启发式：`rootPaths.length === 1`，父目录等于 `defaultProjectParent`，basename 等于 `sanitize(name)` 或 `sanitize(name) <n>`。
-- 第一次使用时弹出确认对话框；确认后把 `sourceProjectId` 写入 codexhost 登记表。取消不写。
+- 不需要首次确认：只要判定为只填名字项目，分类信息就立即出现在「其他机器」里。
 - 识别不确定或项目已改名时不提供该入口，而不是猜测。
 
 ## 目标路径
 
-- `<目标机 home>/Documents/ChatGPT/<name>`（`name` 经 Desktop 同款字符清洗）。
+- 远程目标：`<目标机 home>/Documents/ChatGPT/<name>`（`name` 经 Desktop 同款字符清洗）。
 - 候选依次为 `<name>`、`<name> 2`、`<name> 3`…：
   - 已登记的镜像项目 → 复用。
   - 同路径已有同名项目 → 复用。
@@ -43,10 +46,12 @@
   - 目录存在但不是项目 → 复用该目录。
   - 路径不存在 → 创建目录后建项目。
 - 目录通过 Desktop renderer 服务 `appServices.workspaceFiles.createDirectory({hostId, path})` 创建；home 通过 `appServices.executionPaths.readHomeDirectory(hostId)` 获取。`ProjectMirrorDesktopServices` 保持这套嵌套形状，不拍平成顶层方法。
+- 本机目标（远程 → 本机）：不自行拼路径。已有同名只填名字本机项目时直接复用；否则调用 Desktop 的本地创建，由 Desktop 按自己的规则创建 `~/Documents/ChatGPT/<name>`（必要时编号为 `<name> 2`）。
 
 ## 创建项目
 
-- 通过 `appServices.projects.createRemote({appearance:null, hostId, label, remotePath, reuseExisting:true})` 创建远程项目。该调用与 Desktop 内部 `create_project` 工具同源。
+- 远程目标：`appServices.projects.createRemote({appearance:null, hostId, label, remotePath, reuseExisting:true})`。该调用与 Desktop 内部 `create_project` 工具同源。
+- 本机目标：`appServices.projects.createLocal({appearance:null, initializeDefaultWorkspaceGitRepository:false, name, setActive:false, sources:[]})`。`sources` 为空时 Desktop 自己创建默认项目目录；返回 `{projectId, rootPaths}`。`setActive:false` 不改变用户当前选中的项目。
 - 若目标机已有同名但不同路径的项目，不复用；按候选规则新建。
 - 兼容层：在目标 Host 调用 `project/create {name, roots:[{path}], metadata:{}, idempotencyKey:<remoteProjectId>}`；失败只写日志，不影响主流程。使用 remote project id 作为幂等键，未来 Desktop 迁移时不会重复建项目。
 - 创建后等待侧栏出现 `data-app-action-sidebar-project-id="<id>"`，再点击该项目行的原生新对话按钮。
@@ -79,7 +84,7 @@
   "formatVersion": 1,
   "revision": 1,
   "projects": {
-    "local-source-id": {
+    "source-project-id": {
       "hostId": "remote-ssh-discovered:colab",
       "remoteProjectId": "…",
       "remotePath": "/root/Documents/ChatGPT/demo",
@@ -87,15 +92,16 @@
       "createdAt": "…",
       "updatedAt": "…"
     }
-  },
-  "acknowledged": { "local-source-id": true }
+  }
 }
 ```
 
 Host 只提供本地 RPC：
 
 - `codexhost/project-mirror/list`
-- `codexhost/project-mirror/upsert`（revision + `acknowledge` / `record` / `record:null`）
+- `codexhost/project-mirror/upsert`（revision + `record` / `record:null`）
+
+旧版本写入的 `acknowledged` 字段仍可读取，下一次写入时被丢弃；它不再影响任何行为。
 
 ## 失败与降级
 
@@ -104,6 +110,7 @@ Host 只提供本地 RPC：
 | 机器离线/无路由 | 菜单中整行置灰；不创建 |
 | home/dir 读取失败 | toast，结束 |
 | `createRemote` 返回 null（用户取消信任确认） | toast，结束 |
+| `createLocal` 返回 null（用户取消） | toast，结束 |
 | 项目已创建但侧栏未出现（5s） | toast「项目已创建，请稍后手动打开」 |
 | 原生新对话按钮不存在/禁用 | toast，项目保留 |
 | 自动分区失败 | toast「项目已创建，但未能自动加入同一分区」，不阻塞 |
@@ -121,12 +128,12 @@ Host 只提供本地 RPC：
   peersLoaded: number;       // Harness 目录加载成功的机器数
   lastError: string | null;  // 最近一次失败原因
   projectSource: "composer" | "catalog" | null;
-  projectReason: "unknown" | "eligible" | "no-project" | "remote-project" | "missing-project" | "not-name-only" | "catalog-error";
+  projectReason: "unknown" | "eligible" | "no-project" | "missing-project" | "not-name-only" | "catalog-error";
   machineCount: number;
 }
 ```
 
-项目判定优先读 Composer 根节点 React fiber 上的 `selectedProject`；只有缺失时才回退到 Host catalog 的 `selected-project`。因此 `projectSource` 可用于判断是否命中了稳定的 Composer 上下文；`projectReason` 给出不适用的具体原因（远程项目、非 name-only、目录读取失败等）。
+项目判定优先读 Composer 根节点 React fiber 上的 `selectedProject`；只有缺失时才回退到 Host catalog 的 `selected-project`。因此 `projectSource` 可用于判断是否命中了稳定的 Composer 上下文；`projectReason` 给出不适用的具体原因（项目缺失、非 name-only、目录读取失败等）。
 
 ## 已知限制
 

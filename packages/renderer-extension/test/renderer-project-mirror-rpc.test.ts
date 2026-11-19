@@ -21,14 +21,12 @@ describe("project mirror RPC client", () => {
         "codexhost/project-mirror/list": {
           revision: 3,
           projects: {},
-          acknowledged: ["local-alpha"],
         },
       }),
     );
     await expect(rpc.list()).resolves.toEqual({
       revision: 3,
       projects: {},
-      acknowledged: ["local-alpha"],
     });
   });
 

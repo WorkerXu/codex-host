@@ -22,7 +22,10 @@ export interface CrossHostHarnessCatalog {
 export interface CrossHostMachineEntry {
   hostId: string;
   label: string;
-  /** Set only for machines Desktop still lists as a remote connection. */
+  /**
+   * Set for machines Desktop still lists as a remote connection, and for the
+   * local Mac. An entry without one is a stale remote project, not a machine.
+   */
   displayName?: string;
 }
 
@@ -37,12 +40,21 @@ export interface CrossHostHarnessCatalogInput {
   connections: readonly { hostId: string; displayName: string }[];
   knownHostIds: readonly string[];
   remoteProjectHostIds?: readonly string[];
+  /** Also offer this Mac, for a conversation whose project lives elsewhere. */
+  includeLocal?: boolean;
+  /** The machine that already owns the conversation's project. */
+  excludeHostIds?: readonly string[];
   isOnline(hostId: string): boolean;
   directory(hostId: string): CrossHostHarnessDirectory;
   refresh(hostId: string): Promise<void>;
 }
 
 export const CODEX_HARNESS: CrossHostHarness = { id: "codex", label: "Codex" };
+
+/** Desktop's own name for this Mac, matching the folder bar. */
+export function localMachineLabel(locale: string): string {
+  return locale === "zh-CN" ? "此计算机" : "This computer";
+}
 
 /** `remote-ssh-discovered:colab` → `colab`; managed Hosts rely on displayName. */
 export function fallbackHostLabel(hostId: string): string {
@@ -54,13 +66,16 @@ export function fallbackHostLabel(hostId: string): string {
 export function crossHostMachineEntries(
   input: Pick<
     CrossHostHarnessCatalogInput,
-    "connections" | "knownHostIds" | "remoteProjectHostIds"
+    "connections" | "knownHostIds" | "remoteProjectHostIds" | "includeLocal" | "excludeHostIds"
   >,
+  localLabel = localMachineLabel("zh-CN"),
 ): CrossHostMachineEntry[] {
   const entries: CrossHostMachineEntry[] = [];
   const seen = new Set<string>();
   const push = (hostId: string, label: string, displayName?: string): void => {
-    if (hostId === "local" || hostId === "durable" || seen.has(hostId)) return;
+    if (hostId === "durable" || seen.has(hostId)) return;
+    if (hostId === "local" && !input.includeLocal) return;
+    if (input.excludeHostIds?.includes(hostId)) return;
     seen.add(hostId);
     entries.push({
       hostId,
@@ -68,6 +83,7 @@ export function crossHostMachineEntries(
       ...(displayName ? { displayName } : {}),
     });
   };
+  if (input.includeLocal) push("local", localLabel, localLabel);
   for (const connection of input.connections)
     push(
       connection.hostId,

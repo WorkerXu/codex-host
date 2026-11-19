@@ -1,4 +1,4 @@
-import type { DesktopSelectedProject } from "@codexhost/shared-contracts";
+import type { DesktopProjectsCatalog, DesktopSelectedProject } from "@codexhost/shared-contracts";
 
 export interface MirrorSourceProject {
   id: string;
@@ -6,7 +6,27 @@ export interface MirrorSourceProject {
   rootPaths: readonly string[];
 }
 
+/** A source project and the machine whose Desktop owns it. */
+export interface MirrorProjectSource extends MirrorSourceProject {
+  hostId: string;
+  kind: "local" | "remote";
+}
+
+export type ProjectEligibilityReason =
+  "eligible" | "no-project" | "missing-project" | "not-name-only";
+
+export type MirrorSourceResolution =
+  | { source: MirrorProjectSource; reason: "eligible"; error: null }
+  | {
+      source: null;
+      reason: Exclude<ProjectEligibilityReason, "eligible">;
+      error: string | null;
+    };
+
 const INVALID_DIRECTORY_CHARACTER = /[<>:"/\\|?*\u0000-\u001f]/u;
+// Desktop creates name-only projects directly under its default parent; on a
+// remote machine that parent is `~/Documents/ChatGPT` under the remote home.
+const REMOTE_NAME_ONLY_PARENT = /(?:^|\/)Documents\/ChatGPT$/u;
 
 /** Desktop's own sanitization is not exported; match its observable result. */
 export function sanitizeMirrorDirectoryName(name: string): string {
@@ -16,6 +36,13 @@ export function sanitizeMirrorDirectoryName(name: string): string {
     .join("")
     .replace(/[ .]+$/gu, "");
   return replaced.length === 0 ? "New project" : replaced;
+}
+
+/** `<name>` or Desktop's numbered `<name> 2` folder name. */
+function isNameOnlyBasename(name: string, basename: string): boolean {
+  const expected = sanitizeMirrorDirectoryName(name);
+  if (basename === expected) return true;
+  return /^\d+$/u.test(basename.slice(expected.length + 1)) && basename.startsWith(`${expected} `);
 }
 
 export function isNameOnlyProject(
@@ -29,9 +56,83 @@ export function isNameOnlyProject(
   const parent = separator >= 0 ? root.slice(0, separator) : root;
   const basename = separator >= 0 ? root.slice(separator + 1) : root;
   if (parent !== defaultProjectParent.replace(/[\\/]+$/u, "")) return false;
-  const expected = sanitizeMirrorDirectoryName(project.name);
-  if (basename === expected) return true;
-  return /^\d+$/u.test(basename.slice(expected.length + 1)) && basename.startsWith(`${expected} `);
+  return isNameOnlyBasename(project.name, basename);
+}
+
+/**
+ * A project Desktop created by name on another machine. Its remote home differs
+ * from this Mac's, so only the `Documents/ChatGPT/<name>` shape is comparable.
+ */
+export function isNameOnlyRemoteProject(project: { label: string; remotePath: string }): boolean {
+  const separator = project.remotePath.lastIndexOf("/");
+  if (separator <= 0) return false;
+  const parent = project.remotePath.slice(0, separator);
+  if (!REMOTE_NAME_ONLY_PARENT.test(parent)) return false;
+  return isNameOnlyBasename(project.label, project.remotePath.slice(separator + 1));
+}
+
+/** An existing local project the mirror may reuse instead of creating `<name> 2`. */
+export function findNameOnlyLocalProject(
+  projects: readonly MirrorSourceProject[],
+  name: string,
+  defaultProjectParent: string | undefined,
+): MirrorSourceProject | undefined {
+  const trimmed = name.trim();
+  return projects.find(
+    (project) => project.name === trimmed && isNameOnlyProject(project, defaultProjectParent),
+  );
+}
+
+/**
+ * Classify the Composer's project for the mirror. Local and remote name-only
+ * projects are both eligible; the source machine comes with the project.
+ */
+export function resolveMirrorSource(
+  catalog: DesktopProjectsCatalog,
+  selected: DesktopSelectedProject,
+): MirrorSourceResolution {
+  if (selected.type === "local") {
+    const project = catalog.localProjects[selected.projectId];
+    if (!project)
+      return {
+        source: null,
+        reason: "missing-project",
+        error: `Project ${selected.projectId} is missing from the Desktop catalog`,
+      };
+    if (!isNameOnlyProject(project, catalog.defaultProjectParent))
+      return { source: null, reason: "not-name-only", error: null };
+    return {
+      source: {
+        id: project.id,
+        name: project.name,
+        rootPaths: project.rootPaths,
+        hostId: "local",
+        kind: "local",
+      },
+      reason: "eligible",
+      error: null,
+    };
+  }
+  const project = catalog.remoteProjects.find(({ id }) => id === selected.projectId);
+  if (!project)
+    return {
+      source: null,
+      reason: "missing-project",
+      error: `Project ${selected.projectId} is missing from the Desktop catalog`,
+    };
+  if (!isNameOnlyRemoteProject(project))
+    return { source: null, reason: "not-name-only", error: null };
+  return {
+    source: {
+      id: project.id,
+      name: project.label,
+      rootPaths: [project.remotePath],
+      hostId: project.hostId,
+      kind: "remote",
+    },
+    reason: "eligible",
+    error: null,
+  };
 }
 
 /** Deterministic candidates mirroring Desktop's `<name>`, `<name> 2`, `<name> 3` rule. */

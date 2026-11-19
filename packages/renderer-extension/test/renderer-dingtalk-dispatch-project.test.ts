@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { prepareDingTalkProject } from "../src/renderer-dingtalk-dispatch-project.js";
 
 it("creates the dedicated project through native Desktop services without activating it", async () => {
-  const createLocal = vi.fn(async () => ({ projectId: "local-project" }));
+  const createLocal = vi.fn(async () => ({
+    projectId: "local-project",
+    rootPaths: ["/Users/test/Documents/ChatGPT/钉钉智能体"],
+  }));
   const createDirectory = vi.fn(async () => undefined);
   const services = {
     projects: { createLocal, createRemote: async () => null },
