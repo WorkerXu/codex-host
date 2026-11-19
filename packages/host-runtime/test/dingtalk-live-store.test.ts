@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { DingTalkConversation, DingTalkMessage } from "@codexhost/shared-contracts";
+import {
+  jsonValueSchema,
+  type DingTalkConversation,
+  type DingTalkMessage,
+} from "@codexhost/shared-contracts";
 
 import { DingTalkLiveStore } from "../src/dingtalk-live-store.js";
 
@@ -321,6 +325,19 @@ describe("DingTalk live state", () => {
     ).toBe(false);
     expect(store.rows()[0]?.preview).toBe("林晓：预算表我改完第二版了");
     expect(store.rows()[0]?.lastMessageAt).toBe(300);
+  });
+
+  it("keeps every merged row JSON-safe when neither read carries a preview", () => {
+    const store = new DingTalkLiveStore();
+    store.applyConversations([row("a", 100), { ...row("b", 100), preview: "" }], { now: 1_000 });
+    store.applyConversations([row("a", 200, 3), { ...row("b", 200), preview: "  " }], {
+      now: 2_000,
+    });
+    for (const merged of store.rows()) {
+      expect(Object.prototype.hasOwnProperty.call(merged, "preview")).toBe(false);
+      expect(jsonValueSchema.safeParse(merged).success).toBe(true);
+    }
+    expect(jsonValueSchema.safeParse({ conversations: store.rows() }).success).toBe(true);
   });
 
   it("clears rows, transcripts and members on clear", () => {
