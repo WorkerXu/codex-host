@@ -268,8 +268,8 @@ export function jarvisStepErrorText(
     not_installed: "未安装 Jarvis",
     timeout: "网络失败，请稍后重试",
     network: "网络失败，请稍后重试",
-    cli_failed: "网络失败，请稍后重试",
-    jarvis_failed: "网络失败，请稍后重试",
+    cli_failed: "Jarvis 请求失败，请重试",
+    jarvis_failed: "Jarvis 请求失败，请重试",
     invalid_response: "Jarvis 返回的结果无法识别",
     local_only: "只能在本机 Host 查询 Jarvis",
   };
@@ -279,8 +279,8 @@ export function jarvisStepErrorText(
     not_installed: "Jarvis is not installed",
     timeout: "Network failed; try again",
     network: "Network failed; try again",
-    cli_failed: "Network failed; try again",
-    jarvis_failed: "Network failed; try again",
+    cli_failed: "Jarvis request failed; try again",
+    jarvis_failed: "Jarvis request failed; try again",
     invalid_response: "Jarvis returned an unreadable result",
     local_only: "Jarvis can only be queried on the local Host",
   };

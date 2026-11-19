@@ -277,4 +277,67 @@ describe("Host Jarvis RPC", () => {
       await stopFixture(fixture);
     }
   });
+
+  it("strips undefined optional fields from the three project RPC results", async () => {
+    const bug = {
+      id: 9102,
+      projectId: 9001,
+      title: "示例：发货失败",
+      projectName: undefined,
+      status: undefined,
+      priority: undefined,
+      severity: undefined,
+      creatorId: undefined,
+      assigneeId: undefined,
+      createdAt: undefined,
+      updatedAt: undefined,
+    };
+    const service = fakeService({
+      listProjects: vi.fn(async () => ({
+        available: true,
+        errorCode: null,
+        projects: [{ id: 9001, name: "示例后台", extra: undefined }],
+        complete: true,
+        userId: 10058,
+      })),
+      previewProjectBugTitle: vi.fn(async () => ({
+        available: true,
+        errorCode: null,
+        conditions: [],
+        bugs: [bug],
+        total: 1,
+        capped: false,
+        source: undefined,
+      })),
+      searchProjectBugs: vi.fn(async () => ({
+        available: true,
+        errorCode: null,
+        conditions: [],
+        bugs: [bug],
+        total: 1,
+        capped: false,
+        source: undefined,
+      })),
+    });
+    const fixture = createFixture({ jarvis: service });
+    try {
+      await fixture.ready;
+      const calls = [
+        [10, "codexhost/jarvis/project/list", { query: "发货" }],
+        [11, "codexhost/jarvis/project/bug/title", { projectId: 9001, title: "" }],
+        [12, "codexhost/jarvis/project/bug/search", { projectId: 9001, query: "发货" }],
+      ] as const;
+      for (const [id, method, params] of calls) {
+        writeRequest(fixture.desktopInput, { id, method, params });
+        const message = await fixture.collector.waitFor((item) => requestId(item, id));
+        expect(message).toMatchObject({ result: { available: true } });
+        expect((message as { error?: unknown }).error).toBeUndefined();
+      }
+      const title = await fixture.collector.waitFor((item) => requestId(item, 11));
+      expect(title).toMatchObject({ result: { bugs: [{ id: 9102 }] } });
+      expect(JSON.stringify(title)).not.toContain("projectName");
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
 });

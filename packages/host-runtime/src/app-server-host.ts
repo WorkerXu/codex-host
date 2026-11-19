@@ -593,6 +593,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Optional CLI fields may be present as undefined; JSON values cannot carry them. */
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value))
+    return value.filter((item) => item !== undefined).map((item) => stripUndefined(item)) as T;
+  if (value !== null && typeof value === "object") {
+    const clean: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value))
+      if (item !== undefined) clean[key] = stripUndefined(item);
+    return clean as T;
+  }
+  return value;
+}
+
 /**
  * Codex app-server reports an unknown Thread with these messages. Any other
  * error from a Thread read is a failure to read, not proof that it is missing.
@@ -3993,7 +4006,9 @@ export class AppServerHost {
     }
     try {
       const result = await this.#runJarvisMethod(service, request);
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
     } catch (error) {
       if (error instanceof JarvisServiceError) {
         await this.#writer.json(rpcError(request, -32094, error.code));
