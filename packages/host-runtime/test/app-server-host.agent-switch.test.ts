@@ -8,6 +8,8 @@ import { FakeHarnessAdapter } from "@codexhost/harness-adapter/testing";
 import type { ExternalHarnessId, JsonObject } from "@codexhost/protocol-core";
 import { harnessIdSchema } from "@codexhost/shared-contracts";
 
+import { SharedThreadBridge } from "../src/shared-thread-bridge.js";
+import type { SharedThreadPeer } from "../src/shared-thread-peer.js";
 import {
   completePiTurn,
   createFixture,
@@ -282,6 +284,66 @@ describe("switching a conversation to another Agent", () => {
     } finally {
       await stopFixture(fixture);
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a remote GUI session's switch on the shared Host that owns external Sessions", async () => {
+    const requests: { method: string; params: JsonObject }[] = [];
+    const closed = Promise.withResolvers<undefined>();
+    const peer: SharedThreadPeer = {
+      async request(requestMethod, params) {
+        requests.push({ method: requestMethod, params });
+        if (requestMethod === "thread/list") return { result: { data: [], nextCursor: null } };
+        if (requestMethod === "codexhost/thread/ownership/list") {
+          return {
+            result: {
+              threads: (params.threadIds as string[]).map((threadId) => ({
+                threadId,
+                owner: "codex",
+              })),
+            },
+          };
+        }
+        if (requestMethod === "codexhost/thread/agent/switch") {
+          return { result: { threadId: "shared-new-thread" } };
+        }
+        return { error: { code: -32601, message: `Unexpected ${requestMethod}` } };
+      },
+      async respond() {},
+      subscribe: () => () => undefined,
+      closed: closed.promise,
+      close: () => closed.resolve(undefined),
+    };
+    const grok = new FakeHarnessAdapter(harnessIdSchema.parse("grok"));
+    const fixture = createFixture({
+      sharedThreads: new SharedThreadBridge({
+        connect: async () => peer,
+        delegateCreates: true,
+        diagnose: () => undefined,
+      }),
+      externalAdapters: new Map<ExternalHarnessId, FakeHarnessAdapter>([
+        ["grok" as ExternalHarnessId, grok],
+      ]),
+    });
+    try {
+      await fixture.ready;
+      const params = {
+        threadId: "official-thread",
+        agent: "grok",
+        input: [{ type: "text", text: "接着做", text_elements: [] }],
+      };
+      writeRequest(fixture.desktopInput, {
+        id: 10,
+        method: "codexhost/thread/agent/switch",
+        params,
+      });
+      const response = await fixture.collector.waitFor((message) => requestId(message, 10));
+      expect(response).toMatchObject({ result: { threadId: "shared-new-thread" } });
+      expect(requests).toContainEqual({ method: "codexhost/thread/agent/switch", params });
+      // Nothing of the switch ran in the GUI session itself.
+      expect(grok.sessions).toHaveLength(0);
+    } finally {
+      await stopFixture(fixture);
     }
   });
 
