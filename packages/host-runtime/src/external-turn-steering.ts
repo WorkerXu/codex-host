@@ -149,6 +149,7 @@ export async function insertNativeSteer(
   thread: NativeSteeringThread,
   input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   host: {
+    expandMentions?(text: string): Promise<string>;
     project(
       turnId: HostTurnId,
       item: HostUserMessageItem,
@@ -158,7 +159,10 @@ export async function insertNativeSteer(
   },
 ): Promise<void> {
   const restored = restoreHarnessCommandMentions(input.text);
-  const steered: HostTextInput[] = [{ type: "text", text: rewriteDelegationMentionText(restored) }];
+  const text = rewriteDelegationMentionText(restored);
+  const steered: HostTextInput[] = [
+    { type: "text", text: (await host.expandMentions?.(text)) ?? text },
+  ];
   const displayed: HostTextInput[] = [{ type: "text", text: restored }];
   const projectionDone = Promise.withResolvers<undefined>();
   thread.pendingSteerProjections.add(projectionDone.promise);

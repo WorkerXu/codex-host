@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-设置 → 会话导入可登记 **Claude Code、Pi、Hermes、Cursor CLI ACP、Kiro CLI、Grok、CodeBuddy、WorkBuddy、OMP、Kimi Code、OpenCode（v2）、Qoder、Qoder CN** 和 **DSH** 的原生 Session（已验证 `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-rc.1` / `0.2.1-rc.2` / `0.2.1-rc.3` / `0.2.1-rc.4` / `0.2.1-rc.5` / `0.2.2-rc.1` / `0.2.2-rc.2`；命令和限制见 [DSH 验证记录](../harnesses/deepseek/dsh-version-validation.md)）。普通导入建立 Host Thread 与原生 Session 的映射，打开后通过对应 Adapter 恢复历史；支持导入准备的 Adapter 可先恢复或原生派生会话，再提交实际身份。Host 不复制 Transcript、不转换 Harness、不发送用户 Turn。
+会话导入可登记 **Claude Code、Pi、Hermes、Cursor CLI ACP、Kiro CLI、Grok、CodeBuddy、WorkBuddy、OMP、Kimi Code、OpenCode（v2）、Qoder、Qoder CN** 和 **DSH** 的原生 Session（已验证 `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-rc.1` / `0.2.1-rc.2` / `0.2.1-rc.3` / `0.2.1-rc.4` / `0.2.1-rc.5` / `0.2.2-rc.1` / `0.2.2-rc.2`；命令和限制见 [DSH 验证记录](../harnesses/deepseek/dsh-version-validation.md)）。普通导入建立 Host Thread 与原生 Session 的映射，打开后通过对应 Adapter 恢复历史；支持导入准备的 Adapter 可先恢复或原生派生会话，再提交实际身份。Host 不复制 Transcript、不转换 Harness、不发送用户 Turn。
 
 - Desktop 设置页提供明确的 Host 选择器。未手动选择时使用可唯一确定的 Composer Host；多个本地/远程标签页导致归属不明确时，要求先选择 Host，不显示为协议不支持。手动选择后，刷新仍使用该 Host，不随 Composer 改变。每次加载列表时捕获目标客户端，导入、打开及导航重试始终使用该列表所属 Host；切换 Host 清空旧列表并使在途结果失效，导入和导航重试期间禁止切换。目标 Host 不可用时不回退本地。独立控制台仍使用其连接的本地 Host。
 - Web 侧栏导入页使用同一共享 Host 的公共契约；官方 Codex Thread 无需导入。来源、候选列表、提交结果分别使用 `{ harnesses }`、`{ candidates, total }`、`{ threadId }`；Harness 身份来自当前列表所属来源，不从候选行推断。分页、迟到响应和导入后重试约束见[独立 Web 应用](../product/standalone-web.md#原生会话导入)。

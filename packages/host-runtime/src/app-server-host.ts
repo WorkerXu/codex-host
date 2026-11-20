@@ -1,3 +1,7 @@
+import { handleJarvisRequest } from "./jarvis-requests.js";
+import { hasJarvisCarrier, rewriteJarvisTurnInput } from "./jarvis-mention-rewrite.js";
+import type { JarvisService } from "./jarvis-service.js";
+import type { ModelService } from "./model-service.js";
 import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
   DELEGATION_PEER_LIST_METHOD,
@@ -433,6 +437,8 @@ export interface AppServerHostOptions {
   onRequestRoute?: (observation: RequestRouteObservation) => void;
   updateCoordinator?: HostUpdateCoordinator;
   runtimeMaintenance?: RuntimeMaintenance;
+  jarvis?: JarvisService;
+  modelService?: ModelService;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
   webOpener?: HostWebOpener;
@@ -1409,6 +1415,7 @@ export class AppServerHost {
       // Stop replacement waiters before waiting for their tracked Host operations.
       this.#externalSteering.close();
       await this.#desktopRequests.drain();
+      this.#options.jarvis?.dispose();
       this.#externalRuntime.idleRelease.stop();
       await this.#externalRuntime.idleRelease.drain();
       await this.#pluginLoading;
@@ -1768,6 +1775,19 @@ export class AppServerHost {
       );
       return;
     }
+    if (
+      request.method.startsWith("codexhost/jarvis/") ||
+      request.method.startsWith("codexhost/model-service/")
+    ) {
+      const reply = await handleJarvisRequest(
+        request,
+        origin,
+        this.#options.jarvis,
+        this.#options.modelService,
+      );
+      await this.#writer.json(reply);
+      return;
+    }
     if (this.#options.externalOnly && request.method === SHARED_DELEGATION_METHOD) {
       const result = await dispatchSharedDelegation(this.#delegationApi, requestObject(request));
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
@@ -1949,7 +1969,7 @@ export class AppServerHost {
     );
   }
 
-  /** Native Codex Turns: turn `#` delegation chips into an explicit Skill-backed request. */
+  /** Expand Composer references before forwarding native Codex Turns. */
   async #rewriteOfficialDelegationMentions(
     request: JsonRpcRequest,
     frame: Buffer<ArrayBufferLike>,
@@ -1957,22 +1977,28 @@ export class AppServerHost {
     if (request.method !== "turn/start" && request.method !== "turn/steer") return frame;
     if (!isRecord(request.params) || !Array.isArray(request.params.input)) return frame;
     const input = request.params.input as JsonValue[];
-    if (
-      !input.some(
-        (item) =>
-          isRecord(item) &&
-          typeof item.text === "string" &&
-          item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
-      )
-    ) {
-      return frame;
-    }
-    const rewritten = rewriteDelegationMentionInput(input, await managedDelegationSkillReference());
-    if (!rewritten) return frame;
+    const hasDelegation = input.some(
+      (item) =>
+        isRecord(item) &&
+        typeof item.text === "string" &&
+        item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
+    );
+    const rewritten = hasDelegation
+      ? rewriteDelegationMentionInput(input, await managedDelegationSkillReference())
+      : null;
+    const expanded = this.#options.jarvis
+      ? await rewriteJarvisTurnInput(rewritten ?? input, (text) => this.#expandJarvisText(text))
+      : null;
+    if (!rewritten && !expanded) return frame;
     return encodeJsonFrame({
       ...(request as unknown as JsonObject),
-      params: { ...(request.params as JsonObject), input: rewritten },
+      params: { ...(request.params as JsonObject), input: expanded ?? rewritten },
     });
+  }
+
+  async #expandJarvisText(text: string): Promise<string> {
+    if (!this.#options.jarvis || !hasJarvisCarrier(text)) return text;
+    return this.#options.jarvis.expandMentions(text).catch(() => text);
   }
 
   async #forwardOfficialNonRequest(
@@ -5724,6 +5750,7 @@ export class AppServerHost {
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
     await insertNativeSteer(thread, input, {
+      expandMentions: (text) => this.#expandJarvisText(text),
       project: async (turnId, item, clientUserMessageId) => {
         const projection = projectedTurn(thread, turnId);
         if (clientUserMessageId) {
@@ -5877,7 +5904,8 @@ export class AppServerHost {
         await this.#notifyExternalThreadStarted(thread.thread);
       }
       const stored = await this.#repository.find(thread.id);
-      const injected = withInjectedText(stored, rewriteDelegationMentionText(text));
+      const harnessText = await this.#expandJarvisText(rewriteDelegationMentionText(text));
+      const injected = withInjectedText(stored, harnessText);
       const result = await thread.session.execute({
         type: "turn.start",
         turnId,

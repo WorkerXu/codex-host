@@ -1,5 +1,6 @@
 import hubAdminCss from "./hub-admin.css";
 import settingsCss from "./shell.css";
+import jarvisCss from "./jarvis.css";
 import accountsCss from "./accounts.css";
 import consoleComponentsCss from "../console/components.css";
 import usageCss from "../console/usage/usage.css";
@@ -76,7 +77,7 @@ export function mountRendererSettingsShell(
   const shadow = root.attachShadow({ mode: "open" });
   const style = ownerDocument.createElement("style");
   // Tailwind declares the cascade layer order, so it must precede the unlayered settings CSS.
-  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${consoleComponentsCss}\n${usageCss}\n${coloredBrandCss}\n${hubAdminCss}`;
+  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${jarvisCss}\n${consoleComponentsCss}\n${usageCss}\n${coloredBrandCss}\n${hubAdminCss}`;
 
   // A page beside the native navigation rail, not a modal: the rail stays
   // usable and native navigation replaces the page.

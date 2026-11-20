@@ -284,7 +284,26 @@ export interface RendererSettingsMessages {
   readonly aboutConsoleOpen: string;
   readonly aboutConsoleOpening: string;
   readonly aboutConsoleFailed: string;
-  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
+  readonly jarvis: {
+    machinesSection: string;
+    refresh: string;
+    refreshing: string;
+    install: string;
+    installing: string;
+    login: string;
+    loggingIn: string;
+    installed: string;
+    notInstalled: string;
+    notLoggedIn: string;
+    signedInAs: string;
+    cliVersion: string;
+    unreachable: string;
+    localMachine: string;
+    waitingForBrowser: string;
+    installProgress: string;
+    actionFailed: string;
+  };
+  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId | "jarvis", string>>;
 }
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
@@ -590,11 +609,31 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "Open console",
   aboutConsoleOpening: "Opening…",
   aboutConsoleFailed: "The console could not be opened",
+  jarvis: {
+    machinesSection: "Computers",
+    refresh: "Refresh",
+    refreshing: "Refreshing…",
+    install: "Install",
+    installing: "Installing…",
+    login: "Sign in",
+    loggingIn: "Waiting for the browser…",
+    installed: "Installed",
+    notInstalled: "Not installed",
+    notLoggedIn: "Not signed in",
+    signedInAs: "Signed in as {name}",
+    cliVersion: "Version {version}",
+    unreachable: "This machine is unreachable",
+    localMachine: "This machine",
+    waitingForBrowser: "Browser opened; complete authorization there…",
+    installProgress: "Transferring installer: {received} / {total}",
+    actionFailed: "Action failed: {reason}",
+  },
   pageLabels: Object.freeze({
     connections: "Connections",
     "mobile-web": "Phone & browser",
     "remote-connections": "Other computers (SSH)",
     appearance: "General",
+    jarvis: "Jarvis",
     accounts: "Accounts",
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
@@ -887,11 +926,31 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "打开控制台",
   aboutConsoleOpening: "正在打开…",
   aboutConsoleFailed: "控制台打开失败",
+  jarvis: {
+    machinesSection: "机器",
+    refresh: "刷新",
+    refreshing: "正在刷新…",
+    install: "安装",
+    installing: "正在安装…",
+    login: "登录",
+    loggingIn: "等待浏览器完成登录…",
+    installed: "已安装",
+    notInstalled: "未安装",
+    notLoggedIn: "未登录",
+    signedInAs: "已登录：{name}",
+    cliVersion: "版本 {version}",
+    unreachable: "无法连接该机器",
+    localMachine: "本机",
+    waitingForBrowser: "已打开浏览器，请完成授权…",
+    installProgress: "正在传输安装包：{received} / {total}",
+    actionFailed: "操作失败：{reason}",
+  },
   pageLabels: Object.freeze({
     connections: "连接",
     "mobile-web": "手机与浏览器",
     "remote-connections": "其他电脑（SSH）",
     appearance: "通用",
+    jarvis: "Jarvis",
     accounts: "账号",
     "session-import": "会话导入",
     "usage-statistics": "用量统计",

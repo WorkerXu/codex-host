@@ -12,6 +12,7 @@ import {
 } from "./settings/localization.js";
 import {
   createDefaultRendererSettingsPages,
+  type DesktopWorkbenchSettings,
   type RendererConnectionDiagnostics,
   type RendererCodexAccountClient,
   type RendererUpdateClient,
@@ -31,6 +32,7 @@ const UPDATE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 
 export interface RendererSettingsLifecycleOptions {
   desktopHubPages?: readonly RendererSettingsPageDefinition[];
+  workbench?: DesktopWorkbenchSettings;
   harnessSchedules?: HarnessSchedulesPageOptions;
   getUpdateClient?(): RendererUpdateClient | null;
   getConnectionDiagnostics?(): RendererConnectionDiagnostics | null;
@@ -100,6 +102,7 @@ export function installRendererSettingsLifecycle(
             },
           }
         : undefined,
+      options.workbench,
     );
     const pages = [...definitions];
     const appearance = pages.findIndex(({ id }) => id === "appearance");
