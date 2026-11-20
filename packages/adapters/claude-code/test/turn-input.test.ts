@@ -153,11 +153,19 @@ describe("Claude Code user content", () => {
     const fifo = path.join(path.dirname(present), "pipe.png");
     execFileSync("mkfifo", [fifo]);
     const text = desktopPrompt([fifo, present], "Look");
-    // A plain open would wait for a writer and leave the Turn unfinished.
-    await expect(claudeUserContent(text)).resolves.toEqual([
-      { type: "text", text },
-      image("image/png", PNG),
-    ]);
+    // Kill a blocked reader so a regression cannot leave a Vitest worker hung.
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        "const { claudeUserContent } = await import(process.argv[1]); console.log(JSON.stringify(await claudeUserContent(process.argv[2])));",
+        new URL("../dist/turn-input.js", import.meta.url).href,
+        text,
+      ],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    expect(JSON.parse(output)).toEqual([{ type: "text", text }, image("image/png", PNG)]);
   });
 
   it("leaves files over 20 MiB as path text only", async () => {

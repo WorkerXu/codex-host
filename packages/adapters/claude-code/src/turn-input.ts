@@ -122,7 +122,7 @@ async function imageBlock(file: string, steer: boolean): Promise<ClaudeImageBloc
       if (read.bytesRead === 0) break;
       length += read.bytesRead;
     }
-    if (length > stats.size) return null;
+    if (length !== stats.size) return null;
     const data = buffer.subarray(0, length);
     // The bytes sent are the ones read here, not the header sample: the file
     // can be rewritten in between, so identify the format again.

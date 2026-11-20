@@ -41,6 +41,7 @@ import {
   type ClaudeUserContent,
 } from "../src/transport.js";
 import { FakeQuery } from "./fake-sdk-query.js";
+import { queuedCommand } from "./fixtures/claude-queued-command.js";
 
 afterEach(() => vi.useRealTimers());
 
