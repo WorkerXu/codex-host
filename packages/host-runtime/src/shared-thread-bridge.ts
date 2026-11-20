@@ -150,14 +150,6 @@ export class SharedThreadBridge {
     return { ...(await peer.request(request.method, params)), id: request.id };
   }
 
-  /** Sends a request to the shared Host whatever Thread it names. */
-  async forward(request: JsonRpcRequest): Promise<JsonObject> {
-    const peer = await this.#connect();
-    if (!peer) throw new Error("Shared Thread Host is disconnected");
-    const params = object(request.params) ? request.params : {};
-    return { ...(await peer.request(request.method, params)), id: request.id };
-  }
-
   async #rows(peer: SharedThreadPeer, params: JsonObject): Promise<JsonObject[]> {
     const rows: JsonObject[] = [];
     let cursor: string | null = null;

@@ -39,11 +39,6 @@ The messages view pages visible user/Agent messages, oldest first. Default limit
 hasMore describes remaining messages now. Save nextCursor for later incremental reads even when hasMore=false.
 Compact messages output contains only the message page and status; compact result output includes the latest nonempty progress while running.
 Full JSON retains the complete snapshot. Tool calls/output, file activity, and reasoning are not included in either format.`,
-  "thread handoff": `codexhost thread handoff <thread> [--item <id>] [--offset <n>] [--max-chars <n>] [--cursor <cursor>] [--limit <n>] [--host <peer-or-host-id>] [--format json|compact]
-Read the history a conversation brought along when it moved to another Agent. <thread> is the Thread it moved to, or the one it moved from.
-Without --item, list the items oldest first: id (h<turn>.<n>), turn, kind (user, assistant, command, fileChange, plan, tool, search, error, interrupted), whether the Agent already received it, and a preview. Default limit 50, maximum 200; continue with --cursor nextCursor.
---item reads one item's full text from --offset (default 0) for up to --max-chars characters (default 4000, maximum 20000); continue with --offset nextOffset until it is null.
-Items keep the source's full text, so this works after the source Thread is archived or its Agent is gone.`,
   "thread wait": `codexhost thread wait <thread> [--host <peer-or-host-id>] [--timeout-ms <n>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
 Wait until the Thread is terminal or the timeout expires (default 30000 ms), then return the same snapshot as thread read plus timedOut.
 A thread://<id>?hostId=<x> reference or --host waits on a configured SSH peer; unknown non-local Hosts are rejected.
@@ -126,7 +121,6 @@ export const DELEGATION_HELP = `usage:
   codexhost thread send <thread> --message <text>
   codexhost thread cancel <thread>
   codexhost thread read <thread>
-  codexhost thread handoff <thread>
   codexhost thread wait <thread>
   codexhost thread watch <thread>
   codexhost thread watches

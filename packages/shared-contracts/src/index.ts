@@ -163,12 +163,6 @@ export {
 } from "./external-thread-fork.js";
 export type { ExternalThreadForkParams, ExternalThreadForkResult } from "./external-thread-fork.js";
 export {
-  THREAD_AGENT_SWITCH_METHOD,
-  threadAgentSwitchParamsSchema,
-  threadAgentSwitchResultSchema,
-} from "./thread-agent-switch.js";
-export type { ThreadAgentSwitchParams, ThreadAgentSwitchResult } from "./thread-agent-switch.js";
-export {
   HARNESS_PERMISSION_MODE_CATALOG_MAX_LENGTH,
   HARNESS_PERMISSION_MODE_DESCRIPTION_MAX_LENGTH,
   HARNESS_PERMISSION_MODE_ID_MAX_LENGTH,

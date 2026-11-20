@@ -14,7 +14,6 @@ import {
   type ThreadWaitInput,
   type ThreadWatchCancelInput,
   type ThreadWatchInput,
-  type ThreadHandoffReadInput,
 } from "./delegation-types.js";
 import {
   isMergedListCursor,
@@ -152,24 +151,6 @@ export class DelegationControlRegistry
       return this.#remoteRead(read);
     }
     return (await this.#registrationForThread(read.threadId)).read(read);
-  }
-
-  /** The Runtime that ran a switch keeps its handoff; the shared one owns remote switches. */
-  async readHandoff(input: ThreadHandoffReadInput) {
-    const candidates = this.#harnessCatalog ? [this.#harnessCatalog] : [...this.#registrations];
-    let notFound: unknown = new DelegationControlError("THREAD_NOT_FOUND", "这段对话没有交接记录");
-    for (const registration of candidates) {
-      if (!registration.readHandoff) continue;
-      try {
-        return await registration.readHandoff(input);
-      } catch (error) {
-        if (!(error instanceof DelegationControlError) || error.code !== "THREAD_NOT_FOUND") {
-          throw error;
-        }
-        notFound = error;
-      }
-    }
-    throw notFound;
   }
 
   async wait(input: ThreadWaitInput) {

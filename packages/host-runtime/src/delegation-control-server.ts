@@ -21,7 +21,6 @@ import {
   type ThreadWaitInput,
   type ThreadWatchCancelInput,
   type ThreadWatchInput,
-  type ThreadHandoffReadInput,
 } from "./delegation-types.js";
 import { matchesBearerToken } from "./bearer-token.js";
 
@@ -191,19 +190,6 @@ export async function startDelegationControlServer(input: {
           return;
         case "/v1/thread/read":
           writeJson(response, 200, await input.api.read(body as unknown as ThreadReadInput));
-          return;
-        case "/v1/thread/handoff":
-          if (!input.api.readHandoff) {
-            throw new DelegationControlError(
-              "INVALID_ARGUMENT",
-              "This Runtime does not support handoff reads",
-            );
-          }
-          writeJson(
-            response,
-            200,
-            await input.api.readHandoff(body as unknown as ThreadHandoffReadInput),
-          );
           return;
         case "/v1/thread/wait":
           writeJson(response, 200, await input.api.wait(body as unknown as ThreadWaitInput));

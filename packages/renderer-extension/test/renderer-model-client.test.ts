@@ -476,7 +476,6 @@ describe("Renderer fixed Model request client", () => {
       "startUpdate",
       "subscribeCodexAccounts",
       "subscribeThreadUsage",
-      "switchThreadAgent",
       "updateRemote",
     ]);
 

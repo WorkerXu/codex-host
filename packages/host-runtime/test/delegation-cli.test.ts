@@ -28,7 +28,6 @@ describe("delegation CLI", () => {
     ["thread", "send", "--help"],
     ["thread", "cancel", "--help"],
     ["thread", "read", "--help"],
-    ["thread", "handoff", "--help"],
     ["thread", "wait", "--help"],
     ["thread", "watch", "--help"],
     ["thread", "watches", "--help"],
@@ -60,58 +59,6 @@ describe("delegation CLI", () => {
     expect(JSON.parse(outputText(output))).toEqual({ harnesses: ["codex", "pi"] });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetchImpl).mock.calls[0]?.[0])).toContain("/v1/harness/list");
-  });
-
-  it("reads a switched conversation's handoff item by item", async () => {
-    const environment = {
-      [DELEGATION_RUNTIME_ENDPOINT_ENV]: "http://127.0.0.1:4321",
-      [DELEGATION_RUNTIME_TOKEN_ENV]: "token",
-    };
-    const fetchImpl = successfulFetch({ threadId: "target-1", text: "part", nextOffset: null });
-    const output = new PassThrough();
-    expect(
-      await runDelegationCli({
-        arguments: [
-          "thread",
-          "handoff",
-          "codex://threads/target-1",
-          "--item",
-          "h3.2",
-          "--offset",
-          "0",
-          "--max-chars",
-          "500",
-          "--format",
-          "compact",
-        ],
-        environment,
-        output,
-        fetchImpl,
-      }),
-    ).toBe(0);
-    const [url, request] = vi.mocked(fetchImpl).mock.calls[0] ?? [];
-    expect(String(url)).toContain("/v1/thread/handoff");
-    expect(JSON.parse(String((request as RequestInit).body))).toEqual({
-      threadId: "target-1",
-      item: "h3.2",
-      offset: 0,
-      maxChars: 500,
-    });
-    expect(JSON.parse(outputText(output))).toEqual({
-      threadId: "target-1",
-      text: "part",
-      nextOffset: null,
-    });
-
-    for (const invalid of [
-      ["thread", "handoff", "target-1", "--offset", "4"],
-      ["thread", "handoff", "target-1", "--item", "h1.1", "--limit", "5"],
-      ["thread", "handoff", "target-1", "--item", "h1.1", "--offset", "-1"],
-    ]) {
-      await expect(
-        runDelegationCli({ arguments: invalid, environment, output: new PassThrough(), fetchImpl }),
-      ).resolves.not.toBe(0);
-    }
   });
 
   it("prints the authoritative help", async () => {

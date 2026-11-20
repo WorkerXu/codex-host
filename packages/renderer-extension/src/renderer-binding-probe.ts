@@ -163,11 +163,6 @@ import {
 import { loadCodexNativeServices } from "./codex-native-services.js";
 import { openCodexSchedules } from "./codex-schedule-navigation.js";
 import { openRendererThread } from "./renderer-fork-control.js";
-import {
-  mountRendererAgentSwitchNotice,
-  pendingAgentSwitches,
-  type RendererAgentSwitchNotice,
-} from "./renderer-agent-switch.js";
 import type {
   RendererConnectionDiagnostics,
   RendererConnectionSnapshot,
@@ -661,14 +656,6 @@ interface MountedComposer {
   usageRequestGeneration: number;
   draftUsageClient: RendererModelClient | null;
   commandRequestGeneration: number;
-  /** Notice above the Agent picker while this conversation is moving to another Agent. */
-  agentSwitchNotice?: { notice: RendererAgentSwitchNotice; anchor: HTMLElement };
-  /** Moving this conversation to Codex happens on confirmation, without a message. */
-  codexSwitch?: {
-    threadId: string;
-    state: "confirm" | "busy" | "error" | "unopened";
-    message?: string;
-  } | null;
 }
 
 interface MountedCatalogRequest {
@@ -1373,14 +1360,6 @@ export function installRendererBindingProbe(
       : "installing";
   };
 
-  /** An existing conversation may move to another Agent on the Host that owns it. */
-  const isThreadAgentSwitchable = (mounted: MountedComposer): boolean =>
-    controller.get(mounted.composer).phase === "locked" &&
-    mounted.ownershipStatus === "ready" &&
-    mounted.hostId !== null &&
-    threadIdFromComposerModelTarget(mounted.modelTarget) !== null &&
-    typeof composerClient(mounted)?.switchThreadAgent === "function";
-
   const renderMounted = (mounted: MountedComposer): void => {
     if (!isMountedComposer(mounted.composer)) return;
     const hostId = mounted.hostId;
@@ -1397,7 +1376,7 @@ export function installRendererBindingProbe(
     );
     const externalSubmissionReady = renderComposerAgentControl(
       mounted.control,
-      { ...controller.get(mounted.composer), switchable: isThreadAgentSwitchable(mounted) },
+      controller.get(mounted.composer),
       composerAdapterState(mounted),
       controller.isSwitching(mounted.composer) || mounted.ownershipStatus === "loading",
       composerAvailability(mounted),
@@ -1410,7 +1389,6 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus === "error",
     );
     showCodexUsageGateStatus(mounted, mounted.codexUsageGate.update(externalSubmissionReady));
-    syncAgentSwitchNotice(mounted);
     if (hostId && mounted.modelTarget?.[0] === "default") {
       window.__codexhostProjectMirrorV1?.consumePending({
         composer: mounted.composer,
@@ -1427,118 +1405,6 @@ export function installRendererBindingProbe(
       };
     }
   };
-
-  const agentSwitchErrorMessage = (error: unknown): string =>
-    error instanceof Error && error.message ? error.message : "Agent 切换失败，请稍后重试";
-
-  const switchThreadToCodex = async (mounted: MountedComposer): Promise<void> => {
-    const threadId = threadIdFromComposerModelTarget(mounted.modelTarget);
-    const hostId = mounted.hostId;
-    const client = composerClient(mounted);
-    if (!threadId || !hostId || !client?.switchThreadAgent) return;
-    if (mounted.codexSwitch?.state === "busy") return;
-    mounted.codexSwitch = { threadId, state: "busy" };
-    renderMounted(mounted);
-    let switched: string;
-    try {
-      switched = (await client.switchThreadAgent({ threadId, agent: "codex" })).threadId;
-    } catch (error) {
-      if (mountedByComposer.get(mounted.composer) !== mounted) return;
-      mounted.codexSwitch = { threadId, state: "error", message: agentSwitchErrorMessage(error) };
-      renderMounted(mounted);
-      return;
-    }
-    mounted.codexSwitch = null;
-    renderMounted(mounted);
-    try {
-      await openRendererThread(switched as Parameters<typeof openRendererThread>[0], {
-        hostId,
-        timeoutMs: 20_000,
-      });
-    } catch {
-      if (mountedByComposer.get(mounted.composer) !== mounted) return;
-      mounted.codexSwitch = { threadId, state: "unopened" };
-      renderMounted(mounted);
-    }
-  };
-
-  /** Selecting another Agent in an existing conversation asks before anything moves. */
-  const requestThreadAgentSwitch = (mounted: MountedComposer, agent: RendererAgent): void => {
-    const threadId = threadIdFromComposerModelTarget(mounted.modelTarget);
-    const hostId = mounted.hostId;
-    if (!threadId || !hostId || !isThreadAgentSwitchable(mounted)) return;
-    if (mounted.codexSwitch?.state === "busy") return;
-    pendingAgentSwitches.clear(hostId, threadId);
-    mounted.codexSwitch = null;
-    if (agent === "codex" && controller.get(mounted.composer).agent !== "codex") {
-      mounted.codexSwitch = { threadId, state: "confirm" };
-    } else if (
-      agent !== "codex" &&
-      agent !== controller.get(mounted.composer).agent &&
-      composerAvailability(mounted)[agent] === "ready"
-    ) {
-      pendingAgentSwitches.set(hostId, threadId, {
-        agent,
-        label: pluginForHost(hostId, agent)?.name ?? agent,
-      });
-    }
-    renderMounted(mounted);
-  };
-
-  const syncAgentSwitchNotice = (mounted: MountedComposer): void => {
-    const threadId = threadIdFromComposerModelTarget(mounted.modelTarget);
-    const hostId = mounted.hostId;
-    const codex = mounted.codexSwitch?.threadId === threadId ? mounted.codexSwitch : null;
-    const external = threadId && hostId ? pendingAgentSwitches.get(hostId, threadId) : null;
-    if (!threadId || !hostId || (!codex && !external)) {
-      mounted.agentSwitchNotice?.notice.hide();
-      return;
-    }
-    const anchor = mounted.control.picker.trigger;
-    if (mounted.agentSwitchNotice?.anchor !== anchor) {
-      mounted.agentSwitchNotice?.notice.dispose();
-      mounted.agentSwitchNotice = { notice: mountRendererAgentSwitchNotice(anchor), anchor };
-    }
-    const { notice } = mounted.agentSwitchNotice;
-    const dismissCodex = (): void => {
-      mounted.codexSwitch = null;
-      renderMounted(mounted);
-    };
-    if (codex?.state === "unopened") {
-      notice.show({
-        heading: "已切换到 Codex",
-        message: "新对话还没出现在侧栏，请稍后在侧栏打开；原对话已归档。",
-        actions: [{ label: "知道了", primary: true, run: dismissCodex }],
-      });
-    } else if (codex) {
-      notice.show({
-        heading: "切换到 Codex 继续",
-        message:
-          codex.state === "error"
-            ? (codex.message ?? "Agent 切换失败，请稍后重试")
-            : "把这段对话的历史导入 Codex 继续，手机上也能看到；原对话会归档。",
-        error: codex.state === "error",
-        busy: codex.state === "busy",
-        actions: [
-          { label: "取消", run: dismissCodex },
-          {
-            label: codex.state === "busy" ? "切换中…" : codex.state === "error" ? "重试" : "切换",
-            primary: true,
-            run: () => void switchThreadToCodex(mounted),
-          },
-        ],
-      });
-    } else if (external) {
-      notice.show({
-        heading: `下一条消息交给 ${external.label}`,
-        message: "会带上这段对话的历史继续；发送后原对话会归档。",
-        actions: [{ label: "取消切换", run: () => pendingAgentSwitches.clear(hostId, threadId) }],
-      });
-    }
-  };
-  const unsubscribeAgentSwitches = pendingAgentSwitches.subscribe(() => {
-    for (const mounted of mountedByComposer.values()) renderMounted(mounted);
-  });
 
   let delegationMention: RendererDelegationMentionControl | null = null;
   let jarvisMention: RendererJarvisMentionControl | null = null;
@@ -3758,20 +3624,11 @@ export function installRendererBindingProbe(
       (agent) => {
         const mounted = mountedByComposer.get(composer);
         if (!composer.isConnected || !mounted) return;
-        if (controller.get(composer).phase === "locked") {
-          requestThreadAgentSwitch(mounted, agent);
-          return;
-        }
         void switchComposerAgent(mounted, agent);
       },
       (agent) => openInstallPage(activeModelHostId(composer), agent),
       (picker) => {
         void loadCodexAccounts();
-        if (controller.get(composer).phase === "locked") {
-          // A conversation switches Agents on its own Host; other machines are for new chats.
-          picker.menu.querySelector("[data-codexhost-cross-host-agent-menu]")?.remove();
-          return;
-        }
         window.__codexhostProjectMirrorV1?.openForAgentPicker({ composer, picker });
       },
       (modelId) => {
@@ -3925,7 +3782,6 @@ export function installRendererBindingProbe(
         }
         mounted.codexUsageGate.dispose();
         mounted.workingFolders?.dispose();
-        mounted.agentSwitchNotice?.notice.dispose();
         disposeComposerAgentControl(mounted.control);
         ownershipRecovery.delete(mounted);
         modelRecovery.delete(mounted);
@@ -4582,7 +4438,6 @@ export function installRendererBindingProbe(
       jarvisMention?.dispose();
       dingtalkMention?.dispose();
       disposeDingTalkLinks();
-      unsubscribeAgentSwitches();
       sidebarAgentIcons.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();
@@ -4607,7 +4462,6 @@ export function installRendererBindingProbe(
         usageRefreshAttempts.delete(mounted.composer);
         mounted.codexUsageGate.dispose();
         mounted.workingFolders?.dispose();
-        mounted.agentSwitchNotice?.notice.dispose();
         disposeComposerAgentControl(mounted.control);
       }
       mountedByComposer.clear();
