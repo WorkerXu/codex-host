@@ -895,7 +895,7 @@ export function installRendererBindingProbe(
       routing: () => window.__codexhostHostRoutingV1,
       pluginForHost,
       localHubAdmin: /Macintosh|MacIntel/u.test(
-        `${window.navigator.userAgent} ${window.navigator.platform}`,
+        `${window.navigator?.userAgent ?? ""} ${window.navigator?.platform ?? ""}`,
       ),
     }),
     workbench: desktopJarvis.settings,
