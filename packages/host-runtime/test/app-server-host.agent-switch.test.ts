@@ -8,6 +8,7 @@ import { FakeHarnessAdapter } from "@codexhost/harness-adapter/testing";
 import type { ExternalHarnessId, JsonObject } from "@codexhost/protocol-core";
 import { harnessIdSchema } from "@codexhost/shared-contracts";
 
+import type { DelegationControlRegistration } from "../src/delegation-types.js";
 import { SharedThreadBridge } from "../src/shared-thread-bridge.js";
 import type { SharedThreadPeer } from "../src/shared-thread-peer.js";
 import {
@@ -26,14 +27,19 @@ import {
 function fixtureWith(home: string) {
   const pi = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
   const grok = new FakeHarnessAdapter(harnessIdSchema.parse("grok"));
+  let api: DelegationControlRegistration | undefined;
   const fixture = createFixture({
     environment: { HOME: home },
+    onDelegationApi: (registration) => {
+      api = registration;
+      return undefined;
+    },
     externalAdapters: new Map<ExternalHarnessId, FakeHarnessAdapter>([
       ["pi" as ExternalHarnessId, pi],
       ["grok" as ExternalHarnessId, grok],
     ]),
   });
-  return { fixture, pi, grok };
+  return { fixture, pi, grok, delegationApi: () => api };
 }
 
 async function initialize(fixture: ReturnType<typeof createFixture>): Promise<void> {
@@ -91,7 +97,7 @@ async function readTurns(
 describe("switching a conversation to another Agent", () => {
   it("continues an external conversation in another Harness with its history", async () => {
     const home = mkdtempSync(path.join(tmpdir(), "codexhost-switch-home-"));
-    const { fixture, grok } = fixtureWith(home);
+    const { fixture, grok, delegationApi } = fixtureWith(home);
     try {
       const source = await startPiThread(fixture);
       await completePiTurn(fixture, source, 2);
@@ -132,7 +138,9 @@ describe("switching a conversation to another Agent", () => {
         .map(({ text }) => text)
         .join("\n");
       expect(sent).toMatch(
-        new RegExp(`^<codexhost_handoff from="pi" thread="${source}" messages="2" omitted="0">`),
+        new RegExp(
+          `^<codexhost_handoff from="pi" thread="${target}" source="${source}" items="2" omitted="0">`,
+        ),
       );
       expect(sent).toContain("synthetic");
       expect(sent).toContain("answer 2");
@@ -142,6 +150,17 @@ describe("switching a conversation to another Agent", () => {
       expect(String(turns[0]?.id)).toMatch(/^handoff-/);
       // The earlier conversation first, then the new request without the block.
       expect(userTexts(turns)).toEqual(["synthetic", "继续第三版"]);
+
+      // The receiving Agent can read the whole source history back, from either end.
+      const api = delegationApi();
+      if (!api?.readHandoff) throw new Error("Handoff reading is not registered");
+      const listed = await api.readHandoff({ threadId: source });
+      expect(listed).toMatchObject({ threadId: target, sourceThreadId: source, total: 2 });
+      const answer = await api.readHandoff({ threadId: target, item: "h1.2" });
+      expect(answer).toMatchObject({ text: "answer 2", nextOffset: null });
+      await expect(api.readHandoff({ threadId: "unknown-thread" })).rejects.toMatchObject({
+        code: "THREAD_NOT_FOUND",
+      });
     } finally {
       await stopFixture(fixture);
       rmSync(home, { recursive: true, force: true });
@@ -280,6 +299,8 @@ describe("switching a conversation to another Agent", () => {
       expect(sent).toContain("原生的问题");
       expect(sent).toContain("原生的回答");
       expect(sent).not.toContain("aggregatedOutput");
+      // The activity travels too, not only the messages.
+      expect(sent).toContain("$ ls\n退出码：未知\nx");
       expect(sent.endsWith("\n\n接着做")).toBe(true);
     } finally {
       await stopFixture(fixture);

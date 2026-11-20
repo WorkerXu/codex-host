@@ -626,6 +626,64 @@ export async function runDelegationCli(input: {
       );
       return 0;
     }
+    if (group === "thread" && command === "handoff") {
+      rejectUnknown(parsed, ["--item", "--offset", "--max-chars", "--cursor", "--limit", "--host"]);
+      if (parsed.positionals.length !== 1)
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "thread handoff requires one Thread identifier",
+        );
+      const threadId = parsed.positionals[0];
+      if (!threadId)
+        throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is required");
+      const item = value(parsed, "--item");
+      if (!item && (value(parsed, "--offset") !== undefined || value(parsed, "--max-chars")))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "--offset and --max-chars require --item",
+        );
+      if (item && (value(parsed, "--cursor") || value(parsed, "--limit")))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "--cursor and --limit list items and cannot be used with --item",
+        );
+      const offset = value(parsed, "--offset");
+      if (offset !== undefined && !/^[0-9]+$/u.test(offset))
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "--offset must be a non-negative integer",
+        );
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
+      writeResult(
+        "thread handoff",
+        withPeerHostId(
+          await requestHosted({
+            environment,
+            target,
+            ...(host ? { host } : {}),
+            path: "/v1/thread/handoff",
+            body: {
+              threadId: reference.threadId,
+              ...(item ? { item } : {}),
+              ...(offset !== undefined ? { offset: Number(offset) } : {}),
+              ...(value(parsed, "--max-chars")
+                ? { maxChars: positiveInteger(value(parsed, "--max-chars"), "--max-chars", 20_000) }
+                : {}),
+              ...(value(parsed, "--cursor") ? { cursor: value(parsed, "--cursor") } : {}),
+              ...(value(parsed, "--limit")
+                ? { limit: positiveInteger(value(parsed, "--limit"), "--limit", 200) }
+                : {}),
+            },
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+            ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+          }),
+          target,
+        ),
+      );
+      return 0;
+    }
     if (group === "thread" && (command === "read" || command === "wait")) {
       rejectUnknown(parsed, ["--view", "--cursor", "--limit", "--timeout-ms", "--host"]);
       if (parsed.positionals.length !== 1)

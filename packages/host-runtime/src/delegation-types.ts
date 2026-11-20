@@ -168,6 +168,18 @@ export interface ThreadReadInput {
   limit?: number;
 }
 
+/** Reads what a conversation brought along when it moved to another Agent. */
+export interface ThreadHandoffReadInput {
+  /** The switched-to Thread, or the source it moved from. */
+  threadId: string;
+  /** Reads one item's text instead of listing items. */
+  item?: string;
+  offset?: number;
+  maxChars?: number;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface ThreadWaitInput extends ThreadReadInput {
   timeoutMs: number;
 }
@@ -290,6 +302,7 @@ export interface DelegationControlApi {
   read(input: ThreadReadInput): Promise<DelegationThreadSnapshot>;
   wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }>;
   list(input: ThreadListInput): Promise<DelegationThreadListResult>;
+  readHandoff?(input: ThreadHandoffReadInput): Promise<Record<string, unknown>>;
 }
 
 export interface DelegationControlRegistration extends DelegationControlApi {

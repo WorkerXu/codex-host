@@ -99,6 +99,7 @@ export function compactDelegationOutput(
 ): unknown {
   switch (command) {
     case "harness list":
+    case "thread handoff":
       return body;
     case "harness inspect":
       return inspectOutput(body as HarnessInspectResult);

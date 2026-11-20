@@ -2,11 +2,12 @@ import type { ModelService } from "./model-service.js";
 import type { CodeRepositories } from "./code-repositories.js";
 import { RepositoryError } from "./code-repository-process.js";
 import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
+import { withoutHandoffBlock } from "./thread-handoff-content.js";
 import {
+  ThreadHandoffReadError,
   ThreadHandoffStore,
   defaultThreadHandoffDirectory,
-  withoutHandoffBlock,
-} from "./thread-agent-switch.js";
+} from "./thread-handoff-store.js";
 import {
   ThreadAgentSwitchError,
   ThreadAgentSwitcher,
@@ -357,6 +358,7 @@ import {
   DELEGATION_RUNTIME_TOKEN_ENV,
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
+  type ThreadHandoffReadInput,
 } from "./delegation-types.js";
 import {
   HarnessDelegationCoordinator,
@@ -1085,6 +1087,7 @@ export class AppServerHost {
       environment: this.#options.environment ?? process.env,
       agentLabel: (agent) => this.#agentLabel(agent),
       readSource: (threadId) => this.#readSwitchSource(threadId),
+      threadExists: (threadId, agent) => this.#switchedThreadExists(threadId, agent),
       requestOfficial: (method, params) => this.#requestOfficial(method, params),
       registerExternalThread: (input) => this.#registerExternalThread(input),
       startExternalTurn: (thread, text, turnId, harnessPrefix) =>
@@ -1152,6 +1155,7 @@ export class AppServerHost {
       read: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.read(input)),
       wait: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.wait(input)),
       list: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.list(input)),
+      readHandoff: (input) => this.#readThreadHandoff(input),
       canHandleStart: (input) => this.#canHandleDelegationStart(input),
       ownsThread: (threadId) => this.#ownsDelegationThread(threadId),
       executionHostId: (threadId) => {
@@ -5552,6 +5556,27 @@ export class AppServerHost {
         ),
       );
     }
+  }
+
+  async #readThreadHandoff(input: ThreadHandoffReadInput): Promise<Record<string, unknown>> {
+    try {
+      return await this.#threadHandoffs.read(input);
+    } catch (error) {
+      if (error instanceof ThreadHandoffReadError) {
+        throw new DelegationControlError(error.code, error.message);
+      }
+      if (error instanceof Error && error.message === "Invalid Thread ID") {
+        throw new DelegationControlError("INVALID_ARGUMENT", "Thread identifier is invalid");
+      }
+      throw error;
+    }
+  }
+
+  /** Whether the Thread an earlier switch created is still there to return on a retry. */
+  async #switchedThreadExists(threadId: string, agent: string): Promise<boolean> {
+    if (agent !== "codex") return (await this.#locateExternalThread(threadId)).kind === "external";
+    const read = await this.#requestOfficial("thread/read", { threadId, includeTurns: false });
+    return isRecord(read.result) && isRecord(read.result.thread);
   }
 
   async #loadThreadHandoff(threadId: string): Promise<void> {
