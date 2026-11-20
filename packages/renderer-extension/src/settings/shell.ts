@@ -1,3 +1,5 @@
+import dingtalkCss from "./dingtalk.css";
+import agentsCss from "./agents.css";
 import hubAdminCss from "./hub-admin.css";
 import settingsCss from "./shell.css";
 import jarvisCss from "./jarvis.css";
@@ -77,7 +79,7 @@ export function mountRendererSettingsShell(
   const shadow = root.attachShadow({ mode: "open" });
   const style = ownerDocument.createElement("style");
   // Tailwind declares the cascade layer order, so it must precede the unlayered settings CSS.
-  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${jarvisCss}\n${consoleComponentsCss}\n${usageCss}\n${coloredBrandCss}\n${hubAdminCss}`;
+  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${jarvisCss}\n${consoleComponentsCss}\n${usageCss}\n${coloredBrandCss}\n${hubAdminCss}\n${dingtalkCss}\n${agentsCss}`;
 
   // A page beside the native navigation rail, not a modal: the rail stays
   // usable and native navigation replaces the page.
@@ -173,6 +175,9 @@ export function mountRendererSettingsShell(
     navigationState.select(pageId);
     disposeActivePage();
     setActiveNavigation(navigationButtons, pageId);
+    layout.dataset.activePage = pageId;
+    page.dataset.activePage = pageId;
+    pageContent.dataset.pageId = pageId;
     pageContent.replaceChildren();
     const scope = new RendererSettingsPageScope();
     activeScope = scope;
@@ -199,6 +204,7 @@ export function mountRendererSettingsShell(
   let otherSectionAdded = false;
   appendNavigationSection(messages.generalSection);
   for (const definition of resolvedRegistry.pages) {
+    if (definition.id === "dingtalk") continue;
     if (definition.id === "about" && !otherSectionAdded) {
       appendNavigationSection(messages.otherSection);
       otherSectionAdded = true;
@@ -228,9 +234,10 @@ export function mountRendererSettingsShell(
   navigation.append(starLink);
   const supported = true;
   const focusActiveNavigation = (): void => {
-    navigationButtons
-      .get(navigationState.activePageId)
-      ?.focus({ preventScroll: true, focusVisible: false });
+    (navigationButtons.get(navigationState.activePageId) ?? closeButton).focus({
+      preventScroll: true,
+      focusVisible: false,
+    });
   };
   const finishClose = (focusOpener: boolean): void => {
     disposeActivePage();

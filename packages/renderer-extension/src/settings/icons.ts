@@ -1,6 +1,7 @@
 import type { IconNode } from "lucide";
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Smartphone from "lucide/dist/esm/icons/smartphone.mjs";
+import Bot from "lucide/dist/esm/icons/bot.mjs";
 import Boxes from "lucide/dist/esm/icons/boxes.mjs";
 import CalendarClock from "lucide/dist/esm/icons/calendar-clock.mjs";
 import Check from "lucide/dist/esm/icons/circle-check.mjs";
@@ -49,6 +50,7 @@ export const RENDERER_SETTINGS_ICON_NAMES = [
   "language",
   "connections",
   "accounts",
+  "agents",
   "session-import",
   "add",
   "model-pool",
@@ -105,6 +107,7 @@ const iconNodes = {
   language: Languages,
   connections: PlugZap,
   accounts: Users,
+  agents: Bot,
   "session-import": FolderInput,
   add: Plus,
   "model-pool": Boxes,

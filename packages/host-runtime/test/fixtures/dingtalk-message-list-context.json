@@ -1,0 +1,546 @@
+{
+  "fixtureNote": "Captured from a real `dws chat message list --format json` response; names, text and ids are redacted, field shapes are unchanged.",
+  "arguments": [],
+  "complete": false,
+  "contractVersion": "im.message-list.v1",
+  "count": 31,
+  "hasMore": true,
+  "messages": [
+    {
+      "content": "上下文消息 1",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:48:08",
+      "messageId": "msg-fixture-00",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-00",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-1",
+      "senderOpenDingTalkId": "open-fixture-1",
+      "text": "上下文消息 1",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-11-17 17:48:08"
+      }
+    },
+    {
+      "content": "上下文消息 2",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:47:15",
+      "messageId": "msg-fixture-01",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-01",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-1",
+      "senderOpenDingTalkId": "open-fixture-1",
+      "text": "上下文消息 2"
+    },
+    {
+      "content": "上下文消息 3",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:47:04",
+      "messageId": "msg-fixture-02",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-02",
+      "sendType": "user",
+      "sender": "成员B",
+      "senderId": "open-fixture-2",
+      "senderOpenDingTalkId": "open-fixture-2",
+      "text": "上下文消息 3",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-11-17 17:47:04"
+      }
+    },
+    {
+      "content": "上下文消息 4",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:37:28",
+      "messageId": "msg-fixture-03",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-03",
+      "sendType": "user",
+      "sender": "成员C",
+      "senderId": "open-fixture-3",
+      "senderOpenDingTalkId": "open-fixture-3",
+      "text": "上下文消息 4"
+    },
+    {
+      "content": "上下文消息 5",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:36:59",
+      "messageId": "msg-fixture-04",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-04",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-3",
+      "senderOpenDingTalkId": "open-fixture-3",
+      "text": "上下文消息 5"
+    },
+    {
+      "content": "上下文消息 6",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:32:28",
+      "messageId": "msg-fixture-05",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-05",
+      "sendType": "user",
+      "sender": "成员D",
+      "senderId": "open-fixture-4",
+      "senderOpenDingTalkId": "open-fixture-4",
+      "text": "上下文消息 6",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-11-17 17:32:28"
+      }
+    },
+    {
+      "content": "上下文消息 7",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:21:13",
+      "messageId": "msg-fixture-06",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-06",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-4",
+      "senderOpenDingTalkId": "open-fixture-4",
+      "text": "上下文消息 7"
+    },
+    {
+      "content": "上下文消息 8",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-13 17:30:24",
+      "messageId": "msg-fixture-07",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-07",
+      "sendType": "user",
+      "sender": "成员E",
+      "senderId": "open-fixture-5",
+      "senderOpenDingTalkId": "open-fixture-5",
+      "text": "上下文消息 8",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-11-13 17:30:24"
+      }
+    },
+    {
+      "content": "上下文消息 9",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-13 17:28:43",
+      "messageId": "msg-fixture-08",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-08",
+      "sendType": "user",
+      "sender": "成员B",
+      "senderId": "open-fixture-5",
+      "senderOpenDingTalkId": "open-fixture-5",
+      "text": "上下文消息 9",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-11-13 17:28:43"
+      },
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-8-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    },
+    {
+      "content": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-13 17:27:45",
+      "messageId": "msg-fixture-09",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-09",
+      "sendType": "user",
+      "sender": "成员E",
+      "senderId": "open-fixture-5",
+      "senderOpenDingTalkId": "open-fixture-5",
+      "text": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-9-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    },
+    {
+      "content": "上下文消息 11",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-13 17:26:54",
+      "messageId": "msg-fixture-10",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-10",
+      "sendType": "user",
+      "sender": "成员E",
+      "senderId": "open-fixture-5",
+      "senderOpenDingTalkId": "open-fixture-5",
+      "text": "上下文消息 11"
+    },
+    {
+      "content": "上下文消息 12",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-13 17:25:34",
+      "messageId": "msg-fixture-11",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-11",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-5",
+      "senderOpenDingTalkId": "open-fixture-5",
+      "text": "上下文消息 12"
+    },
+    {
+      "content": "上下文消息 13",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 12:06:48",
+      "messageId": "msg-fixture-12",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-12",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-6",
+      "senderOpenDingTalkId": "open-fixture-6",
+      "text": "上下文消息 13"
+    },
+    {
+      "content": "上下文消息 14",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:44:27",
+      "messageId": "msg-fixture-13",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-13",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-6",
+      "senderOpenDingTalkId": "open-fixture-6",
+      "text": "上下文消息 14",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-30 09:44:27"
+      }
+    },
+    {
+      "content": "上下文消息 15",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:41:20",
+      "messageId": "msg-fixture-14",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-14",
+      "sendType": "user",
+      "sender": "成员D",
+      "senderId": "open-fixture-6",
+      "senderOpenDingTalkId": "open-fixture-6",
+      "text": "上下文消息 15"
+    },
+    {
+      "content": "上下文消息 16",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:36:57",
+      "messageId": "msg-fixture-15",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-15",
+      "sendType": "user",
+      "sender": "成员G",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 16"
+    },
+    {
+      "content": "上下文消息 17",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:35:23",
+      "messageId": "msg-fixture-16",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-16",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 17"
+    },
+    {
+      "content": "上下文消息 18",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:34:20",
+      "messageId": "msg-fixture-17",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-17",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 18"
+    },
+    {
+      "content": "上下文消息 19",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:34:11",
+      "messageId": "msg-fixture-18",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-18",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 19"
+    },
+    {
+      "content": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:33:57",
+      "messageId": "msg-fixture-19",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-19",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-19-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        },
+        {
+          "contentType": "image",
+          "resourceId": "resource-fixture-19-1",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    },
+    {
+      "content": "上下文消息 21",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:29:22",
+      "messageId": "msg-fixture-20",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-20",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 21",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-30 09:29:22"
+      }
+    },
+    {
+      "content": "上下文消息 22",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:28:28",
+      "messageId": "msg-fixture-21",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-21",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 22",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-30 09:28:28"
+      }
+    },
+    {
+      "content": "上下文消息 23",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:23:55",
+      "messageId": "msg-fixture-22",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-22",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 23"
+    },
+    {
+      "content": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-30 09:20:43",
+      "messageId": "msg-fixture-23",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-23",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-23-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    },
+    {
+      "content": "上下文消息 25",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 18:43:33",
+      "messageId": "msg-fixture-24",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-24",
+      "sendType": "user",
+      "sender": "成员B",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 25"
+    },
+    {
+      "content": "上下文消息 26",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 18:41:03",
+      "messageId": "msg-fixture-25",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-25",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 26"
+    },
+    {
+      "content": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 18:40:56",
+      "messageId": "msg-fixture-26",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-26",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "[图片消息](mediaId=<redacted>) 注意：如需下载使用dws chat message download-media命令下载",
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-26-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        },
+        {
+          "contentType": "image",
+          "resourceId": "resource-fixture-26-1",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    },
+    {
+      "content": "上下文消息 28",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 17:06:52",
+      "messageId": "msg-fixture-27",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-27",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 28",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-29 17:06:52"
+      }
+    },
+    {
+      "content": "上下文消息 29",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 17:06:28",
+      "messageId": "msg-fixture-28",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-28",
+      "sendType": "user",
+      "sender": "成员F",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 29",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-29 17:06:28"
+      }
+    },
+    {
+      "content": "上下文消息 30",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 16:59:51",
+      "messageId": "msg-fixture-29",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-29",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 30",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-29 16:59:51"
+      }
+    },
+    {
+      "content": "上下文消息 31",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-10-29 16:59:13",
+      "messageId": "msg-fixture-30",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-30",
+      "sendType": "user",
+      "sender": "成员B",
+      "senderId": "open-fixture-7",
+      "senderOpenDingTalkId": "open-fixture-7",
+      "text": "上下文消息 31",
+      "quotedMessage": {
+        "sender": "成员A",
+        "content": "被引用的消息",
+        "openMessageId": "msg-fixture-quoted",
+        "createTime": "2026-10-29 16:59:13"
+      },
+      "resourceRefs": [
+        {
+          "resourceId": "resource-fixture-30-0",
+          "resourceIdType": "mediaId",
+          "type": "mediaId"
+        }
+      ]
+    }
+  ],
+  "nextPage": null,
+  "pagesFetched": 1,
+  "paginationKnown": true,
+  "partial": false,
+  "stopReason": "single_page",
+  "success": true,
+  "truncated": false
+}

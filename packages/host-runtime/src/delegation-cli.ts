@@ -1,3 +1,4 @@
+import { runDingTalkCli } from "./dingtalk-cli-command.js";
 import { runSkillsCli } from "./skills-hub/cli.js";
 import type { JsonValue } from "@codexhost/protocol-core";
 import path from "node:path";
@@ -237,6 +238,14 @@ export async function runDelegationCli(input: {
         arguments: input.arguments.slice(1),
         environment,
         output,
+        ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+      });
+    if (group === "dingtalk")
+      return await runDingTalkCli({
+        arguments: input.arguments.slice(1),
+        environment,
+        output,
+        diagnosticOutput,
         ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
       });
     if (group === "skills")

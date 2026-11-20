@@ -1,3 +1,5 @@
+import type { DesktopDingTalkDispatch } from "./desktop-dingtalk.js";
+import type { DingTalkService } from "./dingtalk-service.js";
 import type { HubAdminService } from "./hub-admin-service.js";
 import { desktopJarvisServices } from "./desktop-jarvis.js";
 import type { CodeRepositories } from "./code-repositories.js";
@@ -79,6 +81,8 @@ export function sharedHostDesktop(
     owner: SharedThreadOwner;
     store: ExternalThreadStore;
     prices: ModelPriceCatalog;
+    dingtalk?: DingTalkService;
+    dingTalkDispatch?: DesktopDingTalkDispatch;
     updateCoordinator?: HostUpdateCoordinator;
     hubAdmin?: HubAdminService;
     codeRepositories?: CodeRepositories;
@@ -110,6 +114,10 @@ export function sharedHostDesktop(
   const createHost = () =>
     new AppServerHost({
       ...desktopJarvisServices(environment, nativeArguments !== undefined),
+      ...(options.dingtalk ? { dingtalk: options.dingtalk } : {}),
+      ...(nativeArguments && options.dingTalkDispatch
+        ? { dingTalkDispatch: options.dingTalkDispatch }
+        : {}),
       stockCodexPath: options.stockCodex,
       arguments: [],
       environment,

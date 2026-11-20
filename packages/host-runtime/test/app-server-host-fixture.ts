@@ -293,6 +293,8 @@ export function createFixture(
     updateCoordinator?: HostUpdateCoordinator;
     runtimeMaintenance?: RuntimeMaintenance;
     jarvis?: AppServerHostOptions["jarvis"];
+    dingtalk?: AppServerHostOptions["dingtalk"];
+    ownDingTalkDispatch?: boolean;
     modelService?: AppServerHostOptions["modelService"];
     consoleOpener?: HostConsoleOpener;
     webOpener?: AppServerHostOptions["webOpener"];
@@ -346,6 +348,8 @@ export function createFixture(
   const host = new AppServerHost({
     ...(options.desktopHubs ? { desktopHubs: options.desktopHubs } : {}),
     ...(options.jarvis ? { jarvis: options.jarvis } : {}),
+    ...(options.dingtalk ? { dingtalk: options.dingtalk } : {}),
+    ...(options.ownDingTalkDispatch ? { ownDingTalkDispatch: true } : {}),
     ...(options.modelService ? { modelService: options.modelService } : {}),
     ...(options.sharedThreads ? { sharedThreads: options.sharedThreads } : {}),
     ...(options.sharedDelegation ? { sharedDelegation: options.sharedDelegation } : {}),
@@ -484,6 +488,28 @@ export async function closeFixture(fixture: ReturnType<typeof createFixture>): P
 export async function stopFixture(fixture: ReturnType<typeof createFixture>): Promise<void> {
   await closeFixture(fixture);
   rmSync(fixture.mappingStoreDirectory, { recursive: true, force: true });
+}
+
+export async function initializeDingTalkFixture(
+  fixture: ReturnType<typeof createFixture>,
+): Promise<void> {
+  await fixture.ready;
+  writeRequest(fixture.desktopInput, {
+    id: 9000,
+    method: "initialize",
+    params: {
+      clientInfo: { name: "dingtalk-test", version: "1" },
+      capabilities: { experimentalApi: true },
+    },
+  });
+  const request = await readJsonLine(fixture.official.stdin);
+  expect(request.method).toBe("initialize");
+  writeRequest(fixture.official.stdout, {
+    id: requiredMessageId(request),
+    result: { userAgent: "official" },
+  });
+  await fixture.collector.waitFor((message) => requestId(message, 9000));
+  expect((await readJsonLine(fixture.official.stdin)).method).toBe("initialized");
 }
 
 export async function bindOfficialThread(

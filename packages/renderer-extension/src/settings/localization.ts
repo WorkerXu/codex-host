@@ -1,4 +1,9 @@
 import {
+  codexAgentsMessagesChinese,
+  codexAgentsMessagesEnglish,
+  type CodexAgentsMessages,
+} from "./codex-agents-messages.js";
+import {
   credentialImportEnglish,
   credentialImportChinese,
   type CredentialImportMessages,
@@ -284,6 +289,7 @@ export interface RendererSettingsMessages {
   readonly aboutConsoleOpen: string;
   readonly aboutConsoleOpening: string;
   readonly aboutConsoleFailed: string;
+  readonly codexAgents: CodexAgentsMessages;
   readonly jarvis: {
     machinesSection: string;
     refresh: string;
@@ -303,7 +309,9 @@ export interface RendererSettingsMessages {
     installProgress: string;
     actionFailed: string;
   };
-  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId | "jarvis", string>>;
+  readonly pageLabels: Readonly<
+    Record<DefaultRendererSettingsPageId | "jarvis" | "codex-agents" | "dingtalk", string>
+  >;
 }
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
@@ -609,6 +617,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "Open console",
   aboutConsoleOpening: "Opening…",
   aboutConsoleFailed: "The console could not be opened",
+  codexAgents: Object.freeze(codexAgentsMessagesEnglish),
   jarvis: {
     machinesSection: "Computers",
     refresh: "Refresh",
@@ -634,6 +643,8 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "remote-connections": "Other computers (SSH)",
     appearance: "General",
     jarvis: "Jarvis",
+    "codex-agents": "Agents",
+    dingtalk: "DingTalk",
     accounts: "Accounts",
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
@@ -926,6 +937,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   aboutConsoleOpen: "打开控制台",
   aboutConsoleOpening: "正在打开…",
   aboutConsoleFailed: "控制台打开失败",
+  codexAgents: Object.freeze(codexAgentsMessagesChinese),
   jarvis: {
     machinesSection: "机器",
     refresh: "刷新",
@@ -951,6 +963,8 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "remote-connections": "其他电脑（SSH）",
     appearance: "通用",
     jarvis: "Jarvis",
+    "codex-agents": "智能体",
+    dingtalk: "钉钉",
     accounts: "账号",
     "session-import": "会话导入",
     "usage-statistics": "用量统计",
