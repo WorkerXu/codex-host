@@ -152,6 +152,41 @@ describe("Mapping Store forward compatibility", () => {
     }
   });
 
+  it("preserves a fork V1 delegation's Desktop project when loading and updating it", async () => {
+    const directory = await seed();
+    const delegationId = hostThreadIdSchema.parse("legacy-delegation");
+    const mission = {
+      formatVersion: 1,
+      revision: 1,
+      delegationId,
+      parentHostThreadId: "parent-thread",
+      childHostThreadId: threadId,
+      sourceHarnessId: "codex",
+      targetHarnessId: "pi",
+      taskDigest: "f".repeat(64),
+      status: "running",
+      desktopProject: { sourceHostId: "peer", sourceThreadId: "parent-thread", projectId: null },
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+    await mkdir(path.join(directory, "delegations"));
+    const file = path.join(directory, "delegations", `${delegationId}.json`);
+    await writeFile(file, JSON.stringify(mission));
+
+    const store = new MappingStore({ directory });
+    try {
+      await store.initialize();
+      await expect(store.getDelegationByChild(threadId)).resolves.toEqual(mission);
+      await store.setDelegationStatus(delegationId, "completed");
+      expect(await readJson(file)).toMatchObject({
+        status: "completed",
+        desktopProject: mission.desktopProject,
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
   it.each([
     { revision: "invalid" },
     { formatVersion: 2 },
