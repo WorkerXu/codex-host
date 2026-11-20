@@ -300,6 +300,7 @@ export function createFixture(
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
+    desktopHubs?: AppServerHostOptions["desktopHubs"];
   } = {},
 ) {
   const adapter =
@@ -340,6 +341,7 @@ export function createFixture(
   const createOfficialConnection = options.createOfficialConnection;
   if (options.officialRuntimeScope) startup.resolve(undefined);
   const host = new AppServerHost({
+    ...(options.desktopHubs ? { desktopHubs: options.desktopHubs } : {}),
     ...(options.sharedThreads ? { sharedThreads: options.sharedThreads } : {}),
     ...(options.sharedDelegation ? { sharedDelegation: options.sharedDelegation } : {}),
     stockCodexPath: "/synthetic/codex",

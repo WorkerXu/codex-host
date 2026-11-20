@@ -10,6 +10,7 @@ import {
 import { exists, scanRoot, type LibrarySkill, type RootSnapshot } from "./scan.js";
 
 export { SKILL_DIRECTORIES, SKILL_LIBRARY_LIMITS } from "./directories.js";
+export { parseSkillFrontmatter } from "./frontmatter.js";
 export type { LibrarySkill } from "./scan.js";
 
 export interface SkillLibrarySnapshot {

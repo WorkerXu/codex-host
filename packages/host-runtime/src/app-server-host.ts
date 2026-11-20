@@ -30,6 +30,11 @@ import { confirmNativeThreadArchived } from "./native-thread-archive-confirm.js"
 import { ExternalThreadPrewarms } from "./external-thread-prewarms.js";
 import { SkillLibrary } from "@codexhost/skill-library";
 import { SKILLS_LIST_METHOD, SKILLS_CHANGED_METHOD } from "@codexhost/shared-contracts";
+import {
+  handleDesktopHubRequest,
+  isDesktopHubMethod,
+  type DesktopHubServices,
+} from "./desktop-hubs.js";
 import { handleSkillsList } from "./skill-library-host.js";
 import {
   EXTERNAL_RESUME_INTERRUPTED_UNSUPPORTED,
@@ -385,6 +390,7 @@ import {
 } from "@codexhost/protocol-core";
 
 export interface AppServerHostOptions {
+  desktopHubs?: DesktopHubServices;
   /** Private external-session owner: never forwards requests to native Codex. */
   externalOnly?: boolean;
   /** Shared service's live Desktop connection count, not native client subscriptions. */
@@ -1779,6 +1785,16 @@ export class AppServerHost {
           result: jsonValueSchema.parse(await this.#repository.listSectionPlacements()),
         }),
       );
+      return;
+    }
+    if (isDesktopHubMethod(request.method)) {
+      const reply = await handleDesktopHubRequest(
+        request,
+        origin === "desktop" && !this.#options.externalOnly,
+        this.#options.environment ?? process.env,
+        this.#options.desktopHubs,
+      );
+      await this.#writer.json(reply);
       return;
     }
     if (

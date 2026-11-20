@@ -612,7 +612,8 @@ if (userArguments.length === 0) {
   userArguments[0] === "delegate" ||
   userArguments[0] === "thread" ||
   userArguments[0] === "client" ||
-  userArguments[0] === "events"
+  userArguments[0] === "events" ||
+  userArguments[0] === "skills"
 ) {
   launchArguments = null;
   delegationArguments = userArguments;
@@ -636,6 +637,7 @@ if (userArguments.length === 0) {
       "  codexhost host info [--refresh true|false]",
       "  codexhost project list [--query text] [--refresh true|false]",
       "  codexhost delegate --help",
+      "  codexhost skills list|link|sync|undo ...",
       "  codexhost harness inspect ...",
       "  codexhost delegate start ...",
       "  codexhost thread send|cancel|read|wait|watch|watches|list|file ...",
