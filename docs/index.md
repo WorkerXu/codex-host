@@ -26,6 +26,7 @@
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
+| [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | 委派代码任务的独立分支与 worktree、跨主机创建和失败现场保留。 |
 | [`architecture/delegation-questions.md`](architecture/delegation-questions.md) | 委派线程待答问题、Desktop/CLI 回答所有权、异步问题与生命周期边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/skills-hub.md`](architecture/skills-hub.md) | 每机技能中央库、技能库/按 Agent 界面、仅已安装 Agent、链接预览与撤销、跨机同步和冲突选择；修改技能中心时阅读。 |
@@ -47,9 +48,10 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
-| [`harnesses/antigravity/antigravity-tool-approval.md`](harnesses/antigravity/antigravity-tool-approval.md) | agy 的危险跳过权限、旧模式拒绝和问题桥边界；修改权限或交互时阅读。 |
+| [`harnesses/antigravity/native-acp.md`](harnesses/antigravity/native-acp.md) | 原生 ACP 会话、SQLite 历史、权限交互、后台输出及回移边界。 |
+| [`harnesses/antigravity/antigravity-tool-approval.md`](harnesses/antigravity/antigravity-tool-approval.md) | agy 原生 ACP 权限模式、工具审批和表单提问；修改权限或交互时阅读。 |
 | [`harnesses/antigravity/antigravity-subagents.md`](harnesses/antigravity/antigravity-subagents.md) | agy 原生 Subagent 生命周期、Transcript 和公共投影；修改 Subagent 支持时阅读。 |
-| [`harnesses/antigravity/antigravity-question-interaction-postmortem.md`](harnesses/antigravity/antigravity-question-interaction-postmortem.md) | Ask Question 失败历史、后续 Hook 桥实测和限制；排查 agy 提问交互时阅读。 |
+| [`harnesses/antigravity/antigravity-question-interaction-postmortem.md`](harnesses/antigravity/antigravity-question-interaction-postmortem.md) | Ask Question 失败与 Hook 桥历史、后续原生 ACP 替代；排查 agy 提问交互时阅读。 |
 
 ### Claude Code
 

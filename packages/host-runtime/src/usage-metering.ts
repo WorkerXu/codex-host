@@ -60,7 +60,7 @@ export class UsageMeter {
       this.recordOutputTiming(
         {
           requestId: request.requestId,
-          outputTokens: request.outputTokens,
+          outputTokens: request.timedOutputTokens ?? request.outputTokens,
           startedAtMs: request.startedAtMs ?? 0,
           completedAtMs: request.completedAtMs ?? 0,
         },
@@ -158,7 +158,7 @@ export class UsageMeter {
   }
 
   /** The Thread's published usage: native fields plus Host-derived metrics. */
-  derive(native: HostUsage | null, prices: ModelPriceLookup): HostUsage | null {
+  derive(native: HostUsage | null, prices: Pick<ModelPriceLookup, "find">): HostUsage | null {
     // Fields only Host may publish are dropped from the Adapter's snapshot.
     const usage = Object.fromEntries(
       Object.entries(native ?? {}).filter(
@@ -213,7 +213,9 @@ export class UsageMeter {
    * named, so the total is a lower bound; a request without Model or cache data voids the total,
    * as does a Session with no priced request at all.
    */
-  #cost(prices: ModelPriceLookup): { total: number; unpricedModels: string[] } | null {
+  #cost(
+    prices: Pick<ModelPriceLookup, "find">,
+  ): { total: number; unpricedModels: string[] } | null {
     let total = 0;
     let priced = 0;
     const unpriced = new Set<string>();

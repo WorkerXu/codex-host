@@ -12,6 +12,7 @@ import type {
   HistoricalTurnOutcome,
   InteractionClosedEvent,
   ItemCompletedEvent,
+  ItemBackgroundStartedEvent,
   ItemDetachedEvent,
   ItemStartedEvent,
   ItemUpdatedEvent,
@@ -50,6 +51,7 @@ export type ProjectableHostEvent =
   | ItemUpdatedEvent
   | ItemCompletedEvent
   | ItemDetachedEvent
+  | ItemBackgroundStartedEvent
   | InteractionClosedEvent
   | TurnCompletedEvent;
 
@@ -793,6 +795,7 @@ export class CodexTurnProjector {
   #started = false;
   /** Items allowed to outlive the Turn terminal; they settle later on this Turn. */
   readonly #detached = new Set<HostItemId>();
+  readonly #background = new Set<HostItemId>();
   #fileItemId: HostItemId | null = null;
 
   constructor(input: {
@@ -832,6 +835,26 @@ export class CodexTurnProjector {
       const projected = this.#items.get(itemId);
       if (!projected || projected.outcome) continue;
       items.set(itemId, projectItem(projected.item, null, this.#cwd, true, this.#threadId));
+    }
+    return items;
+  }
+
+  backgroundWireItems(): ReadonlyMap<HostItemId, JsonObject> {
+    const items = new Map<HostItemId, JsonObject>();
+    for (const itemId of this.#wireItemOrder) {
+      if (!this.#background.has(itemId)) continue;
+      const projected = this.#items.get(itemId);
+      if (projected) items.set(itemId, this.#projectItem(projected.item, projected.outcome));
+    }
+    return items;
+  }
+
+  foregroundWireItems(): ReadonlyMap<HostItemId, JsonObject> {
+    const items = new Map<HostItemId, JsonObject>();
+    for (const itemId of this.#wireItemOrder) {
+      if (this.#background.has(itemId)) continue;
+      const projected = this.#items.get(itemId);
+      if (projected) items.set(itemId, this.#projectItem(projected.item, projected.outcome));
     }
     return items;
   }
@@ -904,6 +927,7 @@ export class CodexTurnProjector {
     if (
       this.#completed &&
       !(
+        event.type === "item.background.started" ||
         (event.type === "item.updated" && this.#detached.has(event.itemId)) ||
         (event.type === "item.completed" && this.#detached.has(event.snapshot.item.itemId))
       )
@@ -911,6 +935,15 @@ export class CodexTurnProjector {
       throw new Error("Host output follows the Turn terminal event");
     }
     switch (event.type) {
+      case "item.background.started": {
+        if (!this.#completed) throw new Error("Host foreground output must use item.started");
+        if (event.item.type !== "agentMessage" && event.item.type !== "reasoning")
+          throw new Error("Only a text Item can start after its Turn completes");
+        const started = this.#startItem({ ...event, type: "item.started" }, emittedAtMs, true);
+        this.#detached.add(event.item.itemId);
+        this.#background.add(event.item.itemId);
+        return started;
+      }
       case "item.detached":
         if (this.#activeItem(event.itemId).item.type !== "commandExecution") {
           throw new Error("Only a command Item can outlive its Turn");
@@ -1035,7 +1068,11 @@ export class CodexTurnProjector {
     };
   }
 
-  #startItem(event: ItemStartedEvent, startedAtMs: number): CodexTurnProjection {
+  #startItem(
+    event: ItemStartedEvent,
+    startedAtMs: number,
+    background = false,
+  ): CodexTurnProjection {
     this.#requireStarted();
     if (this.#items.has(event.item.itemId)) throw new Error("Host Item started more than once");
     const projected: ProjectedItem = {
@@ -1049,6 +1086,7 @@ export class CodexTurnProjector {
       wireStarted: false,
       startedAtMs,
     };
+    if (background && projected.media) projected.media.flush();
     this.#items.set(event.item.itemId, projected);
     if (
       (event.item.type === "agentMessage" || event.item.type === "reasoning") &&
@@ -1096,7 +1134,10 @@ export class CodexTurnProjector {
       if (event.update.text.length === 0) return { messages };
       if (next.type === "agentMessage") {
         const before = this.#mediaItem(previous);
-        const delta = this.#agentMedia(event.itemId).append(event.update.text);
+        const media = this.#agentMedia(event.itemId);
+        const delta =
+          media.append(event.update.text) +
+          (this.#background.has(event.itemId) ? media.flush() : "");
         if (!delta) return { messages };
         if (!projected.wireStarted)
           messages.push(this.#startWireItem(projected, before, emittedAtMs));
@@ -1201,6 +1242,10 @@ export class CodexTurnProjector {
       mediaMessages.push(this.#agentDelta(projected.item.itemId, delta, emittedAtMs));
     }
     projected.item = { ...event.snapshot.item };
+    if (projected.item.type === "agentMessage" && this.#background.has(projected.item.itemId)) {
+      projected.media = createAgentMedia(projected.item.text, this.#cwd);
+      projected.media.flush();
+    }
     projected.outcome = event.snapshot.outcome;
     const startedAtMs = projected.startedAtMs;
     if (startedAtMs === undefined) throw new Error("Codex Item completed without a start time");

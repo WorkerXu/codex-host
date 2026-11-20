@@ -10,6 +10,30 @@ it("preserves and validates declarative Composer countdowns", () => {
   ).toThrow();
 });
 
+describe("timed output request accounting", () => {
+  const base = {
+    requestId: "request",
+    inputTokens: 100,
+    outputTokens: 40,
+    startedAtMs: 1000,
+    completedAtMs: 2000,
+  };
+  it("keeps billed output independent of the timed visible subset", () => {
+    expect(parseHostUsageRequest({ ...base, timedOutputTokens: 30 })).toEqual({
+      ...base,
+      timedOutputTokens: 30,
+    });
+  });
+  it.each([
+    { ...base, timedOutputTokens: 41 },
+    { ...base, timedOutputTokens: -1 },
+    { ...base, timedOutputTokens: 1.5 },
+    { requestId: "request", inputTokens: 100, outputTokens: 40, timedOutputTokens: 30 },
+  ])("rejects unreliable timed output (%j)", (request) => {
+    expect(() => parseHostUsageRequest(request)).toThrow();
+  });
+});
+
 describe("Harness Usage", () => {
   it("accepts complete normalized session cache totals independently of billing", () => {
     const sessionCacheUsage = { inputTokens: 100, cachedInputTokens: 40 };

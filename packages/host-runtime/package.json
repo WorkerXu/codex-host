@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./usage-metering": {
+      "types": "./dist/usage-metering.d.ts",
+      "import": "./dist/usage-metering.js"
     }
   },
   "scripts": {

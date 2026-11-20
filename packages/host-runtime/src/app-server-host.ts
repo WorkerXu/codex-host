@@ -1,3 +1,4 @@
+import { alignBackgroundTextRun, backgroundItemText } from "./background-output.js";
 import type { ModelService } from "./model-service.js";
 import type { CodeRepositories } from "./code-repositories.js";
 import { RepositoryError } from "./code-repository-process.js";
@@ -5998,11 +5999,14 @@ export class AppServerHost {
    */
   #withOpenBackgroundCommands(thread: ExternalThread, turns: JsonObject[]): JsonObject[] {
     return turns.map((turn) => {
-      const open = thread.projectedTurns
-        .get((turn as { id: HostTurnId }).id)
-        ?.projector.openDetachedWireItems();
-      if (!open || open.size === 0) return turn;
-      const remaining = new Map(open);
+      const projection = thread.projectedTurns.get((turn as { id: HostTurnId }).id)?.projector;
+      const open = projection?.openDetachedWireItems();
+      const background = projection?.backgroundWireItems();
+      const foreground = projection?.foregroundWireItems();
+      if ((!open || open.size === 0) && (!background || background.size === 0)) return turn;
+      const remaining = new Map(open ?? []);
+      // Background text is matched by type and content below; only commands use Item-id overlay.
+      for (const itemId of background?.keys() ?? []) remaining.delete(itemId);
       const items = (turn as { items: JsonObject[] }).items.map((item) => {
         const id = (item as { id: HostItemId }).id;
         const live = remaining.get(id);
@@ -6010,6 +6014,36 @@ export class AppServerHost {
         remaining.delete(id);
         return live;
       });
+      const historicalCount = items.length;
+      const consumedEnd = new Map<string, number>();
+      const liveItems = [...(background?.values() ?? [])].filter(
+        (item) => backgroundItemText(item) !== "",
+      );
+      for (const [index, live] of liveItems.entries()) {
+        const liveText = backgroundItemText(live);
+        if (liveText === null) {
+          items.push(live);
+          continue;
+        }
+        if (typeof live.type !== "string") {
+          items.push(live);
+          continue;
+        }
+        const aligned = alignBackgroundTextRun(
+          items,
+          historicalCount,
+          live.type,
+          liveText,
+          consumedEnd.get(live.type) ?? 0,
+          [...(foreground?.values() ?? [])],
+          index === liveItems.length - 1 && items.length === historicalCount,
+        );
+        if (aligned === null) {
+          items.push(live);
+          continue;
+        }
+        consumedEnd.set(live.type, aligned);
+      }
       return {
         ...turn,
         items: [...items, ...remaining.values()],
@@ -6945,6 +6979,7 @@ export class AppServerHost {
     }
     const result = projection.projector.project(event as ProjectableHostEvent);
     if (event.type === "turn.started") {
+      this.#dropSettledTurnProjections(thread, event.turnId);
       await this.#setThreadStatus(thread, { type: "active", activeFlags: [] });
     }
     if (event.type === "turn.completed") {
@@ -6962,8 +6997,8 @@ export class AppServerHost {
       thread.historyHydrated = false;
       thread.running = false;
       thread.activeTurnId = null;
-      // Detached Items (native background commands) settle on this Turn later.
-      if (!projection.projector.hasOpenDetachedItems) thread.projectedTurns.delete(event.turnId);
+      // Native ACP can emit background text while idle; retain the latest completed Turn.
+      this.#dropSettledTurnProjections(thread, event.turnId);
       thread.responseGates.delete(event.turnId);
       thread.pendingSteerProjections.clear();
       this.#signalActiveWorkChanged();
@@ -6994,8 +7029,10 @@ export class AppServerHost {
     if (
       event.type === "item.completed" &&
       projection.projector.completed &&
-      !projection.projector.hasOpenDetachedItems
+      !projection.projector.hasOpenDetachedItems &&
+      event.turnId !== thread.projectedTerminalTurnId
     ) {
+      thread.turns = this.#withOpenBackgroundCommands(thread, thread.turns);
       thread.projectedTurns.delete(event.turnId);
     }
     for (const message of result.messages) await this.#writer.json(message);
@@ -7595,6 +7632,15 @@ export class AppServerHost {
       emittedAtMs: Date.now(),
       params: { threadId: thread.id, status },
     });
+  }
+
+  /** Fold late text before retiring settled projections at the next Turn. */
+  #dropSettledTurnProjections(thread: ExternalThread, keep: HostTurnId): void {
+    thread.turns = this.#withOpenBackgroundCommands(thread, thread.turns);
+    for (const [id, { projector }] of thread.projectedTurns) {
+      if (id !== keep && projector.completed && !projector.hasOpenDetachedItems)
+        thread.projectedTurns.delete(id);
+    }
   }
 
   #projectedTurn(thread: ExternalThread, turnId: HostTurnId): ProjectedTurn {
