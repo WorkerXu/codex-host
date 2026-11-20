@@ -282,6 +282,15 @@ export const storedDelegationRecordV1Schema = z
     status: delegationStatusSchema,
     requestId: nonBlankTextSchema.max(1_024).optional(),
     taskDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    /** Desktop project routing persisted in fork V1 records. */
+    desktopProject: z
+      .object({
+        sourceHostId: z.string().min(1).optional(),
+        sourceThreadId: z.string().min(1).optional(),
+        projectId: z.string().min(1).nullable().optional(),
+      })
+      .strict()
+      .optional(),
     createdAt: isoDateSchema,
     updatedAt: isoDateSchema,
   })

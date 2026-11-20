@@ -9,6 +9,7 @@
 | [`PRIVACY.md`](PRIVACY.md) | 公开隐私政策：项目独立性、本地存储、Harness 集成、凭据处理与数据删除。 |
 | [`project/README.zh-CN.md`](project/README.zh-CN.md) | 中文项目介绍、安装方式和功能概览；维护中文用户入口时阅读。根目录 `README.md` 为英文默认入口。 |
 | [`project/README.ko.md`](project/README.ko.md) | 韩文项目介绍、安装方式和功能概览；维护韩文用户入口时阅读。 |
+| [`project/fork-data-migration.md`](project/fork-data-migration.md) | fork 迁移到 v0.22.0 的数据对照、oracle-main 和 Mac 的切换与回滚步骤、副本验收记录。 |
 | [`project/领域术语表.md`](project/领域术语表.md) | Harness、Model、Provider、Account、Thread 等领域术语；命名产品和代码概念前阅读。 |
 
 ## Harness 架构与公共能力
