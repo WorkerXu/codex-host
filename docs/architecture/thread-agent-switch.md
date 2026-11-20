@@ -14,6 +14,8 @@
 
 固定 RPC `codexhost/thread/agent/switch`（`packages/shared-contracts/src/thread-agent-switch.ts`）：`{ threadId, agent, input? }` → `{ threadId }`。实现位于 `packages/host-runtime/src/thread-agent-switch-runner.ts`，交接内容的构造和存储位于 `thread-agent-switch.ts`。
 
+远程（SSH）Host 上，外部 Session 都由共享 Host 持有。每个 Desktop 连接对应的会话 Host 不自己执行切换，而是把请求整个转给共享 Host：由它读取 Codex Thread、新建外部 Thread，并归档来源。
+
 1. **读取来源**：外部 Thread 用 Host 的历史投影（包含它此前切换带来的快照），原生 Codex Thread 用 `thread/turns/list` 分页读取（`itemsView: "full"`）。只取用户和 Agent 的文本，不带工具调用、推理和命令输出。
 2. **目标为 Codex**：
    - 把历史写成 Claude Code 会话文件 `$HOME/.claude/projects/codexhost-handoff/<uuid>.jsonl`。Codex 的外部会话导入只接受这个 `projects` 目录下的 `.jsonl`，并且固定读 `$HOME/.claude`，不看 `CLAUDE_CONFIG_DIR`。

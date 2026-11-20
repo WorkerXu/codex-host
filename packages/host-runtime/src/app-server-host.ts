@@ -5524,6 +5524,17 @@ export class AppServerHost {
       await this.#writer.json(rpcError(request, -32602, "Agent 切换请求无效"));
       return;
     }
+    const bridge = this.#options.sharedThreads;
+    if (bridge?.options.delegateCreates) {
+      // A remote GUI session does not own external Sessions: the shared Host
+      // creates the new Thread, reads Codex Threads and archives the source.
+      try {
+        await this.#writer.json(await bridge.forward(request));
+      } catch (error) {
+        await this.#writer.json(rpcError(request, -32090, errorMessage(error)));
+      }
+      return;
+    }
     await this.#waitForPlugins();
     try {
       const result = await this.#agentSwitcher.switch(parsed.data);
