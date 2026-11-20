@@ -9,8 +9,17 @@ export interface DelegationSkillReference {
   path: string;
 }
 
+function shellArgument(value: string): string {
+  return /^[A-Za-z0-9_.:@%+-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function describeTargets(mentions: readonly DelegationMention[]): string {
-  return mentions.map(({ harnessId, label }) => `@${label} (Harness \`${harnessId}\`)`).join(", ");
+  return mentions
+    .map(
+      ({ harnessId, label, hostId }) =>
+        `@${label} (Harness \`${harnessId}\`)${hostId ? ` on ${hostId}` : ""}`,
+    )
+    .join(", ");
 }
 
 /**
@@ -24,11 +33,12 @@ export function delegationMentionInstruction(mentions: readonly DelegationMentio
     `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
     "through the executable in CODEXHOST_CLI_PATH.",
     "Run the command for each selected Harness directly, replacing the task and name placeholders.",
-    ...mentions.map(
-      ({ harnessId }) =>
-        `
-codexhost delegate start --harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
-    ),
+    "Skip --help and peer list. Wait for the Host's notification instead of polling thread wait.",
+    ...mentions.map(({ harnessId, hostId }) => {
+      const host = hostId ? ` --host ${shellArgument(hostId)}` : "";
+      return `
+codexhost delegate start${host} --harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`;
+    }),
     "\nRead the returned Thread link when reporting results or following up.",
   ].join(" ");
 }
@@ -66,8 +76,9 @@ export function rewriteDelegationMentionInput(
     lastTextIndex = index;
     const result = stripDelegationMentions(item.text);
     for (const mention of result.mentions) {
-      if (seen.has(mention.harnessId)) continue;
-      seen.add(mention.harnessId);
+      const key = JSON.stringify([mention.hostId, mention.harnessId]);
+      if (seen.has(key)) continue;
+      seen.add(key);
       mentions.push(mention);
     }
     return result.mentions.length === 0 ? item : ({ ...item, text: result.text } as JsonObject);

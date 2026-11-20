@@ -55,8 +55,10 @@ export class DelegationPeerCatalogService {
     this.#spawnImpl = options.spawnImpl;
   }
 
-  async listPeers(input: { refresh?: boolean | undefined } = {}): Promise<DelegationPeerCatalog> {
-    if (this.#cache && !input.refresh) {
+  async listPeers(
+    input: { refresh?: boolean | undefined; revalidate?: boolean | undefined } = {},
+  ): Promise<DelegationPeerCatalog> {
+    if (this.#cache && !input.refresh && !input.revalidate) {
       const stale = this.#now() - this.#cache.loadedAt >= this.#cacheTtlMs;
       if (stale) {
         // Stale-while-revalidate: the menu gets the cached catalog immediately.
@@ -132,9 +134,7 @@ export class DelegationPeerCatalogService {
               ? result.harnesses.filter((value): value is string => typeof value === "string")
               : [];
             const availability = isRecord(result.availability) ? result.availability : undefined;
-            const harnesses = availability
-              ? listed.filter((harnessId) => availability[harnessId] === "ready")
-              : listed;
+            const harnesses = listed.filter((harnessId) => availability?.[harnessId] === "ready");
             this.#harnessCache.set(name, harnesses);
             return {
               name,

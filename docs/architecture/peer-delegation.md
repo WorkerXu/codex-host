@@ -23,6 +23,18 @@ peer 的命令返回该路径的结果或错误。Thread 链接中的 `hostId` �
 插件指纹变化或启动失败会使旧探测结果失效。Desktop 的插件目录请求可以选择读取新鲜状态，交互式
 Model 和权限模式配置由实时 Harness 检查确认。
 
+## Desktop 的跨机器派发
+
+在 Desktop Composer 输入 `#`，可以按机器选择已安装且就绪的 Harness。同一名字的
+Harness 在不同机器上是独立目标。菜单优先采用 Desktop 的机器显示名，连接异常的
+机器显示一行「连接超时」或「连接失败」。打开菜单时查询当前会话所在 Host 的 peer
+目录。后台重新查询复用对端磁盘上的 Harness 可用性缓存。
+
+选择目标后插入原生 Agent 提及。发送时由 Host 改写成带 `--host`、`--harness`、
+`--watch true` 和 `--format compact` 的 `codexhost delegate start` 命令，填入任务名和
+任务后即可执行。子会话通过 Desktop 的项目归属服务继承父会话的项目。用
+`--project <projectId>` 指定归属或用 `--project none` 设为无项目。
+
 ## 后续功能接入
 
 - T2 可复用 `DesktopProjectCatalogReader` 查询 Mac 本机项目和 Thread 分配。
@@ -30,9 +42,6 @@ Model 和权限模式配置由实时 Harness 检查确认。
   `shared-contracts` 导出对应请求和结果。Desktop 入口通过 `AppServerHost.#handleDesktopRequest`
   及 `#dispatchDesktopReply` 寻址和回包。设置页在 `createDefaultRendererSettingsPages`
   注册 `RendererSettingsPageDefinition`，使用页面作用域清理请求与订阅。
-- T5 可通过 `codexhost/desktop-projects/catalog` 读 Desktop 项目视图，通过 Renderer 的
-  `harnessDirectory` 与 `delegationPeerCatalog` 获取按 Host 分区的可用性和 peer。项目镜像写入和
-  跨机器菜单由 T5 接入。
 - T6 保留 Thread 原生创建和发送入口，适配各 Harness 的目录参数。需要 Desktop 项目上下文时复用目录
   只读 RPC。
 - T7 使用 Host 侧的 peer 配置、目录和传输，新增 Web 的受认证派发入口。现有 Desktop peer RPC 和

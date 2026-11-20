@@ -87,3 +87,15 @@ describe("Harness command carrier", () => {
     expect(stripDelegationMentions(`${link("/review")}`).mentions).toEqual([]);
   });
 });
+
+it("round-trips a peer or Desktop Host ID separately from the display label", () => {
+  const mention = {
+    harnessId: "claude-code",
+    hostId: "remote-ssh-discovered:oracle-main",
+    label: "Claude Code",
+  };
+  expect(stripDelegationMentions(formatDelegationMentionLink(mention))).toEqual({
+    text: "@Claude Code",
+    mentions: [mention],
+  });
+});

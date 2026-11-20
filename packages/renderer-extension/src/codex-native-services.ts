@@ -53,6 +53,7 @@ export async function loadCodexNativeServices<T>(
   ownerWindow: Window,
   matchesServices: (value: unknown) => value is T,
   importModule: (url: string) => Promise<Record<string, unknown>> = (url) => import(url),
+  scan: "module" | "export" = "export",
 ): Promise<T | null> {
   if (!ownerWindow.document || !ownerWindow.location) return null;
   const page = new URL(ownerWindow.location.href);
@@ -112,7 +113,8 @@ export async function loadCodexNativeServices<T>(
     } catch {
       continue;
     }
-    Object.values(module).forEach(addMatch);
+    if (scan === "module") addMatch(module);
+    else Object.values(module).forEach(addMatch);
     const runtime = instantiatedModules(module);
     if (runtime) runtimes.add(runtime);
   }
@@ -124,6 +126,11 @@ export async function loadCodexNativeServices<T>(
     for (const [index, module] of modules.entries()) {
       if (index > 0 && index % RUNTIME_SCAN_SLICE === 0)
         await new Promise((resolve) => setTimeout(resolve));
+      if (scan === "module") {
+        if (objectLike(module) && !Object.hasOwn(module, "error"))
+          addMatch(Object.getOwnPropertyDescriptor(module, "exports")?.value);
+        continue;
+      }
       const values = compiledExportValues(module);
       scannedExports += values.length;
       if (scannedExports > MAX_RUNTIME_EXPORTS)

@@ -51,6 +51,7 @@ import {
   type ThreadExportInput,
   type ThreadExportResult,
 } from "./delegation-thread-export.js";
+import { delegationDesktopProject } from "./delegation-projects.js";
 import { originClientName } from "./external-client-origin.js";
 import { delegationTitle } from "./delegation-title.js";
 import { projectDelegationThreadSnapshot, validateReadOptions } from "./delegation-snapshot.js";
@@ -101,6 +102,13 @@ function statusFromThread(
 }
 
 function validateStart(input: DelegationStartInput): void {
+  if (
+    input.projectId !== undefined &&
+    input.projectId !== null &&
+    (typeof input.projectId !== "string" || input.projectId.trim().length === 0)
+  ) {
+    throw new DelegationControlError("INVALID_ARGUMENT", "Expected a Desktop project ID or null");
+  }
   if (typeof input.task !== "string" || !input.task.trim())
     throw new DelegationControlError("INVALID_ARGUMENT", "Task must not be empty");
   if (
@@ -354,6 +362,7 @@ export class HarnessDelegationCoordinator {
           status: "creating",
           ...(input.requestId ? { requestId: input.requestId } : {}),
           taskDigest: digest,
+          desktopProject: delegationDesktopProject(parentThreadId, input.projectId),
         });
         this.#notifyTreeChanged(childThreadId);
         const opened = await adapter.open({

@@ -37,6 +37,7 @@ import {
   insertNativeTextAtSelection,
   type NativeTextRange,
 } from "./renderer-native-composer-controller.js";
+import type { RendererDelegationPeerNotice } from "./renderer-delegation-peer-catalog.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 import { createSkillIcon, skillMention } from "./renderer-skill-reference.js";
 
@@ -70,6 +71,8 @@ export interface RendererDelegationTarget {
   agent: RendererAgent;
   label: string;
   plugin?: HarnessPluginDescriptor;
+  hostId?: string;
+  hostLabel?: string;
 }
 
 export interface RendererDelegationTrigger {
@@ -100,10 +103,11 @@ export function filterDelegationTargets(
   const scored = targets.flatMap((target, index) => {
     const label = target.label.toLowerCase();
     const id = target.agent.toLowerCase();
+    const host = target.hostLabel?.toLowerCase() ?? "";
     const score =
       label.startsWith(needle) || id.startsWith(needle)
         ? 2
-        : label.includes(needle) || id.includes(needle)
+        : label.includes(needle) || id.includes(needle) || host.includes(needle)
           ? 1
           : 0;
     return score > 0 ? [{ target, score, index }] : [];
@@ -153,6 +157,27 @@ export function harnessCommandDisplayName(label: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+const groupDelegationTargets = (targets: readonly RendererDelegationTarget[]) => {
+  const groups = new Map<string, RendererDelegationTarget[]>();
+  for (const target of targets) {
+    const id = target.hostId ?? "";
+    const group = groups.get(id);
+    if (group) group.push(target);
+    else groups.set(id, [target]);
+  }
+  return groups.values();
+};
+
+function delegationUnavailableReason(reason: string, locale: RendererSettingsLocale): string {
+  if (/timed?\s*out|timeout|deadline|超时/iu.test(reason))
+    return locale === "zh-CN" ? "连接超时" : "Connection timed out";
+  return locale === "zh-CN" ? "连接失败" : "Connection failed";
+}
+
+function targetMentionPath(target: RendererDelegationTarget): string {
+  return delegationMentionPath(target.agent, target.hostId);
 }
 
 function agentsTitle(locale: RendererSettingsLocale): string {
@@ -215,12 +240,13 @@ function syncChipStyle(
   const rules = [
     withPseudo(" > span:last-child") + "{display:none;}",
     withPseudo("::after") + "{content:attr(agent-mention-display-name);}",
-    ...targets.flatMap(({ agent, plugin }) => {
+    ...targets.flatMap((target) => {
+      const { agent, plugin } = target;
       const key = JSON.stringify([plugin?.icon ?? agent, plugin?.iconStyle]);
       if (!cache.has(key)) cache.set(key, iconUrl(agent, ownerDocument, plugin));
       const url = cache.get(key);
       if (!url) return [];
-      const selector = `[agent-mention-path=${cssString(delegationMentionPath(agent))}]::before`;
+      const selector = `[agent-mention-path=${cssString(targetMentionPath(target))}]::before`;
       return [
         `${selector}{content:"";display:inline-block;width:16px;height:16px;` +
           `margin-inline-end:3px;vertical-align:-3px;` +
@@ -242,6 +268,7 @@ interface ActiveTrigger {
 
 export interface RendererDelegationMentionOptions {
   readTargets(editor: HTMLElement): readonly RendererDelegationTarget[];
+  readPeerNotices?(editor: HTMLElement): readonly RendererDelegationPeerNotice[];
   /** Whether the editable element belongs to a Composer we manage. */
   isComposerEditor(editor: HTMLElement): boolean;
   readLocale(): RendererSettingsLocale;
@@ -355,13 +382,15 @@ export function installRendererDelegationMention(
   };
 
   const highlight = (): void => {
-    [...list.querySelectorAll<HTMLElement>("[role=option]")].forEach((item, index) => {
-      const selected = index === activeIndex;
-      item.setAttribute("aria-selected", String(selected));
-      for (const name of ROW_HIGHLIGHT_CLASSES) item.classList.toggle(name, selected);
-      item.classList.toggle(ROW_IDLE_CLASS, !selected);
-      if (selected) item.scrollIntoView({ block: "nearest" });
-    });
+    [...list.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])')].forEach(
+      (item, index) => {
+        const selected = index === activeIndex;
+        item.setAttribute("aria-selected", String(selected));
+        for (const name of ROW_HIGHLIGHT_CLASSES) item.classList.toggle(name, selected);
+        item.classList.toggle(ROW_IDLE_CLASS, !selected);
+        if (selected) item.scrollIntoView({ block: "nearest" });
+      },
+    );
   };
 
   /** Match Desktop: span the Composer and sit just above it. */
@@ -383,7 +412,7 @@ export function installRendererDelegationMention(
   };
 
   /** Every section carries a quiet source tag, like Desktop's "Personal". */
-  const sectionHeader = (title: string): HTMLElement => {
+  const sectionHeader = (title: string, showSource = true): HTMLElement => {
     const header = ownerDocument.createElement("div");
     header.className = `${HEADER_CLASS} flex items-center justify-between gap-2`;
     const label = ownerDocument.createElement("span");
@@ -393,7 +422,8 @@ export function installRendererDelegationMention(
     source.className = "shrink-0 text-sm text-codex-description";
     source.setAttribute("data-codexhost-source", "");
     source.textContent = SOURCE_TAG;
-    header.append(label, source);
+    header.append(label);
+    if (showSource) header.append(source);
     return header;
   };
 
@@ -446,14 +476,15 @@ export function installRendererDelegationMention(
       matches: HarnessCommandDescriptor[];
     } | null,
     targets: RendererDelegationTarget[],
+    peerNotices: readonly RendererDelegationPeerNotice[],
     skills: RendererDelegationSkillSource | null,
   ): void => {
     const locale = options.readLocale();
     const rows: HTMLElement[] = [];
     entries = [];
-    if (targets.length > 0) {
-      rows.push(sectionHeader(agentsTitle(locale)));
-      for (const target of targets) {
+    for (const group of groupDelegationTargets(targets)) {
+      rows.push(sectionHeader(group[0]?.hostLabel ?? agentsTitle(locale), false));
+      for (const target of group) {
         rows.push(
           optionRow(
             { kind: "agent", target },
@@ -465,6 +496,14 @@ export function installRendererDelegationMention(
           ),
         );
       }
+    }
+    for (const notice of peerNotices) {
+      const row = ownerDocument.createElement("div");
+      row.className = `${ROW_CLASS} text-codex-description`;
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-disabled", "true");
+      row.append(rowContent(null, notice.name, delegationUnavailableReason(notice.reason, locale)));
+      rows.push(row);
     }
     if (commands) {
       if (commands.matches.length) {
@@ -589,18 +628,34 @@ export function installRendererDelegationMention(
     const allTargets = options.readTargets(trigger.editor);
     syncChipStyle(ownerDocument, allTargets, iconCache);
     const targets = filterDelegationTargets(allTargets, trigger.query);
+    const needle = trigger.query.trim().toLowerCase();
+    const peerNotices = (options.readPeerNotices?.(trigger.editor) ?? []).filter(({ name }) =>
+      name.toLowerCase().includes(needle),
+    );
     const source = options.readCommands(trigger.editor);
     const commandMatches = source ? filterDelegationCommands(source.commands, trigger.query) : [];
     const skills = options.readSkills?.(trigger.editor) ?? null;
     const showsNotice = Boolean(source?.pendingNotice) && trigger.query === "";
-    if (targets.length === 0 && commandMatches.length === 0 && !showsNotice && !skills) {
+    if (
+      targets.length === 0 &&
+      peerNotices.length === 0 &&
+      commandMatches.length === 0 &&
+      !showsNotice &&
+      !skills
+    ) {
       close();
       return;
     }
     const sameQuery = active?.query === trigger.query && active.node === trigger.node;
     active = trigger;
     if (!sameQuery) activeIndex = 0;
-    render(trigger, source ? { source, matches: commandMatches } : null, targets, skills);
+    render(
+      trigger,
+      source ? { source, matches: commandMatches } : null,
+      targets,
+      peerNotices,
+      skills,
+    );
     // Keep a menu of only disabled rows open so their explanation stays visible.
     if (rowsRendered === 0) close();
   };
@@ -627,7 +682,7 @@ export function installRendererDelegationMention(
     range: NativeTextRange,
     target: RendererDelegationTarget,
   ): Promise<void> => {
-    const path = delegationMentionPath(target.agent);
+    const path = targetMentionPath(target);
     // Preferred: Desktop's own controller inserts an inline agent mention
     // exactly like its `@` menu, independent of the plain-text editor setting.
     if (
@@ -640,7 +695,11 @@ export function installRendererDelegationMention(
       return;
     }
     if (!(await selectTriggerText(trigger))) return;
-    const carrier = `${formatDelegationMentionLink({ harnessId: target.agent, label: target.label })} `;
+    const carrier = `${formatDelegationMentionLink({
+      harnessId: target.agent,
+      label: target.label,
+      ...(target.hostId ? { hostId: target.hostId } : {}),
+    })} `;
     const pasted = dispatchPlainTextPaste(trigger.editor, carrier);
     if (!pasted) ownerDocument.execCommand("insertText", false, carrier);
   };

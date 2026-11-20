@@ -100,6 +100,8 @@ export interface DelegationStartInput {
   taskName?: string;
   cwd?: string;
   parentThreadId?: string;
+  /** Desktop project override. Omission inherits the parent project. */
+  projectId?: string | null;
   requestId?: string;
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;

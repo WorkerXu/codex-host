@@ -159,6 +159,8 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
+| [`architecture/sidebar-sections.md`](architecture/sidebar-sections.md) | Desktop 原生分区的合并视图、项目分组开关与结构回退。 |
+| [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | Desktop 同名项目镜像、分区归属与目标 Harness 预选。 |
 | [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Desktop Composer 的 Jarvis Bug 引用、搜索条件解析、CLI 管理和本机 Gemini 密钥。 |
 | [`product/harness-schedules.md`](product/harness-schedules.md) | 官方任务页的原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |

@@ -92,7 +92,7 @@ describe("DelegationPeerCatalogService", () => {
       ssh === "mac"
         ? {
             code: 0,
-            stdout: `${JSON.stringify({ harnesses: ["codex", "grok"] })}\n`,
+            stdout: `${JSON.stringify({ harnesses: ["codex", "grok"], availability: { codex: "ready", grok: "ready" } })}\n`,
           }
         : { code: 1, stderr: "ssh: connect to host colab: unreachable" },
     );
@@ -143,7 +143,7 @@ describe("DelegationPeerCatalogService", () => {
     let now = 1_000;
     const fake = fakeSpawn(() => ({
       code: 0,
-      stdout: `${JSON.stringify({ harnesses: ["codex"] })}\n`,
+      stdout: `${JSON.stringify({ harnesses: ["codex"], availability: { codex: "ready" } })}\n`,
     }));
     const service = new DelegationPeerCatalogService(env, {
       spawnImpl: fake.spawnImpl,
@@ -173,7 +173,6 @@ describe("DelegationPeerCatalogService", () => {
             code: 0,
             stdout: `${JSON.stringify({
               harnesses: ["grok"],
-              availability: { grok: "notInstalled" },
             })}\n`,
           },
     );
@@ -195,7 +194,10 @@ describe("DelegationPeerCatalogService", () => {
     const fake = fakeSpawn(({ ssh }) =>
       offline || ssh === "colab"
         ? { code: 1, stderr: "offline" }
-        : { code: 0, stdout: `${JSON.stringify({ harnesses: ["codex", "grok"] })}\n` },
+        : {
+            code: 0,
+            stdout: `${JSON.stringify({ harnesses: ["codex", "grok"], availability: { codex: "ready", grok: "ready" } })}\n`,
+          },
     );
     const service = new DelegationPeerCatalogService(env, { spawnImpl: fake.spawnImpl });
     const first = await service.listPeers();
