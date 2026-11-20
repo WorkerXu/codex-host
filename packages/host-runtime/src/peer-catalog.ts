@@ -1,10 +1,13 @@
 import type {
   DelegationPeerCatalog,
   DelegationPeerCatalogEntry,
+  DesktopRemoteConnection,
+  WebDelegationPeers,
 } from "@codexhost/shared-contracts";
 
 import { DelegationControlError, type DelegationThreadSnapshot } from "./delegation-types.js";
-import { readPeerConfig, resolvePeerTarget } from "./peer-config.js";
+import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
+import { readPeerConfig, resolvePeerTarget, type ResolvedPeer } from "./peer-config.js";
 import { requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
 const DEFAULT_CATALOG_TIMEOUT_MS = 15_000;
@@ -18,6 +21,28 @@ function errorText(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function webFailure(error: unknown): "timeout" | "failed" {
+  if (error instanceof DelegationControlError) {
+    const { reason, stderr } = error.details ?? {};
+    if (
+      reason === "peer_timeout" ||
+      /timed?\s*out|timeout|deadline|超时/iu.test(
+        typeof stderr === "string" ? stderr : error.message,
+      )
+    )
+      return "timeout";
+  }
+  return "failed";
+}
+
+function displayName(peer: ResolvedPeer, connections: readonly DesktopRemoteConnection[]): string {
+  for (const hostId of peer.hostIds) {
+    const connection = connections.find((entry) => entry.hostId === hostId);
+    if (connection) return connection.displayName;
+  }
+  return connections.find((entry) => entry.alias === peer.ssh)?.displayName ?? peer.name;
 }
 
 /**
@@ -34,6 +59,8 @@ export class DelegationPeerCatalogService {
   readonly #spawnImpl: PeerSpawn | undefined;
   #cache: { loadedAt: number; value: DelegationPeerCatalog } | undefined;
   #inflight: Promise<DelegationPeerCatalog> | undefined;
+  #webInflight: Promise<WebDelegationPeers> | undefined;
+  #desktopProjects: DesktopProjectCatalogReader | undefined;
   /** Last successful Harness list, so an offline machine keeps greyed-out rows. */
   readonly #harnessCache = new Map<string, string[]>();
 
@@ -65,6 +92,44 @@ export class DelegationPeerCatalogService {
       return this.#cache.value;
     }
     return this.#refresh(input.refresh === true);
+  }
+
+  /** Query the peer's availability cache on each menu open. */
+  listWebPeers(): Promise<WebDelegationPeers> {
+    this.#webInflight ??= this.#loadWebPeers().finally(() => {
+      this.#webInflight = undefined;
+    });
+    return this.#webInflight;
+  }
+
+  async #loadWebPeers(): Promise<WebDelegationPeers> {
+    const peers = await this.#configuredPeers();
+    if (peers.targets.length === 0) return { peers: [] };
+    this.#desktopProjects ??= new DesktopProjectCatalogReader({ environment: this.#environment });
+    const connections = await this.#desktopProjects.read().then(
+      (catalog) => catalog.codexManagedRemoteConnections,
+      () => [],
+    );
+    return {
+      peers: await Promise.all(
+        peers.targets.map(async (peer) => {
+          const identity = { name: peer.name, label: displayName(peer, connections) };
+          try {
+            const { ready } = await this.#listPeerHarnesses(peer, false);
+            if (!ready) return { ...identity, status: "failed" as const };
+            return {
+              ...identity,
+              status: "ready" as const,
+              harnesses: [...new Set(ready)].filter((harnessId) =>
+                /^[a-z0-9][a-z0-9-]*$/u.test(harnessId),
+              ),
+            };
+          } catch (error) {
+            return { ...identity, status: webFailure(error) };
+          }
+        }),
+      ),
+    };
   }
 
   #refresh(refresh: boolean): Promise<DelegationPeerCatalog> {
@@ -113,51 +178,65 @@ export class DelegationPeerCatalogService {
     return result as unknown as DelegationThreadSnapshot;
   }
 
-  async #load(refresh: boolean): Promise<DelegationPeerCatalog> {
+  async #configuredPeers() {
     const config = await readPeerConfig(this.#environment);
+    const targets = Object.entries(config.peers)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, entry]): ResolvedPeer => ({
+        name,
+        ...entry,
+        linkHostId: entry.hostIds[0] ?? name,
+      }));
+    return { targets, self: config.self };
+  }
+
+  async #listPeerHarnesses(peer: ResolvedPeer, refresh: boolean) {
+    const result = await requestPeerRoute({
+      environment: this.#environment,
+      peer,
+      route: "/v1/harness/list",
+      body: { includeAvailability: true, ...(refresh ? { refresh: true } : {}) },
+      timeoutMs: this.#catalogTimeoutMs,
+      ...(this.#spawnImpl ? { spawnImpl: this.#spawnImpl } : {}),
+    });
+    const listed = Array.isArray(result.harnesses)
+      ? result.harnesses.filter((value): value is string => typeof value === "string")
+      : [];
+    const availability = isRecord(result.availability) ? result.availability : undefined;
+    return { listed, ready: availability && listed.filter((id) => availability[id] === "ready") };
+  }
+
+  async #load(refresh: boolean): Promise<DelegationPeerCatalog> {
+    const { targets, self } = await this.#configuredPeers();
     const peers = await Promise.all(
-      Object.entries(config.peers)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(async ([name, entry]): Promise<DelegationPeerCatalogEntry> => {
-          try {
-            const result = await requestPeerRoute({
-              environment: this.#environment,
-              peer: { name, ...entry, linkHostId: entry.hostIds[0] ?? name },
-              route: "/v1/harness/list",
-              body: { includeAvailability: true, ...(refresh ? { refresh: true } : {}) },
-              timeoutMs: this.#catalogTimeoutMs,
-              ...(this.#spawnImpl ? { spawnImpl: this.#spawnImpl } : {}),
-            });
-            const listed = Array.isArray(result.harnesses)
-              ? result.harnesses.filter((value): value is string => typeof value === "string")
-              : [];
-            const availability = isRecord(result.availability) ? result.availability : undefined;
-            const harnesses = availability
-              ? listed.filter((harnessId) => availability[harnessId] === "ready")
-              : listed;
-            this.#harnessCache.set(name, harnesses);
-            return {
-              name,
-              hostIds: entry.hostIds,
-              ssh: entry.ssh,
-              state: "ready",
-              harnesses,
-            };
-          } catch (error) {
-            return {
-              name,
-              hostIds: entry.hostIds,
-              ssh: entry.ssh,
-              state: "unreachable",
-              harnesses: this.#harnessCache.get(name) ?? [],
-              error: errorText(error),
-            };
-          }
-        }),
+      targets.map(async (peer): Promise<DelegationPeerCatalogEntry> => {
+        const { name, hostIds, ssh } = peer;
+        try {
+          const { listed, ready } = await this.#listPeerHarnesses(peer, refresh);
+          const harnesses = ready ?? listed;
+          this.#harnessCache.set(name, harnesses);
+          return {
+            name,
+            hostIds,
+            ssh,
+            state: "ready",
+            harnesses,
+          };
+        } catch (error) {
+          return {
+            name,
+            hostIds,
+            ssh,
+            state: "unreachable",
+            harnesses: this.#harnessCache.get(name) ?? [],
+            error: errorText(error),
+          };
+        }
+      }),
     );
     const value: DelegationPeerCatalog = {
       peers,
-      ...(config.self ? { self: { hostIds: config.self.hostIds } } : {}),
+      ...(self ? { self: { hostIds: self.hostIds } } : {}),
     };
     this.#cache = { loadedAt: this.#now(), value };
     return value;

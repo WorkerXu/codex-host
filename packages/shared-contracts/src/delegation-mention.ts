@@ -11,19 +11,26 @@
 export const DELEGATION_MENTION_PATH_PREFIX = "subagent://codexhost.";
 
 const HARNESS_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
+const HOST_ID_PATTERN = /^[A-Za-z0-9_.:@%+-]{1,256}$/u;
 const MENTION_LINK_PATTERN =
-  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)>?\)/gu;
+  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)(?:\?host=([^)&\s>]+))?>?\)/gu;
 
 export interface DelegationMention {
   harnessId: string;
   label: string;
+  /** Peer name or Desktop Host ID. */
+  hostId?: string;
 }
 
-export function delegationMentionPath(harnessId: string): string {
+export function delegationMentionPath(harnessId: string, hostId?: string): string {
   if (!HARNESS_ID_PATTERN.test(harnessId)) {
     throw new Error(`Invalid delegation mention Harness id: ${harnessId}`);
   }
-  return `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}`;
+  if (hostId !== undefined && !HOST_ID_PATTERN.test(hostId)) {
+    throw new Error("Invalid delegation mention Host ID");
+  }
+  const path = `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}`;
+  return hostId === undefined ? path : `${path}?host=${encodeURIComponent(hostId)}`;
 }
 
 function sanitizeLabel(label: string): string {
@@ -36,7 +43,29 @@ function sanitizeLabel(label: string): string {
 
 /** Markdown carrier Desktop restores into a native agent mention chip. */
 export function formatDelegationMentionLink(mention: DelegationMention): string {
-  return `[@${sanitizeLabel(mention.label)}](${delegationMentionPath(mention.harnessId)})`;
+  return `[@${sanitizeLabel(mention.label)}](${delegationMentionPath(mention.harnessId, mention.hostId)})`;
+}
+
+export function delegationMentionReferences(text: string) {
+  return Array.from(text.matchAll(MENTION_LINK_PATTERN)).flatMap((match) => {
+    const [source, label, harnessId, encodedHost] = match;
+    if (label === undefined || harnessId === undefined) return [];
+    let hostId: string | undefined;
+    if (encodedHost !== undefined) {
+      try {
+        hostId = decodeURIComponent(encodedHost);
+      } catch {
+        return [];
+      }
+      if (!HOST_ID_PATTERN.test(hostId)) return [];
+    }
+    const mention: DelegationMention = {
+      harnessId,
+      label: label.trim(),
+      ...(hostId === undefined ? {} : { hostId }),
+    };
+    return [{ start: match.index, end: match.index + source.length, text: source, mention }];
+  });
 }
 
 export interface DelegationMentionRewrite {
@@ -51,18 +80,18 @@ export interface DelegationMentionRewrite {
 export function stripDelegationMentions(text: string): DelegationMentionRewrite {
   const mentions: DelegationMention[] = [];
   const seen = new Set<string>();
-  const rewritten = text.replace(
-    MENTION_LINK_PATTERN,
-    (_match, label: string, harnessId: string) => {
-      const trimmed = label.trim();
-      if (!seen.has(harnessId)) {
-        seen.add(harnessId);
-        mentions.push({ harnessId, label: trimmed });
-      }
-      return `@${trimmed}`;
-    },
-  );
-  return { text: rewritten, mentions };
+  let rewritten = "";
+  let offset = 0;
+  for (const { start, end, mention } of delegationMentionReferences(text)) {
+    const key = `${mention.hostId ?? ""}\u0000${mention.harnessId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      mentions.push(mention);
+    }
+    rewritten += `${text.slice(offset, start)}@${mention.label}`;
+    offset = end;
+  }
+  return { text: rewritten + text.slice(offset), mentions };
 }
 
 /**

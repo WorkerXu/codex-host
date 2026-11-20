@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { JsonObject } from "@codexhost/protocol-core";
-import { hostThreadIdSchema } from "@codexhost/shared-contracts";
+import { formatDelegationMentionLink, hostThreadIdSchema } from "@codexhost/shared-contracts";
 import { ClientChannelHost } from "../src/client-channel-host.js";
 import { ClientChannelEvents } from "../src/client-channel-events.js";
 import { encodeOfficialCodexModelRef } from "../src/official-codex-model-ref.js";
 import {
   createFixture,
+  JsonLineCollector,
   startPiThread,
   stopFixture,
   writeRequest,
@@ -23,6 +24,60 @@ import { OfficialAdmissionError } from "../src/codex-runtime/official-work-gate.
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+});
+
+it("passes Web native Turn input and queued edits through the Host delegation rewrite", async () => {
+  const fixture = createFixture({ externalOnly: true });
+  cleanup.push(() => stopFixture(fixture));
+  const incoming = new JsonLineCollector(fixture.official.stdin);
+  const thread = { id: "parent", cwd: "/workspace", status: { type: "idle" } };
+  const captured: JsonObject[] = [];
+  fixture.official.stdin.on("data", () => {
+    for (const message of incoming.messages.splice(0)) {
+      if (typeof message.id !== "string" && typeof message.id !== "number") continue;
+      captured.push(message);
+      const result =
+        message.method === "initialize"
+          ? { userAgent: "fixture" }
+          : message.method === "turn/start"
+            ? { turn: { id: "turn", status: "completed" } }
+            : { thread };
+      writeRequest(fixture.official.stdout, { id: message.id, result });
+    }
+  });
+  const input = [
+    {
+      type: "text",
+      text: formatDelegationMentionLink({
+        harnessId: "codex",
+        label: "Codex · Mac",
+        hostId: "mac",
+      }),
+    },
+  ];
+  expect(await fixture.host.handleClientRequest("thread/start", { cwd: thread.cwd })).toEqual({
+    result: { thread },
+  });
+  await vi.waitFor(() => expect(fixture.mappingStore.listThreads()).resolves.toEqual([]));
+  for (const method of ["turn/start", "thread/queue/update"]) {
+    expect(
+      await fixture.host.handleClientRequest(method, {
+        threadId: thread.id,
+        input,
+        ...(method === "thread/queue/update" ? { queuedSubmissionId: "queued" } : {}),
+      }),
+    ).toMatchObject({ result: expect.any(Object) });
+    expect(captured.find((message) => message.method === method)?.params).toMatchObject({
+      input: expect.arrayContaining([
+        {
+          type: "text",
+          text: expect.stringMatching(
+            /^@Codex · Mac[\s\S]+codexhost delegate start --host mac --harness codex .*--watch true --format compact/u,
+          ),
+        },
+      ]),
+    });
+  }
 });
 
 it("routes official and external fork, queue, configuration, command, pin and usage methods by owner", async () => {

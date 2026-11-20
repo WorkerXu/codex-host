@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { it } from "node:test";
-import { clientChannelEventSchema } from "@codexhost/shared-contracts";
+import { clientChannelEventSchema, WEB_DELEGATION_PEERS_METHOD } from "@codexhost/shared-contracts";
 import { FakeChChannel, startFakeChChannel } from "./support/ch-channel.ts";
 import { startFakeChDebugger } from "./support/ch-host.ts";
 import { startServer } from "./support/server.ts";
@@ -26,6 +26,15 @@ it(
     );
     const host = new FakeChChannel();
     host.add("shared", "/computer/shared");
+    const catalog = {
+      peers: [{ name: "mac", label: "MacBook", status: "ready", harnesses: ["codex"] }],
+    };
+    const request = host.request.bind(host);
+    host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+      if (method !== WEB_DELEGATION_PEERS_METHOD) return request<T>(method, params);
+      assert.deepEqual(params, {});
+      return catalog as T;
+    };
     const control = await startFakeChChannel(host, directory);
     t.after(() => control.close());
     const cdp = await startFakeChDebugger(host);
@@ -49,6 +58,17 @@ it(
     );
     const origin = new URL(url).origin;
     const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const peers = (headers: Record<string, string>) =>
+      fetch(`${origin}/api/ch/v1/rpc`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ method: WEB_DELEGATION_PEERS_METHOD, params: {} }),
+      });
+    assert.equal((await peers({})).status, 401);
+    assert.equal((await peers({ ...headers, origin: "http://untrusted.invalid" })).status, 403);
+    const peerReply = await peers({ ...headers, origin });
+    assert.equal(peerReply.status, 200);
+    assert.deepEqual(await peerReply.json(), { result: catalog });
     assert.equal((await fetch(`${origin}/api/ch/v1/events`)).status, 401);
     assert.equal(
       (

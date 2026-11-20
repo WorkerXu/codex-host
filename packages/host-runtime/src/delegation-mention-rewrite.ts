@@ -1,7 +1,11 @@
-import { stripDelegationMentions, type DelegationMention } from "@codexhost/shared-contracts";
+import {
+  DELEGATION_MENTION_PATH_PREFIX,
+  stripDelegationMentions,
+  type DelegationMention,
+} from "@codexhost/shared-contracts";
 import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
 
-import { DELEGATION_SKILL_NAME } from "./delegation-skill.js";
+import { DELEGATION_SKILL_NAME, managedDelegationSkillReference } from "./delegation-skill.js";
 
 /** Native Codex `skill` UserInput pointing at the managed delegation Skill. */
 export interface DelegationSkillReference {
@@ -10,7 +14,12 @@ export interface DelegationSkillReference {
 }
 
 function describeTargets(mentions: readonly DelegationMention[]): string {
-  return mentions.map(({ harnessId, label }) => `@${label} (Harness \`${harnessId}\`)`).join(", ");
+  return mentions
+    .map(
+      ({ harnessId, label, hostId }) =>
+        `@${label}${hostId ? ` on machine \`${hostId}\`` : ""} (Harness \`${harnessId}\`)`,
+    )
+    .join(", ");
 }
 
 /**
@@ -19,15 +28,23 @@ function describeTargets(mentions: readonly DelegationMention[]): string {
  */
 export function delegationMentionInstruction(mentions: readonly DelegationMention[]): string {
   const plural = mentions.length > 1;
+  const hasPeer = mentions.some((mention) => mention.hostId !== undefined);
   return [
     `[codexhost delegation] The user mentioned ${describeTargets(mentions)}.`,
-    `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
-    "through the executable in CODEXHOST_CLI_PATH.",
+    ...(hasPeer
+      ? [
+          "Execute the matching commands directly without running `--help` or `peer list`.",
+          "Keep `--watch true` to receive the result in this Thread. Do not poll with `thread wait` or do the task yourself.",
+        ]
+      : [
+          `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
+          "through the executable in CODEXHOST_CLI_PATH.",
+        ]),
     "Run the command for each selected Harness directly, replacing the task and name placeholders.",
     ...mentions.map(
-      ({ harnessId }) =>
+      ({ harnessId, hostId }) =>
         `
-codexhost delegate start --harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
+codexhost delegate start ${hostId ? `--host ${hostId} ` : ""}--harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
     ),
     "\nRead the returned Thread link when reporting results or following up.",
   ].join(" ");
@@ -48,6 +65,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Both native submission paths attach the same managed Skill when available. */
+export async function rewriteNativeDelegationMentions(input: readonly JsonValue[]) {
+  if (
+    !input.some(
+      (item) =>
+        isRecord(item) &&
+        item.type === "text" &&
+        typeof item.text === "string" &&
+        item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
+    )
+  )
+    return null;
+  return rewriteDelegationMentionInput(input, await managedDelegationSkillReference());
+}
+
 /**
  * Rewrite a native Codex `turn/start` / `turn/steer` input array. Returns null
  * when no delegation mention is present so the original frame is forwarded
@@ -66,8 +98,9 @@ export function rewriteDelegationMentionInput(
     lastTextIndex = index;
     const result = stripDelegationMentions(item.text);
     for (const mention of result.mentions) {
-      if (seen.has(mention.harnessId)) continue;
-      seen.add(mention.harnessId);
+      const key = `${mention.hostId ?? ""}\u0000${mention.harnessId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       mentions.push(mention);
     }
     return result.mentions.length === 0 ? item : ({ ...item, text: result.text } as JsonObject);

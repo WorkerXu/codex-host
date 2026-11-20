@@ -7,7 +7,7 @@ import {
   discoverHostClientChannel,
   type HostClientUpdate,
 } from "@codexhost/desktop-control";
-import type { ClientChannelEvent } from "@codexhost/shared-contracts";
+import { formatDelegationMentionLink, type ClientChannelEvent } from "@codexhost/shared-contracts";
 import { ClientChannelEvents } from "../src/client-channel-events.js";
 import { ClientCommandReceipts } from "../src/client-command-receipts.js";
 import { startClientChannelServer } from "../src/client-channel-server.js";
@@ -58,6 +58,34 @@ function current(fixture: ReturnType<typeof createFixture>) {
 }
 
 describe("public authenticated owner channel", () => {
+  it("submits a peer mention to the local Harness and keeps the selected target in the parent", async () => {
+    const { fixture, a } = await setup();
+    const id = await startPiThread(fixture);
+    const execute = vi.spyOn(current(fixture), "execute");
+    const text = `${formatDelegationMentionLink({ harnessId: "codex", label: "Codex · Mac", hostId: "mac" })} 检查构建结果`;
+    await a.request("turn/start", { threadId: id, input: [{ type: "text", text }] });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "turn.start",
+        input: [
+          {
+            type: "text",
+            text: expect.stringMatching(
+              /codexhost delegate start --host mac --harness codex .*--watch true --format compact/u,
+            ),
+          },
+        ],
+      }),
+    );
+    expect((await a.snapshot(id)).turnsPage.data[0]?.items).toContainEqual(
+      expect.objectContaining({
+        type: "userMessage",
+        content: [expect.objectContaining({ type: "text", text })],
+      }),
+    );
+    current(fixture).succeedTurn();
+  });
+
   it("broadcasts completed explicit inspection refreshes, including normalized failures", async () => {
     const { fixture, a, events } = await setup();
     const inspect = vi.spyOn(fixture.adapter, "inspect");
