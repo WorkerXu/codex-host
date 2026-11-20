@@ -34,7 +34,9 @@ CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；
 
 ## 历史
 
-原生把插入记成同一条 transcript 里的 `queued_command` attachment（`commandMode: "prompt"`，`source_uuid` 是插入消息 id），不是新的 user 消息。现有历史解析忽略 attachment，所以刷新后仍是原来那一轮，插入文本不会变成单独的 Turn 或 Item。
+原生把插入记成同一条 transcript 里的 `queued_command` attachment（`commandMode: "prompt"`，`source_uuid` 是插入消息 id），不是新的 user 消息。历史恢复保留根级、人类来源的 prompt 队列输入，在所属 Turn 内还原为用户消息 Item，不另建 Turn。按 `source_uuid` 去重；同一输入已有原生 user 记录时优先采用该记录。带图片的队列输入仅使用其 text 块恢复文字与附件清单；普通附件、子 Agent 和合成输入不会变成用户消息。
+
+持久化确认同时识别队列记录自身的 UUID 与 `source_uuid`，避免原生已保存输入却被误判为丢失。读取失败与无效队列结构分别报告原生读取错误和协议错误。Fork/编辑恢复保留队列前缀，只使用最新插入之后有效的原生 checkpoint。
 
 ## 验证
 

@@ -13,3 +13,5 @@ The Claude transport waits for its owned Unix process group and observed backgro
 Empty reservations are a new Adapter-owned format. Versions without this reader cannot recover those empty identities; retain metadata/transcripts and use a compatible version when rolling back an installation. Optional saved selection hints in resume and rollback also require the matching Broker build for brokered Sessions. Existing native transcript identities keep their original format.
 
 Hard cancellation keeps the active Turn and its Transport owned until close succeeds. A late native terminal cannot bypass that wait. If shutdown fails, the Session faults and cannot start another Turn or confirm a history replacement.
+
+Compaction summaries and transcript-only synthetic user records remain inside their existing Turn. A final root tool-result can anchor a checkpoint; split assistant block UUIDs are matched against the original native record when verifying a fork prefix. A Turn cancelled before native assistant output does not leave an unpersisted prompt blocking the next snapshot read.
