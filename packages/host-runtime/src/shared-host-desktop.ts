@@ -1,3 +1,4 @@
+import type { HubAdminService } from "./hub-admin-service.js";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -77,6 +78,7 @@ export function sharedHostDesktop(
     store: ExternalThreadStore;
     prices: ModelPriceCatalog;
     updateCoordinator?: HostUpdateCoordinator;
+    hubAdmin?: HubAdminService;
     delegation(): DelegationControlRegistration | undefined;
     register(api: DelegationControlRegistration): (() => void) | undefined;
     connected: Set<AppServerHost>;
@@ -136,6 +138,7 @@ export function sharedHostDesktop(
         ? { consoleOpener: createHostConsoleOpener({ entrypoint: entry, environment }) }
         : {}),
       ...(webOpener ? { webOpener } : {}),
+      ...(request && options.hubAdmin ? { desktopHubs: { admin: options.hubAdmin } } : {}),
       onDelegationApi: options.register,
     });
   let host: AppServerHost | undefined;

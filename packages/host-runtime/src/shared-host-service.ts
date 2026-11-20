@@ -113,7 +113,7 @@ export async function runSharedHostService(
   try {
     return await prepareDelegationRuntime({
       environment: env,
-      createHost: async (delegationEnvironment, _register, registry) => {
+      createHost: async (delegationEnvironment, _register, registry, hubAdmin) => {
         const remote = createRemoteControlAppServerPlan({
           arguments: ["app-server"],
           environment: delegationEnvironment,
@@ -188,6 +188,7 @@ export async function runSharedHostService(
           ...(updateCoordinator ? { updateCoordinator } : {}),
           delegation: () => delegation,
           register: (api: DelegationControlRegistration) => registry.register(api),
+          ...(hubAdmin ? { hubAdmin } : {}),
           connected: desktops,
           running: desktopRuns,
         };

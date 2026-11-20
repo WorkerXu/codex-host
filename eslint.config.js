@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-const typeScriptFiles = ["packages/**/*.ts", "tests/**/*.ts"];
+const typeScriptFiles = ["packages/**/*.ts", "tests/**/*.ts", "tools/ui-preview/**/*.ts"];
 const javaScriptFiles = [
   "*.config.js",
   "packages/**/scripts/**/*.mjs",
@@ -47,7 +47,7 @@ export default [
     },
   },
   {
-    files: ["packages/renderer-extension/**/*.ts"],
+    files: ["packages/renderer-extension/**/*.ts", "tools/ui-preview/src/**/*.ts"],
     languageOptions: {
       globals: globals.browser,
     },

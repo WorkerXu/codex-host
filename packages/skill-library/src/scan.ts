@@ -1,6 +1,6 @@
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { parseDocument } from "yaml";
+import { parseSkillFrontmatter } from "./frontmatter.js";
 
 import {
   SKILL_LIBRARY_LIMITS as limits,
@@ -80,12 +80,8 @@ async function metadata(
       await file.close();
     }
   });
-  const match = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(prefix);
-  if (!match) return { warning: `${path}: Missing or oversized YAML frontmatter` };
-  const document = parseDocument(match[1] ?? "", { uniqueKeys: true });
-  if (document.errors.length) return { warning: `${path}: Invalid YAML frontmatter` };
-  const value: unknown = document.toJS({ maxAliasCount: 100 });
-  const data = value as { name?: unknown; description?: unknown } | null;
+  const { data, error } = parseSkillFrontmatter(prefix);
+  if (error) return { warning: `${path}: ${error}` };
   if (!data || typeof data.name !== "string" || !data.name || /[\s[\]]/u.test(data.name)) {
     return { warning: `${path}: Skill name is missing or contains whitespace or brackets` };
   }

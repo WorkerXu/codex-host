@@ -1,3 +1,9 @@
+import {
+  SKILL_PEER_OPERATIONS,
+  type LocalSkillsHub,
+  type SkillPeerOperation,
+} from "./skills-hub/local.js";
+import { skillsError } from "./skills-hub/service.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -244,6 +250,7 @@ export async function startDelegationControlServer(input: {
   api: DelegationControlApi;
   watchApi?: DelegationWatchApi;
   inventory?: HostInventory;
+  skills?: LocalSkillsHub;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
     void (async () => {
@@ -260,6 +267,22 @@ export async function startDelegationControlServer(input: {
         return;
       }
       const body = await jsonBody(request);
+      if (request.url?.startsWith("/v1/skills/")) {
+        const operation = request.url.slice("/v1/skills/".length) as SkillPeerOperation;
+        if (!input.skills || !SKILL_PEER_OPERATIONS.includes(operation)) {
+          writeJson(response, 404, {
+            error: { code: "INVALID_ARGUMENT", message: "Unknown skills route" },
+          });
+          return;
+        }
+        try {
+          writeJson(response, 200, await input.skills.request(operation, body));
+        } catch (error) {
+          const code = skillsError(error);
+          writeJson(response, 400, { error: { code, message: code } });
+        }
+        return;
+      }
       writeJson(response, 200, await routeDelegationRequest(input, request.url, body));
     })().catch((error) => {
       writeJson(response, error instanceof DelegationControlError ? 400 : 500, errorBody(error));

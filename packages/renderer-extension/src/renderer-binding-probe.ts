@@ -16,6 +16,7 @@ import {
   writeCachedHarnessDirectory,
 } from "./renderer-harness-directory-cache.js";
 import { createDelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
+import { createDesktopHubPages } from "./settings/desktop-hub-pages.js";
 import {
   HARNESS_PREFERENCES_UPDATED_EVENT,
   rendererHarnessPreferences,
@@ -886,6 +887,13 @@ export function installRendererBindingProbe(
     disposed: () => disposed,
   });
   const settingsLifecycle = installRendererSettingsLifecycle(window, {
+    desktopHubPages: createDesktopHubPages({
+      routing: () => window.__codexhostHostRoutingV1,
+      pluginForHost,
+      localHubAdmin: /Macintosh|MacIntel/u.test(
+        `${window.navigator.userAgent} ${window.navigator.platform}`,
+      ),
+    }),
     harnessSchedules: {
       openSchedules: (signal) => openCodexSchedules(signal),
     },

@@ -85,4 +85,4 @@
 
 - Host 与 Renderer 不读取、不注入 Skill 正文，只提供路径；Agent 是否读取由模型决定，链接标题只是简短提示。
 - 读取全局 Skill 是否触发审批，由各 Harness 自身的权限设置决定。
-- 不提供按 Harness 控制可见性、原生 Skill 标记或 Skill 管理面板；这些能力在此索引之上另行实现。
+- Desktop 的 [技能中央库](skills-hub.md) 使用相同的 YAML frontmatter 解析，并负责技能目录的管理操作。

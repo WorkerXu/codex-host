@@ -1,3 +1,5 @@
+import { HubAdminService } from "./hub-admin-service.js";
+import { getSkillsHub } from "./skills-hub/service.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -204,6 +206,7 @@ export async function prepareDelegationRuntime(input: {
     environment: NodeJS.ProcessEnv,
     onDelegationApi: (api: DelegationControlRegistration) => (() => void) | undefined,
     registry: DelegationControlRegistry,
+    hubAdmin: HubAdminService | undefined,
   ): Promise<number>;
 }): Promise<number> {
   const diagnoseWatch = (error: unknown) =>
@@ -247,6 +250,7 @@ export async function prepareDelegationRuntime(input: {
     api: registry,
     watchApi: registry,
     inventory,
+    skills: getSkillsHub(input.environment).local,
   });
   const externalServer = await startExternalClients(
     input.environment,
@@ -291,11 +295,20 @@ export async function prepareDelegationRuntime(input: {
     process.stderr.write(`codexhost delegation: peer control file unavailable: ${String(error)}\n`);
     return undefined;
   });
+  const hubAdmin = process.platform === "darwin" ? new HubAdminService({ environment }) : undefined;
   try {
-    return await input.createHost(environment, (value) => registry.register(value), registry);
+    return await input.createHost(
+      environment,
+      (value) => registry.register(value),
+      registry,
+      hubAdmin,
+    );
   } finally {
     registry.close();
     await peerControl?.close();
+    await hubAdmin
+      ?.stop()
+      .catch(() => process.stderr.write("codexhost: Hub forward cleanup failed\n"));
     await externalServer?.close();
     await server.close();
   }
@@ -439,7 +452,7 @@ export async function runHostRuntime(input: {
     return prepareDelegationRuntime({
       environment,
       ...(hostRuntimePath ? { hostRuntimePath } : {}),
-      createHost: async (delegationEnvironment, onDelegationApi, registry) => {
+      createHost: async (delegationEnvironment, onDelegationApi, registry, hubAdmin) => {
         const official = await prepareLocalCodex({
           stockCodexPath,
           arguments: remoteControlPlan?.officialArguments ?? input.arguments,
@@ -453,6 +466,7 @@ export async function runHostRuntime(input: {
         if (!remoteControlPlan) {
           try {
             const host = new AppServerHost({
+              ...(hubAdmin ? { desktopHubs: { admin: hubAdmin } } : {}),
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
@@ -501,6 +515,7 @@ export async function runHostRuntime(input: {
             ...(webOpener ? { webOpener } : {}),
           };
           const host = new AppServerHost({
+            ...(hubAdmin ? { desktopHubs: { admin: hubAdmin } } : {}),
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,

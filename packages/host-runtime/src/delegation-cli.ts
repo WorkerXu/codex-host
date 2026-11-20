@@ -1,3 +1,4 @@
+import { runSkillsCli } from "./skills-hub/cli.js";
 import type { JsonValue } from "@codexhost/protocol-core";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -238,6 +239,8 @@ export async function runDelegationCli(input: {
         output,
         ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
       });
+    if (group === "skills")
+      return runSkillsCli({ arguments: input.arguments.slice(1), environment, output });
     const local = (path: string, body: Record<string, unknown>) =>
       requestRuntime({ environment, path, body, ...fetchOptions });
     const remote = (

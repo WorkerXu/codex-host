@@ -4,6 +4,8 @@ export * from "./thread-catalog.js";
 export * from "./thread-archive-confirm.js";
 export * from "./voice.js";
 export * from "./skills.js";
+export * from "./skills-hub.js";
+export * from "./hub-admin.js";
 export * from "./skill-reference.js";
 export * from "./web-access-tokens.js";
 export * from "./delegation-read.js";

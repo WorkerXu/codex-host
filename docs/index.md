@@ -20,6 +20,8 @@
 | [`architecture/harness-plugin-architecture.md`](architecture/harness-plugin-architecture.md) | 插件化目标架构与未完成迁移方案；规划后续解耦时阅读，接口示例不代表当前 API。 |
 | [`architecture/harness-command-integration.md`](architecture/harness-command-integration.md) | Harness 原生命令的 Adapter、Host、Renderer 边界；新增命令能力时阅读。 |
 | [`architecture/skill-library.md`](architecture/skill-library.md) | Host 统一发现全局与项目 Skill 的目录清单、扫描与刷新、`codexhost/skills/list` 接口，以及 Web/Desktop 以带路径文本引用选用 Skill；修改 Skill 发现或选用时阅读。 |
+| [`architecture/skills-hub.md`](architecture/skills-hub.md) | Desktop 技能中央库、Agent 链接、预览、同步和撤销。 |
+| [`architecture/hub-admin.md`](architecture/hub-admin.md) | Mac Desktop 的 MCP 服务器与记忆页面、India SSH 转发及凭据生命周期。 |
 | [`architecture/harness-executable-discovery.md`](architecture/harness-executable-discovery.md) | Harness CLI 的跨平台发现、连接页安装指引和 DSH 特殊连接范围；修改安装指引、发现或启动逻辑时阅读。 |
 | [`architecture/harness-session-import.md`](architecture/harness-session-import.md) | 原生会话的本地/远程 Host 导入契约、Broker 转发和恢复边界；扩展导入能力时阅读。 |
 | [`architecture/harness-questions.md`](architecture/harness-questions.md) | 外部 Harness 多选提问卡片、原生单选分流、回答归属与生命周期；修改提问交互时阅读。 |

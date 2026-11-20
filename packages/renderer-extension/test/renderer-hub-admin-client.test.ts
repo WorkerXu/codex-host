@@ -1,0 +1,52 @@
+import { expect, it, vi } from "vitest";
+import { HUB_ADMIN_METHOD } from "@codexhost/shared-contracts";
+import { createRendererHubAdminClient, hubErrorText } from "../src/renderer-hub-admin-client.js";
+it("routes management requests only to the local Host", async () => {
+  const sendRequest = vi.fn(async () => ({ servers: [] }));
+  const forHost = vi.fn((id: string) => (id === "local" ? { manager: { sendRequest } } : null));
+  const client = createRendererHubAdminClient({
+    forHost,
+  });
+  await expect(client.request("local", { op: "servers" })).resolves.toEqual({
+    servers: [],
+  });
+  expect(sendRequest).toHaveBeenCalledWith(
+    HUB_ADMIN_METHOD,
+    { op: "servers" },
+    { priority: "interactive", timeoutMs: 30000 },
+  );
+  await expect(client.request("oracle-main", { op: "overview" })).rejects.toThrow("connection");
+  expect(sendRequest).toHaveBeenCalledTimes(1);
+  expect(forHost.mock.calls.map(([id]) => id)).toEqual(["local"]);
+});
+it("localizes stable codes and hides raw errors", () => {
+  expect(hubErrorText(new Error("forbidden"))).toBe("无权限");
+  expect(hubErrorText(new Error("timeout"))).toBe("连接超时");
+  expect(hubErrorText(new Error("secret in upstream error"))).toBe("连接失败");
+  expect(hubErrorText(new Error("mcp-key-invalid"))).toBe("密钥不正确");
+  expect(hubErrorText(new Error("mcp-key-scoped"))).toBe(
+    "这个密钥只能访问部分服务器，管理需要“全部访问”类型的密钥",
+  );
+});
+it("sends a candidate only to the local Host and rejects credential-bearing responses", async () => {
+  const key = "mcphub_fake_candidate_1234";
+  const sendRequest = vi.fn(async () => ({ configured: true, last4: "1234" }));
+  const forHost = vi.fn(() => ({ manager: { sendRequest } }));
+  const client = createRendererHubAdminClient({ forHost });
+  expect(await client.request("local", { op: "mcpConnect", key })).toEqual({
+    configured: true,
+    last4: "1234",
+  });
+  expect(forHost).toHaveBeenCalledWith("local");
+  expect(sendRequest).toHaveBeenCalledWith(
+    HUB_ADMIN_METHOD,
+    { op: "mcpConnect", key },
+    expect.anything(),
+  );
+  sendRequest.mockResolvedValueOnce({ configured: true, last4: "1234", key } as {
+    configured: boolean;
+    last4: string;
+  });
+  await expect(client.request("local", { op: "mcpConnection" })).rejects.toThrow();
+  expect(hubErrorText(new Error("mcp-auth"))).toBe("密钥无效或权限不足");
+});

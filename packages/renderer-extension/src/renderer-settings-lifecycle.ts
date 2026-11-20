@@ -1,3 +1,4 @@
+import type { RendererSettingsPageDefinition } from "./settings/core.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
@@ -29,6 +30,7 @@ const UPDATE_CHECK_TIMEOUT_MS = 5_000;
 const UPDATE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 
 export interface RendererSettingsLifecycleOptions {
+  desktopHubPages?: readonly RendererSettingsPageDefinition[];
   harnessSchedules?: HarnessSchedulesPageOptions;
   getUpdateClient?(): RendererUpdateClient | null;
   getConnectionDiagnostics?(): RendererConnectionDiagnostics | null;
@@ -99,7 +101,10 @@ export function installRendererSettingsLifecycle(
           }
         : undefined,
     );
-    const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
+    const pages = [...definitions];
+    const appearance = pages.findIndex(({ id }) => id === "appearance");
+    pages.splice(appearance, 0, ...(options.desktopHubPages ?? []));
+    const nextShell = installRendererSettingsShell(pages, messages, ownerWindow.document, {
       onOpenChange(open) {
         trigger?.setSelected(open);
       },
