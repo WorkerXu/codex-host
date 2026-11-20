@@ -28,6 +28,7 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
   type DelegationConfigurationResult,
+  type DelegationPendingQuestion,
   type DelegationPeerOrigin,
   type DelegationStartInput,
   type DelegationStartResult,
@@ -41,6 +42,8 @@ import {
   type ThreadCancelResult,
   type ThreadListInput,
   type ThreadReadInput,
+  type ThreadAnswerInput,
+  type ThreadAnswerResult,
   type ThreadSendInput,
   type ThreadSendResult,
   type ThreadWaitInput,
@@ -280,6 +283,8 @@ export class HarnessDelegationCoordinator {
   ) => Promise<void>;
   readonly #notifyThreadStarted: (thread: JsonObject) => Promise<void>;
   readonly #inspectOfficial: (input: HarnessInspectInput) => Promise<HarnessInspectResult>;
+  readonly #answerQuestion: ((input: ThreadAnswerInput) => Promise<ThreadAnswerResult>) | undefined;
+  readonly #pendingQuestions: (threadId: string) => DelegationPendingQuestion[];
   readonly #readOfficial: (input: ThreadReadInput) => Promise<DelegationThreadSnapshot>;
   readonly #sendOfficial: (input: ThreadSendInput) => Promise<ThreadSendResult>;
   readonly #cancelOfficial: (input: ThreadCancelInput) => Promise<ThreadCancelResult>;
@@ -316,6 +321,8 @@ export class HarnessDelegationCoordinator {
     startExternalTurn(thread: ExternalThread, text: string, turnId: string): Promise<void>;
     notifyThreadStarted(thread: JsonObject): Promise<void>;
     inspectOfficial(input: HarnessInspectInput): Promise<HarnessInspectResult>;
+    answerQuestion?(input: ThreadAnswerInput): Promise<ThreadAnswerResult>;
+    pendingQuestions?(threadId: string): DelegationPendingQuestion[];
     readOfficial(input: ThreadReadInput): Promise<DelegationThreadSnapshot>;
     sendOfficial(input: ThreadSendInput): Promise<ThreadSendResult>;
     cancelOfficial(input: ThreadCancelInput): Promise<ThreadCancelResult>;
@@ -341,6 +348,8 @@ export class HarnessDelegationCoordinator {
     this.#notifyThreadStarted = input.notifyThreadStarted;
     this.#inspectOfficial = input.inspectOfficial;
     this.#readOfficial = input.readOfficial;
+    this.#answerQuestion = input.answerQuestion;
+    this.#pendingQuestions = input.pendingQuestions ?? (() => []);
     this.#sendOfficial = input.sendOfficial;
     this.#cancelOfficial = input.cancelOfficial;
     this.#startOfficial = input.startOfficial;
@@ -821,6 +830,15 @@ export class HarnessDelegationCoordinator {
     return { threadId: thread.id, turnId, harnessId: thread.harnessId, cancelled: true };
   }
 
+  async answer(input: ThreadAnswerInput): Promise<ThreadAnswerResult> {
+    if (!this.#answerQuestion)
+      throw new DelegationControlError(
+        "QUESTION_NOT_PENDING",
+        "No Question reply handler is available",
+      );
+    return this.#answerQuestion(input);
+  }
+
   async read(input: ThreadReadInput): Promise<DelegationThreadSnapshot> {
     return this.#externalRuntime.idleRelease.runOperation(input.threadId, () => this.#read(input));
   }
@@ -828,7 +846,11 @@ export class HarnessDelegationCoordinator {
   async #read(input: ThreadReadInput): Promise<DelegationThreadSnapshot> {
     validateReadOptions(input);
     const location = await this.#externalRuntime.locate(input.threadId);
-    if (location.kind === "official") return this.#readOfficial(input);
+    if (location.kind === "official")
+      return {
+        ...(await this.#readOfficial(input)),
+        pendingQuestions: this.#pendingQuestions(input.threadId),
+      };
     if (location.kind === "error")
       throw new DelegationControlError("THREAD_NOT_FOUND", location.error.message);
     const resolution = await this.#externalRuntime.resolve(input.threadId);
@@ -873,7 +895,7 @@ export class HarnessDelegationCoordinator {
     if (delegation && delegation.status !== status) {
       await this.#repository.setDelegationStatus(delegation.delegationId, status);
     }
-    return snapshot;
+    return { ...snapshot, pendingQuestions: this.#pendingQuestions(thread.id) };
   }
 
   async wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }> {
@@ -883,7 +905,8 @@ export class HarnessDelegationCoordinator {
     const deadline = Date.now() + input.timeoutMs;
     while (true) {
       const snapshot = await this.read(input);
-      if (terminal(snapshot.status)) return { ...snapshot, timedOut: false };
+      if (terminal(snapshot.status) || snapshot.pendingQuestions?.length)
+        return { ...snapshot, timedOut: false };
       const remaining = deadline - Date.now();
       if (remaining <= 0) return { ...snapshot, timedOut: true };
       await delay(Math.min(100, remaining));

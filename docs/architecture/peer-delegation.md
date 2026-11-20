@@ -4,7 +4,7 @@
 
 ## 目标与边界
 
-- 让 `delegate start`、`harness list|inspect`、`thread read|send|cancel|wait` 可以用 `--host <peer 名或 Host ID>` 指向另一台机器。
+- 让 `delegate start`、`harness list|inspect`、`thread read|send|cancel|wait|answer` 可以用 `--host <peer 名或 Host ID>` 指向另一台机器。
 - Thread 链接 `thread://<id>?hostId=<x>` 中的 Host ID 可以自动解析到对应 peer。
 - 复用每台机器已有的本机控制 API，不新增远程 RPC 协议，也不开放任意 URL 转发。
 - 第一版由调用方本机登记跨机 watch，后台轮询远端 Thread；跨机 `delegate start` 不建立父子关系。
@@ -78,7 +78,7 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
 - 从 stdin 读取一个 JSON 对象：`{"route":"/v1/thread/read","body":{...}}`。
 - `route` 必须属于控制 API 白名单：
   `/v1/harness/list`、`/v1/harness/inspect`、`/v1/delegate/start`、
-  `/v1/thread/send`、`/v1/thread/cancel`、`/v1/thread/read`、
+  `/v1/thread/answer`、`/v1/thread/send`、`/v1/thread/cancel`、`/v1/thread/read`、
   `/v1/thread/wait`、`/v1/thread/list`。`/v1/thread/watch` 和 `/v1/thread/watches` 第一版不跨机，不在白名单内。
 - 不接受 URL、endpoint、token 或路由参数；所有连接信息只从本机控制文件读取。
 - 请求体上限 2 MiB，与 Host Runtime 控制服务一致。

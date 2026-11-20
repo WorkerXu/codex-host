@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DelegationControlError,
   type DelegationThreadSnapshot,
+  type DelegationPendingQuestion,
   type DelegationThreadStatus,
   type ThreadSendInput,
 } from "../src/delegation-types.js";
@@ -11,7 +12,16 @@ import { DelegationWatchService } from "../src/delegation-watch.js";
 const POLL_MS = 1_000;
 
 /** A fake Runtime whose Threads are driven by the test. */
-function runtime(threads: Record<string, { status: DelegationThreadStatus; turnId?: string }>) {
+function runtime(
+  threads: Record<
+    string,
+    {
+      status: DelegationThreadStatus;
+      turnId?: string;
+      pendingQuestions?: DelegationPendingQuestion[];
+    }
+  >,
+) {
   const sent: ThreadSendInput[] = [];
   const sendFailures: DelegationControlError[] = [];
   const readFailure: { current?: DelegationControlError } = {};
@@ -28,6 +38,9 @@ function runtime(threads: Record<string, { status: DelegationThreadStatus; turnI
       progress: [],
       result: { availability: "pending" },
       nextCursor: null,
+      ...(thread.pendingQuestions !== undefined
+        ? { pendingQuestions: thread.pendingQuestions }
+        : {}),
     } as DelegationThreadSnapshot;
   });
   const send = vi.fn(async (input: ThreadSendInput) => {
@@ -56,6 +69,56 @@ describe("DelegationWatchService", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+
+  it("reports an already pending Question without registering or duplicating a notification", async () => {
+    const pendingQuestions: DelegationPendingQuestion[] = [
+      {
+        interactionId: "opaque",
+        kind: "requestUserInput",
+        turnId: "turn-child",
+        request: { questions: [] },
+      },
+    ];
+    const fake = runtime({
+      child: { status: "running", pendingQuestions },
+      parent: { status: "completed" },
+    });
+    const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+    await expect(
+      service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 10000 }),
+    ).resolves.toMatchObject({ state: "alreadyNeedsInput", pendingQuestions });
+    expect((await service.watches()).watches).toEqual([]);
+    expect(fake.send).not.toHaveBeenCalled();
+    service.close();
+  });
+
+  it.each(["running", "completed"] as const)(
+    "uses Question readiness only while the child is %s",
+    async (status) => {
+      const fake = runtime({ child: { status: "running" }, parent: { status: "completed" } });
+      const service = new DelegationWatchService(fake, { pollIntervalMs: POLL_MS });
+      await service.watch({ threadId: "child", notifyThreadId: "parent", timeoutMs: 10000 });
+      fake.threads.child = {
+        status,
+        pendingQuestions: [
+          {
+            interactionId: "opaque",
+            kind: "requestUserInputAsync",
+            turnId: "turn-child",
+            request: { title: "Continue?" },
+          },
+        ],
+      };
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      expect(fake.sent).toHaveLength(1);
+      expect(fake.sent[0]?.message).toContain(
+        status === "running" ? "waiting for an answer" : ": completed",
+      );
+      if (status === "running") expect(fake.sent[0]?.message).toContain("opaque");
+      expect((await service.watches()).watches).toEqual([]);
+      service.close();
+    },
+  );
 
   it.each(["completed", "failed", "interrupted"] as const)(
     "notifies the subscriber once when the watched Turn is %s",

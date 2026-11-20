@@ -34,23 +34,30 @@ cancelled=true (compact: cancelRequested=true) means the cancellation request wa
   "thread read": `codexhost thread read <thread> [--host <peer-or-host-id>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
 Read immediately without starting a Turn. Accepts thread://<id>?hostId=<encoded-host-id> or --host with a bare ID.
 A configured peer is read over SSH. Without a peer, a non-local Host falls back to the existing Desktop remote connection, which needs updated local and remote codexhost and an available Desktop Host connection.
+pendingQuestions reports current unanswered Questions with opaque interaction IDs and native request data. An empty list means none; an omitted field means the Runtime does not support it.
 The default result view reports the latest Turn's status and result.
 The messages view pages visible user/Agent messages, oldest first. Default limit 25, maximum 100; --cursor and --limit require --view messages.
 hasMore describes remaining messages now. Save nextCursor for later incremental reads even when hasMore=false.
 Compact messages output contains only the message page and status; compact result output includes the latest nonempty progress while running.
 Full JSON retains the complete snapshot. Tool calls/output, file activity, and reasoning are not included in either format.`,
   "thread wait": `codexhost thread wait <thread> [--host <peer-or-host-id>] [--timeout-ms <n>] [--view result|messages] [--cursor <cursor>] [--limit <n>] [--format json|compact]
-Wait until the Thread is terminal or the timeout expires (default 30000 ms), then return the same snapshot as thread read plus timedOut.
+Wait until the Thread is terminal, has pendingQuestions, or the timeout expires (default 30000 ms), then return the same snapshot as thread read plus timedOut.
 A thread://<id>?hostId=<x> reference or --host waits on a configured SSH peer; unknown non-local Hosts are rejected.
-timedOut=true is a running checkpoint: the child keeps running. The response already includes the result when available; another read is unnecessary unless more information is needed.
+Pending Questions return immediately with timedOut=false. timedOut=true is a running checkpoint: the child keeps running. The response already includes the result when available; another read is unnecessary unless more information is needed.
 Message pagination uses --view messages, default limit 25, maximum 100. hasMore is for current pages; nextCursor also supports future incremental reads.`,
+  "thread answer": `codexhost thread answer <thread> --interaction <id> --answers-file <file> [--host <peer-or-host-id>] [--format json|compact]
+Answer one pending Question request reported by thread read in pendingQuestions, and let the original Turn continue.
+--interaction is the opaque interactionId reported by read. --answers-file contains the existing reply result for kind=requestUserInput, for example {"answers":{"decision":{"answers":["Continue"]}}}. For kind=requestUserInputAsync, each entry is one question: read request.title and request.options and submit {"answer":"Continue"}. Native async questions use the native channel: answers steer the current active Turn, or start a Turn when idle; the original question need not belong to the current Turn.
+Read pendingQuestions[].request for the original prompts and option labels. Reply interpretation, cancellation, and invalid-input behavior belong to the existing handler, just as for Desktop. Do not assume a rejected reply can be retried; read the Thread again.
+QUESTION_NOT_PENDING means the interaction ID is unknown, already answered by the user or another caller, cancelled, expired, or from a finished Turn or retired Runtime.
+The reply is submitted to the existing request handler, and the same Question closes in Desktop. The receipt means the answer was accepted, not that the delegated work succeeded: read or wait for the outcome.`,
   "thread watch": `codexhost thread watch <thread> [--notify <thread>] [--timeout-ms <n>] [--host <peer-or-host-id>] [--cancel] [--format json|compact]
-Ask the Host to notify one Thread, once, when the watched Thread stops. Returns immediately; no waiting or polling by the caller is needed, and the caller may end its Turn.
+Ask the Host to notify one Thread, once, when the watched Thread stops or needs an answer. Returns immediately; no waiting or polling by the caller is needed, and the caller may end its Turn.
 A thread://<id>?hostId=<x> reference or --host watches a configured SSH peer. The watch is registered on this machine; the Host polls the peer and sends the same notification locally.
 --notify defaults to the calling Thread when it is identified (CODEXHOST_THREAD_ID, or CODEX_THREAD_ID in native Codex); otherwise it is required. delegate start reports the caller as its parent.
-The notification starts a new Turn in the notified Thread with the watched Thread's host-qualified link and outcome: completed, failed, interrupted, timedOut, unreadable, or notFound; a terminal outcome names the Turn it came from. It reports execution state only; read the Thread to judge the work.
+The notification starts a new Turn in the notified Thread with the watched Thread's host-qualified link and outcome: completed, failed, interrupted, needsInput, timedOut, unreadable, or notFound; a terminal outcome names the Turn it came from. It reports execution state only; read the Thread to judge the work.
 --timeout-ms defaults to 1740000 (29 min). timedOut means the Thread had not reached a terminal state, which also covers a Harness that stopped without reporting it; watch again to keep waiting. unreadable means reads failed for 60 s, so the state is unknown.
-state=watching means registered. state=alreadyTerminal means the Thread was not running: nothing was registered and nothing will be sent.
+state=watching means registered. state=alreadyTerminal means the Thread was not running; state=alreadyNeedsInput means an unanswered Question already exists and pendingQuestions contains it. Neither registers a watch or sends a notification. After answering, watch again for the next Question or completion.
 A busy notified Thread is notified after its Turn ends (retried for up to 6 hours); notifications due together arrive as one message. THREAD_BUSY is never treated as delivered.
 Watching the same pair again while it is still watched returns that watch; a new watch after it stops covers the next stop. Use --cancel to remove a watch that has not been delivered.
 Watches live in Host Runtime memory and are lost when it restarts; thread watches lists local and cross-machine watches.`,
@@ -122,6 +129,7 @@ export const DELEGATION_HELP = `usage:
   codexhost thread cancel <thread>
   codexhost thread read <thread>
   codexhost thread wait <thread>
+  codexhost thread answer <thread> --interaction <id> --answers-file <file>
   codexhost thread watch <thread>
   codexhost thread watches
   codexhost thread list

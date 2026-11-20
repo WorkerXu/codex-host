@@ -20,6 +20,7 @@ export const PEER_EXEC_ROUTES = [
   "/v1/harness/inspect",
   "/v1/delegate/start",
   "/v1/thread/send",
+  "/v1/thread/answer",
   "/v1/thread/cancel",
   "/v1/thread/read",
   "/v1/thread/wait",

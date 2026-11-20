@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -127,6 +127,48 @@ afterEach(async () => {
 });
 
 describe("delegation CLI peer routing", () => {
+  it("answers on the linked peer and preserves its Host in the compact receipt", async () => {
+    const env = await environment();
+    const file = path.join(env.CODEXHOST_USER_DIR ?? "", "reply.json");
+    const result = { answers: { value: { answers: ["Keep"] } } };
+    await writeFile(file, JSON.stringify(result));
+    const peer = peerSpawn([
+      {
+        threadId: "t",
+        turnId: "turn",
+        interactionId: "opaque",
+        harnessId: "pi",
+        status: "running",
+      },
+    ]);
+    const output = new PassThrough();
+    expect(
+      await runDelegationCli({
+        arguments: [
+          "thread",
+          "answer",
+          "thread://t?hostId=remote-ssh-discovered%3Amac",
+          "--interaction",
+          "opaque",
+          "--answers-file",
+          file,
+          "--format",
+          "compact",
+        ],
+        environment: env,
+        output,
+        spawnImpl: peer.spawnImpl,
+      }),
+    ).toBe(0);
+    expect(peer.inputs).toEqual([
+      { route: "/v1/thread/answer", body: { threadId: "t", interactionId: "opaque", result } },
+    ]);
+    expect(JSON.parse(outputText(output))).toMatchObject({
+      thread: "thread://t?hostId=remote-ssh-discovered%3Amac",
+      interaction: "opaque",
+    });
+  });
+
   it.each([
     ["harness list", ["harness", "list", "--host", "mac"], "/v1/harness/list", {}],
     [

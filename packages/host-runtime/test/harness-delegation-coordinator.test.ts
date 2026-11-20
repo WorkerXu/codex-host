@@ -118,6 +118,7 @@ function registrationFor(coordinator: HarnessDelegationCoordinator): DelegationC
     inspect: (input) => coordinator.inspect(input),
     start: (input) => coordinator.start(input),
     send: (input) => coordinator.send(input),
+    answer: (input) => coordinator.answer(input),
     cancel: (input) => coordinator.cancel(input),
     read: (input) => coordinator.read(input),
     wait: (input) => coordinator.wait(input),

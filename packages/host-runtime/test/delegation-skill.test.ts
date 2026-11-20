@@ -66,6 +66,7 @@ describe("delegation Skill installation", () => {
     ["upstream v0.18 beta v11 Skill", "codexhost-delegation-upstream-v11.md"],
     ["branch v11 cross-host Skill", "codexhost-delegation-v11.md"],
     ["v12 Skill before direct-command guidance", "codexhost-delegation-v12.md"],
+    ["v15 installed fork Skill", "codexhost-delegation-v15.md"],
     ["v14 installed Skill", "codexhost-delegation-v14.md"],
     ["v13 Skill before local-only thread list guidance", "codexhost-delegation-v13.md"],
   ])("updates the %s", async (_name, fixture) => {
@@ -105,7 +106,7 @@ describe("delegation Skill installation", () => {
   });
 
   it("routes natural agent requests and points execution to the authoritative help", () => {
-    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 15");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 16");
     expect(CODEXHOST_DELEGATION_SKILL).toContain(
       "`thread list` lists only this machine's Threads and does not accept\n`--host`",
     );

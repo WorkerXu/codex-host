@@ -73,6 +73,8 @@ function duration(milliseconds: number): string {
 function describe(watch: Watch): string {
   const link = threadLink(watch.threadId, watch.hostId);
   switch (watch.outcome) {
+    case "needsInput":
+      return `${link} is waiting for an answer (Turn ${watch.turnId}, interaction ${watch.interactionId}). Read the current Question with 'codexhost thread read ${link}' and answer with 'codexhost thread answer ${link} --interaction <id> --answers-file <file>'. Register a new watch after answering.`;
     case "timedOut":
       return `${link} has not reached a terminal state after ${duration(watch.timeoutMs)}; this watch expired. Run 'codexhost thread watch' again to keep waiting.`;
     case "unreadable":
@@ -89,7 +91,7 @@ function describe(watch: Watch): string {
 
 function notification(watches: readonly Watch[]): string {
   return [
-    "[codexhost thread watch] Watched Threads stopped or the watch expired. This reports execution state only, not that the work is correct or accepted. Inspect each Thread with 'codexhost thread read <thread>' before relying on it.",
+    "[codexhost thread watch] Watched Threads stopped, need an answer, or the watch expired. This reports execution state only, not that the work is correct or accepted. Inspect each Thread with 'codexhost thread read <thread>' before relying on it.",
     ...watches.map((watch) => `- ${describe(watch)}`),
   ].join("\n");
 }
@@ -165,6 +167,18 @@ export class DelegationWatchService {
       timeoutMs: input.timeoutMs,
     };
     if (terminal(target.status)) return { ...result, state: "alreadyTerminal" };
+    if (target.pendingQuestions?.length) {
+      for (const watch of [...this.#watches]) {
+        if (
+          watch.state === "watching" &&
+          watch.threadId === input.threadId &&
+          watch.notifyThreadId === input.notifyThreadId &&
+          watch.hostId === input.hostId
+        )
+          this.#remove(watch);
+      }
+      return { ...result, state: "alreadyNeedsInput", pendingQuestions: target.pendingQuestions };
+    }
     const existing = this.#watches.find(
       (watch) =>
         watch.state === "watching" &&
@@ -197,13 +211,24 @@ export class DelegationWatchService {
   async watches(): Promise<ThreadWatchListResult> {
     return {
       watches: this.#watches.map(
-        ({ threadId, notifyThreadId, hostId, state, outcome, turnId, reason, registeredAt }) => ({
+        ({
+          threadId,
+          notifyThreadId,
+          hostId,
+          state,
+          outcome,
+          turnId,
+          interactionId,
+          reason,
+          registeredAt,
+        }) => ({
           threadId,
           notifyThreadId,
           ...(hostId ? { hostId } : {}),
           state,
           ...(outcome ? { outcome } : {}),
           ...(turnId ? { turnId } : {}),
+          ...(interactionId ? { interactionId } : {}),
           ...(reason ? { reason } : {}),
           registeredAt,
         }),
@@ -274,10 +299,11 @@ export class DelegationWatchService {
         watch.nextPollAt = Date.now() + (watch.backoffMs ?? this.#peerPollIntervalMs);
       }
       if (!observed) continue;
-      const { outcome, turnId } = observed;
+      const { outcome, turnId, interactionId } = observed;
       watch.state = "pendingDelivery";
       watch.outcome = outcome;
       if (turnId) watch.turnId = turnId;
+      if (interactionId) watch.interactionId = interactionId;
       watch.deliveryDeadline = Date.now() + DELIVERY_WINDOW_MS;
     }
     const subscribers = new Set(
@@ -306,7 +332,7 @@ export class DelegationWatchService {
 
   async #observe(
     watch: Watch,
-  ): Promise<{ outcome: ThreadWatchOutcome; turnId?: string } | undefined> {
+  ): Promise<{ outcome: ThreadWatchOutcome; turnId?: string; interactionId?: string } | undefined> {
     try {
       const snapshot = await this.#readTarget(watch.hostId, watch.threadId);
       if (terminal(snapshot.status)) {
@@ -315,6 +341,13 @@ export class DelegationWatchService {
           ...(snapshot.turn ? { turnId: snapshot.turn.turnId } : {}),
         };
       }
+      const pending = snapshot.pendingQuestions?.[0];
+      if (pending)
+        return {
+          outcome: "needsInput",
+          turnId: pending.turnId,
+          interactionId: pending.interactionId,
+        };
       delete watch.unreadableSince;
       if (watch.hostId) watch.backoffMs = this.#peerPollIntervalMs;
     } catch (error) {

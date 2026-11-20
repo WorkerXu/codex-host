@@ -15,6 +15,7 @@ import {
   type HarnessInspectInput,
   type HarnessListInput,
   type ThreadCancelInput,
+  type ThreadAnswerInput,
   type ThreadListInput,
   type ThreadSendInput,
   type ThreadReadInput,
@@ -181,6 +182,9 @@ export async function startDelegationControlServer(input: {
               ? await input.api.start(body as unknown as DelegationStartInput)
               : await startWithWatch(input.api, watchApi(input.watchApi), body),
           );
+          return;
+        case "/v1/thread/answer":
+          writeJson(response, 200, await input.api.answer(body as unknown as ThreadAnswerInput));
           return;
         case "/v1/thread/send":
           writeJson(response, 200, await input.api.send(body as unknown as ThreadSendInput));

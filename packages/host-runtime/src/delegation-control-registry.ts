@@ -122,6 +122,10 @@ export class DelegationControlRegistry
     return (await this.#registrationForThread(input.threadId)).send(input);
   }
 
+  async answer(input: Parameters<DelegationControlApi["answer"]>[0]) {
+    return (await this.#registrationForThread(input.threadId)).answer(input);
+  }
+
   async cancel(input: Parameters<DelegationControlApi["cancel"]>[0]) {
     return (await this.#registrationForThread(input.threadId)).cancel(input);
   }
