@@ -61,4 +61,22 @@ describe("delegation mention rewrite", () => {
     expect(text).not.toContain("`codexhost delegate");
     expect(rewriteDelegationMentionText("plain")).toBe("plain");
   });
+
+  it("keeps peer and local targets across native text items without starting the same target twice", () => {
+    const mac = "[@Claude Code · Mac](subagent://codexhost.claude-code?host=mac)";
+    const rewritten = rewriteDelegationMentionInput(
+      [
+        { type: "text", text: mac },
+        { type: "text", text: `${link} and ${mac}` },
+      ],
+      null,
+    );
+    expect(rewritten?.[0]).toEqual({ type: "text", text: "@Claude Code · Mac" });
+    const { text } = rewritten?.[1] as { text: string };
+    expect(text.match(/codexhost delegate start --host mac --harness claude-code/g)).toHaveLength(
+      1,
+    );
+    expect(text).toContain("codexhost delegate start --harness claude-code");
+    expect(text).toContain("--watch true --format compact");
+  });
 });

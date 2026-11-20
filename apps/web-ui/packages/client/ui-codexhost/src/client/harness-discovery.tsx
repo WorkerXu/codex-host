@@ -11,6 +11,7 @@ import type {
 } from "@deepseek-ai/dsh-client-ui-input-trigger/client";
 import {
   formatDelegationMentionLink,
+  type DelegationMention,
   type HarnessCommandDescriptor,
   type HarnessCommandCatalog,
 } from "@codexhost/shared-contracts";
@@ -19,7 +20,7 @@ import {
   IconDataOutlineRegular,
   type IconProps,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import { harnessCommandApi } from "./api.ts";
+import { harnessCommandApi, listDelegationPeers } from "./api.ts";
 import { HARNESS_COMMAND_SOURCE, harnessCommandReference } from "./harness-command-reference.ts";
 import type {} from "./HostConnectionStatus.tsx";
 
@@ -29,6 +30,32 @@ declare module "@deepseek-ai/dsh-session-projection/types" {
   }
 }
 const AGENTS = "codexhost-delegation";
+const PEER_AGENTS = "codexhost-peer-delegation";
+
+function agentIcon(id: string) {
+  return (props: IconProps) => (
+    <RemotePluginIcon
+      id={id}
+      src={`/harness-icons/${encodeURIComponent(id)}`}
+      presentationUrl="/harness-icons/presentation.json"
+      size={props.size ?? 14}
+      fallback={<IconDataOutlineRegular size={props.size ?? 14} />}
+    />
+  );
+}
+
+function insertDelegationMention(mention: DelegationMention) {
+  const ref = formatDelegationMentionLink(mention);
+  return {
+    insert: {
+      source: AGENTS,
+      ref,
+      label: mention.label,
+      appearance: "session" as const,
+      clipboardText: ref,
+    },
+  };
+}
 
 export function registerHarnessDiscovery(ctx: Context): void {
   const connection = ctx.get("connection") as ConnectionHandle;
@@ -44,6 +71,14 @@ export function registerHarnessDiscovery(ctx: Context): void {
   const selected = new WeakMap<
     InputTriggerCandidate,
     { command: HarnessCommandDescriptor; entry: object }
+  >();
+  const peerCatalogs = new WeakMap<
+    object,
+    { generation: number; promise: ReturnType<typeof listDelegationPeers> }
+  >();
+  const peerMentions = new WeakMap<
+    InputTriggerCandidate,
+    { generation: number; mention: DelegationMention }
   >();
   const pending = new Set<SessionId>();
   let generation = 0;
@@ -335,15 +370,7 @@ export function registerHarnessDiscovery(ctx: Context): void {
               label: group.name,
               value: group.id,
               section: t("discovery.agents"),
-              icon: (props: IconProps) => (
-                <RemotePluginIcon
-                  id={group.id}
-                  src={`/harness-icons/${encodeURIComponent(group.id)}`}
-                  presentationUrl="/harness-icons/presentation.json"
-                  size={props.size ?? 14}
-                  fallback={<IconDataOutlineRegular size={props.size ?? 14} />}
-                />
-              ),
+              icon: agentIcon(group.id),
             }));
         },
         onPick: (pick) => {
@@ -354,18 +381,88 @@ export function registerHarnessDiscovery(ctx: Context): void {
             notify(pick.session.sessionId, t("discovery.stale"));
             return "handled";
           }
-          const ref = formatDelegationMentionLink({ harnessId: group.id, label: group.name });
-          return {
-            insert: {
-              source: AGENTS,
-              ref,
-              label: group.name,
-              appearance: "session",
-              clipboardText: ref,
-            },
-          };
+          return insertDelegationMention({ harnessId: group.id, label: group.name });
         },
       }),
     "ui-codexhost: delegation discovery",
+  );
+
+  ctx.effect(
+    () =>
+      ctx.inputTriggers.registerSource({
+        trigger: "@",
+        aliases: ["#"],
+        name: PEER_AGENTS,
+        launcher: "command",
+        launcherOrder: 31,
+        order: 11,
+        showGroupTitle: false,
+        subscribeCandidates: subscribe,
+        candidates: async ({ sessionId }, req) => {
+          if (!supportsDelegation(sessionId) || !connection.generation.getSnapshot()) return [];
+          const epoch = req.menuEpoch ?? {};
+          let entry = peerCatalogs.get(epoch);
+          if (!entry || entry.generation !== generation) {
+            entry = { generation, promise: listDelegationPeers() };
+            peerCatalogs.set(epoch, entry);
+          }
+          const section = t("discovery.otherMachines");
+          const query = req.query.trim().toLocaleLowerCase();
+          try {
+            const { peers } = await entry.promise;
+            if (req.signal.aborted || generation !== entry.generation) return [];
+            const groups = ctx.modelDirectories.harnessCatalog.getSnapshot().value?.groups ?? [];
+            return peers.flatMap((peer): InputTriggerCandidate[] => {
+              const machine = `${peer.name} ${peer.label}`.toLocaleLowerCase();
+              if (peer.status !== "ready") {
+                return machine.includes(query)
+                  ? [
+                      {
+                        name: peer.label,
+                        section,
+                        disabledReason: t(
+                          peer.status === "timeout"
+                            ? "discovery.peerTimeout"
+                            : "discovery.peerFailed",
+                        ),
+                      },
+                    ]
+                  : [];
+              }
+              return peer.harnesses.flatMap((id) => {
+                const name = groups.find((group) => group.id === id)?.name ?? id;
+                if (!`${machine} ${id} ${name}`.toLocaleLowerCase().includes(query)) return [];
+                const row: InputTriggerCandidate = {
+                  name: id,
+                  label: name,
+                  showAlias: false,
+                  section: `${section} · ${peer.label}`,
+                  icon: agentIcon(id),
+                };
+                peerMentions.set(row, {
+                  generation,
+                  mention: { hostId: peer.name, harnessId: id, label: `${name} · ${peer.label}` },
+                });
+                return [row];
+              });
+            });
+          } catch {
+            return query ? [] : [{ name: section, disabledReason: t("discovery.peerFailed") }];
+          }
+        },
+        onPick: (pick) => {
+          const target = peerMentions.get(pick.candidate);
+          if (
+            target?.generation !== generation ||
+            !supportsDelegation(pick.session.sessionId) ||
+            !connection.generation.getSnapshot()
+          ) {
+            notify(pick.session.sessionId, t("discovery.stale"));
+            return "handled";
+          }
+          return insertDelegationMention(target.mention);
+        },
+      }),
+    "ui-codexhost: peer delegation discovery",
   );
 }

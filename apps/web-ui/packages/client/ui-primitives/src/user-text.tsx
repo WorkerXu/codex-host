@@ -16,7 +16,7 @@
  * tokens (`/plan。`) stay plain even for a loaded name.
  */
 import type { ReactNode } from "react";
-import { skillReferences } from "@codexhost/shared-contracts";
+import { delegationMentionReferences, skillReferences } from "@codexhost/shared-contracts";
 import clsx from "clsx";
 import { ReferenceIconRegular } from "./ReferenceIcon.tsx";
 import css from "./user-text.module.css";
@@ -28,9 +28,6 @@ const SESSION_WIRE_RE = /@\[([^\]\n]+)\]\(dsh-session:[^)\s]+\)/gu;
 /** Explicit CH mention: keep manual bare IDs/URIs and ordinary Markdown as plain text. */
 const THREAD_WIRE_RE =
   /\[@((?:\\.|[^\\\]\r\n])+)\]\((thread:\/\/[^/?#()\s<>]+\?hostId=[^&#()\s<>]+)\)/gu;
-
-/** Explicit Harness identity; ordinary subagent links are not delegation mentions. */
-const HARNESS_WIRE_RE = /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)>?\)/gu;
 
 /** Sentence punctuation a bare `@name` token may carry without being part of the reference. */
 const TRAILING_PUNCTUATION_RE = /[.,;:!?，。；：！？]+$/u;
@@ -78,13 +75,13 @@ export function projectUserText(
     kind: "skill",
     display: ref.name,
   }));
-  for (const mention of text.matchAll(HARNESS_WIRE_RE)) {
+  for (const { start, end, text: label, mention } of delegationMentionReferences(text)) {
     ranges.push({
-      start: mention.index,
-      end: mention.index + mention[0].length,
-      label: mention[0],
+      start,
+      end,
+      label,
       kind: "harness",
-      display: (mention[1] as string).trim(),
+      display: mention.label,
     });
   }
   for (const mention of text.matchAll(THREAD_WIRE_RE)) {

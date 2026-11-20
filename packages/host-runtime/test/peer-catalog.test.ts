@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -86,6 +86,55 @@ function fakeSpawn(
 }
 
 describe("DelegationPeerCatalogService", () => {
+  it("projects Desktop names, verified readiness and one sanitized status per peer for Web", async () => {
+    const env = await environment();
+    const codexHome = env.CODEXHOST_USER_DIR;
+    if (!codexHome) throw new Error("Missing isolated Codex home");
+    await writeFile(
+      path.join(codexHome, ".codex-global-state.json"),
+      JSON.stringify({
+        "codex-managed-remote-connections": [
+          { hostId: "legacy:mac", alias: "mac", displayName: "MacBook", source: "ssh" },
+          { hostId: "remote-ssh-discovered:colab", displayName: "Lab", source: "ssh" },
+        ],
+      }),
+    );
+    let response: object = {
+      harnesses: ["codex", "pi", "grok"],
+      availability: { codex: "ready", pi: "notInstalled", grok: "unavailable" },
+    };
+    let stderr = "ssh: Connection timed out";
+    const fake = fakeSpawn(({ ssh }) =>
+      ssh === "mac" ? { code: 0, stdout: JSON.stringify(response) } : { code: 255, stderr },
+    );
+    const service = new DelegationPeerCatalogService(
+      { ...env, CODEX_HOME: codexHome },
+      {
+        spawnImpl: fake.spawnImpl,
+      },
+    );
+    await expect(service.listWebPeers()).resolves.toEqual({
+      peers: [
+        { name: "colab", label: "Lab", status: "timeout" },
+        { name: "mac", label: "MacBook", status: "ready", harnesses: ["codex"] },
+      ],
+    });
+    response = { harnesses: ["codex"] };
+    stderr = "ssh: Permission denied (publickey)";
+    await expect(service.listWebPeers()).resolves.toEqual({
+      peers: [
+        { name: "colab", label: "Lab", status: "failed" },
+        { name: "mac", label: "MacBook", status: "failed" },
+      ],
+    });
+    expect(fake.calls.map((call) => JSON.parse(call.body))).toEqual(
+      Array.from({ length: 4 }, () => ({
+        route: "/v1/harness/list",
+        body: { includeAvailability: true },
+      })),
+    );
+  });
+
   it("lists configured peers, Harnesses and self IDs, then uses its cache", async () => {
     const env = await environment();
     const fake = fakeSpawn(({ ssh }) =>

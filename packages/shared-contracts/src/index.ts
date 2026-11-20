@@ -375,6 +375,7 @@ export {
   harnessCommandMentionPath,
   restoreHarnessCommandMentions,
   formatDelegationMentionLink,
+  delegationMentionReferences,
   stripDelegationMentions,
   type DelegationMention,
   type DelegationMentionRewrite,
@@ -482,6 +483,9 @@ export {
   type DelegationPeerState,
   type DelegationPeerCatalogEntry,
   type DelegationPeerCatalog,
+  WEB_DELEGATION_PEERS_METHOD,
+  webDelegationPeersSchema,
+  type WebDelegationPeers,
 } from "./delegation-peer.js";
 
 export {

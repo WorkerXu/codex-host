@@ -23,6 +23,18 @@ peer 的命令返回该路径的结果或错误。Thread 链接中的 `hostId` �
 插件指纹变化或启动失败会使旧探测结果失效。Desktop 的插件目录请求可以选择读取新鲜状态，交互式
 Model 和权限模式配置由实时 Harness 检查确认。
 
+## Web 派发
+
+Web 通过受 Web 访问认证和同源限制保护的 client channel 方法
+`codexhost/web/delegation/peers/list` 读取 peer。该方法查询对端的 Harness 可用性缓存，返回机器名、
+显示名、已确认就绪的 Harness ID 或机器连接状态。显示名按 Desktop 连接的 Host ID 和 SSH 别名匹配，
+缺少对应连接记录时使用 peer 名。Desktop 的 `codexhost/delegation/peers/list` 由 Desktop 连接调用。
+
+Web 和 Desktop 共用可带 `?host=<peer>` 的委派提及。官方 Codex 和外部 Harness 的输入都在 Host 侧
+改写，由父会话中的 Agent 执行 `codexhost delegate start --host <peer> --harness <id>`，并带上
+`--watch true --format compact`。父会话通过 watch 收到结束通知。Web 运行于 oracle-main，侧栏和历史读取使用
+oracle-main 的本机 Thread。父会话显示所选机器和 Agent，远程 watch 卡片以只读方式显示结果。
+
 ## 后续功能接入
 
 - T2 可复用 `DesktopProjectCatalogReader` 查询 Mac 本机项目和 Thread 分配。
@@ -35,5 +47,3 @@ Model 和权限模式配置由实时 Harness 检查确认。
   跨机器菜单由 T5 接入。
 - T6 保留 Thread 原生创建和发送入口，适配各 Harness 的目录参数。需要 Desktop 项目上下文时复用目录
   只读 RPC。
-- T7 使用 Host 侧的 peer 配置、目录和传输，新增 Web 的受认证派发入口。现有 Desktop peer RPC 和
-  标准 Web Thread 列表维持各自的调用边界。

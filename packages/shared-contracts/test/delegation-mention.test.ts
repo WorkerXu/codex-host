@@ -38,6 +38,30 @@ describe("delegation mention carrier", () => {
     const text = "[@reviewer](subagent://reviewer) and #claude";
     expect(stripDelegationMentions(text)).toEqual({ text, mentions: [] });
   });
+
+  it("keeps local and peer targets of the same Harness distinct", () => {
+    const peer = { harnessId: "claude-code", label: "Claude Code · Mac", hostId: "remote-ssh:mac" };
+    const carrier = formatDelegationMentionLink(peer);
+    expect(carrier).toBe(
+      "[@Claude Code · Mac](subagent://codexhost.claude-code?host=remote-ssh%3Amac)",
+    );
+    expect(
+      stripDelegationMentions(
+        `${carrier} [@Claude Code](subagent://codexhost.claude-code) ${carrier}`,
+      ),
+    ).toEqual({
+      text: "@Claude Code · Mac @Claude Code @Claude Code · Mac",
+      mentions: [peer, { harnessId: "claude-code", label: "Claude Code" }],
+    });
+  });
+
+  it.each(["%ZZ", "mac%3Becho", "%20"])(
+    "does not dispatch a malformed peer carrier (%s)",
+    (host) => {
+      const text = `[@Codex](subagent://codexhost.codex?host=${host})`;
+      expect(stripDelegationMentions(text)).toEqual({ text, mentions: [] });
+    },
+  );
 });
 
 describe("Harness command carrier", () => {

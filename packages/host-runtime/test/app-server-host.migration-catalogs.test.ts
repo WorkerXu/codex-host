@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   DELEGATION_PEER_LIST_METHOD,
   DESKTOP_PROJECTS_CATALOG_METHOD,
+  WEB_DELEGATION_PEERS_METHOD,
 } from "@codexhost/shared-contracts";
 import { expect, it } from "vitest";
 
@@ -41,8 +42,13 @@ it("serves the configured peer IDs and Desktop projects on the Desktop connectio
       method: DESKTOP_PROJECTS_CATALOG_METHOD,
       params: {},
     });
-    const [peers, projects] = await Promise.all(
-      [990, 991].map((id) => fixture.collector.waitFor((message) => requestId(message, id))),
+    writeRequest(fixture.desktopInput, {
+      id: 992,
+      method: WEB_DELEGATION_PEERS_METHOD,
+      params: {},
+    });
+    const [peers, projects, webOnDesktop] = await Promise.all(
+      [990, 991, 992].map((id) => fixture.collector.waitFor((message) => requestId(message, id))),
     );
     expect(peers).toMatchObject({
       result: { peers: [], self: { hostIds: ["remote-ssh-discovered:test"] } },
@@ -53,6 +59,17 @@ it("serves the configured peer IDs and Desktop projects on the Desktop connectio
         projectOrder: ["workspace"],
       },
     });
+    expect(webOnDesktop).toMatchObject({ error: { code: -32601 } });
+    await expect(
+      fixture.host.handleClientRequest(WEB_DELEGATION_PEERS_METHOD, {}),
+    ).resolves.toEqual({
+      result: { peers: [] },
+    });
+    for (const method of [DELEGATION_PEER_LIST_METHOD, DESKTOP_PROJECTS_CATALOG_METHOD]) {
+      await expect(fixture.host.handleClientRequest(method, {})).resolves.toMatchObject({
+        error: { code: -32601 },
+      });
+    }
   } finally {
     await stopFixture(fixture);
     await rm(root, { recursive: true, force: true });

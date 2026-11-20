@@ -43,3 +43,28 @@ export type DelegationPeerListParams = z.infer<typeof delegationPeerListParamsSc
 export type DelegationPeerState = z.infer<typeof delegationPeerStateSchema>;
 export type DelegationPeerCatalogEntry = z.infer<typeof delegationPeerCatalogEntrySchema>;
 export type DelegationPeerCatalog = z.infer<typeof delegationPeerCatalogSchema>;
+
+export const WEB_DELEGATION_PEERS_METHOD = "codexhost/web/delegation/peers/list";
+
+const webDelegationPeerIdentity = {
+  name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u),
+  label: z.string().min(1),
+};
+
+export const webDelegationPeersSchema = z
+  .object({
+    peers: z.array(
+      z.discriminatedUnion("status", [
+        z
+          .object({
+            ...webDelegationPeerIdentity,
+            status: z.literal("ready"),
+            harnesses: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/u)),
+          })
+          .strict(),
+        z.object({ ...webDelegationPeerIdentity, status: z.enum(["timeout", "failed"]) }).strict(),
+      ]),
+    ),
+  })
+  .strict();
+export type WebDelegationPeers = z.infer<typeof webDelegationPeersSchema>;

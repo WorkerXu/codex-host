@@ -3,6 +3,8 @@ import { randomUUID } from "@deepseek-ai/dsh-util-crypto";
 import {
   THREAD_FOLDERS_GET_METHOD,
   THREAD_FOLDERS_SET_METHOD,
+  WEB_DELEGATION_PEERS_METHOD,
+  webDelegationPeersSchema,
   harnessSessionImportResultSchema,
   updateCheckResultSchema,
   voiceStatusResultSchema,
@@ -86,21 +88,29 @@ export const workingFoldersApi = {
     call<WorkingFoldersView>(THREAD_FOLDERS_SET_METHOD, { sessionId, folders }),
 };
 
-export async function checkHostUpdate(signal: AbortSignal) {
+async function callClientChannel(method: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch("api/ch/v1/rpc", {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ method: "codexhost/update/check", params: {} }),
-    signal,
+    body: JSON.stringify({ method, params: {} }),
+    ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
   const reply = (await response.json()) as {
     result?: unknown;
     error?: { message?: string };
   };
-  if (reply.error) throw new Error(reply.error.message ?? "Update check failed");
-  return updateCheckResultSchema.parse(reply.result);
+  if (reply.error) throw new Error(reply.error.message ?? "Host request failed");
+  return reply.result;
+}
+
+export async function checkHostUpdate(signal: AbortSignal) {
+  return updateCheckResultSchema.parse(await callClientChannel("codexhost/update/check", signal));
+}
+
+export async function listDelegationPeers() {
+  return webDelegationPeersSchema.parse(await callClientChannel(WEB_DELEGATION_PEERS_METHOD));
 }
 
 export const voiceApi = {

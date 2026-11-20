@@ -11,6 +11,7 @@ import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
   DELEGATION_PEER_LIST_METHOD,
   delegationPeerListParamsSchema,
+  WEB_DELEGATION_PEERS_METHOD,
 } from "@codexhost/shared-contracts";
 import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
@@ -85,7 +86,6 @@ import {
   webOpenResultSchema,
 } from "@codexhost/shared-contracts";
 import {
-  DELEGATION_MENTION_PATH_PREFIX,
   IDLE_RELEASE_SETTINGS_METHOD,
   restoreHarnessCommandMentions,
   LOADED_SESSIONS_METHOD,
@@ -94,10 +94,9 @@ import { HarnessDisplaySettingsStore } from "./harness-display-settings.js";
 import { isModelPriceOverridesMethod } from "./model-price-overrides-file.js";
 import { HARNESS_DISPLAY_CHANGED_METHOD } from "@codexhost/shared-contracts";
 import {
-  rewriteDelegationMentionInput,
   rewriteDelegationMentionText,
+  rewriteNativeDelegationMentions,
 } from "./delegation-mention-rewrite.js";
-import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
 import { nativeThreadSupportsReferences } from "./native-thread-reference-capability.js";
@@ -1925,6 +1924,26 @@ export class AppServerHost {
       });
       return;
     }
+    if (request.method === WEB_DELEGATION_PEERS_METHOD) {
+      if (origin !== "client") {
+        await this.#writer.json(
+          rpcError(request, -32601, "This catalog requires a client connection"),
+        );
+        return;
+      }
+      if (!isRecord(request.params) || Object.keys(request.params).length !== 0) {
+        await this.#writer.json(rpcError(request, -32602, "Invalid Web peer catalog request"));
+        return;
+      }
+      this.#dispatchDesktopReply(request, async () => {
+        this.#delegationPeers ??= new DelegationPeerCatalogService(
+          this.#options.environment ?? process.env,
+        );
+        const result = await this.#delegationPeers.listWebPeers();
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      });
+      return;
+    }
     if (request.method.startsWith(CODE_REPOSITORIES_PREFIX)) {
       const service = origin === "desktop" ? this.#options.codeRepositories : undefined;
       this.#dispatchDesktopReply(request, async () => {
@@ -2107,15 +2126,7 @@ export class AppServerHost {
     if (request.method !== "turn/start" && request.method !== "turn/steer") return frame;
     if (!isRecord(request.params) || !Array.isArray(request.params.input)) return frame;
     const input = request.params.input as JsonValue[];
-    const hasDelegation = input.some(
-      (item) =>
-        isRecord(item) &&
-        typeof item.text === "string" &&
-        item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
-    );
-    const rewritten = hasDelegation
-      ? rewriteDelegationMentionInput(input, await managedDelegationSkillReference())
-      : null;
+    const rewritten = await rewriteNativeDelegationMentions(input);
     const expanded = this.#options.jarvis
       ? await rewriteJarvisTurnInput(rewritten ?? input, (text) => this.#expandJarvisText(text))
       : null;
@@ -2363,6 +2374,13 @@ export class AppServerHost {
 
   async #requestClientNative(method: string, params: JsonObject): Promise<ConsoleHostReply> {
     try {
+      if (
+        ["turn/start", "turn/steer", "thread/queue/add", "thread/queue/update"].includes(method) &&
+        Array.isArray(params.input)
+      ) {
+        const input = await rewriteNativeDelegationMentions(params.input);
+        if (input) params = { ...params, input };
+      }
       const response = await this.#requestOfficial(method, params);
       if (isRecord(response.error)) {
         return {

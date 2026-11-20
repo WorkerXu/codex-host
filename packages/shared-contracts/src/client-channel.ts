@@ -3,6 +3,7 @@ import { z } from "zod";
 import { harnessModelRefSchema, harnessThinkingOptionIdSchema } from "./harness-models.js";
 import { harnessPermissionModeIdSchema } from "./harness-permission-modes.js";
 import { THREAD_ARCHIVE_CONFIRM_METHOD } from "./thread-archive-confirm.js";
+import { WEB_DELEGATION_PEERS_METHOD } from "./delegation-peer.js";
 
 /** Authenticated local owner channel. Notifications invalidate state; they are
  * NOT appendable transcript deltas. Clients reconcile absolute snapshots. */
@@ -10,6 +11,7 @@ export const CLIENT_CHANNEL_VERSION = 1;
 /** Request-body ceiling of the channel's POST routes; large enough for an inline image prompt. */
 export const CLIENT_REQUEST_LIMIT_BYTES = 128 * 1024 * 1024;
 export const CLIENT_CHANNEL_METHODS = [
+  WEB_DELEGATION_PEERS_METHOD,
   "codexhost/skills/list",
   "codexhost/voice/status",
   "codexhost/voice/transcribe",
