@@ -1,12 +1,23 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { McpHubConnectionStore } from "../src/mcphub-connection.js";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { HUB_ADMIN_METHOD, SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
 import { HubAdminService } from "../src/hub-admin-service.js";
 import { createFixture, requestId, stopFixture, writeRequest } from "./app-server-host-fixture.js";
 
+let configDirectory: string;
+beforeEach(async () => {
+  configDirectory = await mkdtemp(join(tmpdir(), "desktop-hub-admin-"));
+});
+afterEach(async () => {
+  await rm(configDirectory, { recursive: true, force: true });
+});
+
 it("serves Hub RPCs without forwarding them and suppresses secret-bearing failures", async () => {
-  const connection = new McpHubConnectionStore();
-  connection.write("fake-key-not-real");
+  const connection = new McpHubConnectionStore({ configDirectory });
+  await connection.write("fake-key-not-real");
   const hubAdmin = new HubAdminService({
     mcpConnection: connection,
     mcpHeaderName: async () => "Authorization",
@@ -58,8 +69,8 @@ it("serves Hub RPCs without forwarding them and suppresses secret-bearing failur
 
 it("keeps administrator keys out of RPC replies, diagnostics and the official process", async () => {
   const key = "mcphub_fake_admin_credential_1234";
-  const connection = new McpHubConnectionStore();
-  connection.write(key);
+  const connection = new McpHubConnectionStore({ configDirectory });
+  await connection.write(key);
   const hubAdmin = new HubAdminService({
     mcpConnection: connection,
     mcpHeaderName: async () => "Authorization",

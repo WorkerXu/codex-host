@@ -22,12 +22,11 @@ export class HubAdminService {
   #connectionRevision = 0;
   #stopped = false;
   constructor(private readonly options: HubAdminServiceOptions = {}) {
-    this.connection = options.mcpConnection ?? new McpHubConnectionStore();
+    this.connection = options.mcpConnection ?? new McpHubConnectionStore(options);
     this.remote = options.remote ?? new HubRemote(options.environment ?? process.env);
   }
   async stop(): Promise<void> {
     this.#stopped = true;
-    this.connection.write(null);
     await this.remote.stop();
   }
   async request(input: unknown): Promise<unknown> {
@@ -47,13 +46,13 @@ export class HubAdminService {
             configured: key !== null,
             last4: key?.slice(-4) ?? null,
           });
-          if (params.op === "mcpConnection") result = state(this.connection.read());
+          if (params.op === "mcpConnection") result = state(await this.connection.read());
           else if (params.op === "mcpDisconnect") {
             this.#connectionRevision++;
-            this.connection.write(null);
+            await this.connection.write(null);
             result = state(null);
           } else if (params.op === "mcpOverview") {
-            const key = this.connection.read();
+            const key = await this.connection.read();
             if (!key) result = { ...state(null), servers: null, keys: null };
             else {
               const endpoints = await this.remote.endpoints();
@@ -80,7 +79,7 @@ export class HubAdminService {
           } else {
             const revision =
               params.op === "mcpConnect" ? ++this.#connectionRevision : this.#connectionRevision;
-            const key = params.op === "mcpConnect" ? params.key : this.connection.read();
+            const key = params.op === "mcpConnect" ? params.key : await this.connection.read();
             if (!key) throw new HubAdminError("mcp-auth");
             const endpoints = await this.remote.endpoints();
             const header = await (this.options.mcpHeaderName ?? (() => this.#header()))();
@@ -122,7 +121,7 @@ export class HubAdminService {
               if (!Array.isArray(check.data)) throw new HubAdminError("failed");
               if (this.#stopped || revision !== this.#connectionRevision)
                 throw new HubAdminError("conflict");
-              this.connection.write(key);
+              await this.connection.write(key);
               result = state(key);
             } else result = await runMcpAdmin(request, params);
           }

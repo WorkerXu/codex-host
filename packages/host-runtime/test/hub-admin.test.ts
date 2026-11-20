@@ -1,19 +1,30 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { McpHubConnectionStore } from "../src/mcphub-connection.js";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubAdminService } from "../src/hub-admin-service.js";
 import { HubAdminError, hubJson } from "../src/hub-admin-http.js";
 
 const secret = "test-secret-that-must-not-leak";
 const success = (data?: unknown) => Response.json({ success: true, data });
-function service(
+let configDirectory: string;
+beforeEach(async () => {
+  configDirectory = await mkdtemp(join(tmpdir(), "hub-admin-"));
+});
+afterEach(async () => {
+  await rm(configDirectory, { recursive: true, force: true });
+});
+
+async function service(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
   saved: string | null = secret,
 ) {
   const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) =>
     handler(String(url), init),
   );
-  const connection = new McpHubConnectionStore();
-  connection.write(saved);
+  const connection = new McpHubConnectionStore({ configDirectory });
+  await connection.write(saved);
   return {
     fetcher,
     connection,
@@ -50,12 +61,12 @@ describe("Hub admin boundary", () => {
     { op: "memory", id: "x", kind: "chat", variant: null, method: "DELETE" },
     { op: "search", query: "x", source: "", offset: -1 },
   ])("rejects operations outside the allowlist before HTTP: %j", async (input) => {
-    const fixture = service(() => success());
+    const fixture = await service(() => success());
     await expect(fixture.service.request(input)).rejects.toMatchObject({ code: "invalid" });
     expect(fixture.fetcher).not.toHaveBeenCalled();
   });
   it("projects servers and keys without secret fields", async () => {
-    const fixture = service((url) =>
+    const fixture = await service((url) =>
       url.endsWith("/servers")
         ? success([
             {
@@ -106,7 +117,7 @@ describe("Hub admin boundary", () => {
     }
   });
   it("preserves native config and secrets during edits and percent-encodes names", async () => {
-    const fixture = service((_url, init) =>
+    const fixture = await service((_url, init) =>
       init?.method === "GET"
         ? success({
             config: {
@@ -130,7 +141,7 @@ describe("Hub admin boundary", () => {
     });
   });
   it("sends only routing auth fields and returns a newly issued token once", async () => {
-    const fixture = service(() => success({ token: secret, tokenHash: "hash" }));
+    const fixture = await service(() => success({ token: secret, tokenHash: "hash" }));
     expect(
       await fixture.service.request({ op: "keyRegenerate", id: "a", confirmed: true }),
     ).toEqual({ ok: true, token: secret });
@@ -145,7 +156,7 @@ describe("Hub admin boundary", () => {
     });
   });
   it("refuses to rewrite scopes the editor cannot represent", async () => {
-    const fixture = service(() =>
+    const fixture = await service(() =>
       success([
         { id: "1", name: "group", enabled: true, accessType: "exclude", excludedGroups: ["g"] },
       ]),
@@ -169,7 +180,7 @@ describe("Hub admin boundary", () => {
       kind: "experience",
       variant: "coding",
     };
-    const fixture = service((url) =>
+    const fixture = await service((url) =>
       url.includes("memory-library")
         ? Response.json({ total: 20, offset: 10, window_id: "window", memories: [memory] })
         : Response.json(memory),
@@ -205,7 +216,7 @@ describe("Hub admin boundary", () => {
       Response.json({ error: secret }, { status: 500 }),
       success({ token: secret }),
     ]) {
-      const fixture = service(() => response);
+      const fixture = await service(() => response);
       const error = await fixture.service
         .request({ op: "servers" })
         .catch((error: unknown) => error);
@@ -219,7 +230,7 @@ describe("Hub admin boundary", () => {
     [404, "missing"],
     [409, "conflict"],
   ])("maps HTTP %s", async (status, code) => {
-    const fixture = service(() => new Response(secret, { status: Number(status) }));
+    const fixture = await service(() => new Response(secret, { status: Number(status) }));
     await expect(fixture.service.request({ op: "servers" })).rejects.toMatchObject({ code });
   });
   it.each([
@@ -281,7 +292,7 @@ describe("MemHub token rotation", () => {
 
 describe("MCP page overview", () => {
   it("returns the connection, servers and keys in one request", async () => {
-    const f = service((url) =>
+    const f = await service((url) =>
       url.endsWith("/servers") || url.endsWith("/auth/keys")
         ? success([])
         : success({ systemConfig: { routing: {} } }),
@@ -298,7 +309,7 @@ describe("MCP page overview", () => {
 
 describe("MCP connection state", () => {
   it("reports a never-connected Host without contacting MCPHub", async () => {
-    const f = service(() => success(), null);
+    const f = await service(() => success(), null);
     await expect(f.service.request({ op: "mcpOverview" })).resolves.toEqual({
       configured: false,
       last4: null,
@@ -309,26 +320,26 @@ describe("MCP connection state", () => {
   });
 
   it("rejects a 401 key as incorrect and does not store it", async () => {
-    const f = service(() => new Response("", { status: 401 }), null);
+    const f = await service(() => new Response("", { status: 401 }), null);
     await expect(
       f.service.request({ op: "mcpConnect", key: "mcphub_fake_candidate_1234" }),
     ).rejects.toMatchObject({ code: "mcp-key-invalid" });
-    expect(f.connection.read()).toBeNull();
+    expect(await f.connection.read()).toBeNull();
   });
 
   it("rejects a scoped key with the all-access message", async () => {
-    const f = service(
+    const f = await service(
       () => new Response("this is not a system-level all-access key", { status: 403 }),
       null,
     );
     await expect(
       f.service.request({ op: "mcpConnect", key: "mcphub_fake_candidate_1234" }),
     ).rejects.toMatchObject({ code: "mcp-key-scoped" });
-    expect(f.connection.read()).toBeNull();
+    expect(await f.connection.read()).toBeNull();
   });
 
   it("keeps the stored-key failure path distinct from a new connection", async () => {
-    const f = service(() => new Response("", { status: 401 }));
+    const f = await service(() => new Response("", { status: 401 }));
     await expect(f.service.request({ op: "servers" })).rejects.toMatchObject({
       code: "mcp-auth",
     });

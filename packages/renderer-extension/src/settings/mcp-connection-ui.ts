@@ -26,7 +26,7 @@ export function createMcpConnectionUi(
         document,
         "p",
         "hub-muted",
-        "需要系统级、全部访问（accessType 为全部）的密钥。Host 重启后需要重新输入。",
+        "需要系统级、全部访问（accessType 为全部）的密钥。通过验证后保存在本机。",
       ),
     );
     const submit = hubButton(
@@ -94,7 +94,7 @@ export function createMcpConnectionUi(
       run: () => {
         const host = ui.hostId;
         const revision = ui.revision();
-        ui.confirm("断开 MCPHub", "清除此主机当前使用的管理员密钥？", async () => {
+        ui.confirm("断开 MCPHub", "删除此主机保存的管理员密钥？", async () => {
           await client.request(host, { op: "mcpDisconnect", confirmed: true });
           if (ui.valid(host, revision)) await refresh();
         });

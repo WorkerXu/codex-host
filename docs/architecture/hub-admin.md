@@ -28,7 +28,7 @@ MCPHub 服务位于 India 的 `127.0.0.1:3000`，经 Mac Host 的转发访问，
 
 用户在 MCPHub 网页后台创建专用管理员密钥，要求 `enabled=true`、`kind=system`、`accessType=all`（旧记录缺失 kind 时按原生系统级语义）。1.1.15 的管理 API 中间件拒绝用户级和受限范围密钥，验证通过时赋予管理员权限。Host 读取 `/etc/mcphub.env` 中的 `MCPHUB_SETTING_PATH`（默认 `/opt/mcphub/data/mcp_settings.json`），仅解析 routing 中的请求头名和认证策略；请求头默认 `Authorization`，值为 `Bearer <密钥>`。要求 Bearer 开启且 skipAuth 关闭，避免免认证请求误判密钥有效。Host 用户需要这些配置的只读权限。
 
-首次访问时，用户在「连接 MCPHub」的密码框输入管理员密钥。Host 通过只读 `GET /api/auth/keys` 验证权限，验证成功后将密钥保留在进程内存中。RPC 只回报 `configured` 和 `last4`。验证失败时继续使用原来的密钥。提交后清空输入框，断开或退出 Host 时清除密钥，重启后由用户重新输入。旧版密钥文件保留原状以便回退。
+Mac Host 从 `~/.config/codexhost/mcphub-admin-key` 读取管理员密钥，重启后继续使用该文件。首次连接或更换密钥时，Host 通过只读 `GET /api/auth/keys` 验证权限。验证通过后，Host 以 `0600` 写入同目录的临时文件，再原子替换密钥文件。验证失败时保留旧值；用户确认断开时删除文件。连接 RPC 只回报 `configured` 和 `last4`，提交后清空输入框。
 
 认证凭据只用于 Host 到 localhost 的请求。Renderer 收不到管理员密码、哈希、JWT、原密钥或原服务器连接配置。列表密钥统一显示掩码；创建和重新生成的密钥按官方 API 返回值仅在一次性对话框展示并允许复制，关闭时清空控件。编辑服务器时连接字段留空保留原值，填写则替换该项；参数和环境变量使用 JSON 数组/对象，请求头使用键值行编辑器，保存前检查名称、重复项和换行，并在字段下方显示中文错误。Host 合并原生未知配置，协议切换清理不适用的连接字段。
 
@@ -48,7 +48,7 @@ MemHub 服务位于 India 的 `127.0.0.1:8765`，经同一条转发访问。Host
 
 ## 验证与 Desktop 复核
 
-聚焦测试验证桌面 RPC、认证、确认流程、内存密钥生命周期、脱敏、MemHub 搜索窗口和 SSH 转发生命周期。预览命令使用导出的真实 Desktop 主题和隔离假数据。
+聚焦测试验证桌面 RPC、认证、确认流程、密钥持久化与清除、脱敏、MemHub 搜索窗口和 SSH 转发生命周期。预览命令使用导出的真实 Desktop 主题和隔离假数据。
 
 ```sh
 node tools/ui-preview/capture-hubs.mjs /path/to/codex-desktop.css /tmp/codexhost-hubs-preview
