@@ -59,6 +59,8 @@ describe("delegation Skill installation", () => {
   });
 
   it.each([
+    ["upstream v15 Skill", "codexhost-delegation-upstream-v15.md"],
+    ["installed fork v16 Skill", "codexhost-delegation-v16.md"],
     ["upstream v14 Skill with split CLI help", "codexhost-delegation-v14.md"],
     ["fork v13 Skill with question instructions", "codexhost-delegation-fork-v13.md"],
     ["v4 Skill shipped in v0.4.0-v0.6.0", "codexhost-delegation-v4.md"],
@@ -116,7 +118,7 @@ describe("delegation Skill installation", () => {
   });
 
   it("routes natural agent requests and points execution to the authoritative help", () => {
-    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 15");
+    expect(CODEXHOST_DELEGATION_SKILL).toContain("version: 17");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("@agent) to independently perform a task");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("session's content, progress, or results");
     expect(CODEXHOST_DELEGATION_SKILL).toContain("Not for recapping the current conversation");

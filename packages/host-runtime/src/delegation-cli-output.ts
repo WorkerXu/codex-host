@@ -19,8 +19,10 @@ function targetLink(identifier: string): string {
 
 export type DelegationCliFormat = "json" | "compact" | "text";
 
-function threadLink(threadId: string): string {
-  return `codex://threads/${threadId}`;
+function threadLink(threadId: string, hostId?: string): string {
+  return hostId
+    ? `thread://${threadId}?hostId=${encodeURIComponent(hostId)}`
+    : `codex://threads/${threadId}`;
 }
 
 function watchOutput(watch: DelegationStartResult["watch"]): { watch?: unknown } {
@@ -137,7 +139,7 @@ export function compactDelegationOutput(
     case "thread send": {
       const result = body as ThreadSendResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         harnessId: result.harnessId,
         status: result.status,
         ...watchOutput(result.watch),
@@ -146,7 +148,7 @@ export function compactDelegationOutput(
     case "thread cancel": {
       const result = body as ThreadCancelResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         harnessId: result.harnessId,
         cancelRequested: result.cancelled,
       };
@@ -157,7 +159,7 @@ export function compactDelegationOutput(
     case "thread answer": {
       const result = body as ThreadAnswerResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         interaction: result.interactionId,
         turn: result.turnId,
         harnessId: result.harnessId,
@@ -165,9 +167,10 @@ export function compactDelegationOutput(
       };
     }
     case "thread watch": {
+      if ("cancelled" in (body as object)) return body;
       const result = body as ThreadWatchResult;
       return {
-        thread: threadLink(result.threadId),
+        thread: threadLink(result.threadId, result.hostId),
         notify: targetLink(result.notifyThreadId),
         state: result.state,
         status: result.status,
@@ -181,6 +184,7 @@ export function compactDelegationOutput(
         watches: result.watches.map(
           ({
             threadId,
+            hostId,
             notifyThreadId,
             state,
             outcome,
@@ -191,7 +195,7 @@ export function compactDelegationOutput(
             threadStatus,
             watchedForMs,
           }) => ({
-            thread: threadLink(threadId),
+            thread: threadLink(threadId, hostId),
             notify: targetLink(notifyThreadId),
             state,
             ...(outcome ? { outcome } : {}),

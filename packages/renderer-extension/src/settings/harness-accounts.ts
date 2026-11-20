@@ -38,8 +38,9 @@ export function createHarnessAccounts(
   signal: AbortSignal,
   getClient: () => RendererHarnessAccountClient | null,
   onChange: () => void,
+  initialAccounts: readonly HarnessAccount[] = [],
 ) {
-  let accounts: HarnessAccount[] = [];
+  let accounts = [...initialAccounts];
   let refreshing = false;
 
   const loadProgressively = async (
@@ -55,7 +56,13 @@ export function createHarnessAccounts(
       return false;
     }
     if (signal.aborted) return true;
-    const byAccount = new Map(accounts.map((account) => [accountKey(account), account]));
+    const known = new Set(sources.sources.map(({ harnessId }) => harnessId));
+    const byAccount = new Map(
+      accounts
+        .filter(({ harnessId }) => known.has(harnessId))
+        .map((account) => [accountKey(account), account]),
+    );
+    accounts = sortedAccounts(byAccount.values());
     await Promise.all(
       sources.sources.map(async (source) => {
         try {
@@ -104,7 +111,6 @@ export function createHarnessAccounts(
       const client = getClient();
       if (!client) return;
       refreshing = true;
-      accounts = [];
       onChange();
       try {
         const progressive =

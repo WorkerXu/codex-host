@@ -1,0 +1,113 @@
+---
+name: codexhost-delegation
+version: 16
+description: >
+  Delegate tasks to other coding agents, or read and follow up on existing
+  external agent sessions. Use when the user asks another agent (including
+  @agent) to independently perform a task, or asks to view a specified external
+  session's content, progress, or results, send follow-up messages, wait, or
+  cancel a task. Not for recapping the current conversation, discussing or
+  configuring agents, or role-playing.
+---
+
+# Execute the task
+
+New delegated Threads inherit the caller's Desktop project even when their
+working folders differ. Use `--project <projectId>` to override it, or
+`--project none` to start without a project. Cross-machine children are assigned
+by the Desktop renderer when it connects.
+
+Run the CLI through the executable in CODEXHOST_CLI_PATH. If you need command
+details, run help with the form for your shell:
+
+- POSIX: `"$CODEXHOST_CLI_PATH" delegate --help`
+- PowerShell: `& $env:CODEXHOST_CLI_PATH delegate --help`
+- cmd: `"%CODEXHOST_CLI_PATH%" delegate --help`
+
+If CODEXHOST_CLI_PATH is unset, try `codexhost`; if that also fails, tell the
+user to add CODEXHOST_CLI_PATH to shell_environment_policy.include_only.
+Commands shown by help and in `next` begin with `codexhost`; run them the
+same way.
+
+For delegated code changes in a Git repository, prefer a dedicated checkout with
+`delegate start --worktree <unique-branch>`. The Host creates it before starting
+the child; do not run a separate Git worktree command. Use `--base <ref>` to choose
+a base, otherwise the source checkout's HEAD is used. Uncommitted changes are not
+copied. Cross-machine starts require an explicit absolute `--cwd` on the target
+Host. Read the returned `worktree` metadata. If a start fails and reports
+`worktreeRetained`, inspect that checkout and Thread before retrying; do not
+delete or overwrite it. Merge and cleanup are separate explicit operations.
+
+A delegation mention may contain complete `codexhost delegate start` commands.
+Execute them directly, replacing `<task>` and `<short-name>`; do not run
+`--help` or `peer list` first. Otherwise, use CLI help as the authoritative
+source for commands and behavior, and consult the Harness listing command when
+the target is unknown. Prefer compact output when supported, and use its task
+links directly for subsequent commands.
+
+## Cross-machine targets
+
+Run `codexhost peer list` to see configured machines and their Host IDs. Pass
+`--host <peer>` to `delegate start`, `harness list|inspect`, and
+`thread read|send|cancel|wait|answer` to operate on that machine. A task link with a
+`hostId` carries the machine; reuse the link for follow-up commands so routing
+is automatic. Use `thread wait <thread> --host <peer>` for a bounded wait.
+
+`thread list` lists only this machine's Threads and does not accept
+`--host`. To list another machine's Threads, run `codexhost thread list` on
+that machine.
+
+`delegate start --host <peer> --watch true` and
+`thread watch <thread> --host <peer>` register a watch on this machine. The
+Host notifies this Thread once with `[codexhost thread watch]` when the remote
+Thread stops or needs an answer. `thread watches` lists local and cross-machine watches;
+`thread watch <thread> --host <peer> --cancel` removes one. Cross-machine
+watches live in memory and are lost when the Host Runtime restarts.
+
+Never read files under `~/.codexhost/runtime/`; they contain the Runtime
+token. Use the CLI instead.
+
+Use the Harness native defaults. Inspect the target when a Model or Thinking
+selection is needed or the default is unavailable.
+
+For a new delegation, create an independent child session and submit the
+requested task. Give it a short task name that tells it apart from sibling
+tasks, using the help's task-name option. For an existing external session, resolve the target from the
+user-provided session link, identifier, or context and operate on that Thread
+directly; it need not have been created by the current assistant. If the target
+is ambiguous, ask the user to identify it. Keep requests to view or summarize a
+session read-only.
+
+For a new or existing task, choose the appropriate next action based on the
+user’s request and the task:
+
+- send a follow-up message to the same Thread;
+- cancel its current Turn;
+- read its current state and pendingQuestions immediately;
+- answer a pending Question through `thread answer <thread> --interaction <id> --answers-file <file>`;
+- wait for a bounded period;
+- check it again later;
+- watch it, so the Host notifies this Thread once when the watched Thread stops or needs an answer
+  and no waiting or polling is needed meanwhile;
+- leave it running in the background.
+
+For a new delegation, prefer `delegate start --watch true` and then end this
+Turn. Do not poll with repeated `thread wait`; the watch notification starts a
+new Turn. Use a bounded wait only when the user asked to wait or watch
+registration is unavailable.
+
+If read/wait returns pendingQuestions, use its opaque interactionId and original
+request. For kind=requestUserInput, put the existing requestUserInput result in
+a JSON file; for requestUserInputAsync, use {"answer":"your answer"}. Submit it
+with `thread answer`; never use `thread send` as a substitute. An empty
+pendingQuestions list means none; a missing field means an older Runtime.
+QUESTION_NOT_PENDING means that request is no longer answerable. After answering,
+register a new watch for the next Question or completion. A receipt confirms only
+submission; read/wait reports the actual execution state. Ask the user when the
+Question requires their decision rather than guessing their preference.
+
+A watch notification reports execution state only. Read the Thread before
+judging or reporting its work.
+
+Report the result returned by read or a completed wait, together with the target
+agent, status, and a labeled task link. Keep internal tracking IDs in tool calls.

@@ -1,3 +1,4 @@
+import { recordRendererPageOpen } from "../../renderer-page-timings.js";
 import {
   USAGE_STATISTICS_METHOD,
   USAGE_STATISTICS_RANGES,
@@ -201,6 +202,7 @@ export function createUsageStatisticsPage(
     label: messages.label,
     icon: "dashboard" as const,
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
       const document = context.content.ownerDocument;
       const locale = pageLocale ?? (document.documentElement.lang || "en");
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1386,6 +1388,7 @@ export function createUsageStatisticsPage(
       offerHosts();
       void refreshHarnessNames();
       load();
+      recordRendererPageOpen("usage-statistics", pageStartedAt, view.hostId);
       return () => {
         window.clearTimeout(poll);
         window.clearInterval(clock);

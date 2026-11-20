@@ -1,3 +1,9 @@
+import {
+  readCachedAccountPresentation,
+  writeCachedAccountPresentation,
+  type CachedAccountPresentation,
+} from "./account-presentation-cache.js";
+import { recordRendererPageOpen } from "../renderer-page-timings.js";
 import type {
   CodexAccountChanged,
   CodexAccountListResult,
@@ -30,6 +36,7 @@ import { shouldApplyCodexAccountSnapshot } from "../renderer-codex-account-state
 
 export interface RendererCodexAccountClient
   extends RendererHarnessAccountClient, RendererCredentialImportClient {
+  currentHostId?(): string | null;
   listHarnessPlugins?(): Promise<HarnessPluginListResult>;
   listCodexAccounts(): Promise<CodexAccountListResult>;
   refreshCodexAccounts?(): Promise<CodexAccountListResult>;
@@ -50,6 +57,11 @@ export function createAccountsSettingsPage(
     label: messages.pageLabels.accounts,
     icon: "accounts",
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
+      const mountedClient = getClient();
+      const hostId = mountedClient?.currentHostId?.() ?? "local";
+      const pageClient = () => mountedClient ?? getClient();
+      const presentation = readCachedAccountPresentation(hostId);
       const document = context.content.ownerDocument;
       const header = document.createElement("div");
       header.className = "settings-account-header";
@@ -140,7 +152,7 @@ export function createAccountsSettingsPage(
       const credentialImports = mountCredentialImports(
         context.content,
         context.signal,
-        getClient,
+        pageClient,
         messages.credentialImports,
         () => render(),
         pluginFor,
@@ -148,14 +160,24 @@ export function createAccountsSettingsPage(
       context.content.append(header, status, toolbar, list, credentialImports.section);
       const stopCountdowns = mountAccountResetCountdowns(list, messages, context.signal);
 
-      let accounts: readonly CodexAccountSummary[] = [];
+      let accounts: readonly CodexAccountSummary[] = presentation.codex?.accounts ?? [];
       let currentAccountId: string | null = null;
       let accountPhase: CodexAccountListResult["phase"] = "unavailable";
       let accountRevision = 0;
       let accountInstanceId: string | undefined;
       let hasAccountSnapshot = false;
       let loadMessage: string | null = null;
-      const usageByAccountId = new Map<string, AccountUsageViewState>();
+      const usageByAccountId = new Map<string, AccountUsageViewState>(
+        Object.entries(presentation.usage).map(([id, entry]) => [
+          id,
+          { status: "ready", ...entry, freshness: "cached" },
+        ]),
+      );
+      const restoredUsage = new Set(Object.keys(presentation.usage));
+      const persist = (update: Partial<CachedAccountPresentation>) => {
+        Object.assign(presentation, update);
+        writeCachedAccountPresentation(hostId, presentation);
+      };
       let usageDisplay: AccountUsageDisplay = "remaining";
       const expandedResetAccounts = new Set<string>();
 
@@ -170,8 +192,8 @@ export function createAccountsSettingsPage(
           button.setAttribute("aria-pressed", String(display === usageDisplay));
         }
         refreshUsage.disabled =
-          ((!getClient()?.inspectCodexAccountUsage || accounts.length === 0) &&
-            !getClient()?.listHarnessAccounts) ||
+          ((!pageClient()?.inspectCodexAccountUsage || accounts.length === 0) &&
+            !pageClient()?.listHarnessAccounts) ||
           harnessAccounts?.refreshing === true ||
           [...usageByAccountId.values()].some((usage) => usage.status === "loading");
         const query = search.value.trim().toLocaleLowerCase();
@@ -237,24 +259,30 @@ export function createAccountsSettingsPage(
       };
 
       const client = (): RendererCodexAccountClient => {
-        const value = getClient();
+        const value = pageClient();
         if (!value) throw new Error(messages.runtimeCapabilityNotInstalled);
         return value;
       };
       const loadUsage = (nextAccounts: readonly CodexAccountSummary[]): void => {
-        const inspect = getClient()?.inspectCodexAccountUsage;
+        const inspect = pageClient()?.inspectCodexAccountUsage;
         const saved = [...nextAccounts];
         const keep = new Set(saved.map((account) => account.accountId));
         for (const accountId of [...usageByAccountId.keys()]) {
           if (!keep.has(accountId)) usageByAccountId.delete(accountId);
         }
-        const pending = saved.filter((account) => !usageByAccountId.has(account.accountId));
+        const pending = saved.filter(
+          (account) =>
+            !usageByAccountId.has(account.accountId) || restoredUsage.has(account.accountId),
+        );
         if (!inspect || pending.length === 0) {
           render();
           return;
         }
         const requests = pending.map((account) => {
-          const loading: AccountUsageViewState = { status: "loading" };
+          restoredUsage.delete(account.accountId);
+          const previous = usageByAccountId.get(account.accountId);
+          const loading: AccountUsageViewState =
+            previous?.status === "ready" ? { ...previous } : { status: "loading" };
           usageByAccountId.set(account.accountId, loading);
           return { account, loading };
         });
@@ -276,6 +304,16 @@ export function createAccountsSettingsPage(
                     }
                   : { status: "empty" },
               );
+              if (result.accountCredits)
+                presentation.usage[account.accountId] = {
+                  credits: result.accountCredits,
+                  observedAt: result.observedAt,
+                };
+              else
+                presentation.usage = Object.fromEntries(
+                  Object.entries(presentation.usage).filter(([id]) => id !== account.accountId),
+                );
+              persist({ usage: presentation.usage });
             } catch {
               if (context.signal.aborted || usageByAccountId.get(account.accountId) !== loading)
                 return;
@@ -302,6 +340,12 @@ export function createAccountsSettingsPage(
         accountPhase = result.phase;
         accountRevision = result.revision;
         accountInstanceId = result.instanceId;
+        presentation.usage = Object.fromEntries(
+          result.accounts.flatMap(({ accountId }) =>
+            presentation.usage[accountId] ? [[accountId, presentation.usage[accountId]]] : [],
+          ),
+        );
+        persist({ codex: result });
         for (const accountId of expandedResetAccounts) {
           if (!accounts.some((account) => account.accountId === accountId))
             expandedResetAccounts.delete(accountId);
@@ -338,19 +382,32 @@ export function createAccountsSettingsPage(
 
       let unsubscribeAccounts: (() => void) | undefined;
       try {
-        unsubscribeAccounts = getClient()?.subscribeCodexAccounts?.((result) => {
+        unsubscribeAccounts = pageClient()?.subscribeCodexAccounts?.((result) => {
           setAccounts(result);
           render();
         });
       } catch {
         // The page remains usable through list and refresh.
       }
-      const harnessAccounts = createHarnessAccounts(context.signal, getClient, render);
-      const directoryClient = getClient();
+      const harnessAccounts = createHarnessAccounts(
+        context.signal,
+        pageClient,
+        () => {
+          if (!harnessAccounts.refreshing)
+            persist({
+              harness: { accounts: [...harnessAccounts.accounts], observedAt: Date.now() },
+            });
+          render();
+        },
+        presentation.harness?.accounts,
+      );
+      render();
+      recordRendererPageOpen("accounts", pageStartedAt, hostId);
+      const directoryClient = pageClient();
       void directoryClient
         ?.listHarnessPlugins?.()
         .then(({ plugins: next }) => {
-          if (context.signal.aborted || getClient() !== directoryClient) return;
+          if (context.signal.aborted || pageClient() !== directoryClient) return;
           plugins = next;
           render();
           void credentialImports.refresh();

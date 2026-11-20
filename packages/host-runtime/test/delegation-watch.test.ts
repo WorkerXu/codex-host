@@ -65,6 +65,39 @@ describe("DelegationWatchService", () => {
     vi.useRealTimers();
   });
 
+  it("delivers a host-qualified notice to the local subscriber", async () => {
+    const remote = runtime({ child: { status: "running" } });
+    const local = runtime({ parent: { status: "completed" } });
+    const service = new DelegationWatchService(
+      {
+        read: (input) => (input.hostId === "mac" ? remote.read(input) : local.read(input)),
+        send: local.send,
+      },
+      { pollIntervalMs: POLL_MS },
+    );
+    const watch = await service.watch({
+      threadId: "child",
+      hostId: "mac",
+      notifyThreadId: "parent",
+      timeoutMs: 60_000,
+    });
+    expect(watch).toMatchObject({ state: "watching", hostId: "mac" });
+    expect((await service.watches()).watches).toMatchObject([
+      { threadId: "child", hostId: "mac", threadStatus: "running" },
+    ]);
+    remote.update("child", { status: "completed" });
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(
+      local.sent.map(({ threadId, message }) => ({
+        threadId,
+        notice: parseThreadWatchNotice(message),
+      })),
+    ).toMatchObject([
+      { threadId: "parent", notice: [{ threadId: "child", hostId: "mac", outcome: "completed" }] },
+    ]);
+    service.close();
+  });
+
   it.each(["completed", "failed", "interrupted"] as const)(
     "notifies the subscriber once when the watched Turn is %s",
     async (status) => {

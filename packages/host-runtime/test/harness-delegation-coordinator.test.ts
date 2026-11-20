@@ -1,3 +1,4 @@
+import { HarnessAvailability } from "../src/harness-availability.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -52,6 +53,7 @@ async function fixture(
     diagnose: () => undefined,
   });
   const coordinator = new HarnessDelegationCoordinator({
+    availability: new HarnessAvailability({}, []),
     adapters,
     environment,
     externalRuntime: runtime,

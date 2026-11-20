@@ -1,3 +1,4 @@
+import type { HarnessAvailability } from "./harness-availability.js";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -34,6 +35,7 @@ import {
   type DelegationThreadSnapshot,
   type HarnessInspectInput,
   type HarnessInspectResult,
+  type HarnessListInput,
   type HarnessListResult,
   type ThreadCancelInput,
   type ThreadCancelResult,
@@ -157,8 +159,11 @@ export class HarnessDelegationCoordinator {
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
   readonly #pendingQuestions: (threadId: string) => DelegationPendingQuestion[];
 
+  readonly #availability: HarnessAvailability;
+
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
+    availability: HarnessAvailability;
     environment: NodeJS.ProcessEnv;
     externalRuntime: ExternalThreadRuntime;
     repository: ExternalThreadRepository;
@@ -191,6 +196,7 @@ export class HarnessDelegationCoordinator {
     pendingQuestions(threadId: string): DelegationPendingQuestion[];
   }) {
     this.#adapters = input.adapters;
+    this.#availability = input.availability;
     this.#environment = input.environment;
     this.#externalRuntime = input.externalRuntime;
     this.#repository = input.repository;
@@ -212,8 +218,13 @@ export class HarnessDelegationCoordinator {
     this.#pendingQuestions = input.pendingQuestions;
   }
 
-  async listHarnesses(): Promise<HarnessListResult> {
-    return { harnesses: ["codex", ...this.#adapters.keys()] };
+  async listHarnesses(input: HarnessListInput = {}): Promise<HarnessListResult> {
+    const harnesses: RoutedHarnessId[] = ["codex", ...this.#adapters.keys()];
+    if (!input.includeAvailability) return { harnesses };
+    return {
+      harnesses,
+      availability: await this.#availability.list(this.#adapters, input.refresh === true),
+    };
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {
@@ -353,7 +364,10 @@ export class HarnessDelegationCoordinator {
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
         });
-        if (!opened.ok) throw new DelegationControlError("DELEGATION_FAILED", opened.error.message);
+        if (!opened.ok) {
+          await this.#availability.invalidate(targetHarnessId);
+          throw new DelegationControlError("DELEGATION_FAILED", opened.error.message);
+        }
         session = opened.value;
         if (session.initialState.nativeRef) {
           record = await this.#repository.commitNative(
@@ -786,7 +800,7 @@ export class HarnessDelegationCoordinator {
   ): Promise<ParentMetadata & { harnessId: RoutedHarnessId }> {
     // A client origin is no Thread; its stored source Harness keeps the native default.
     const client = originClientName(parentThreadId);
-    if (client) return { harnessId: "codex", title: client };
+    if (client) return { harnessId: "codex", title: client.startsWith("peer:") ? "" : client };
     const record = await this.#repository.find(parentThreadId);
     if (record)
       return {

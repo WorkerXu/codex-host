@@ -610,6 +610,8 @@ if (userArguments.length === 0) {
   userArguments[0] === "host" ||
   userArguments[0] === "project" ||
   userArguments[0] === "delegate" ||
+  userArguments[0] === "peer" ||
+  userArguments[0] === "peer-exec" ||
   userArguments[0] === "thread" ||
   userArguments[0] === "client" ||
   userArguments[0] === "events"
@@ -638,6 +640,7 @@ if (userArguments.length === 0) {
       "  codexhost delegate --help",
       "  codexhost harness inspect ...",
       "  codexhost delegate start ...",
+      "  codexhost peer list|add|remove|test|self ...",
       "  codexhost thread send|cancel|read|wait|watch|watches|list|file ...",
       "  codexhost client add|list|remove ...",
       "  codexhost events [--after <id>] [--limit <n>] [--follow true|false]",

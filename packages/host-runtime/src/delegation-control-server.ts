@@ -22,6 +22,7 @@ import { validateThreadExportInput, type ThreadExportInput } from "./delegation-
 import { readThreadResultFile } from "./thread-result-file.js";
 import { validateReadOptions } from "./delegation-snapshot.js";
 import { startWithDelegationWorktree } from "./delegation-worktree.js";
+import { clientOrigin } from "./external-client-origin.js";
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 
@@ -151,7 +152,26 @@ export async function routeDelegationRequest(
     case "/v1/harness/inspect":
       return handlers.api.inspect(body as unknown as HarnessInspectInput);
     case "/v1/delegate/start": {
-      const { worktree, base, ...start } = body;
+      const { worktree, base, origin, ...start } = body;
+      if (origin !== undefined) {
+        const peer = origin as { kind?: unknown; hostId?: unknown; threadId?: unknown } | null;
+        if (
+          peer?.kind !== "peer" ||
+          typeof peer.hostId !== "string" ||
+          !/^[A-Za-z0-9_.:@%+-]{1,256}$/u.test(peer.hostId) ||
+          (peer.threadId !== undefined &&
+            (typeof peer.threadId !== "string" ||
+              !/^[A-Za-z0-9._-]{1,256}$/u.test(peer.threadId))) ||
+          start.parentThreadId !== undefined ||
+          start.watchTimeoutMs !== undefined
+        )
+          throw new DelegationControlError("INVALID_ARGUMENT", "Invalid peer delegation origin");
+        // Match the upstream headless start path, using a namespace that cannot name a client.
+        start.parentThreadId = clientOrigin(
+          `peer:${encodeURIComponent(peer.hostId)}${peer.threadId ? `:${peer.threadId}` : ""}`,
+        );
+        if (start.cwd === undefined) start.cwd = process.cwd();
+      }
       return startWithDelegationWorktree(
         {
           cwd: start.cwd as string | undefined,
@@ -204,6 +224,12 @@ export async function routeDelegationRequest(
       return handlers.api.answer(body as unknown as ThreadAnswerInput);
     case "/v1/thread/watch":
       return watchApi(handlers.watchApi).watch(body as unknown as ThreadWatchInput);
+    case "/v1/thread/watch/cancel": {
+      const watches = watchApi(handlers.watchApi);
+      if (!watches.cancelWatch)
+        throw new DelegationControlError("UNSUPPORTED", "Watch cancellation is unavailable");
+      return watches.cancelWatch(body as unknown as Omit<ThreadWatchInput, "timeoutMs">);
+    }
     case "/v1/thread/watches":
       return watchApi(handlers.watchApi).watches();
     case "/v1/thread/list":

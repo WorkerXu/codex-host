@@ -154,13 +154,23 @@ export const harnessPluginDescriptorSchema = z
   .strict();
 export type HarnessPluginDescriptor = z.infer<typeof harnessPluginDescriptorSchema>;
 
-export const harnessPluginListParamsSchema = z.object({}).strict();
+export const harnessPluginAvailabilitySchema = z.enum([
+  "ready",
+  "notInstalled",
+  "unavailable",
+  "error",
+]);
+export type HarnessPluginAvailability = z.infer<typeof harnessPluginAvailabilitySchema>;
+export const harnessPluginListParamsSchema = z
+  .object({ includeAvailability: z.boolean().optional() })
+  .strict();
 /** This is the Desktop/CH external plugin directory, not a Web execution registry. */
 export const harnessPluginListResultSchema = z
   .object({
     plugins: z
       .array(harnessPluginDescriptorSchema.extend({ id: harnessPluginIdSchema }))
       .max(HARNESS_PLUGIN_LIMIT),
+    availability: z.record(harnessPluginIdSchema, harnessPluginAvailabilitySchema).optional(),
   })
   .strict();
 export type HarnessPluginListResult = z.infer<typeof harnessPluginListResultSchema>;

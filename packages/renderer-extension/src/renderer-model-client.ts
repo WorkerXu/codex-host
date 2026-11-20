@@ -1,4 +1,9 @@
 import {
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerCatalogSchema,
+  type DelegationPeerCatalog,
+} from "@codexhost/shared-contracts";
+import {
   SKILLS_LIST_METHOD,
   SKILLS_CHANGED_METHOD,
   skillsListParamsSchema,
@@ -240,7 +245,8 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   listLoadedSessions?(): Promise<LoadedSession[]>;
   currentHostId?(composer?: Element): string | null;
   knownHostIds?(): readonly string[];
-  listHarnessPlugins?(): Promise<HarnessPluginListResult>;
+  listHarnessPlugins?(input?: { includeAvailability?: boolean }): Promise<HarnessPluginListResult>;
+  listDelegationPeers?(input: { refresh?: boolean }): Promise<DelegationPeerCatalog>;
   listSkills?(params: SkillsListParams): Promise<SkillsListResult>;
   subscribeSkillsChanged?(listener: (params: SkillsChangedParams) => void): () => void;
   clientForHost?(hostId: string): RendererModelClient | null;
@@ -522,9 +528,14 @@ export function createRendererModelClient(
         }) ?? (() => {})
       );
     },
-    async listHarnessPlugins(): Promise<HarnessPluginListResult> {
+    async listDelegationPeers(input: { refresh?: boolean }): Promise<DelegationPeerCatalog> {
+      return delegationPeerCatalogSchema.parse(
+        await manager.sendRequest(DELEGATION_PEER_LIST_METHOD, input),
+      );
+    },
+    async listHarnessPlugins(input = {}): Promise<HarnessPluginListResult> {
       return harnessPluginListResultSchema.parse(
-        await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
+        await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, input),
       );
     },
     async openHarnessWebUi(input: HarnessWebUiOpenParams): Promise<void> {

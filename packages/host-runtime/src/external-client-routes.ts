@@ -63,6 +63,7 @@ function forClient(
     return { ...body, parentThreadId: ownOrigin(client, body.parentThreadId, "parentThreadId") };
   if (
     route === "/v1/thread/watch" ||
+    route === "/v1/thread/watch/cancel" ||
     (route === "/v1/thread/send" && body.watchTimeoutMs !== undefined)
   )
     return { ...body, notifyThreadId: ownOrigin(client, body.notifyThreadId, "notifyThreadId") };

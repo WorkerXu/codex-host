@@ -30,6 +30,7 @@
 | [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 共享 Host 的官方 Codex 与外部 Thread 所有权、存储边界、启动发现及生命周期；不提供旧 standalone 迁移。 |
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
+| [`architecture/peer-delegation.md`](architecture/peer-delegation.md) | SSH peer 配置、跨机器 Thread 路由和 watch、Desktop 目录以及后续功能的接入点。 |
 | [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | CLI 与 HTTP/MCP 委派创建独立 Git worktree 的目录、HEAD 基线、返回字段、状态校验与失败保留边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
 | [`architecture/web-thread-tree.md`](architecture/web-thread-tree.md) | Web 侧栏会话树：委派关系决定的显示父 Thread、Host 树接口、祖先补齐、归档级联、排序与置顶规则；修改侧栏层级或委派显示时阅读。 |
@@ -170,6 +171,7 @@
 | [`platforms/linux/linux.md`](platforms/linux/linux.md) | Linux 安装与诊断的英文说明；修改对应中文说明时同步核对。 |
 | [`platforms/remote/remote-ssh-host.zh-CN.md`](platforms/remote/remote-ssh-host.zh-CN.md) | SSH 远程使用教程：安装、添加连接、选择工具、更新和常见问题。 |
 | [`platforms/remote/remote-ssh-host.md`](platforms/remote/remote-ssh-host.md) | SSH 远程使用教程的英文版；修改对应中文教程时同步核对。 |
+| [`platforms/remote/fork-upgrade-plan.md`](platforms/remote/fork-upgrade-plan.md) | fork 两机升级、数据迁移与回滚方案。 |
 | [`platforms/remote/remote-control-host.zh-CN.md`](platforms/remote/remote-control-host.zh-CN.md) | 在被控 Windows 主机运行 Harness 的 Remote Control 说明；修改该链路时阅读。 |
 | [`platforms/remote/remote-control-host.md`](platforms/remote/remote-control-host.md) | Remote Control Harness Host 的英文说明；修改对应中文说明时同步核对。 |
 | [`platforms/macos/macos-native-tools.md`](platforms/macos/macos-native-tools.md) | macOS Browser 与 Computer Use 辅助 app-server 路由；修改原生工具兼容性时阅读。 |

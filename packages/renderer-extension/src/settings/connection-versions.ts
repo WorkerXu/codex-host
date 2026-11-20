@@ -1,3 +1,4 @@
+import { readCachedHarnessVersion, writeCachedHarnessVersion } from "./connection-version-cache.js";
 import type { ExternalRendererAgent } from "../agent-selection-state.js";
 import type { RendererConnectionDiagnostics } from "./connections-page.js";
 import {
@@ -53,10 +54,15 @@ export function createConnectionVersions(
       const key = sessionKey(hostId, agent);
       let panel = panels.get(key);
       if (!panel) {
-        const run = (action: "check" | "update") => installation(hostId, agent, action);
+        const run = async (action: "check" | "update") => {
+          const result = await installation(hostId, agent, action);
+          writeCachedHarnessVersion(hostId, agent, result);
+          return result;
+        };
         let session = sessions?.get(key);
         if (!session) {
-          session = createHarnessVersionSession({ run });
+          const cached = readCachedHarnessVersion(hostId, agent);
+          session = createHarnessVersionSession({ run }, cached ? { cached } : undefined);
           sessions?.set(key, session);
         }
         panel = createHarnessVersionPanel(

@@ -1,5 +1,9 @@
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
-import { delegationReadParamsSchema, harnessIdSchema } from "@codexhost/shared-contracts";
+import {
+  delegationReadParamsSchema,
+  harnessIdSchema,
+  jsonValueSchema,
+} from "@codexhost/shared-contracts";
 import { z } from "zod";
 import {
   DelegationControlError,
@@ -12,6 +16,20 @@ const snapshot = z.object({
   threadId: z.string(),
   harnessId: z.union([z.literal("codex"), harnessIdSchema]),
   status,
+  cwd: z.string().optional(),
+  title: z.string().optional(),
+  refs: z.array(z.string()).optional(),
+  pendingQuestions: z
+    .array(
+      z.object({
+        kind: z.enum(["requestUserInput", "requestUserInputAsync"]),
+        interactionId: z.string(),
+        turnId: z.string(),
+        expiresAt: z.string().optional(),
+        request: z.record(z.string(), jsonValueSchema),
+      }),
+    )
+    .optional(),
   turn: z.object({ turnId: z.string(), status }).nullable(),
   progress: z.array(z.object({ id: z.string(), turnId: z.string(), text: z.string() })),
   result: z.object({
@@ -57,11 +75,19 @@ export async function readRemoteDelegationThread(
       reply.error.code === -32094 ? "RESPONSE_TOO_LARGE" : "RUNTIME_UNREACHABLE",
       reply.error.message,
     );
+  return parseRemoteDelegationSnapshot(reply.result, input);
+}
+
+export function parseRemoteDelegationSnapshot(
+  value: unknown,
+  input: ThreadReadInput,
+): DelegationThreadSnapshot {
+  const { hostId } = input;
   const schema =
     input.view === "messages"
       ? snapshot.required({ totalTurns: true, from: true, to: true, turns: true })
       : snapshot;
-  const parsed = schema.safeParse(reply.result);
+  const parsed = schema.safeParse(value);
   if (!parsed.success || parsed.data.threadId !== input.threadId)
     throw new DelegationControlError(
       "INTERNAL_ERROR",

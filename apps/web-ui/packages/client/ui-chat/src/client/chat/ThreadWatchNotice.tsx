@@ -21,7 +21,7 @@ function NoticeEntry({
   t: ChatViewSlotProps["t"];
 }) {
   const href = `codex://threads/${entry.threadId}`;
-  const title = () => links?.describe?.(href)?.title;
+  const title = () => (entry.hostId ? undefined : links?.describe?.(href)?.title);
   const currentTitle = useSyncExternalStore(links?.resolve.subscribe ?? noChanges, title, title);
   const known = currentTitle !== undefined;
   return (

@@ -75,6 +75,9 @@ export interface DesktopControlRequestHost {
   readonly usageStatistics: UsageStatistics | undefined;
   readonly externalAdapters: ReadonlyMap<ExternalHarnessId, HarnessAdapter>;
   pluginDescriptors(): readonly HarnessPluginDescriptor[];
+  cachedHarnessAvailability(): Promise<
+    Record<string, "ready" | "notInstalled" | "unavailable" | "error">
+  >;
   listLoadedSessions(): LoadedSession[];
   applyHarnessPreferences(snapshot: HarnessPreferenceSnapshot): void;
   attachUsageStatistics(): void;
@@ -430,7 +433,8 @@ export class DesktopControlRequests {
     }
     if (request.method === "codexhost/harness/plugins/list") {
       this.#host.dispatchReply(request, async () => {
-        if (!harnessPluginListParamsSchema.safeParse(request.params).success) {
+        const params = harnessPluginListParamsSchema.safeParse(request.params);
+        if (!params.success) {
           await this.#host.writeJson(
             rpcError(request, -32602, "Invalid Harness plugin list params"),
           );
@@ -439,6 +443,9 @@ export class DesktopControlRequests {
         await this.#host.waitForPlugins();
         const result = harnessPluginListResultSchema.parse({
           plugins: this.#host.pluginDescriptors(),
+          ...(params.data.includeAvailability
+            ? { availability: await this.#host.cachedHarnessAvailability() }
+            : {}),
         });
         await this.#host.writeJson(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
       });

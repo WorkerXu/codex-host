@@ -593,6 +593,8 @@ describe("npm package release", () => {
     expect(source).toContain('runNativeBroker("install"');
     expect(source).toContain('runNativeBroker("uninstall"');
     expect(source).toContain('userArguments[0] === "delegate"');
+    expect(source).toContain('userArguments[0] === "peer"');
+    expect(source).toContain('userArguments[0] === "peer-exec"');
     expect(source).toContain('userArguments[0] === "thread"');
     expect(source).toContain('userArguments[0] === "client"');
     expect(source).toContain('userArguments[0] === "events"');

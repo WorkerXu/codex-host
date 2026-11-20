@@ -1,3 +1,4 @@
+import { recordRendererPageOpen } from "../renderer-page-timings.js";
 import type {
   CodexhostError,
   HarnessInstallationState,
@@ -564,6 +565,7 @@ export function createConnectionsSettingsPage(
     label: messages.pageLabels.connections,
     icon: "connections",
     mount(context: RendererSettingsPageMountContext) {
+      const pageStartedAt = performance.now();
       const document = context.content.ownerDocument;
       const header = document.createElement("div");
       header.className = "settings-connection-page-header";
@@ -1221,6 +1223,7 @@ export function createConnectionsSettingsPage(
       refresh.addEventListener("click", runRefresh);
       const unsubscribe = diagnostics.subscribe(scheduleRender);
       const unsubscribeInstalls = installs?.subscribe(scheduleRender);
+      recordRendererPageOpen("connections", pageStartedAt, selectedHostId);
       return () => {
         cancelRender();
         hostScroller.dispose();

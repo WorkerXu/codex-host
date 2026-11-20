@@ -112,8 +112,10 @@ function deliveryFailure(error: unknown): "permanent" | "rejected" | "unknown" {
   return "unknown";
 }
 
-function threadLink(threadId: string): string {
-  return `codex://threads/${threadId}`;
+function threadLink(threadId: string, hostId?: string): string {
+  return hostId
+    ? `thread://${threadId}?hostId=${encodeURIComponent(hostId)}`
+    : `codex://threads/${threadId}`;
 }
 
 function duration(milliseconds: number): string {
@@ -129,7 +131,7 @@ function noticeNote(watch: Watch): string | undefined {
       const request = watch.interactionId
         ? `, request ${watch.interactionId}${watch.turnId ? `, Turn ${watch.turnId}` : ""}`
         : "";
-      return `Waiting for an answer${request}. Read the current Question with 'codexhost thread read ${watch.threadId}' and answer it with 'codexhost thread answer <thread> --interaction <id> --answers-file <file>'.`;
+      return `Waiting for an answer${request}. Read the current Question with 'codexhost thread read ${watch.hostId ? threadLink(watch.threadId, watch.hostId) : watch.threadId}' and answer it with 'codexhost thread answer <thread> --interaction <id> --answers-file <file>'.`;
     }
     case "timedOut":
       return `Not stopped after ${duration(watch.timeoutMs)}; run 'codexhost thread watch' again to keep waiting.`;
@@ -151,6 +153,7 @@ function notification(watches: readonly Watch[]): string {
       return {
         threadId: watch.threadId,
         label: threadWatchLabel(watch.title, watch.threadId),
+        ...(watch.hostId ? { hostId: watch.hostId } : {}),
         // Only pending deliveries, whose outcome has been observed, are notified.
         outcome: watch.outcome as ThreadWatchOutcome,
         ...(note ? { note } : {}),
@@ -209,7 +212,7 @@ export class DelegationWatchService {
         "INVALID_ARGUMENT",
         "Notified Thread is required; pass --notify <thread>",
       );
-    if (input.threadId === input.notifyThreadId)
+    if ((!input.hostId || input.hostId === "local") && input.threadId === input.notifyThreadId)
       throw new DelegationControlError("INVALID_ARGUMENT", "A Thread cannot watch itself");
     if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)
       throw new DelegationControlError("INVALID_ARGUMENT", "timeoutMs must be a positive integer");
@@ -221,7 +224,14 @@ export class DelegationWatchService {
         "The notified client is invalid or this Runtime keeps no client events",
       );
     // Both reads reject unknown Threads, so a watch is never reported for a missing end.
-    const target = await this.#api.read({ threadId: input.threadId, view: "result" });
+    const hostId = input.hostId === "local" ? undefined : input.hostId;
+    if (hostId !== undefined && (typeof hostId !== "string" || !hostId.trim()))
+      throw new DelegationControlError("INVALID_ARGUMENT", "Watch Host ID is invalid");
+    const target = await this.#readTarget({
+      threadId: input.threadId,
+      ...(hostId ? { hostId } : {}),
+    });
+    const host = target.hostId ?? hostId;
     if (client === undefined)
       await this.#api.read({ threadId: input.notifyThreadId, view: "result" });
     const result = {
@@ -229,6 +239,7 @@ export class DelegationWatchService {
       notifyThreadId: input.notifyThreadId,
       status: target.status,
       timeoutMs: input.timeoutMs,
+      ...(host ? { hostId: host } : {}),
     };
     if (terminal(target.status)) return { ...result, state: "alreadyTerminal" };
     // A Question already waiting needs no watch: report it once, immediately,
@@ -238,6 +249,7 @@ export class DelegationWatchService {
         if (
           watch.state === "watching" &&
           watch.threadId === input.threadId &&
+          watch.hostId === host &&
           watch.notifyThreadId === input.notifyThreadId
         )
           this.#remove(watch);
@@ -253,6 +265,7 @@ export class DelegationWatchService {
       (watch) =>
         watch.state === "watching" &&
         watch.threadId === input.threadId &&
+        watch.hostId === host &&
         watch.notifyThreadId === input.notifyThreadId,
     );
     if (existing) return { ...result, state: "watching", timeoutMs: existing.timeoutMs };
@@ -264,6 +277,7 @@ export class DelegationWatchService {
       state: "watching",
       registeredAt: new Date().toISOString(),
       timeoutMs: input.timeoutMs,
+      ...(host ? { hostId: host } : {}),
       deadline: Date.now() + input.timeoutMs,
       ...(target.title ? { title: target.title } : {}),
     };
@@ -282,26 +296,49 @@ export class DelegationWatchService {
     return { ...result, state: "watching" };
   }
 
+  async cancelWatch(input: Omit<ThreadWatchInput, "timeoutMs">): Promise<{ cancelled: boolean }> {
+    await this.#ready;
+    let cancelled = false;
+    for (const watch of [...this.#watches]) {
+      if (
+        watch.threadId !== input.threadId ||
+        watch.hostId !== input.hostId ||
+        watch.notifyThreadId !== input.notifyThreadId
+      )
+        continue;
+      this.#remove(watch);
+      cancelled = true;
+    }
+    await this.#writes;
+    return { cancelled };
+  }
+
   async watches(): Promise<ThreadWatchListResult> {
     await this.#ready;
     const watches = [...this.#watches];
-    const snapshots = new Map<string, DelegationThreadSnapshot | undefined>();
-    await Promise.all(
-      [...new Set(watches.map(({ threadId }) => threadId))].map(async (threadId) => {
-        try {
-          snapshots.set(threadId, await this.#api.read({ threadId, view: "result" }));
-        } catch {
-          // A missing or temporarily unreadable Thread must not hide its watch.
-        }
-      }),
+    const snapshots = new Map<string, Promise<DelegationThreadSnapshot | undefined>>();
+    const key = (watch: Watch) => threadLink(watch.threadId, watch.hostId);
+    for (const watch of watches) {
+      if (!snapshots.has(key(watch))) {
+        snapshots.set(
+          key(watch),
+          this.#readTarget(watch).catch(() => undefined),
+        );
+      }
+    }
+    const values = new Map(
+      await Promise.all(
+        [...snapshots].map(async ([link, pending]) => [link, await pending] as const),
+      ),
     );
     const now = Date.now();
     return {
       watches: watches
         .filter((watch) => this.#watches.includes(watch))
-        .map(
-          ({
+        .map((watch) => {
+          const {
             threadId,
+            hostId,
             notifyThreadId,
             state,
             outcome,
@@ -310,27 +347,27 @@ export class DelegationWatchService {
             reason,
             registeredAt,
             title,
-          }) => {
-            const snapshot = snapshots.get(threadId);
-            const taskName = snapshot?.title || title;
-            const registeredMs = Date.parse(registeredAt);
-            return {
-              threadId,
-              notifyThreadId,
-              state,
-              ...(outcome ? { outcome } : {}),
-              ...(turnId ? { turnId } : {}),
-              ...(interactionId ? { interactionId } : {}),
-              ...(reason ? { reason } : {}),
-              registeredAt,
-              ...(taskName ? { taskName } : {}),
-              ...(snapshot ? { threadStatus: snapshot.status } : {}),
-              ...(Number.isFinite(registeredMs)
-                ? { watchedForMs: Math.max(0, now - registeredMs) }
-                : {}),
-            };
-          },
-        ),
+          } = watch;
+          const snapshot = values.get(key(watch));
+          const taskName = snapshot?.title || title;
+          const registeredMs = Date.parse(registeredAt);
+          return {
+            threadId,
+            ...(hostId ? { hostId } : {}),
+            notifyThreadId,
+            state,
+            ...(outcome ? { outcome } : {}),
+            ...(turnId ? { turnId } : {}),
+            ...(interactionId ? { interactionId } : {}),
+            ...(reason ? { reason } : {}),
+            registeredAt,
+            ...(taskName ? { taskName } : {}),
+            ...(snapshot ? { threadStatus: snapshot.status } : {}),
+            ...(Number.isFinite(registeredMs)
+              ? { watchedForMs: Math.max(0, now - registeredMs) }
+              : {}),
+          };
+        }),
     };
   }
 
@@ -343,7 +380,7 @@ export class DelegationWatchService {
       const result = await operation();
       if (result.cancelled) {
         for (const watch of [...this.#watches]) {
-          if (watch.threadId === threadId) this.#remove(watch);
+          if (!watch.hostId && watch.threadId === threadId) this.#remove(watch);
         }
         // Flush ordered removals before acknowledging, using the normal diagnostic-only I/O errors.
         await this.#writes;
@@ -358,7 +395,7 @@ export class DelegationWatchService {
     try {
       await this.#ready;
       for (const watch of this.#watches) {
-        if (watch.threadId === threadId)
+        if (!watch.hostId && watch.threadId === threadId)
           watch.observationGeneration = (watch.observationGeneration ?? 0) + 1;
       }
       return await operation();
@@ -427,13 +464,14 @@ export class DelegationWatchService {
   async #tick(): Promise<void> {
     for (const watch of [...this.#watches]) {
       if (this.#closed) return;
-      if (watch.state !== "watching" || this.#cancelling.has(watch.threadId)) continue;
+      if (watch.state !== "watching" || (!watch.hostId && this.#cancelling.has(watch.threadId)))
+        continue;
       const generation = watch.observationGeneration;
       const observed = await this.#observe(watch);
       if (
         !observed ||
         !this.#watches.includes(watch) ||
-        this.#cancelling.has(watch.threadId) ||
+        (!watch.hostId && this.#cancelling.has(watch.threadId)) ||
         generation !== watch.observationGeneration
       )
         continue;
@@ -457,6 +495,10 @@ export class DelegationWatchService {
     }
   }
 
+  #readTarget({ threadId, hostId }: Pick<ThreadWatchInput, "threadId" | "hostId">) {
+    return this.#api.read({ threadId, ...(hostId ? { hostId } : {}), view: "result" });
+  }
+
   async #observe(
     watch: Watch,
   ): Promise<
@@ -464,7 +506,7 @@ export class DelegationWatchService {
     | undefined
   > {
     try {
-      const snapshot = await this.#api.read({ threadId: watch.threadId, view: "result" });
+      const snapshot = await this.#readTarget(watch);
       delete watch.observeGraceUntil;
       const turnId = snapshot.turn?.turnId;
       const crossedRestart = watch.crossedRestart === true;
@@ -577,7 +619,7 @@ export class DelegationWatchService {
           type: "watch" as const,
           threadId: watch.threadId,
           outcome: watch.outcome ?? "notFound",
-          deepLink: threadLink(watch.threadId),
+          deepLink: threadLink(watch.threadId, watch.hostId),
           ...(watch.turnId ? { turnId: watch.turnId } : {}),
           ...(watch.outcome === "needsInput" && watch.interactionId
             ? { interactionId: watch.interactionId }
@@ -620,13 +662,13 @@ export class DelegationWatchService {
       !this.#closed &&
       this.#watches.includes(watch) &&
       watch.state === "pendingDelivery" &&
-      !this.#cancelling.has(watch.threadId)
+      !(!watch.hostId && this.#cancelling.has(watch.threadId))
     );
   }
 
   #persist(watch: Watch, required = false): Promise<void> {
     // An asynchronous observation or delivery may still hold a removed watch.
-    if (!this.#watches.includes(watch)) return Promise.resolve();
+    if (watch.hostId || !this.#watches.includes(watch)) return Promise.resolve();
     const record = persisted(watch);
     return this.#write((store) => store.save(record), required);
   }
@@ -646,7 +688,7 @@ export class DelegationWatchService {
   #remove(watch: Watch): void {
     const index = this.#watches.indexOf(watch);
     if (index >= 0) this.#watches.splice(index, 1);
-    void this.#write((store) => store.remove(watch.id));
+    if (!watch.hostId) void this.#write((store) => store.remove(watch.id));
   }
 
   #trimUndeliverable(): void {

@@ -36,10 +36,14 @@ function isUnsupportedInstallationError(error: unknown): boolean {
 
 export function createHarnessVersionSession(
   client: { run(action: "check" | "update"): Promise<HarnessInstallationState> },
-  options?: { readonly signal?: AbortSignal },
+  options?: {
+    readonly signal?: AbortSignal;
+    readonly cached?: { state: HarnessInstallationState; fresh: boolean };
+  },
 ): HarnessVersionSession {
-  let state: HarnessInstallationState | undefined;
-  let statusKind: HarnessVersionStatusKind = "checking";
+  let state = options?.cached?.state;
+  let statusKind: HarnessVersionStatusKind = options?.cached?.fresh ? "idle" : "checking";
+  let skipInitialCheck = options?.cached?.fresh === true;
   let checkPromise: Promise<void> | null = null;
   let updatePromise: Promise<boolean> | null = null;
   const listeners = new Set<(pageChange: boolean) => void>();
@@ -123,6 +127,10 @@ export function createHarnessVersionSession(
     },
     prepareMount() {
       if (updatePromise || checkPromise) return false;
+      if (skipInitialCheck) {
+        skipInitialCheck = false;
+        return false;
+      }
       statusKind = "checking";
       return true;
     },

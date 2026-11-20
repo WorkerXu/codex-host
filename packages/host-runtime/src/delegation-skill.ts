@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 15;
+const SKILL_VERSION = 17;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
@@ -35,6 +35,14 @@ const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
   "75eb0ea22c8e3ce875a62133c10d62fedacf381e25202d01688210dd951324c1",
   // Fork v13, before the content split with CLI help.
   "41c2672e34b7a52dee9111f8284a4261b4dbcd42908262dcc814b323bb278e59",
+  // Previously shipped upstream v15 and fork-managed versions.
+  "1ff56f80948aae392c908ae87e7c3763d329c60fd305c4b1f1a29cf32b8f93a3",
+  "6462ae8c4ae3c6434e104a117431cad2ef76e2fa1e87b7735d1fe4fbe7c68a1b",
+  "7caa62a4fed8a0d4ae2f757bc28e80da05fefc6bc2b46b231d42d57c01461a32",
+  "51ca77e7c3c91c4706822dc9c11e6f0cdb0ab5d8497c745b691cc40b72fd2886",
+  "dca27d38f5cc09e24638756d7131cb5388ed72af96db5f1e474f8b2ef3308d61",
+  "c54f0f11a66e7269aa0ca0a613a346a7650a6b16bb1a44b50eb514e46db6e0dd",
+  "c25116f50717539fbf40f1c40a96bc45dbe767c19b4c8d0f2b477dcfd0bb620d",
 ];
 
 export const CODEXHOST_DELEGATION_SKILL = `---
@@ -74,6 +82,24 @@ The running Host saves private local credentials in ~/.codexhost/cli-credentials
 HTTP/MCP clients can use that token in Authorization: Bearer <token>.
 For a separate client identity, run \`codexhost client add <name>\` and store the
 returned token privately. Host-started sessions keep their injected credentials.
+
+A delegation mention can supply a complete \`codexhost delegate start\` command.
+Replace \`<task>\` and \`<short-name>\` and run it directly. Use \`--watch true\`
+to receive a completion notification, then end the Turn. Use a bounded wait
+when the user asks to wait or watch registration is unavailable.
+
+## Cross-machine targets
+
+Use \`codexhost peer list\` to discover configured machines when the target is
+unknown. Pass \`--host <peer>\` to \`delegate start\`, \`harness list|inspect\`,
+and \`thread read|send|cancel|wait|watch|answer\`. Reuse a returned Thread link
+with a \`hostId\` for follow-ups. A remote worktree requires an explicit
+absolute \`--cwd\` on the target Host. The caller's Host registers a remote
+watch and delivers its notice once the target stops or needs input. Use
+\`thread watch <thread> --host <peer> --cancel\` to cancel that watch.
+\`thread list\` and \`thread watches\` query the current Host.
+
+Keep Runtime control credentials private. Use the CLI for Runtime requests.
 
 Use the Harness native defaults unless a Model or Thinking selection is needed.
 

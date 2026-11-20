@@ -22,7 +22,14 @@ export function delegationMentionInstruction(mentions: readonly DelegationMentio
   return [
     `[codexhost delegation] The user mentioned ${describeTargets(mentions)}.`,
     `Use the ${DELEGATION_SKILL_NAME} skill to delegate this request to ${plural ? "each mentioned Harness" : "that Harness"}`,
-    "with `delegate start --harness <id>` through the executable in CODEXHOST_CLI_PATH, instead of doing the task yourself.",
+    "through the executable in CODEXHOST_CLI_PATH.",
+    "Run the command for each selected Harness directly, replacing the task and name placeholders.",
+    ...mentions.map(
+      ({ harnessId }) =>
+        `
+codexhost delegate start --harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
+    ),
+    "\nRead the returned Thread link when reporting results or following up.",
   ].join(" ");
 }
 

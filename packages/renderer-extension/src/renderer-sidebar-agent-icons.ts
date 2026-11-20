@@ -1,3 +1,4 @@
+import { createSidebarOwnershipStore } from "./renderer-sidebar-ownership-cache.js";
 import {
   NATIVE_SCHEDULE_SIDEBAR_ROW_SELECTOR,
   readNativeScheduleSidebarThread,
@@ -312,6 +313,7 @@ class BrowserSidebarAgentIconDom implements SidebarAgentIconDom {
 }
 
 export function installRendererSidebarAgentIcons(options: {
+  observeRows?(rendered: number, total: number): void;
   getClient(hostId: string): RendererModelClient | null;
   getPlugins?(hostId: string): readonly HarnessPluginDescriptor[] | undefined;
   getLocalAgent?(input: {
@@ -322,6 +324,8 @@ export function installRendererSidebarAgentIcons(options: {
   dom?: SidebarAgentIconDom;
 }): RendererSidebarAgentIcons {
   const dom = options.dom ?? new BrowserSidebarAgentIconDom(document);
+  const store = createSidebarOwnershipStore();
+  const hydratedHosts = new Set<string>();
   const ownershipByThread = new Map<string, { agent: RendererAgent; stale: boolean }>();
   const pending = new Set<string>();
   const failed = new Set<string>();
@@ -424,6 +428,13 @@ export function installRendererSidebarAgentIcons(options: {
             clearOwnershipRetry(key);
           }
         }
+        store.write(
+          hostId,
+          threads.map((ownership) => [
+            ownership.threadId,
+            rendererAgentForThreadOwnership(ownership),
+          ]),
+        );
         succeeded = true;
       })
       .catch((error) => {
@@ -447,6 +458,7 @@ export function installRendererSidebarAgentIcons(options: {
     scanScheduled = false;
     if (disposed) return;
     const rows = [...dirtyRows];
+    let rendered = 0;
     dirtyRows.clear();
     const unresolvedByHost = new Map<string, Set<ReturnType<typeof hostThreadIdSchema.parse>>>();
     // Host discovery walks the native React tree. Read artwork once per Host in
@@ -482,6 +494,7 @@ export function installRendererSidebarAgentIcons(options: {
           ownershipByThread.set(key, { agent: localAgent, stale: false });
           clearOwnershipRetry(key);
         }
+        rendered += 1;
         row.render(localAgent, getPlugin(hostId, localAgent));
         continue;
       }
@@ -490,9 +503,18 @@ export function installRendererSidebarAgentIcons(options: {
         continue;
       }
       const key = ownershipKey(hostId, threadId.data);
+      if (!hydratedHosts.has(hostId)) {
+        for (const [savedThread, agent] of store.read(hostId)) {
+          const savedKey = ownershipKey(hostId, savedThread);
+          if (!ownershipByThread.has(savedKey))
+            ownershipByThread.set(savedKey, { agent, stale: true });
+        }
+        hydratedHosts.add(hostId);
+      }
       const cached = ownershipByThread.get(key);
       if (cached) {
         // Revalidation must not remove a known icon while its reply is pending.
+        rendered += 1;
         row.render(cached.agent, getPlugin(hostId, cached.agent));
         if (!cached.stale) continue;
       } else row.clear();
@@ -505,6 +527,7 @@ export function installRendererSidebarAgentIcons(options: {
         unresolved.add(threadId.data);
       }
     }
+    options.observeRows?.(rendered, rows.length);
     for (const [hostId, unresolved] of unresolvedByHost) {
       const client = options.getClient(hostId);
       if (!client) {

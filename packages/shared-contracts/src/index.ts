@@ -89,6 +89,8 @@ export {
   harnessPluginIdSchema,
   harnessPluginListParamsSchema,
   harnessPluginListResultSchema,
+  harnessPluginAvailabilitySchema,
+  type HarnessPluginAvailability,
   harnessPluginManifestSchema,
   installedHarnessPluginIdSchema,
   isHarnessPluginInScope,
@@ -463,3 +465,31 @@ export {
   canonicalizeOfficialCodexModelRef,
   OFFICIAL_CODEX_MODEL_REF_PREFIX,
 } from "./official-codex-model-ref.js";
+
+export {
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerListParamsSchema,
+  delegationPeerStateSchema,
+  delegationPeerCatalogEntrySchema,
+  delegationPeerCatalogSchema,
+  type DelegationPeerListParams,
+  type DelegationPeerState,
+  type DelegationPeerCatalogEntry,
+  type DelegationPeerCatalog,
+} from "./delegation-peer.js";
+
+export {
+  DESKTOP_PROJECTS_CATALOG_METHOD,
+  desktopLocalProjectSchema,
+  desktopRemoteProjectSchema,
+  desktopRemoteConnectionSchema,
+  threadProjectAssignmentSchema,
+  desktopSelectedProjectSchema,
+  type DesktopSelectedProject,
+  desktopProjectsCatalogSchema,
+  type DesktopLocalProject,
+  type DesktopRemoteProject,
+  type DesktopRemoteConnection,
+  type ThreadProjectAssignment,
+  type DesktopProjectsCatalog,
+} from "./desktop-projects.js";

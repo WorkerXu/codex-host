@@ -1,4 +1,12 @@
 import {
+  DESKTOP_PROJECTS_CATALOG_METHOD,
+  DELEGATION_PEER_LIST_METHOD,
+  delegationPeerListParamsSchema,
+} from "@codexhost/shared-contracts";
+import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
+import { DelegationPeerCatalogService } from "./peer-catalog.js";
+import { HarnessAvailability } from "./harness-availability.js";
+import {
   SHARED_DELEGATION_METHOD,
   sharedDelegationRegistration,
   dispatchSharedDelegation,
@@ -774,6 +782,10 @@ export class AppServerHost {
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
 
+  #desktopProjects: DesktopProjectCatalogReader | undefined;
+  #delegationPeers: DelegationPeerCatalogService | undefined;
+  readonly #harnessAvailability: HarnessAvailability;
+
   constructor(options: AppServerHostOptions) {
     this.#options = {
       desktopInput: process.stdin,
@@ -781,6 +793,10 @@ export class AppServerHost {
       diagnosticOutput: process.stderr,
       ...options,
     };
+    this.#harnessAvailability = new HarnessAvailability(
+      options.environment ?? process.env,
+      options.pluginRoots ?? [],
+    );
     this.#externalSteering = new ExternalTurnSteering(options.externalSteerTimeoutMs);
     this.#modelPrices = options.modelPrices ?? new ModelPriceCatalog();
     this.#observedSessionUsage = new ObservedSessionUsage(
@@ -992,6 +1008,7 @@ export class AppServerHost {
     });
     this.#delegationCoordinator = new HarnessDelegationCoordinator({
       adapters: this.#externalAdapters,
+      availability: this.#harnessAvailability,
       environment: this.#options.environment ?? process.env,
       externalRuntime: this.#externalRuntime,
       repository: this.#repository,
@@ -1024,8 +1041,8 @@ export class AppServerHost {
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
     this.#delegationApi = sharedDelegationRegistration(
       {
-        listHarnesses: () =>
-          this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses()),
+        listHarnesses: (input) =>
+          this.#waitForPlugins().then(() => this.#delegationCoordinator.listHarnesses(input)),
         inspect: (input) =>
           this.#waitForPlugins().then(() => this.#delegationCoordinator.inspect(input)),
         start: (input) =>
@@ -1101,6 +1118,8 @@ export class AppServerHost {
       usageStatistics: this.#options.usageStatistics,
       externalAdapters: this.#externalAdapters,
       pluginDescriptors: () => this.#pluginDescriptors,
+      cachedHarnessAvailability: () =>
+        this.#harnessAvailability.cached(this.#externalAdapters.keys()),
       listLoadedSessions: () => this.#externalRuntime.idleRelease.list(),
       applyHarnessPreferences: (snapshot) => this.#applyHarnessPreferences(snapshot),
       attachUsageStatistics: () => this.#attachUsageStatistics(),
@@ -1767,6 +1786,41 @@ export class AppServerHost {
         ...(parsed.data.to !== undefined ? { to: parsed.data.to } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      return;
+    }
+    if (
+      request.method === DESKTOP_PROJECTS_CATALOG_METHOD ||
+      request.method === DELEGATION_PEER_LIST_METHOD
+    ) {
+      if (origin !== "desktop" || this.#options.externalOnly) {
+        await this.#writer.json(
+          rpcError(request, -32601, "This catalog requires a Desktop connection"),
+        );
+        return;
+      }
+      this.#dispatchDesktopReply(request, async () => {
+        const environment = this.#options.environment ?? process.env;
+        if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
+          if (environment.CODEXHOST_REMOTE_SSH_MANAGED === "1") {
+            await this.#writer.json(
+              rpcError(request, -32601, "Desktop projects require the local Host"),
+            );
+            return;
+          }
+          this.#desktopProjects ??= new DesktopProjectCatalogReader({ environment });
+          const result = await this.#desktopProjects.read();
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+          return;
+        }
+        const params = delegationPeerListParamsSchema.safeParse(request.params ?? {});
+        if (!params.success) {
+          await this.#writer.json(rpcError(request, -32602, "Invalid peer catalog request"));
+          return;
+        }
+        this.#delegationPeers ??= new DelegationPeerCatalogService(environment);
+        const result = await this.#delegationPeers.listPeers(params.data);
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      });
       return;
     }
     if (request.method === THREAD_CATALOG_READ_METHOD) {
@@ -3530,6 +3584,7 @@ export class AppServerHost {
       );
       return;
     }
+    const checkedAt = Date.now();
     let inspection: unknown;
     try {
       inspection = await adapter.inspect({
@@ -3552,6 +3607,7 @@ export class AppServerHost {
       );
       return;
     }
+    void this.#harnessAvailability.record(params.data.harnessId, validated.data.status, checkedAt);
     await this.#writer.json(
       rpcEnvelope(request, { result: jsonValueSchema.parse(validated.data) }),
     );
@@ -4534,6 +4590,7 @@ export class AppServerHost {
       ...(requestedPermissionModeId ? { permissionModeId: requestedPermissionModeId } : {}),
     });
     if (!sessionResult.ok) {
+      await this.#harnessAvailability.invalidate(harnessId);
       this.#routeObservationTracker.rejectCreate(request.id);
       await this.#repository.removeProvisional(record.hostThreadId).catch(() => undefined);
       const mapped = mapExternalThreadHarnessError(sessionResult.error, "create");

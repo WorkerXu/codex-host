@@ -704,6 +704,61 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     ).toMatchObject({ availability: "ready", error: null });
   });
 
+  it("recovers an active Host after both the short retries and a reconnected directory probe fail", async () => {
+    vi.useFakeTimers();
+    installFakeBrowser();
+    const hostId = "remote-ssh-discovered:linux";
+    const local = {
+      listHarnessPlugins,
+      inspectHarness: async () => readyInspection(),
+      inspectThread: async () => ({ owner: "codex", locked: true }),
+      inspectThreadCommands: async () => ({ commands: [] }),
+      inspectThreadUsage: async () => ({ threadId: "thread-a", usage: null }),
+    };
+    let connected = false;
+    let ready = false;
+    const remote = {
+      ...local,
+      listHarnessPlugins: async () => {
+        if (!ready) throw new Error("Host is loading its plugins");
+        return listHarnessPlugins();
+      },
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({ enabledAgents: ["codex", "pi"] });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        {
+          ...local,
+          currentHostId: () => hostId,
+          clientForHost: (id: string) => (id === "local" ? local : connected ? remote : null),
+        } as never,
+      );
+      await probe.refreshHarnessDirectory(hostId);
+      await vi.advanceTimersByTimeAsync(16_000);
+      expect(probe.harnessDirectory(hostId)).toMatchObject({
+        error: expect.stringContaining("unavailable"),
+      });
+      connected = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(probe.harnessDirectory(hostId)).toMatchObject({
+        error: "Host is loading its plugins",
+      });
+      ready = true;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(probe.harnessDirectory(hostId)).toMatchObject({
+        error: null,
+        availability: { pi: "ready" },
+      });
+    } finally {
+      probe.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("skips editor text/IME mutations but retains visibility and structural reconciliation", async () => {
     installFakeBrowser();
     const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");

@@ -38,7 +38,13 @@ import {
 } from "./external-client-server.js";
 import { installDelegationSkills } from "./delegation-skill.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
-import { readRemoteDelegationThread } from "./remote-delegation-read.js";
+import {
+  parseRemoteDelegationSnapshot,
+  readRemoteDelegationThread,
+} from "./remote-delegation-read.js";
+import { publishRuntimeControl } from "./runtime-control-file.js";
+import { readPeerConfig, resolvePeerTarget } from "./peer-config.js";
+import { requestPeerRoute } from "./peer-transport.js";
 import {
   DELEGATION_CLI_NODE_PATH_ENV,
   DELEGATION_CLI_PATH_ENV,
@@ -209,7 +215,21 @@ export async function prepareDelegationRuntime(input: {
     retentionDays: eventRetentionDays(input.environment),
   });
   const registry = new DelegationControlRegistry({
-    remoteRead: (request) => readRemoteDelegationThread(input.environment, request),
+    remoteRead: async (request) => {
+      const { hostId, ...body } = request;
+      const peer = hostId
+        ? resolvePeerTarget(await readPeerConfig(input.environment), hostId)
+        : undefined;
+      if (!peer || peer === "local") return readRemoteDelegationThread(input.environment, request);
+      const snapshot = await requestPeerRoute({
+        environment: input.environment,
+        peer,
+        route: "/v1/thread/read",
+        body,
+        timeoutMs: 15_000,
+      });
+      return parseRemoteDelegationSnapshot(snapshot, { ...request, hostId: peer.linkHostId });
+    },
     diagnose: diagnoseWatch,
     watchStore: new FileDelegationWatchStore(
       defaultDelegationWatchDirectory(input.environment),
@@ -263,10 +283,19 @@ export async function prepareDelegationRuntime(input: {
     .catch((error) => {
       process.stderr.write(`codexhost delegation Skill installation failed: ${String(error)}\n`);
     });
+  const peerControl = await publishRuntimeControl({
+    environment: input.environment,
+    endpoint: server.endpoint,
+    token,
+  }).catch((error: unknown) => {
+    process.stderr.write(`codexhost delegation: peer control file unavailable: ${String(error)}\n`);
+    return undefined;
+  });
   try {
     return await input.createHost(environment, (value) => registry.register(value), registry);
   } finally {
     registry.close();
+    await peerControl?.close();
     await externalServer?.close();
     await server.close();
   }

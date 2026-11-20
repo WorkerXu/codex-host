@@ -131,12 +131,13 @@ export function createRendererHostClients(
       },
     ]);
     if (!nativeClient) return null;
-    const client = restoreThreadReferenceCapability(
+    const currentClient = restoreThreadReferenceCapability(
       nativeClient,
       target,
       () => !disposed && readRouting()?.forHost(route.hostId) === route,
       messages,
     );
+    const client = { ...currentClient, currentHostId: () => route.hostId };
     entries.set(route.hostId, { route, client, cleanups });
     try {
       for (const install of [

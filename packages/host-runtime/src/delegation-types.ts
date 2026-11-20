@@ -116,6 +116,8 @@ export interface HarnessInspectInput {
 }
 
 export interface HarnessListInput {
+  includeAvailability?: boolean;
+  refresh?: boolean;
   /** Calling Thread; an official parent cannot list a Harness Desktop must not present. */
   parentThreadId?: string;
 }
@@ -127,6 +129,7 @@ export interface HarnessInspectResult {
 
 export interface HarnessListResult {
   harnesses: RoutedHarnessId[];
+  availability?: Record<string, HarnessInspection["status"]>;
 }
 
 export interface DelegationConfigurationResult {
@@ -167,6 +170,7 @@ export interface ThreadSendInput {
 }
 
 export interface ThreadSendResult {
+  hostId?: string;
   threadId: string;
   turnId: string;
   harnessId: RoutedHarnessId;
@@ -181,6 +185,7 @@ export interface ThreadCancelInput {
 }
 
 export interface ThreadCancelResult {
+  hostId?: string;
   threadId: string;
   turnId: string | null;
   harnessId: RoutedHarnessId;
@@ -211,6 +216,7 @@ export interface ThreadAnswerInput {
 }
 
 export interface ThreadAnswerResult {
+  hostId?: string;
   threadId: string;
   interactionId: string;
   turnId: string;
@@ -258,6 +264,7 @@ export interface DelegationThreadListResult {
 }
 
 export interface ThreadWatchInput {
+  hostId?: string;
   /** Thread observed until it stops. */
   threadId: string;
   /** Thread that receives the single notification. */
@@ -278,6 +285,7 @@ export type ThreadWatchOutcome =
   | "notFound";
 
 export interface ThreadWatchResult {
+  hostId?: string;
   threadId: string;
   notifyThreadId: string;
   /**
@@ -292,6 +300,7 @@ export interface ThreadWatchResult {
 }
 
 export interface ThreadWatchEntry {
+  hostId?: string;
   threadId: string;
   notifyThreadId: string;
   state: "watching" | "pendingDelivery" | "undeliverable";
@@ -323,6 +332,7 @@ export interface ThreadWatchListResult {
 export interface DelegationWatchApi {
   watch(input: ThreadWatchInput): Promise<ThreadWatchResult>;
   watches(): Promise<ThreadWatchListResult>;
+  cancelWatch?(input: Omit<ThreadWatchInput, "timeoutMs">): Promise<{ cancelled: boolean }>;
 }
 
 export interface DelegationControlApi {

@@ -27,6 +27,7 @@ export type ThreadWatchNoticeOutcome = (typeof THREAD_WATCH_NOTICE_OUTCOMES)[num
 
 export interface ThreadWatchNoticeEntry {
   threadId: string;
+  hostId?: string;
   /** Link label: the Thread title when known, otherwise the Thread id. */
   label: string;
   outcome: ThreadWatchNoticeOutcome;
@@ -35,7 +36,7 @@ export interface ThreadWatchNoticeEntry {
 }
 
 const ENTRY_PATTERN = new RegExp(
-  String.raw`^- \[([^\]\n]+)\]\(thread://([^\s()<>"?#/]+)\): ` +
+  String.raw`^- \[([^\]\n]+)\]\(thread://([^\s()<>"?#/]+)(?:\?hostId=([^\s()<>"?#/]+))?\): ` +
     `(${THREAD_WATCH_NOTICE_OUTCOMES.join("|")})(?:\. (.+))?$`,
   "u",
 );
@@ -47,7 +48,7 @@ function oneLine(value: string, forbidden: RegExp): string {
 function formatEntry(entry: ThreadWatchNoticeEntry): string {
   const label = oneLine(entry.label, /[[\]]/gu) || entry.threadId;
   const note = entry.note ? oneLine(entry.note, /\n/gu) : "";
-  return `- [${label}](thread://${entry.threadId}): ${entry.outcome}${note ? `. ${note}` : ""}`;
+  return `- [${label}](thread://${entry.threadId}${entry.hostId ? `?hostId=${encodeURIComponent(entry.hostId)}` : ""}): ${entry.outcome}${note ? `. ${note}` : ""}`;
 }
 
 export function formatThreadWatchNotice(entries: readonly ThreadWatchNoticeEntry[]): string {
@@ -63,9 +64,16 @@ export function parseThreadWatchNotice(text: string): ThreadWatchNoticeEntry[] |
     if (!line.trim()) continue;
     const match = ENTRY_PATTERN.exec(line);
     if (!match) return undefined;
-    const [, label = "", threadId = "", outcome, note] = match;
+    const [, label = "", threadId = "", encodedHostId, outcome, note] = match;
+    let hostId: string | undefined;
+    try {
+      hostId = encodedHostId ? decodeURIComponent(encodedHostId) : undefined;
+    } catch {
+      return undefined;
+    }
     entries.push({
       threadId,
+      ...(hostId ? { hostId } : {}),
       label,
       outcome: outcome as ThreadWatchNoticeOutcome,
       ...(note ? { note } : {}),

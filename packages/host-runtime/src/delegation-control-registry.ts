@@ -148,7 +148,9 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
 
   async read(input: ThreadReadInput) {
     const snapshot = await this.#read(input);
-    return withRefs(snapshot, (await this.#refs?.get(snapshot.threadId)) ?? []);
+    return snapshot.hostId && snapshot.hostId !== "local"
+      ? snapshot
+      : withRefs(snapshot, (await this.#refs?.get(snapshot.threadId)) ?? []);
   }
 
   async #read(input: ThreadReadInput) {
@@ -199,6 +201,10 @@ export class DelegationControlRegistry implements DelegationControlApi, Delegati
 
   async watch(input: ThreadWatchInput) {
     return this.#watchService.watch(input);
+  }
+
+  async cancelWatch(input: Omit<ThreadWatchInput, "timeoutMs">) {
+    return this.#watchService.cancelWatch(input);
   }
 
   async watches() {

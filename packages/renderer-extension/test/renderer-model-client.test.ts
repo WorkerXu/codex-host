@@ -120,6 +120,14 @@ describe("Renderer fixed Model request client", () => {
     expect(sendRequest).not.toHaveBeenCalled();
   });
 
+  it("reads the peer catalog through its fixed Renderer route", async () => {
+    const catalog = { peers: [{ name: "mac", hostIds: [], state: "ready", harnesses: ["codex"] }] };
+    const sendRequest = vi.fn(async () => catalog);
+    const client = createRendererModelClient([{ sendRequest }]);
+    await expect(client?.listDelegationPeers?.({ refresh: true })).resolves.toEqual(catalog);
+    expect(sendRequest).toHaveBeenCalledWith("codexhost/delegation/peers/list", { refresh: true });
+  });
+
   it("asks an outdated remote for its runtime status again after it was updated", async () => {
     const status = {
       runningVersion: "0.12.0",
@@ -436,6 +444,7 @@ describe("Renderer fixed Model request client", () => {
       "inspectThreadUsage",
       "installation",
       "listCodexAccounts",
+      "listDelegationPeers",
       "listHarnessAccountSources",
       "listHarnessAccounts",
       "listHarnessPlugins",
