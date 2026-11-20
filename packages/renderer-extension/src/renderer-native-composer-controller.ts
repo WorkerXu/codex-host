@@ -177,19 +177,18 @@ export function insertNativeMentionContent(
 }
 
 /**
- * Replace the DOM text range with a native `agentMention` node. Returns false
- * when the controller is unavailable or the range no longer holds `expected`.
+ * Insert a native `agentMention` at the current selection or replace a verified DOM range.
  */
 export function insertNativeAgentMention(
   editor: Element,
-  range: NativeTextRange,
+  range: NativeTextRange | null,
   mention: NativeAgentMention,
 ): boolean {
   const controller = findNativeComposerController(editor);
   const nodeType = controller?.view.state.schema.nodes.agentMention;
   if (!controller || !nodeType) return false;
   try {
-    const resolved = resolveRange(controller, range);
+    const resolved = range ? resolveRange(controller, range) : controller.view.state.selection;
     if (!resolved) return false;
     const { from, to } = resolved;
     controller.insertMentionNodeInRange(

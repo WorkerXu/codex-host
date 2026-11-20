@@ -2,7 +2,7 @@
 
 ## 入口与任务管理
 
-Desktop 内的 codexhost 设置侧栏保留“定时任务”入口，选择后直接进入官方任务页面，不显示自有任务列表或创建、编辑表单。跳转通过 Desktop 原生 `navigate-to-route` 路由发送 `/automations`；Desktop 26.1023.50603 在启用新版任务 UI 时将它重定向为 `/scheduled`。只确认当前活动页面的 committed LocationContext，不把后台保留的标签页当作到达。到达后关闭 codexhost 设置；失败或超时保留错误提示和显式重试，不自动重放导航。离开设置目标会停止等待。
+从 Desktop 官方侧栏打开定时任务。codexhost 在官方任务页和原生新建弹窗内提供外部 Harness 支持。
 
 任务创建、查看、修改、暂停、恢复和删除均在官方 UI 中完成。此入口不读取或写入任务存储，不迁移或删除已有日程、Thread 和工作区。没有独立 Console 入口。
 

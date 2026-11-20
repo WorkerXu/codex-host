@@ -1,3 +1,4 @@
+import { desktopJarvisServices } from "./desktop-jarvis.js";
 import { writeFile, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -144,6 +145,7 @@ export async function runSharedHostService(
               })
             : undefined;
         const host = new AppServerHost({
+          ...desktopJarvisServices(hostEnvironment, false),
           stockCodexPath: values["stock-codex"] ?? "",
           arguments: [],
           environment: hostEnvironment,

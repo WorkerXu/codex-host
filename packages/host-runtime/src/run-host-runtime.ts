@@ -1,3 +1,4 @@
+import { desktopJarvisServices } from "./desktop-jarvis.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -424,6 +425,7 @@ export async function runHostRuntime(input: {
         if (!remoteControlPlan) {
           try {
             const host = new AppServerHost({
+              ...desktopJarvisServices(delegationEnvironment, true),
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
@@ -472,6 +474,7 @@ export async function runHostRuntime(input: {
             ...(webOpener ? { webOpener } : {}),
           };
           const host = new AppServerHost({
+            ...desktopJarvisServices(delegationEnvironment, true),
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
@@ -485,6 +488,7 @@ export async function runHostRuntime(input: {
             diagnosticOutput: process.stderr,
             createSession: ({ input: desktopInput, output: desktopOutput, diagnosticOutput }) =>
               new AppServerHost({
+                ...desktopJarvisServices(delegationEnvironment, false),
                 ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
                 modelPrices,
                 usageStatistics,
@@ -559,6 +563,7 @@ export async function runHostRuntime(input: {
       const sharedOwner = new SharedThreadOwner();
       let sharedDelegation: DelegationControlRegistration | undefined;
       const externalHost = new AppServerHost({
+        ...desktopJarvisServices(delegationEnvironment, false),
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
@@ -595,6 +600,7 @@ export async function runHostRuntime(input: {
         diagnosticOutput: process.stderr,
         createSession: ({ input: desktopInput, output: desktopOutput, diagnosticOutput }) => {
           return new AppServerHost({
+            ...desktopJarvisServices(delegationEnvironment, false),
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,

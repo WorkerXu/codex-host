@@ -1,3 +1,5 @@
+import type { RendererModelServiceClient } from "../model-service-client.js";
+import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 import {
   createUsageStatisticsPage,
   type RendererUsageStatisticsHostsProvider,
@@ -684,6 +686,11 @@ function updatesPage(
   });
 }
 
+export interface DesktopWorkbenchSettings {
+  jarvis: RendererJarvisSettingsOptions;
+  modelService: RendererModelServiceClient;
+}
+
 export function createDefaultRendererSettingsPages(
   messages: RendererSettingsMessages = DEFAULT_RENDERER_SETTINGS_MESSAGES,
   getUpdateClient: () => RendererUpdateClient | null = () => null,
@@ -698,6 +705,7 @@ export function createDefaultRendererSettingsPages(
     Promise.reject(new Error("Local Host connection is unavailable")),
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
+  workbench?: DesktopWorkbenchSettings,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
@@ -707,20 +715,24 @@ export function createDefaultRendererSettingsPages(
     }),
     createRemoteConnectionsPage(messages, getRemoteConnections),
     createAccountsSettingsPage(messages, getAccountClient),
-    ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
-    createSessionImportSettingsPage(
-      messages,
-      getSessionImportClient,
-      openImportedThread,
-      getDiagnostics,
-    ),
+    ...(workbench
+      ? [createJarvisSettingsPage(messages, workbench.jarvis)]
+      : [
+          ...(harnessSchedules ? [createHarnessSchedulesPage(messages, harnessSchedules)] : []),
+          createSessionImportSettingsPage(
+            messages,
+            getSessionImportClient,
+            openImportedThread,
+            getDiagnostics,
+          ),
+        ]),
     createUsageStatisticsPage(
       consoleMessages(messages.locale),
       requestUsageStatistics,
       messages.locale,
       usageStatisticsHosts,
     ),
-    createAppearanceSettingsPage(messages, getLoadedSessionsClient),
+    createAppearanceSettingsPage(messages, getLoadedSessionsClient, workbench?.modelService),
     updatesPage(messages, getUpdateClient),
     aboutPage(messages, getUpdateClient),
   ]);

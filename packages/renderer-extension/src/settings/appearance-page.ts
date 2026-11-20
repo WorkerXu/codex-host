@@ -1,3 +1,5 @@
+import { mountModelServiceSection } from "./model-service-section.js";
+import type { RendererModelServiceClient } from "../model-service-client.js";
 import {
   REASONING_SOFT_WRAP_CHANGE_EVENT,
   readReasoningTranscriptSoftWrap,
@@ -17,6 +19,7 @@ import {
 export function createAppearanceSettingsPage(
   messages: RendererSettingsMessages,
   getLoadedSessionsClient: () => LoadedSessionsClient | null = () => null,
+  modelService: RendererModelServiceClient | null = null,
 ): RendererSettingsPageDefinition {
   return Object.freeze({
     id: "appearance",
@@ -54,6 +57,7 @@ export function createAppearanceSettingsPage(
       card.append(row.item);
 
       context.content.append(heading, description, group);
+      if (modelService) mountModelServiceSection(context, modelService);
       const disposeIdleRelease = mountIdleReleaseControls(
         context,
         messages,

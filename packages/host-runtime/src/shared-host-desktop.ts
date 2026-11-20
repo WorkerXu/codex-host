@@ -1,3 +1,4 @@
+import { desktopJarvisServices } from "./desktop-jarvis.js";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -104,6 +105,7 @@ export function sharedHostDesktop(
   const webOpener = createHostWebOpener(options.environment);
   const createHost = () =>
     new AppServerHost({
+      ...desktopJarvisServices(environment, nativeArguments !== undefined),
       stockCodexPath: options.stockCodex,
       arguments: [],
       environment,

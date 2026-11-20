@@ -1,3 +1,5 @@
+import { createDesktopJarvis } from "./renderer-desktop-jarvis.js";
+import { installRendererJarvisMention } from "./renderer-jarvis-mention.js";
 import {
   HARNESS_PREFERENCES_UPDATED_EVENT,
   rendererHarnessPreferences,
@@ -122,7 +124,6 @@ import {
   isNativeProjectThreadCreator,
 } from "@codexhost/desktop-control/renderer-bindings";
 import { loadCodexNativeServices } from "./codex-native-services.js";
-import { openCodexSchedules } from "./codex-schedule-navigation.js";
 import { openRendererThread } from "./renderer-fork-control.js";
 import type {
   RendererConnectionDiagnostics,
@@ -855,10 +856,9 @@ export function installRendererBindingProbe(
     listConnections: () => remoteConnections.ssh.list(),
     disposed: () => disposed,
   });
+  const desktopJarvis = createDesktopJarvis(window, remoteConnections);
   const settingsLifecycle = installRendererSettingsLifecycle(window, {
-    harnessSchedules: {
-      openSchedules: (signal) => openCodexSchedules(signal),
-    },
+    workbench: desktopJarvis.settings,
     getRemoteConnections: () => remoteConnections,
     getUpdateClient: () => modelControl,
     getAccountClient: () => modelControl,
@@ -3398,6 +3398,31 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
+  const jarvisMention = installRendererJarvisMention(document, {
+    ...desktopJarvis.search,
+    isComposerEditor: (editor) => {
+      const composer = composerForElement(editor);
+      return composer !== null && isMountedComposer(composer);
+    },
+    readHostId: (editor) => {
+      const composer = composerForElement(editor);
+      const mounted = composer ? mountedByComposer.get(composer) : undefined;
+      return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
+    },
+    readLocale: () => settingsLifecycle.locale,
+    anchorForEditor: (editor) =>
+      editor.closest("[data-composer-body]") ?? composerForElement(editor),
+    openSettings: (opener) => {
+      const shell = (
+        window as Window & {
+          __codexhostSettingsShellV1?: {
+            openSettings(opener?: HTMLElement, pageId?: string): boolean;
+          };
+        }
+      ).__codexhostSettingsShellV1;
+      shell?.openSettings(opener, "appearance");
+    },
+  });
   delegationMention = installRendererDelegationMention(document, {
     readSkills: (editor) => skillLibrary.read(editor),
     onClose: () => skillLibrary.close(),
@@ -3619,6 +3644,7 @@ export function installRendererBindingProbe(
       mutationObserver.disconnect();
       disposeReasoningSoftWrap();
       delegationMention?.dispose();
+      jarvisMention.dispose();
       skillLibrary.dispose();
       disposeSkillReferences();
       sidebarAgentIcons.dispose();

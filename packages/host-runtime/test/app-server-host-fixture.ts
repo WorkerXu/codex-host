@@ -292,6 +292,8 @@ export function createFixture(
       OfficialAppServerConnection | Promise<OfficialAppServerConnection>;
     updateCoordinator?: HostUpdateCoordinator;
     runtimeMaintenance?: RuntimeMaintenance;
+    jarvis?: AppServerHostOptions["jarvis"];
+    modelService?: AppServerHostOptions["modelService"];
     consoleOpener?: HostConsoleOpener;
     webOpener?: AppServerHostOptions["webOpener"];
     accountControl?: CodexAccountControl;
@@ -340,6 +342,8 @@ export function createFixture(
   const createOfficialConnection = options.createOfficialConnection;
   if (options.officialRuntimeScope) startup.resolve(undefined);
   const host = new AppServerHost({
+    ...(options.jarvis ? { jarvis: options.jarvis } : {}),
+    ...(options.modelService ? { modelService: options.modelService } : {}),
     ...(options.sharedThreads ? { sharedThreads: options.sharedThreads } : {}),
     ...(options.sharedDelegation ? { sharedDelegation: options.sharedDelegation } : {}),
     stockCodexPath: "/synthetic/codex",

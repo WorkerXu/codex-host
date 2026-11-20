@@ -11,6 +11,7 @@ import {
 } from "./settings/localization.js";
 import {
   createDefaultRendererSettingsPages,
+  type DesktopWorkbenchSettings,
   type RendererConnectionDiagnostics,
   type RendererCodexAccountClient,
   type RendererUpdateClient,
@@ -29,6 +30,7 @@ const UPDATE_CHECK_TIMEOUT_MS = 5_000;
 const UPDATE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000] as const;
 
 export interface RendererSettingsLifecycleOptions {
+  workbench?: DesktopWorkbenchSettings;
   harnessSchedules?: HarnessSchedulesPageOptions;
   getUpdateClient?(): RendererUpdateClient | null;
   getConnectionDiagnostics?(): RendererConnectionDiagnostics | null;
@@ -98,6 +100,7 @@ export function installRendererSettingsLifecycle(
             },
           }
         : undefined,
+      options.workbench,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {
