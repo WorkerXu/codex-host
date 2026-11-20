@@ -658,6 +658,12 @@ class BrokeredHarnessSession implements HarnessSession {
         : connection.request("adapter.open", {
             kind: "resume",
             cwd: this.openInput.cwd,
+            ...("additionalDirectories" in this.openInput && this.openInput.additionalDirectories
+              ? { additionalDirectories: this.openInput.additionalDirectories }
+              : {}),
+            ...(this.openInput.kind === "resume" && this.openInput.previousCwd
+              ? { previousCwd: this.openInput.previousCwd }
+              : {}),
             nativeRef,
             ...(this.openInput.environment ? { environment: this.openInput.environment } : {}),
             ...(this.#state.effectiveModel ? { model: this.#state.effectiveModel } : {}),
@@ -720,6 +726,7 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
   readonly #sessions = new Set<BrokeredHarnessSession>();
   readonly commandCatalog?: HarnessCommandCatalog;
   readonly liveCommandCatalog?: boolean;
+  readonly additionalDirectories?: boolean;
   readonly harnessId: HarnessId;
   readonly sessionImport?: HarnessSessionImportCapability;
   readonly credits?: () => AccountCreditsSnapshot | null;
@@ -760,6 +767,7 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
       environment?: NodeJS.ProcessEnv;
       commandCatalog?: HarnessCommandCatalog;
       liveCommandCatalog?: boolean;
+      additionalDirectories?: boolean;
       /** Cheap local check; a broker is never started for a CLI that is not installed. */
       isInstalled?: () => boolean;
       /**
@@ -788,6 +796,7 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
     }
     this.#forwardEnvironment = input.forwardDelegationEnvironment === true;
     if (input.commandCatalog) this.commandCatalog = input.commandCatalog;
+    if (input.additionalDirectories) this.additionalDirectories = true;
     if (input.liveCommandCatalog) this.liveCommandCatalog = true;
     this.#descriptorPath =
       input.descriptorPath ?? defaultHarnessBrokerDescriptorPath(input.environment, this.harnessId);

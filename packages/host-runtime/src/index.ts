@@ -124,3 +124,4 @@ export const packageMetadata = {
     updateManager.name,
   ],
 } as const;
+export * from "./thread-folders-probe.js";

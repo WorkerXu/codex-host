@@ -644,6 +644,39 @@ async function consumeCreationPrewarm(input: Record<string, unknown>, consume: (
   return config == null || Object.keys(config).length === 0 ? consume() : null;
 }
 
+it("applies escaped workspace roots only to the selected draft and bypasses its stale prewarm", async () => {
+  const fixture = setup();
+  const routing = await install(fixture);
+  try {
+    const policy = policyOf(routing.forComposer());
+    policy.selectWorkingFolders?.("client-new-thread:folders", ["/primary", "/extra"]);
+    fixture.post(creation("prewarmConversation", "official", {}));
+    const chosen = creation("startConversation", "official", {
+      clientThreadId: "client-new-thread:folders",
+    });
+    const unrelated = creation("startConversation", "official", {
+      clientThreadId: "client-new-thread:other",
+    });
+    fixture.post(chosen);
+    const input = ((fixture.sent.at(-1) as unknown[])[1] as unknown[])[3] as Record<
+      string,
+      unknown
+    >[];
+    const routed = input[0];
+    expect(routed).toMatchObject({
+      cwd: "/primary",
+      workspaceRoots: [["/primary", "/extra"]],
+      config: { model: "official" },
+    });
+    if (!routed) throw new Error("Missing creation input");
+    expect(await consumeCreationPrewarm(routed, () => "wrong-roots")).toBeNull();
+    fixture.post(unrelated);
+    expect(fixture.sent.at(-1)).toBe(unrelated);
+  } finally {
+    routing.dispose();
+  }
+});
+
 it.each(["local", "remote-ssh:isolated", "remote-control:legacy"])(
   "does not consume a late official prewarm for an external draft on %s",
   async (hostId) => {

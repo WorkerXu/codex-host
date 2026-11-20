@@ -2,9 +2,15 @@ import { draftPermissionMode, type DraftConfiguration } from "./draft-configurat
 /** CH-backed Web facade: canonical Threads are owned/persisted by CH, Web holds only rendering buffers. */
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import {
   THREAD_ARCHIVE_CONFIRM_METHOD,
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
+  THREAD_FOLDERS_PARAM,
+  threadFoldersGetResultSchema,
+  threadFoldersSelectionSchema,
+  workingFoldersSchema,
   WEB_FOLLOW_PROJECTION_KEYS,
   webTurnDiffsRequestSchema,
   webToolOutputReferenceSchema,
@@ -69,6 +75,7 @@ interface Draft {
   id: string;
   cwd?: string;
   selection: ModelSelection;
+  workingFolders?: string[];
   permissionModeId?: string;
   createdAt: number;
   canonicalId?: string;
@@ -804,17 +811,64 @@ export class ChSessions {
     if (configuration.permissionModeId) draft.permissionModeId = configuration.permissionModeId;
   }
 
+  private async workingFolders(sessionId: unknown, input?: { folders: unknown }) {
+    if (typeof sessionId !== "string" || !sessionId)
+      throw new RpcError("session/not-found", "找不到对话");
+    const id = this.id(sessionId);
+    const draft = this.drafts.get(id);
+    if (input && draft?.creating) throw new RpcError("session/busy", "正在创建对话，请稍后重试");
+    const row = draft ? undefined : (this.rows.get(id) ?? (await this.view(id, true)).thread);
+    if (row?.parentThreadId || row?.canAcceptDirectInput === false)
+      throw new RpcError("session/read-only", "此对话无法更改工作文件夹");
+    const params = draft ? { harnessId: draft.selection.provider } : { threadId: id };
+    const state = threadFoldersGetResultSchema.parse(
+      await this.host.request(THREAD_FOLDERS_GET_METHOD, params),
+    );
+    const cwd = draft?.cwd ?? row?.cwd;
+    let folders = draft?.workingFolders ?? state.selection?.folders ?? (cwd ? [cwd] : []);
+    if (input) {
+      const parsed = workingFoldersSchema.safeParse(input.folders);
+      if (
+        !parsed.success ||
+        parsed.data.some((folder) => !isAbsolute(folder) || folder.includes("\0"))
+      )
+        throw new RpcError("workspace/invalid-path", "请选择有效的绝对路径");
+      if (draft) {
+        if (draft.creating) throw new RpcError("session/busy", "正在创建对话，请稍后重试");
+        draft.workingFolders = parsed.data;
+        folders = parsed.data;
+      } else {
+        const selection = threadFoldersSelectionSchema.parse(
+          await this.host.request(THREAD_FOLDERS_SET_METHOD, {
+            threadId: id,
+            folders: parsed.data,
+          }),
+        );
+        folders = selection.folders;
+      }
+    }
+    return { folders, recent: state.recent, additionalDirectories: state.additionalDirectories };
+  }
   private async commit(draft: Draft, prompt: string): Promise<string> {
     if (draft.canonicalId) return draft.canonicalId;
     draft.creating ??= (async () => {
       const plugin = (await this.catalog.list()).some(
         (item) => item.id === draft.selection.provider,
       );
+      const workspace = draft.cwd;
+      const projectId =
+        workspace && draft.workingFolders
+          ? (await this.host.projects([])).projects.find((project) =>
+              project.rootPaths.some((root) => resolve(root) === resolve(workspace)),
+            )?.id
+          : undefined;
       const result = await this.host.request<{ thread: ChThread }>("thread/start", {
+        ...(projectId ? { projectId } : {}),
         historyMode: "paginated",
         ...(draft.cwd
           ? { cwd: draft.cwd }
           : { projectlessWorkspace: { prompt: prompt.slice(0, 16_384) } }),
+        ...(draft.workingFolders ? { [THREAD_FOLDERS_PARAM]: draft.workingFolders } : {}),
         ...(plugin
           ? {
               model: encodeHarnessPluginRoute(
@@ -857,7 +911,7 @@ export class ChSessions {
       this.workspaces.detachSession(draft.id);
       if (draft.cwd) {
         this.workspaces.selectReferenceWorkspace(draft.cwd);
-        this.workspaces.attachReferencedSession(result.thread.id, result.thread.cwd);
+        this.workspaces.attachReferencedSession(result.thread.id, draft.cwd);
         this.workspaces.addDraftReference(result.thread.id, draft.cwd);
       } else {
         this.workspaces.addDraftReference(result.thread.id, undefined);
@@ -1144,6 +1198,10 @@ export class ChSessions {
       };
     });
     rpc.register("session/create", (args) => this.create(args));
+    rpc.register(THREAD_FOLDERS_GET_METHOD, (args) => this.workingFolders(args.sessionId));
+    rpc.register(THREAD_FOLDERS_SET_METHOD, (args) =>
+      this.workingFolders(args.sessionId, { folders: args.folders }),
+    );
     rpc.register("session/fork", async (args) => {
       const request = requestOf<{ sessionId: string; atSeq?: number }>(args);
       if (

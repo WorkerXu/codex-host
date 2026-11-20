@@ -621,6 +621,7 @@ class ClaudeHarnessSession implements HarnessSession {
   readonly #createTransport: ClaudeAdapterDependencies["createTransport"];
   readonly #bypassPermissionsAvailable: boolean;
   readonly #cwd: string;
+  readonly #additionalDirectories: readonly string[];
   readonly #nativeRef: NativeSessionRef;
   readonly #onClosed: () => void;
   readonly #onPlanLimitObserved: (planLimit: ClaudePlanLimitEvent) => ClaudePlanLimitEvent | null;
@@ -683,6 +684,7 @@ class ClaudeHarnessSession implements HarnessSession {
     onPlanLimitObserved: (planLimit: ClaudePlanLimitEvent) => ClaudePlanLimitEvent | null,
     options: {
       environment?: NodeJS.ProcessEnv;
+      additionalDirectories?: readonly string[];
       bypassPermissionsAvailable: boolean;
       openMode: "create" | "resume";
       sessionId: string;
@@ -706,6 +708,7 @@ class ClaudeHarnessSession implements HarnessSession {
     },
   ) {
     this.#cwd = cwd;
+    this.#additionalDirectories = options.additionalDirectories ?? [];
     this.#lastAssistantResponseAtUnix = options.usageHistory.lastResponseAtUnix;
     this.#accountCreditsSupported = options.accountCreditsSupported;
     const composerIndicators = claudePromptCacheIndicators(
@@ -1876,6 +1879,7 @@ class ClaudeHarnessSession implements HarnessSession {
     try {
       transport = this.#createTransport({
         cwd: this.#cwd,
+        additionalDirectories: this.#additionalDirectories,
         sessionId: this.#sessionId,
         openMode: this.#openMode,
         ...(model ? { model } : {}),
@@ -3158,6 +3162,7 @@ class ClaudeHarnessSession implements HarnessSession {
 export class ClaudeCodeAdapter implements HarnessAdapter {
   readonly commandCatalog = claudeCommandCatalog;
   readonly liveCommandCatalog = true;
+  readonly additionalDirectories = true;
   readonly harnessId: HarnessId = claudeCodeHarnessId;
   readonly sessionImport = Object.freeze({
     listCandidates: async (): Promise<HarnessResult<readonly HarnessSessionImportCandidate[]>> => {
@@ -3674,6 +3679,9 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       {
         ...(environment ? { environment } : {}),
         bypassPermissionsAvailable,
+        ...(input.kind === "create" || input.kind === "resume"
+          ? { additionalDirectories: input.additionalDirectories ?? [] }
+          : {}),
         openMode,
         pendingSessions: this.#pendingSessions,
         knownConfiguration:

@@ -1,6 +1,8 @@
 /** Thin client for the CodexHost server's `codexhost/*` RPC methods. */
 import { randomUUID } from "@deepseek-ai/dsh-util-crypto";
 import {
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
   harnessSessionImportResultSchema,
   updateCheckResultSchema,
   voiceStatusResultSchema,
@@ -41,10 +43,15 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, args: Record<string, unknown>): Promise<T> {
+async function call<T>(
+  method: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`api/${method}`, {
     method: "POST",
     credentials: "same-origin",
+    ...(signal ? { signal } : {}),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       type: "client-request",
@@ -65,6 +72,19 @@ async function call<T>(method: string, args: Record<string, unknown>): Promise<T
   }
   return envelope.result.value;
 }
+
+export interface WorkingFoldersView {
+  folders: string[];
+  recent: string[];
+  additionalDirectories: boolean;
+}
+
+export const workingFoldersApi = {
+  read: (sessionId: string, signal?: AbortSignal) =>
+    call<WorkingFoldersView>(THREAD_FOLDERS_GET_METHOD, { sessionId }, signal),
+  write: (sessionId: string, folders: string[]) =>
+    call<WorkingFoldersView>(THREAD_FOLDERS_SET_METHOD, { sessionId, folders }),
+};
 
 export async function checkHostUpdate(signal: AbortSignal) {
   const response = await fetch("api/ch/v1/rpc", {

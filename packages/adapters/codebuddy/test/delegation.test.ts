@@ -33,8 +33,14 @@ describe("CodeBuddy cross-Harness delegation", () => {
     ).toEqual(["--acp"]);
   });
 
-  it("retains per-Thread delegation environment across create and resume", async () => {
+  it("retains native directory options and delegation environment across create and resume", async () => {
     const native = fixture();
+    const additionalDirectories = ["/docs", "/shared project"];
+    expect(codeBuddyInvocation({}, false, undefined, additionalDirectories).arguments).toEqual([
+      "--acp",
+      "--add-dir",
+      ...additionalDirectories,
+    ]);
     const adapter = new CodeBuddyAdapter({
       ...native,
       environment: { ...runtime, CODEXHOST_THREAD_ID: "stale-parent" },
@@ -53,11 +59,16 @@ describe("CodeBuddy cross-Harness delegation", () => {
         kind: "create",
         cwd: process.cwd(),
         environment: runtime,
+        additionalDirectories,
         executionPolicy: "unattended-full-access",
       });
       if (!opened.ok) throw Error(opened.error.message);
       expect(opened.value.initialState.effectivePermissionModeId).toBe("fullAccess");
-      expect(native.clients[0]?.context.environment).toMatchObject(runtime);
+      expect(native.clients[0]?.context).toMatchObject({
+        environment: runtime,
+        additionalDirectories,
+        cwd: process.cwd(),
+      });
       const ref = opened.value.initialState.nativeRef;
       if (!ref) throw Error("No native identity");
       native.history.push({ id: "existing", type: "message", role: "user", content: "earlier" });
@@ -67,9 +78,14 @@ describe("CodeBuddy cross-Harness delegation", () => {
         cwd: process.cwd(),
         nativeRef: ref,
         environment: runtime,
+        additionalDirectories,
       });
       expect(resumed.ok).toBe(true);
-      expect(native.clients.at(-1)?.context.environment).toMatchObject(runtime);
+      expect(native.clients.at(-1)?.context).toMatchObject({
+        environment: runtime,
+        additionalDirectories,
+        cwd: process.cwd(),
+      });
     } finally {
       await adapter.close();
     }

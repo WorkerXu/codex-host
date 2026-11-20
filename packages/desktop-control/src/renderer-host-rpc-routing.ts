@@ -110,6 +110,10 @@ export function installRendererHostRpcRouting(
   // still issues each creation call; the selected carrier is applied to that call.
   const externalDrafts = new Map<string, { model: string; owner: RendererHostRoutePolicy }>();
   const selectedModels = new Map<string, string>();
+  const folderDrafts = new Map<
+    string,
+    { folders: readonly string[]; owner: RendererHostRoutePolicy }
+  >();
   const prewarmCarrier = (carrier: string): string | null => {
     const prefix = "codexhost/plugin-v1@";
     if (!carrier.startsWith(prefix)) return null;
@@ -162,9 +166,11 @@ export function installRendererHostRpcRouting(
     // A creation can omit its native Model; a registered external draft still needs its carrier.
     const nativeModel = typeof settings.model === "string" ? settings.model : null;
     let model: string | null = null;
+    let folders: readonly string[] | undefined;
     if (path[0] === "startConversation") {
       const draftId = isRecord(options) ? options.clientThreadId : null;
       model = typeof draftId === "string" ? (externalDrafts.get(draftId)?.model ?? null) : null;
+      folders = typeof draftId === "string" ? folderDrafts.get(draftId)?.folders : undefined;
     } else if (path[0] === "prewarmConversation") {
       // Desktop prewarms only local drafts; the pool is keyed by workspace, not Model.
       if (input.ephemeral !== true) publishDraftWorkspace("local", input.cwd);
@@ -174,19 +180,17 @@ export function installRendererHostRpcRouting(
       const carrier = nativeModel?.startsWith("codexhost/") ? nativeModel : selected;
       model = carrier ? prewarmCarrier(carrier) : null;
     }
-    if (!model) return message;
+    if (!model && !folders) return message;
     // A creation that names a different external carrier keeps it.
     if (path[0] === "startConversation" && nativeModel?.startsWith("codexhost/"))
       model = nativeModel;
-    // The native pool is keyed by workspace, not Model. An explicit creation
-    // config keeps external drafts out of that pool even after a late prewarm.
-    // Caller overrides still belong to native preparation and take precedence.
+    // An explicit config keeps scoped creations out of the cwd-keyed native pool.
+    // Retain the draft's native Model and any caller overrides.
+    const configuredModel = model ?? nativeModel;
     const config =
-      input.config == null
-        ? { model }
-        : isRecord(input.config)
-          ? { model, ...input.config }
-          : input.config;
+      configuredModel && (input.config == null || isRecord(input.config))
+        ? { model: configuredModel, ...(isRecord(input.config) ? input.config : {}) }
+        : input.config;
     return [
       "push",
       [
@@ -196,8 +200,17 @@ export function installRendererHostRpcRouting(
         [
           {
             ...input,
-            ...(path[0] === "startConversation" ? { config } : {}),
-            collaborationMode: { ...input.collaborationMode, settings: { ...settings, model } },
+            // Cap'n Web escapes a literal array in the pipeline arguments with another array.
+            ...(folders ? { cwd: folders[0], workspaceRoots: [[...folders]] } : {}),
+            ...(path[0] === "startConversation" && config !== undefined ? { config } : {}),
+            ...(model
+              ? {
+                  collaborationMode: {
+                    ...input.collaborationMode,
+                    settings: { ...settings, model },
+                  },
+                }
+              : {}),
           },
           ...args.slice(1),
         ],
@@ -344,11 +357,18 @@ export function installRendererHostRpcRouting(
         void clear().catch(() => undefined);
         return true;
       },
+      selectWorkingFolders(draftId: string, folders: readonly string[]) {
+        if (!isCurrent() || !draftId.startsWith("client-new-thread:") || !folders.length)
+          throw new Error("Desktop 工作文件夹绑定不可用");
+        folderDrafts.set(draftId, { folders: [...folders], owner: policy });
+        void clear().catch(() => undefined);
+      },
       clear,
       dispose() {
         if (retired) return;
         retired = true;
         clearDrafts();
+        for (const [id, draft] of folderDrafts) if (draft.owner === policy) folderDrafts.delete(id);
         selectedModels.delete(hostId);
       },
     });

@@ -1,0 +1,303 @@
+[data-above-composer-portal]:has(> [data-codexhost-thread-folders]) {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+[data-codexhost-thread-folders] {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  font: inherit;
+}
+.codexhost-folders-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(320px, 50vw);
+  height: var(--spacing-token-button-composer);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-token-text-secondary);
+  font: inherit;
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+  cursor: pointer;
+}
+.codexhost-folders-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-chip:hover,
+.codexhost-folders-chip[aria-expanded="true"] {
+  background: var(--color-token-list-hover-background);
+  color: var(--color-token-text-primary);
+}
+.codexhost-folders-chip svg,
+.codexhost-folders-popover svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.codexhost-folders-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, calc(100dvh - 120px));
+  overflow: auto;
+  padding: 4px;
+  border: 0.5px solid var(--color-token-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px);
+  background: var(--color-token-dropdown-background);
+  color: var(--color-token-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-text-sm-size);
+  line-height: var(--font-text-sm-line-height);
+}
+.codexhost-folders-popover::backdrop {
+  background: transparent;
+}
+.codexhost-folders-popover h3 {
+  margin: 0;
+  padding: 8px;
+  font: inherit;
+  font-weight: 600;
+}
+.codexhost-folders-hint,
+.codexhost-folders-heading {
+  padding: 8px 8px 4px;
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+.codexhost-folders-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  padding-right: 8px;
+  min-height: 48px;
+}
+.codexhost-folders-row:hover,
+.codexhost-folders-row:has(:focus-visible) {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-folders-popover button {
+  font: inherit;
+  cursor: pointer;
+}
+.codexhost-folders-choice,
+.codexhost-folders-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+.codexhost-folders-choice {
+  flex: 1;
+}
+.codexhost-folders-choice:disabled {
+  cursor: default;
+}
+.codexhost-folders-check {
+  display: flex;
+  flex: none;
+  width: 16px;
+}
+.codexhost-folders-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.codexhost-folders-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-detail {
+  display: flex;
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+.codexhost-folders-main {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-token-list-hover-background);
+  color: var(--color-token-text-secondary);
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+.codexhost-folders-action {
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  color: var(--color-token-text-secondary);
+  background: transparent;
+}
+.codexhost-folders-action:hover,
+.codexhost-folders-add:hover {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-folders-row .codexhost-folders-action {
+  font-size: var(--font-text-xs-size);
+  opacity: 0;
+}
+.codexhost-folders-row:hover .codexhost-folders-action,
+.codexhost-folders-row:has(:focus-visible) .codexhost-folders-action {
+  opacity: 1;
+}
+.codexhost-folders-add {
+  width: 100%;
+  margin-top: 4px;
+}
+.codexhost-folders-path {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 4px;
+  flex: none;
+}
+.codexhost-folders-path input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--color-token-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  height: var(--control-size-xs);
+  padding: 0 8px;
+  box-sizing: border-box;
+  font: inherit;
+}
+.codexhost-folders-error {
+  padding: 8px;
+  color: var(--color-text-danger-surface);
+  font-size: var(--font-text-xs-size);
+}
+.codexhost-folders-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--color-token-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+  text-align: center;
+}
+.codexhost-folders-note[hidden] {
+  display: none;
+}
+.codexhost-folders-note::before,
+.codexhost-folders-note::after {
+  content: "";
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: var(--color-token-border);
+}
+.codexhost-folders-popover :focus-visible,
+.codexhost-folders-chip:focus-visible {
+  outline: 2px solid var(--color-token-focus-border);
+  outline-offset: -2px;
+}
+
+.codexhost-folders-path-parent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-path-leaf {
+  flex: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexhost-folders-note-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexhost-folders-back,
+.codexhost-folders-directory {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.codexhost-folders-back {
+  padding: 4px;
+  flex: none;
+}
+.codexhost-folders-directory {
+  width: 100%;
+}
+.codexhost-folders-directory span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-folders-back:hover,
+.codexhost-folders-directory:hover {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-folders-primary {
+  flex: none;
+  height: var(--control-size-xs);
+  padding: 0 var(--control-gutter-xs);
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: var(--color-background-primary-solid);
+  color: var(--color-text-primary-solid);
+}
+.codexhost-folders-primary:hover {
+  background: var(--color-background-primary-solid-hover);
+}
+.codexhost-folders-primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.codexhost-folders-popover:popover-open[data-codexhost-folders-browser] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.codexhost-folders-children {
+  min-height: 0;
+  overflow-y: auto;
+}
+[data-codexhost-folders-browser] > [role="status"],
+[data-codexhost-folders-browser] > [role="alert"] {
+  flex: none;
+}
+.codexhost-folders-popover [role="status"]:empty {
+  display: none;
+}

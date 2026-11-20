@@ -1,3 +1,4 @@
+import { THREAD_FOLDERS_GET_METHOD, THREAD_FOLDERS_SET_METHOD } from "@codexhost/shared-contracts";
 /** Connect to one shared Host; native Launcher starts it on demand without Desktop.
  * This gateway never owns a Mapping Store or spawns a Harness. Explicit CDP is legacy-only.
  */
@@ -53,6 +54,8 @@ export interface ChProjectSnapshot {
 
 const exec = promisify(execFile);
 const METHODS = new Set([
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
   THREAD_ARCHIVE_CONFIRM_METHOD,
   "codexhost/thread/tree/read",
   "codexhost/thread/pins/list",

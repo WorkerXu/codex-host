@@ -366,6 +366,7 @@ export interface ClaudeTurnTransport {
 }
 
 export interface ClaudeTransportFactoryInput {
+  additionalDirectories?: readonly string[];
   cwd: string;
   environment?: NodeJS.ProcessEnv;
   sessionId: string;

@@ -1,3 +1,4 @@
+import { CodeRepositories } from "./code-repositories.js";
 import { writeFile, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -185,6 +186,9 @@ export async function runSharedHostService(
           owner,
           store,
           prices,
+          ...(process.platform === "darwin"
+            ? { codeRepositories: new CodeRepositories({ environment: hostEnvironment }) }
+            : {}),
           ...(updateCoordinator ? { updateCoordinator } : {}),
           delegation: () => delegation,
           register: (api: DelegationControlRegistration) => registry.register(api),

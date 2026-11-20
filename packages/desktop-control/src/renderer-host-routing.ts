@@ -45,6 +45,11 @@ export interface RendererHostRoutePolicy {
     draftId?: string,
     creationModes?: readonly Record<string, unknown>[],
   ): boolean;
+  selectWorkingFolders?(
+    draftId: string,
+    folders: readonly string[],
+    creationModes?: readonly Record<string, unknown>[],
+  ): void;
   clear(): Promise<void>;
   dispose(): void;
 }

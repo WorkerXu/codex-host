@@ -168,6 +168,7 @@ export interface AntigravityOpenAcpSessionInput {
 }
 
 export interface AntigravityAcpTransportOptions {
+  additionalDirectories?: readonly string[];
   cwd: string;
   command?: string;
   environment?: NodeJS.ProcessEnv;

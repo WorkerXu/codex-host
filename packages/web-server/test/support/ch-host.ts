@@ -8,12 +8,18 @@ import type { ChHostClient, ChPinChange, ChProjectSnapshot } from "../../src/ch-
 import type { ChThread } from "../../src/ch-thread-view.ts";
 import {
   THREAD_ARCHIVE_CONFIRM_METHOD,
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
+  THREAD_FOLDERS_PARAM,
+  type ThreadFoldersSelection,
+  workingFoldersSchema,
   decodeHarnessPluginRoute,
 } from "@codexhost/shared-contracts";
 
 export class FakeChHost implements ChHostClient {
   readonly requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   readonly threads = new Map<string, ChThread>();
+  readonly workingFolders = new Map<string, ThreadFoldersSelection>();
   readonly archivedIds = new Set<string>();
   readonly modes = new Map<string, string>();
   readonly projectSnapshot: ChProjectSnapshot = { projects: [], assignments: {}, projectless: [] };
@@ -107,6 +113,25 @@ export class FakeChHost implements ChHostClient {
     let value: unknown;
     const row = this.threads.get(String(params.threadId));
     switch (method) {
+      case THREAD_FOLDERS_GET_METHOD:
+        value = {
+          selection: this.workingFolders.get(String(params.threadId)) ?? null,
+          recent: [...new Set([...this.workingFolders.values()].flatMap(({ folders }) => folders))],
+          additionalDirectories: true,
+        };
+        break;
+      case THREAD_FOLDERS_SET_METHOD: {
+        if (!row) throw new Error("Unknown Thread");
+        const selection = {
+          folders: workingFoldersSchema.parse(params.folders),
+          appliedFolders: this.workingFolders.get(row.id)?.appliedFolders ?? null,
+          changedAt: new Date().toISOString(),
+          notes: [],
+        };
+        this.workingFolders.set(row.id, selection);
+        value = selection;
+        break;
+      }
       case "codexhost/thread/tree/read":
         value = { parents: {} };
         break;
@@ -244,17 +269,29 @@ export class FakeChHost implements ChHostClient {
         if (route?.harnessId !== "fake") throw new Error("Wrong Harness route");
         const id = "canonical-" + (this.threads.size + 1);
         const projectless = params.projectlessWorkspace !== undefined;
+        const folders = workingFoldersSchema.safeParse(params[THREAD_FOLDERS_PARAM]);
+        const cwd = folders.success
+          ? (folders.data[0] ?? "")
+          : projectless
+            ? join(tmpdir(), "codexhost-projectless-fixture", id)
+            : String(params.cwd);
         if (!projectless && (typeof params.cwd !== "string" || !params.cwd))
           throw new Error("thread/start requires cwd or a projectless choice");
-        const created = this.add(
-          id,
-          projectless ? join(tmpdir(), "codexhost-projectless-fixture", id) : String(params.cwd),
-          "Web-created CH Thread",
-          false,
-        );
+        const created = this.add(id, cwd, "Web-created CH Thread", false);
+        if (typeof params.projectId === "string") {
+          created.projectId = params.projectId;
+          this.projectSnapshot.assignments[id] = params.projectId;
+        }
         if (projectless) created.workspaceKind = "projectless";
         else
           this.projectSnapshot.projectless.splice(this.projectSnapshot.projectless.indexOf(id), 1);
+        if (folders.success)
+          this.workingFolders.set(id, {
+            folders: folders.data,
+            appliedFolders: folders.data,
+            changedAt: new Date().toISOString(),
+            notes: [],
+          });
         created.historyMode = params.historyMode === "paginated" ? "paginated" : "legacy";
         created.turns = [];
         value = { thread: structuredClone(created) };

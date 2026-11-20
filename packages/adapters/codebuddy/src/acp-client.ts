@@ -38,6 +38,7 @@ export interface CodeBuddyClient {
 
 export type CodeBuddyClientFactory = (options: {
   cwd: string;
+  additionalDirectories?: readonly string[];
   environment: NodeJS.ProcessEnv;
   ephemeral: boolean;
   temporarySessionId?: string;
@@ -73,6 +74,7 @@ export class CodeBuddyAcpClient implements CodeBuddyClient {
       this.#copyCleanup?.environment(options.environment) ?? options.environment,
       options.ephemeral,
       this.#copyCleanup?.arguments,
+      options.additionalDirectories,
     );
     this.#child = spawn(invocation.command, invocation.arguments, {
       cwd: options.cwd,

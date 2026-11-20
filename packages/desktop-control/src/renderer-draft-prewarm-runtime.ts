@@ -580,7 +580,10 @@ export function createDraftPrewarmPolicyBridge(
   const discardExternalPrewarms = (): void => {
     for (const threadId of externalPrewarms) discardExternalPrewarm(threadId);
   };
-  const restoreConsumption = isolateConsumption(manager, discardExternalPrewarm);
+  const restoreConsumption = isolateConsumption(manager, discardExternalPrewarm, {
+    client: bridge,
+    send: routedSend,
+  });
   const routedPrewarm = (parameters: unknown, options?: unknown): unknown => {
     const external =
       isRecord(parameters) &&
@@ -705,6 +708,16 @@ export function createDraftPrewarmPolicyBridge(
       prewarmGeneration += 1;
       discardExternalPrewarms();
       return true;
+    },
+    selectWorkingFolders(
+      draftId: string,
+      folders: readonly string[],
+      creationModes?: readonly Record<string, unknown>[],
+    ): void {
+      if (!restoreConsumption || disposed || (isCurrentManager && !isCurrentManager()))
+        throw new Error("Desktop 工作文件夹绑定不可用");
+      restoreConsumption.selectWorkingFolders(draftId, folders, creationModes);
+      void this.clear().catch(() => undefined);
     },
     clear(): Promise<void> {
       if (disposed || (isCurrentManager && !isCurrentManager()))

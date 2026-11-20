@@ -135,3 +135,13 @@ export async function loadCodexNativeServices<T>(
     throw new Error("Codex loaded module catalog changed during discovery. Try again once ready.");
   return [...matches][0] ?? null;
 }
+
+export function isCodexServiceRegistry(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  try {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}

@@ -262,6 +262,7 @@ interface RequestedConfiguration {
   permissionModeId?: HarnessPermissionModeId | undefined;
 }
 interface SessionOptions extends RequestedConfiguration {
+  additionalDirectories?: readonly string[];
   cwd: string;
   environment: NodeJS.ProcessEnv;
   nativeRef?: NativeSessionRef;
@@ -375,6 +376,9 @@ export class AntigravitySession implements HarnessSession {
   #newTransport(skipPermissions: boolean): AntigravityAcpTransportLike {
     const options: AntigravityAcpTransportOptions = {
       cwd: this.#options.cwd,
+      ...(this.#options.additionalDirectories
+        ? { additionalDirectories: this.#options.additionalDirectories }
+        : {}),
       ...(this.#options.adapter.command ? { command: this.#options.adapter.command } : {}),
       environment: this.#options.environment,
       skipPermissions,
@@ -1257,6 +1261,7 @@ function promptParts(command: TurnStartCommand): AntigravityPromptInputPart[] {
 }
 
 export class AntigravityAdapter implements HarnessAdapter {
+  readonly additionalDirectories = true;
   readonly harnessId = harnessId;
   readonly commandCatalog = ANTIGRAVITY_COMMAND_CATALOG;
   readonly liveCommandCatalog = true;
@@ -1438,6 +1443,9 @@ export class AntigravityAdapter implements HarnessAdapter {
     }
     const session = new AntigravitySession({
       cwd: input.cwd,
+      ...(input.additionalDirectories
+        ? { additionalDirectories: input.additionalDirectories }
+        : {}),
       environment: { ...this.#environment, ...input.environment },
       model: input.model,
       thinkingOptionId: input.thinkingOptionId,

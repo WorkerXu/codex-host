@@ -2,6 +2,7 @@ import {
   CodeBuddyAcpClient,
   CodeBuddyAdapter,
   type CodeBuddyAdapterOptions,
+  type CodeBuddyInvocationFactory,
 } from "@codexhost/adapter-codebuddy";
 import type {
   HarnessInspection,
@@ -37,13 +38,15 @@ export class WorkBuddyAdapter extends CodeBuddyAdapter {
       ...WORKBUDDY_RUNTIME_PROFILE,
       allowUnlistedModelSelection: true,
     };
+    const invocation: CodeBuddyInvocationFactory = (env, ephemeral, args) =>
+      workBuddyInvocation(env, ephemeral, args);
     super({
       ...codeBuddyOptions,
       profile: platform === "win32" ? windowsProfile : WORKBUDDY_RUNTIME_PROFILE,
-      invocationFactory: workBuddyInvocation,
+      invocationFactory: invocation,
       clientFactory:
         codeBuddyOptions.clientFactory ??
-        ((clientOptions) => new CodeBuddyAcpClient(clientOptions, undefined, workBuddyInvocation)),
+        ((clientOptions) => new CodeBuddyAcpClient(clientOptions, undefined, invocation)),
     });
     this.#productModels =
       platform === "win32"

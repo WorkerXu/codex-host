@@ -1,3 +1,4 @@
+import { THREAD_FOLDERS_GET_METHOD, THREAD_FOLDERS_SET_METHOD } from "./thread-folders.js";
 import { z } from "zod";
 import { harnessModelRefSchema, harnessThinkingOptionIdSchema } from "./harness-models.js";
 import { harnessPermissionModeIdSchema } from "./harness-permission-modes.js";
@@ -81,6 +82,8 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/update/start",
   "codexhost/update/status",
   "codexhost/sessions/loaded/list",
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
 ] as const;
 /** Canonical external pin membership, shared with native Thread sections. */
 export const clientThreadPinsSchema = z.object({ threadIds: z.array(z.string().min(1)) }).strict();

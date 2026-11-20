@@ -19,6 +19,7 @@ export async function createHarnessAdapter(context: HarnessPluginContext): Promi
       forwardDelegationEnvironment: true,
       commandCatalog: claudeCommandCatalog,
       liveCommandCatalog: true,
+      additionalDirectories: true,
       environment,
       isInstalled: () => {
         try {

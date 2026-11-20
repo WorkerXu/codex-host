@@ -463,3 +463,5 @@ export {
   canonicalizeOfficialCodexModelRef,
   OFFICIAL_CODEX_MODEL_REF_PREFIX,
 } from "./official-codex-model-ref.js";
+export * from "./thread-folders.js";
+export * from "./code-repositories.js";
