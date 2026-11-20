@@ -12,6 +12,13 @@ const skill = {
 const link = "[@Claude Code](subagent://codexhost.claude-code)";
 
 describe("delegation mention rewrite", () => {
+  it("quotes a decoded Host ID containing parentheses in the delegation command", () => {
+    const carrier = "[@Codex](subagent://codexhost.codex?host=remote-ssh%3Amac%28work%29)";
+    expect(rewriteDelegationMentionText(carrier)).toContain(
+      "codexhost delegate start --host 'remote-ssh:mac(work)' --harness codex",
+    );
+  });
+
   it("forwards native input untouched without a carrier", () => {
     expect(rewriteDelegationMentionInput([{ type: "text", text: "hello" }], skill)).toBeNull();
   });
@@ -79,4 +86,25 @@ describe("delegation mention rewrite", () => {
     expect(text).toContain("codexhost delegate start --harness claude-code");
     expect(text).toContain("--watch true --format compact");
   });
+});
+
+it("keeps the same Harness on two machines and emits the route in each command", () => {
+  const oracle = "[@Claude Code](subagent://codexhost.claude-code?host=oracle-main)";
+  const mac = "[@Claude Code](<subagent://codexhost.claude-code?host=local>)";
+  const input = rewriteDelegationMentionInput(
+    [
+      { type: "text", text: oracle },
+      { type: "text", text: `${oracle} ${mac} review this change` },
+    ],
+    skill,
+  );
+  const text = JSON.stringify(input);
+  expect(
+    text.match(/codexhost delegate start --host oracle-main --harness claude-code/gu),
+  ).toHaveLength(1);
+  expect(text.match(/codexhost delegate start --host local --harness claude-code/gu)).toHaveLength(
+    1,
+  );
+  expect(text.match(/--watch true --format compact/gu)).toHaveLength(2);
+  expect(text).not.toContain("subagent://");
 });

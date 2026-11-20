@@ -14,11 +14,14 @@ import {
 } from "./renderer-startup-trace.js";
 import { rendererPageTimings } from "./renderer-page-timings.js";
 import type { CrossHostHarnessDirectory } from "./renderer-cross-host-harness-catalog.js";
+import { installRendererProjectMirror } from "./renderer-project-mirror.js";
 import type { DelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
 import {
   readCachedHarnessDirectory,
   writeCachedHarnessDirectory,
 } from "./renderer-harness-directory-cache.js";
+import { delegationPeerLabel, delegationPeerTargets } from "./renderer-delegation-peer-catalog.js";
+import { localMachineLabel } from "./renderer-cross-host-harness-catalog.js";
 import { createDelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
 import { createDesktopHubPages } from "./settings/desktop-hub-pages.js";
 import { createDesktopJarvis } from "./renderer-desktop-jarvis.js";
@@ -954,9 +957,11 @@ export function installRendererBindingProbe(
     retryAttempt: 0,
   });
   const harnessAvailabilityByHost = new Map<string, HostHarnessAvailabilityState>();
+  let delegationConnections: Awaited<ReturnType<typeof remoteConnections.ssh.list>> = [];
   async function listConnectionHosts() {
     const connections = await remoteConnections.ssh.list();
     if (disposed) return connections;
+    delegationConnections = connections;
     const removed = releaseRetiredSshConnectionHosts(
       harnessAvailabilityByHost.keys(),
       connections.map(({ hostId }) => hostId),
@@ -1137,7 +1142,22 @@ export function installRendererBindingProbe(
       agent: controller.get(mounted.composer).agent,
     }));
     mounted.workingFolders?.refresh();
-    restorePendingDraftPreference(mounted);
+    if (
+      mounted.modelTarget?.[0] !== "default" ||
+      !mounted.hostId ||
+      !projectMirror.consumePending({
+        composer: mounted.composer,
+        hostId: mounted.hostId,
+        applyHarness: async (composer, agent) => {
+          const state = controller.get(composer);
+          if (!isMountedComposer(composer) || state.phase !== "draft") return false;
+          pendingDefaultPreferences.set(state.composerId, false);
+          return state.agent === agent || switchComposerAgent(mounted, agent);
+        },
+      })
+    ) {
+      restorePendingDraftPreference(mounted);
+    }
     const hostId = mounted.hostId;
     mounted.control.setPlugins(
       hostId
@@ -1175,6 +1195,7 @@ export function installRendererBindingProbe(
     }
   };
 
+  const projectMirror = installRendererProjectMirror();
   let delegationMention: RendererDelegationMentionControl | null = null;
   const delegationPeers = createDelegationPeerCatalogSource({
     load: async (hostId, input) => {
@@ -3130,6 +3151,11 @@ export function installRendererBindingProbe(
         const editor = composer.querySelector<HTMLElement>(EDITOR_SELECTOR);
         if (editor) delegationMention?.openFor(editor);
       },
+      (picker) => {
+        const mounted = mountedByComposer.get(composer);
+        if (mounted?.modelTarget?.[0] === "default" && mounted.hostId)
+          projectMirror.openForAgentPicker({ composer, hostId: mounted.hostId, picker });
+      },
     );
     if (!pendingDefaultPreferences.has(state.composerId)) {
       pendingDefaultPreferences.set(
@@ -3614,6 +3640,38 @@ export function installRendererBindingProbe(
       shell?.openSettings(opener, "appearance");
     },
   });
+  const delegationHostId = (editor: HTMLElement) => {
+    const composer = composerForElement(editor);
+    const mounted = composer ? mountedByComposer.get(composer) : undefined;
+    return mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null;
+  };
+  const delegationMachineName = (hostId: string) =>
+    hostId === "local"
+      ? localMachineLabel(settingsLifecycle.locale)
+      : (delegationConnections.find((entry) => entry.hostId === hostId)?.displayName ??
+        hostId.split(":").at(-1) ??
+        hostId);
+  const peerMenu = (editor: HTMLElement) => {
+    const hostId = delegationHostId(editor);
+    return delegationPeerTargets(
+      hostId ? delegationPeers.get(hostId) : null,
+      (agent, peer) =>
+        peer.hostIds.map((id) => pluginForHost(id, agent)).find(Boolean) ??
+        pluginForHost("local", agent),
+      rendererAgentLabel,
+      (peer) =>
+        delegationPeerLabel(
+          peer,
+          settingsLifecycle.locale,
+          (entry) =>
+            (
+              entry.hostIds
+                .map((id) => delegationConnections.find((row) => row.hostId === id))
+                .find(Boolean) ?? delegationConnections.find((row) => row.sshHost === entry.ssh)
+            )?.displayName,
+        ),
+    );
+  };
   delegationMention = installRendererDelegationMention(document, {
     readSkills: (editor) => skillLibrary.read(editor),
     onClose: () => skillLibrary.close(),
@@ -3621,7 +3679,11 @@ export function installRendererBindingProbe(
       skillLibrary.open(editor);
       const composer = composerForElement(editor);
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
-      if (mounted?.hostId) delegationPeers.refresh(mounted.hostId);
+      const hostId = delegationHostId(editor);
+      if (hostId) delegationPeers.refresh(hostId);
+      void listConnectionHosts()
+        .then(() => delegationMention?.refresh())
+        .catch(() => undefined);
       if (mounted && controller.get(mounted.composer).agent !== "codex") {
         void refreshCommands(mounted, { keepCurrent: true });
       }
@@ -3630,13 +3692,28 @@ export function installRendererBindingProbe(
       const composer = composerForElement(editor);
       const mounted = composer ? mountedByComposer.get(composer) : undefined;
       const availability = mounted ? composerAvailability(mounted) : {};
-      return enabledAgents
+      const hostId = delegationHostId(editor);
+      const hostLabel = hostId ? delegationMachineName(hostId) : undefined;
+      const own = hostId
+        ? (hostHarnessAvailabilityState(hostId).plugins ?? [])
+            .filter((plugin) => plugin.kind !== "usage")
+            .map(({ id }) => id)
+        : [];
+      const agents = new Set(["codex", ...enabledAgents, ...own]);
+      return [...agents]
         .filter((agent) => agent === "codex" || availability[agent] === "ready")
         .map((agent) => {
           const plugin = mounted?.hostId ? pluginForHost(mounted.hostId, agent) : undefined;
-          return { agent, label: rendererAgentLabel(agent, plugin), ...(plugin ? { plugin } : {}) };
-        });
+          return {
+            agent,
+            label: rendererAgentLabel(agent, plugin),
+            ...(plugin ? { plugin } : {}),
+            ...(hostLabel ? { hostLabel } : {}),
+          };
+        })
+        .concat(peerMenu(editor).targets);
     },
+    readPeerNotices: (editor) => peerMenu(editor).notices,
     isComposerEditor: (editor) => {
       const composer = composerForElement(editor);
       return composer !== null && isMountedComposer(composer);
@@ -3852,6 +3929,7 @@ export function installRendererBindingProbe(
       mutationObserver.disconnect();
       disposeReasoningSoftWrap();
       delegationPeers.dispose();
+      projectMirror.dispose();
       delegationMention?.dispose();
       jarvisMention.dispose();
       dingTalkMention.dispose();

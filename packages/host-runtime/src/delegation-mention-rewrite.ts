@@ -13,6 +13,10 @@ export interface DelegationSkillReference {
   path: string;
 }
 
+function shellArgument(value: string): string {
+  return /^[A-Za-z0-9_.:@%+-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function describeTargets(mentions: readonly DelegationMention[]): string {
   return mentions
     .map(
@@ -44,7 +48,7 @@ export function delegationMentionInstruction(mentions: readonly DelegationMentio
     ...mentions.map(
       ({ harnessId, hostId }) =>
         `
-codexhost delegate start ${hostId ? `--host ${hostId} ` : ""}--harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
+codexhost delegate start ${hostId ? `--host ${shellArgument(hostId)} ` : ""}--harness ${harnessId} --task "<task>" --task-name "<short-name>" --watch true --format compact`,
     ),
     "\nRead the returned Thread link when reporting results or following up.",
   ].join(" ");

@@ -1,4 +1,5 @@
 import { committedReactAncestors } from "@codexhost/desktop-control/renderer-bindings";
+
 import { isCodexServiceRegistry, loadCodexNativeModule } from "./codex-native-services.js";
 
 /** A Desktop AppScope instance, the store-aware facade the native hooks hand to components. */
@@ -6,9 +7,20 @@ export interface NativeSectionScope {
   get(atom: unknown): unknown;
 }
 
-/** The sidebar module exposes its custom sections atom as QV. */
+/**
+ * The bundled sidebar module that owns custom-section commands. `QV` is the derived
+ * `sidebar-custom-sections-v3` sections atom; `Jn` and `f2` are the exact commands behind the
+ * native "New section…" and "Move to section" menu actions.
+ */
 export interface NativeSectionApi {
   QV: unknown;
+  Jn(scope: NativeSectionScope, name: string, itemKeys: string[], afterSectionId?: string): unknown;
+  f2(
+    scope: NativeSectionScope,
+    sectionId: string,
+    itemKey: string,
+    beforeItemKey?: string | null,
+  ): unknown;
 }
 
 const SECTION_COMMANDS = ["Jn", "f2", "qF", "HW"] as const;
@@ -27,7 +39,9 @@ function isSectionApi(value: unknown): value is NativeSectionApi {
   }
 }
 
-/** Locate the section atom by the exports of its already-loaded Desktop module. */
+/** Resolve the native section commands, or null when this Desktop does not expose them or more
+ * than one module claims the shape. The export names are internal, so discovery inspects the
+ * instantiated module containers rather than a chunk name or module id. */
 export async function loadCodexNativeSections(
   ownerWindow: Window,
   importModule?: (url: string) => Promise<Record<string, unknown>>,

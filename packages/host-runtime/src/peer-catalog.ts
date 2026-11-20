@@ -82,8 +82,10 @@ export class DelegationPeerCatalogService {
     this.#spawnImpl = options.spawnImpl;
   }
 
-  async listPeers(input: { refresh?: boolean | undefined } = {}): Promise<DelegationPeerCatalog> {
-    if (this.#cache && !input.refresh) {
+  async listPeers(
+    input: { refresh?: boolean | undefined; revalidate?: boolean | undefined } = {},
+  ): Promise<DelegationPeerCatalog> {
+    if (this.#cache && !input.refresh && !input.revalidate) {
       const stale = this.#now() - this.#cache.loadedAt >= this.#cacheTtlMs;
       if (stale) {
         // Stale-while-revalidate: the menu gets the cached catalog immediately.
@@ -115,7 +117,7 @@ export class DelegationPeerCatalogService {
         peers.targets.map(async (peer) => {
           const identity = { name: peer.name, label: displayName(peer, connections) };
           try {
-            const { ready } = await this.#listPeerHarnesses(peer, false);
+            const ready = await this.#listPeerHarnesses(peer, false);
             if (!ready) return { ...identity, status: "failed" as const };
             return {
               ...identity,
@@ -203,7 +205,7 @@ export class DelegationPeerCatalogService {
       ? result.harnesses.filter((value): value is string => typeof value === "string")
       : [];
     const availability = isRecord(result.availability) ? result.availability : undefined;
-    return { listed, ready: availability && listed.filter((id) => availability[id] === "ready") };
+    return availability && listed.filter((id) => availability[id] === "ready");
   }
 
   async #load(refresh: boolean): Promise<DelegationPeerCatalog> {
@@ -212,8 +214,7 @@ export class DelegationPeerCatalogService {
       targets.map(async (peer): Promise<DelegationPeerCatalogEntry> => {
         const { name, hostIds, ssh } = peer;
         try {
-          const { listed, ready } = await this.#listPeerHarnesses(peer, refresh);
-          const harnesses = ready ?? listed;
+          const harnesses = (await this.#listPeerHarnesses(peer, refresh)) ?? [];
           this.#harnessCache.set(name, harnesses);
           return {
             name,

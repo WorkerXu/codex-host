@@ -52,7 +52,7 @@ const labels: Record<string, string> = {
 };
 
 describe("renderer delegation peer targets", () => {
-  it("groups ready peers by machine and marks offline Harnesses disabled", () => {
+  it("groups ready peers by machine and gives each offline machine one notice", () => {
     const result = delegationPeerTargets(
       catalog,
       () => undefined,
@@ -72,15 +72,11 @@ describe("renderer delegation peer targets", () => {
         hostId: "oracle-sg",
         hostLabel: "Oracle SG",
       },
-      {
-        agent: "grok",
-        label: "Grok",
-        hostId: "colab",
-        hostLabel: "colab",
-        disabledReason: "ssh: connect timed out",
-      },
     ]);
-    expect(result.notices).toEqual([{ name: "newbox", reason: "ssh: no route to host" }]);
+    expect(result.notices).toEqual([
+      { name: "colab", reason: "ssh: connect timed out" },
+      { name: "newbox", reason: "ssh: no route to host" },
+    ]);
   });
 
   it("labels a peer that is this Mac as 此计算机 and keeps its peer name for --host", () => {

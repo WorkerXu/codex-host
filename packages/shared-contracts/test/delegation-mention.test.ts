@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   delegationMentionPath,
+  delegationMentionReferences,
   formatDelegationMentionLink,
   harnessCommandMentionPath,
   restoreHarnessCommandMentions,
@@ -55,7 +56,32 @@ describe("delegation mention carrier", () => {
     });
   });
 
-  it.each(["%ZZ", "mac%3Becho", "%20"])(
+  it("escapes parentheses and exposes the decoded target at the Web text offsets", () => {
+    const mention = { harnessId: "codex", label: "Codex · Mac", hostId: "remote-ssh:mac(work)" };
+    const carrier = formatDelegationMentionLink(mention);
+    const text = `ask ${carrier} now`;
+    expect(carrier).toBe(
+      "[@Codex · Mac](subagent://codexhost.codex?host=remote-ssh%3Amac%28work%29)",
+    );
+    expect(delegationMentionReferences(text)).toEqual([
+      { start: 4, end: 4 + carrier.length, text: carrier, mention },
+    ]);
+    expect(stripDelegationMentions(text)).toEqual({
+      text: "ask @Codex · Mac now",
+      mentions: [mention],
+    });
+  });
+
+  it.each(["", "mac;echo", "mac work", "x".repeat(257)])(
+    "rejects invalid Host IDs when formatting a carrier (%s)",
+    (hostId) => {
+      expect(() => delegationMentionPath("codex", hostId)).toThrow(
+        "Invalid delegation mention Host ID",
+      );
+    },
+  );
+
+  it.each(["%ZZ", "mac%3Becho", "%20", "mac(work"])(
     "does not dispatch a malformed peer carrier (%s)",
     (host) => {
       const text = `[@Codex](subagent://codexhost.codex?host=${host})`;
@@ -109,5 +135,17 @@ describe("Harness command carrier", () => {
     const text = "[@Claude Code](subagent://codexhost.claude-code) /usage";
     expect(restoreHarnessCommandMentions(text)).toBe(text);
     expect(stripDelegationMentions(`${link("/review")}`).mentions).toEqual([]);
+  });
+});
+
+it("round-trips a peer or Desktop Host ID separately from the display label", () => {
+  const mention = {
+    harnessId: "claude-code",
+    hostId: "remote-ssh-discovered:oracle-main",
+    label: "Claude Code",
+  };
+  expect(stripDelegationMentions(formatDelegationMentionLink(mention))).toEqual({
+    text: "@Claude Code",
+    mentions: [mention],
   });
 });

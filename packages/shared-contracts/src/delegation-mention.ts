@@ -11,15 +11,28 @@
 export const DELEGATION_MENTION_PATH_PREFIX = "subagent://codexhost.";
 
 const HARNESS_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
-const HOST_ID_PATTERN = /^[A-Za-z0-9_.:@%+-]{1,256}$/u;
+const HOST_ID_PATTERN = /^[A-Za-z0-9_.:@%+()-]{1,256}$/u;
 const MENTION_LINK_PATTERN =
-  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)(?:\?host=([^)&\s>]+))?>?\)/gu;
+  /\[@([^\]\n]+)\]\(<?subagent:\/\/codexhost\.([a-z0-9][a-z0-9-]*)(?:\?host=([^()&\s>]+))?>?\)/gu;
 
 export interface DelegationMention {
   harnessId: string;
   label: string;
-  /** Peer name or Desktop Host ID. */
+  /** Peer name or Desktop Host ID. Omitted for local delegation. */
   hostId?: string;
+}
+
+function encodeMentionPathComponent(value: string): string {
+  return encodeURIComponent(value).replaceAll("(", "%28").replaceAll(")", "%29");
+}
+
+function decodeMentionHostId(encoded: string): string | undefined {
+  try {
+    const hostId = decodeURIComponent(encoded);
+    return HOST_ID_PATTERN.test(hostId) ? hostId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function delegationMentionPath(harnessId: string, hostId?: string): string {
@@ -30,7 +43,7 @@ export function delegationMentionPath(harnessId: string, hostId?: string): strin
     throw new Error("Invalid delegation mention Host ID");
   }
   const path = `${DELEGATION_MENTION_PATH_PREFIX}${harnessId}`;
-  return hostId === undefined ? path : `${path}?host=${encodeURIComponent(hostId)}`;
+  return hostId === undefined ? path : `${path}?host=${encodeMentionPathComponent(hostId)}`;
 }
 
 function sanitizeLabel(label: string): string {
@@ -50,15 +63,8 @@ export function delegationMentionReferences(text: string) {
   return Array.from(text.matchAll(MENTION_LINK_PATTERN)).flatMap((match) => {
     const [source, label, harnessId, encodedHost] = match;
     if (label === undefined || harnessId === undefined) return [];
-    let hostId: string | undefined;
-    if (encodedHost !== undefined) {
-      try {
-        hostId = decodeURIComponent(encodedHost);
-      } catch {
-        return [];
-      }
-      if (!HOST_ID_PATTERN.test(hostId)) return [];
-    }
+    const hostId = encodedHost === undefined ? undefined : decodeMentionHostId(encodedHost);
+    if (encodedHost !== undefined && hostId === undefined) return [];
     const mention: DelegationMention = {
       harnessId,
       label: label.trim(),
@@ -108,10 +114,7 @@ const COMMAND_LINK_PATTERN =
 export function harnessCommandMentionPath(invocation: string): string {
   const name = invocation.trim().replace(/^\//u, "");
   if (!name || /\s/u.test(name)) throw new Error(`Invalid Harness command: ${invocation}`);
-  return `${HARNESS_COMMAND_MENTION_PATH_PREFIX}${encodeURIComponent(name).replace(
-    /[()]/gu,
-    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
-  )}`;
+  return `${HARNESS_COMMAND_MENTION_PATH_PREFIX}${encodeMentionPathComponent(name)}`;
 }
 
 /**

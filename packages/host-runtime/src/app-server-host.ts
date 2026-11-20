@@ -9,10 +9,16 @@ import type { JarvisService } from "./jarvis-service.js";
 import type { ModelService } from "./model-service.js";
 import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
+  PROJECT_MIRROR_LIST_METHOD,
+  PROJECT_MIRROR_UPSERT_METHOD,
   DELEGATION_PEER_LIST_METHOD,
+  DELEGATION_PROJECTS_METHOD,
+  DELEGATION_PROJECTS_CHANGED_METHOD,
   delegationPeerListParamsSchema,
   WEB_DELEGATION_PEERS_METHOD,
 } from "@codexhost/shared-contracts";
+import { delegationDesktopProject, delegationProjectAssignments } from "./delegation-projects.js";
+import { defaultProjectMirrorDirectory, ProjectMirrorService } from "./project-mirror-service.js";
 import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { HarnessAvailability } from "./harness-availability.js";
@@ -814,6 +820,7 @@ export class AppServerHost {
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
 
+  #projectMirror?: ProjectMirrorService;
   #desktopProjects: DesktopProjectCatalogReader | undefined;
   #delegationPeers: DelegationPeerCatalogService | undefined;
   readonly #harnessAvailability: HarnessAvailability;
@@ -1060,7 +1067,10 @@ export class AppServerHost {
       startExternalTurn: (thread, text, turnId) =>
         this.#startDelegatedExternalTurn(thread, text, turnId),
       steerExternalTurn: (thread, text) => this.#steerDelegatedExternalTurn(thread, text),
-      notifyThreadStarted: (thread) => this.#notifyExternalThreadStarted(thread),
+      notifyThreadStarted: async (thread) => {
+        await this.#notifyExternalThreadStarted(thread);
+        await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
+      },
       notifyTreeChanged: (threadId) =>
         this.clientEvents.changed(threadId, "codexhost/thread/tree/changed"),
       inspectOfficial: (input) => this.#inspectOfficialDelegationTarget(input),
@@ -1889,6 +1899,43 @@ export class AppServerHost {
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
       return;
     }
+    if (request.method === DELEGATION_PROJECTS_METHOD) {
+      if (origin !== "desktop" || this.#options.externalOnly) {
+        await this.#writer.json(
+          rpcError(request, -32601, "This catalog requires a Desktop connection"),
+        );
+        return;
+      }
+      this.#dispatchDesktopReply(request, async () => {
+        const result = delegationProjectAssignments(await this.#repository.listDelegations());
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      });
+      return;
+    }
+    if (
+      request.method === PROJECT_MIRROR_LIST_METHOD ||
+      request.method === PROJECT_MIRROR_UPSERT_METHOD
+    ) {
+      const environment = this.#options.environment ?? process.env;
+      if (
+        origin !== "desktop" ||
+        this.#options.externalOnly ||
+        environment.CODEXHOST_REMOTE_SSH_MANAGED === "1"
+      ) {
+        await this.#writer.json(
+          rpcError(request, -32601, "Project mirror requires the local Desktop Host"),
+        );
+        return;
+      }
+      this.#projectMirror ??= new ProjectMirrorService({
+        directory: defaultProjectMirrorDirectory(environment),
+      });
+      const mirror = this.#projectMirror;
+      this.#dispatchDesktopReply(request, async () => {
+        await this.#writer.json(await mirror.reply(request));
+      });
+      return;
+    }
     if (
       request.method === DESKTOP_PROJECTS_CATALOG_METHOD ||
       request.method === DELEGATION_PEER_LIST_METHOD
@@ -1919,7 +1966,7 @@ export class AppServerHost {
           return;
         }
         this.#delegationPeers ??= new DelegationPeerCatalogService(environment);
-        const result = await this.#delegationPeers.listPeers(params.data);
+        const result = await this.#delegationPeers.listPeers({ revalidate: params.data.refresh });
         await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
       });
       return;
@@ -2821,7 +2868,9 @@ export class AppServerHost {
         status: pendingTerminal ?? "running",
         ...(input.requestId ? { requestId: input.requestId } : {}),
         taskDigest: digest,
+        desktopProject: delegationDesktopProject(input.parentThreadId, input.projectId),
       });
+      await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
       this.clientEvents.changed(threadId, "codexhost/thread/tree/changed");
       return {
         delegationId,

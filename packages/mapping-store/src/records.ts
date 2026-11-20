@@ -311,6 +311,7 @@ export interface CreateDelegationInput {
   status?: DelegationStatus;
   requestId?: string;
   taskDigest: string;
+  desktopProject?: StoredDelegationRecordV1["desktopProject"];
 }
 
 export interface FindRecentDelegationInput {

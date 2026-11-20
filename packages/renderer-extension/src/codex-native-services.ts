@@ -18,22 +18,20 @@ function instantiatedModules(namespace: Record<string, unknown>): object | null 
   return objectLike(cache) ? cache : null;
 }
 
-/** Values an instantiated module exports through compiled namespace bindings. CommonJS objects,
- * which may be `window` or carry lazy accessors, stay outside the supported search domain. */
-function compiledExports(module: unknown): Record<string, unknown> {
-  if (!objectLike(module) || Object.hasOwn(module, "error")) return {};
-  const exports = Object.getOwnPropertyDescriptor(module, "exports")?.value as unknown;
-  if (typeof exports !== "object" || exports === null) return {};
-  const prototype: unknown = Object.getPrototypeOf(exports);
-  if (prototype !== Object.prototype && prototype !== null) return {};
+/** Values an instantiated module exports through compiled namespace bindings. Whole-module
+ * matching also accepts plain data bindings. Unrecognized accessors are never read. */
+function compiledExports(
+  exports: Record<string, unknown>,
+  matchModule: boolean,
+): Record<string, unknown> {
   const entries: [string, unknown][] = [];
   for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(exports))) {
-    if (!descriptor.enumerable || descriptor.configurable) continue;
+    if (!descriptor.enumerable) continue;
     if ("value" in descriptor) {
-      entries.push([key, descriptor.value]);
+      if (matchModule || !descriptor.configurable) entries.push([key, descriptor.value]);
       continue;
     }
-    if (!descriptor.get) continue;
+    if (descriptor.configurable || !descriptor.get) continue;
     try {
       if (COMPILED_EXPORT_GETTER.test(Function.prototype.toString.call(descriptor.get)))
         entries.push([key, descriptor.get.call(exports)]);
@@ -118,8 +116,8 @@ async function scanNativeExports<T>(
     (a, b) => Number(b.includes("/app-shared-")) - Number(a.includes("/app-shared-")),
   );
   const found = new Set<T>();
-  const addMatch = (value: unknown): void => {
-    if (matches(value)) found.add(value);
+  const addMatch = (value: unknown, original = value): void => {
+    if (matches(value)) found.add(original as T);
     if (found.size > 1) throw new Error("Codex native services are unavailable in this window");
   };
   const runtimes = new Set<object>();
@@ -131,7 +129,7 @@ async function scanNativeExports<T>(
       continue;
     }
     if (matchModule) addMatch(module);
-    else Object.values(module).forEach(addMatch);
+    else Object.values(module).forEach((value) => addMatch(value));
     const runtime = instantiatedModules(module);
     if (runtime) runtimes.add(runtime);
   }
@@ -143,13 +141,16 @@ async function scanNativeExports<T>(
     for (const [index, module] of modules.entries()) {
       if (index > 0 && index % RUNTIME_SCAN_SLICE === 0)
         await new Promise((resolve) => setTimeout(resolve));
-      const exports = compiledExports(module);
-      const values = Object.values(exports);
+      if (!objectLike(module) || Object.hasOwn(module, "error")) continue;
+      const exports: unknown = Object.getOwnPropertyDescriptor(module, "exports")?.value;
+      if (!isCodexServiceRegistry(exports)) continue;
+      const bindings = compiledExports(exports, matchModule);
+      const values = Object.values(bindings);
       scannedExports += values.length;
       if (scannedExports > MAX_RUNTIME_EXPORTS)
         throw new Error("Codex native services are unavailable in this window");
-      if (matchModule) addMatch(exports);
-      else values.forEach(addMatch);
+      if (matchModule) addMatch(bindings, exports);
+      else values.forEach((value) => addMatch(value));
     }
   }
   if (catalog !== undefined && Reflect.get(ownerWindow, "__codexhostLoadedModulesV1") !== catalog)

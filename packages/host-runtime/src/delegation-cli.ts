@@ -499,6 +499,7 @@ export async function runDelegationCli(input: {
         "--task",
         "--task-file",
         "--task-name",
+        "--project",
         "--cwd",
         "--worktree",
         "--base",
@@ -525,6 +526,7 @@ export async function runDelegationCli(input: {
       const peer = await resolveCliPeer(environment, value(parsed, "--host"));
       const caller = callerThreadId(environment);
       const parentThread = value(parsed, "--parent-thread") ?? caller;
+      const project = value(parsed, "--project");
       const branch = value(parsed, "--worktree");
       const base = value(parsed, "--base");
       const cwd = peer ? value(parsed, "--cwd") : cwdOption(parsed);
@@ -556,6 +558,7 @@ export async function runDelegationCli(input: {
           ? { taskName: value(parsed, "--task-name") }
           : {}),
         ...(cwd ? { cwd } : {}),
+        ...(project !== undefined ? { projectId: project === "none" ? null : project } : {}),
         ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
         ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
         ...(parentThread && !peer ? { parentThreadId: normalizeThreadId(parentThread) } : {}),

@@ -16,7 +16,6 @@ export interface RendererDelegationPeerNotice {
 type PeerTarget = RendererDelegationTarget & {
   hostId: string;
   hostLabel: string;
-  disabledReason?: string;
 };
 
 export interface RendererDelegationPeerTargets {
@@ -39,11 +38,7 @@ export function delegationPeerLabel(
   return desktopNameFor?.(peer) ?? peer.name;
 }
 
-/**
- * Turn the conversation Host's peer catalog into `#` menu rows. A peer that is
- * offline keeps its last known Harnesses as disabled rows; a peer that has no
- * known Harnesses becomes a disabled machine group instead.
- */
+/** An unreachable machine contributes one notice. Only ready targets can be selected. */
 export function delegationPeerTargets(
   catalog: DelegationPeerCatalog | null,
   pluginFor: (
@@ -58,16 +53,12 @@ export function delegationPeerTargets(
   const notices: RendererDelegationPeerNotice[] = [];
   for (const peer of catalog.peers) {
     const hostLabel = displayNameForPeer?.(peer) ?? peer.name;
-    if (peer.harnesses.length === 0) {
-      if (peer.state !== "ready") {
-        notices.push({
-          name: hostLabel,
-          reason: peer.error ?? "Machine is unreachable",
-        });
-      }
+    if (peer.state !== "ready") {
+      notices.push({ name: hostLabel, reason: peer.error ?? "" });
       continue;
     }
-    for (const harnessId of peer.harnesses) {
+    for (const harnessId of new Set(peer.harnesses)) {
+      if (!/^[a-z0-9][a-z0-9-]*$/u.test(harnessId)) continue;
       const plugin = pluginFor(harnessId, peer);
       targets.push({
         agent: harnessId,
@@ -75,9 +66,6 @@ export function delegationPeerTargets(
         ...(plugin ? { plugin } : {}),
         hostId: peer.name,
         hostLabel,
-        ...(peer.state === "ready"
-          ? {}
-          : { disabledReason: peer.error ?? "Machine is unreachable" }),
       });
     }
   }
