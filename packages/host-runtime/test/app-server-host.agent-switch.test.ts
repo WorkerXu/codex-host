@@ -11,6 +11,8 @@ import { harnessIdSchema } from "@codexhost/shared-contracts";
 import type { DelegationControlRegistration } from "../src/delegation-types.js";
 import { SharedThreadBridge } from "../src/shared-thread-bridge.js";
 import type { SharedThreadPeer } from "../src/shared-thread-peer.js";
+import { handoffItemsFromTurns, handoffSnapshotTurns } from "../src/thread-handoff-content.js";
+import { ThreadHandoffStore } from "../src/thread-handoff-store.js";
 import {
   completePiTurn,
   createFixture,
@@ -302,6 +304,180 @@ describe("switching a conversation to another Agent", () => {
       // The activity travels too, not only the messages.
       expect(sent).toContain("$ ls\n退出码：未知\nx");
       expect(sent.endsWith("\n\n接着做")).toBe(true);
+    } finally {
+      await stopFixture(fixture);
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])(
+    "keeps activity through Codex and another Harness (legacy: %s)",
+    async (legacy) => {
+      const home = mkdtempSync(path.join(tmpdir(), "codexhost-switch-home-"));
+      const { fixture, grok, delegationApi } = fixtureWith(home);
+      const original = [
+        {
+          id: "original-turn",
+          status: "completed",
+          items: [
+            { id: "u", type: "userMessage", content: [{ type: "text", text: "最初的请求" }] },
+            {
+              id: "c",
+              type: "commandExecution",
+              command: "echo chain-42",
+              aggregatedOutput: "chain-42",
+              exitCode: 0,
+            },
+            {
+              id: "f",
+              type: "fileChange",
+              changes: [{ path: "chain.txt", kind: { type: "add" }, diff: "+chain-42" }],
+            },
+            { id: "a", type: "agentMessage", text: "最初的回答" },
+          ],
+        },
+      ];
+      try {
+        await initialize(fixture);
+        const store = new ThreadHandoffStore(
+          path.join(fixture.mappingStoreDirectory, "thread-handoffs"),
+        );
+        await store.save({
+          formatVersion: 2,
+          hostThreadId: "official-thread",
+          sourceThreadId: "original-thread",
+          sourceAgent: "pi",
+          sourceTitle: "连续切换",
+          targetAgent: "codex",
+          createdAt: new Date().toISOString(),
+          items: handoffItemsFromTurns(original, { agent: "pi" }),
+          turns: legacy ? [] : handoffSnapshotTurns(original, "handoff-official"),
+          deliveredItemIds: [],
+        });
+        writeRequest(fixture.desktopInput, {
+          id: 10,
+          method: "codexhost/thread/agent/switch",
+          params: {
+            threadId: "official-thread",
+            agent: "grok",
+            input: [{ type: "text", text: "最后的请求" }],
+          },
+        });
+        await answerOfficial(fixture, "thread/read", {
+          thread: {
+            id: "official-thread",
+            cwd: "/synthetic",
+            name: "连续切换",
+            status: { type: "idle" },
+          },
+        });
+        await answerOfficial(fixture, "thread/turns/list", {
+          data: [
+            {
+              id: "external-import-turn-1",
+              status: "completed",
+              items: original.flatMap(({ items }) =>
+                items.filter(({ type }) => type === "userMessage" || type === "agentMessage"),
+              ),
+            },
+            {
+              id: "codex-own",
+              status: "completed",
+              items: [
+                {
+                  id: "cu",
+                  type: "userMessage",
+                  content: [{ type: "text", text: "Codex 的请求" }],
+                },
+                { id: "ca", type: "agentMessage", text: "Codex 的回答" },
+              ],
+            },
+          ],
+          nextCursor: null,
+        });
+        await answerOfficial(fixture, "thread/archive", {});
+        const response = await fixture.collector.waitFor((message) => requestId(message, 10));
+        expect(response.error).toBeUndefined();
+        const target = (response.result as JsonObject).threadId as string;
+        const session = grok.sessions[0];
+        if (!session) throw new Error("Missing Grok session");
+        session.appendText("最后的回答");
+        session.succeedTurn();
+        await fixture.collector.waitFor(
+          (message) =>
+            method(message, "turn/completed") && messageParams(message).threadId === target,
+        );
+        const sent = (session.persistedSnapshot().turns[0]?.input ?? [])
+          .map(({ text }) => text)
+          .join("\n");
+        expect(sent.match(/最初的请求/gu)).toHaveLength(1);
+        expect(sent.match(/\$ echo chain-42/gu)).toHaveLength(1);
+        expect(sent).toContain("chain.txt");
+        expect(sent).toContain("助手（pi）");
+        expect(sent).toContain("助手（Codex）");
+        const turns = await readTurns(fixture, target, 11);
+        expect(userTexts(turns)).toEqual(["最初的请求", "Codex 的请求", "最后的请求"]);
+        expect(JSON.stringify(turns)).toContain("echo chain-42");
+        const api = delegationApi();
+        if (!api?.readHandoff) throw new Error("Missing handoff reader");
+        expect(await api.readHandoff({ threadId: target, item: "h1.2" })).toMatchObject({
+          item: { kind: "command", agent: "pi" },
+          text: "$ echo chain-42\n退出码：0\nchain-42",
+        });
+        expect(await api.readHandoff({ threadId: target, item: "h2.2" })).toMatchObject({
+          item: { agent: "codex" },
+          text: "Codex 的回答",
+        });
+      } finally {
+        await stopFixture(fixture);
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("keeps a Codex turn unsent when handoff injection fails, then retries without changing its input", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "codexhost-switch-home-"));
+    const { fixture } = fixtureWith(home);
+    try {
+      await initialize(fixture);
+      const store = new ThreadHandoffStore(
+        path.join(fixture.mappingStoreDirectory, "thread-handoffs"),
+      );
+      await store.save({
+        formatVersion: 2,
+        hostThreadId: "codex-pending",
+        sourceThreadId: "source",
+        sourceAgent: "pi",
+        sourceTitle: "",
+        targetAgent: "codex",
+        createdAt: new Date().toISOString(),
+        turns: [],
+        items: handoffItemsFromTurns([
+          { id: "t", items: [{ id: "c", type: "commandExecution", command: "echo pending" }] },
+        ]),
+        deliveredItemIds: [],
+        activityPending: true,
+      });
+      const params = { threadId: "codex-pending", input: [{ type: "text", text: "继续" }] };
+      writeRequest(fixture.desktopInput, { id: 20, method: "turn/start", params });
+      const resume = await readJsonLine(fixture.official.stdin);
+      expect(resume.method).toBe("thread/resume");
+      writeRequest(fixture.official.stdout, {
+        id: requiredMessageId(resume),
+        error: { code: -1, message: "not ready" },
+      });
+      expect(await fixture.collector.waitFor((message) => requestId(message, 20))).toMatchObject({
+        error: { code: -32076, message: "交接记录暂时未能送达 Codex，请重试发送" },
+      });
+      expect((await store.load("codex-pending"))?.activityPending).toBe(true);
+      writeRequest(fixture.desktopInput, { id: 21, method: "turn/start", params });
+      await answerOfficial(fixture, "thread/resume", {});
+      await answerOfficial(fixture, "thread/inject_items", {});
+      const forwarded = await answerOfficial(fixture, "turn/start", {
+        turn: { id: "next", items: [], status: "inProgress" },
+      });
+      expect(forwarded.params).toMatchObject(params);
+      expect((await store.load("codex-pending"))?.activityPending).toBeUndefined();
     } finally {
       await stopFixture(fixture);
       rmSync(home, { recursive: true, force: true });

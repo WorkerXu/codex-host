@@ -21,6 +21,8 @@
 
 不带推理过程、工具的内部状态和附件本身。上一次切换带来的历史块会被剥掉，不会层层嵌套。
 
+连续切换时，沿用来源 Thread 已保存的完整条目，再追加该 Agent 自己的新回合。Codex 的导入回合和外部 Thread 已显示的快照不会重复加入；每条助手回复及操作记录保留实际产生它的 Agent。即使中间经过 Codex，最早的命令和文件改动仍然可以交给后续 Agent、逐条读取并显示。旧版 Codex 交接记录没有快照时，用已保存的条目恢复文字显示。
+
 完整条目保存在交接记录里（`<数据目录>/thread-handoffs/<新 Thread>.json`，`sources.json` 记录来源到新 Thread 的对应）。来源对话归档、删除，或它的 Harness 被卸载之后，这些条目仍然可读。
 
 ### 历史块
@@ -46,11 +48,13 @@
 3. **目标为 Codex**：
    - 把用户和助手消息完整写成 Claude Code 会话文件 `$HOME/.claude/projects/codexhost-handoff/<uuid>.jsonl`。Codex 的外部会话导入只接受这个 `projects` 目录下的 `.jsonl`，并且固定读 `$HOME/.claude`，不看 `CLAUDE_CONFIG_DIR`。
    - 调用官方 `externalAgentConfig/import`，在 `externalAgentConfig/import/progress` 里按文件路径取得新 Thread ID。如果 3 秒内没收到通知，就按创建时间、cwd 和标题在 `thread/list` 里找导入出的 Thread，避免留下孤立对话；60 秒超时。
-   - 设置原项目（`thread/metadata/update`），保存交接记录。
-   - 用 `thread/resume` 和 `thread/inject_items` 把命令、文件改动、错误等操作记录连同读取说明交给 Codex 的模型。这些内容只有模型能看到，界面上不显示。
+   - 设置原项目（`thread/metadata/update`），保存完整条目及来源快照。有操作记录时，先记录待送达状态；保存失败不会归档来源。
+   - 用 `thread/resume` 和 `thread/inject_items` 把命令、文件改动、错误等操作记录连同读取说明交给 Codex 的模型。这些内容只有模型能看到，界面上不显示。失败后再试一次；仍失败则保持待送达，下一次发送前重试。只有注入成功才标记已送达；若仍未送达，返回错误并保留用户消息待重试，不在缺少交接记录时启动回合。各连接 Host 重新读取磁盘状态，避免缓存旧的待送达状态或之前未找到的记录。
    - 向 Desktop 补发 `thread/started`（导入本身不发这个通知），然后删除临时文件。导入的回合由 Codex 原生显示，ID 为 `external-import-turn-N`。
 4. **目标为外部 Harness**：按委派的流程新建 Thread（同 cwd、同标题、同项目，使用该 Harness 的默认 Model），先保存交接记录，再启动 Session。第一轮发给 Harness 的文本是历史块加用户原文；Desktop 显示的仍是用户原文。任何一步失败都会删除新 Thread 和它的交接记录。
 5. **归档来源**。归档失败不影响切换，原对话保留可见。
+
+删除目标 Thread 时同时删除它的交接记录与来源索引；后续 Thread 已保存的历史不受影响。下一次导入也会清理专用临时目录里遗留超过 10 分钟的会话文件。
 
 ## 显示
 

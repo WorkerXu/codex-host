@@ -2496,9 +2496,16 @@ export class AppServerHost {
               ),
             false,
           );
+          await this.#prepareHandedOverActivity(request);
           frame = encodeJsonFrame(request as unknown as JsonObject);
         } catch (error) {
-          await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+          await this.#writer.json(
+            rpcError(
+              request,
+              error instanceof ThreadAgentSwitchError ? error.code : -32602,
+              errorMessage(error),
+            ),
+          );
           return;
         }
       }
@@ -5558,6 +5565,15 @@ export class AppServerHost {
     }
   }
 
+  /** A Codex Thread an Agent switch created gets the handed-over activity its model still lacks. */
+  async #prepareHandedOverActivity(request: JsonRpcRequest): Promise<void> {
+    const params = isRecord(request.params) ? request.params : null;
+    if (!params || typeof params.threadId !== "string" || !Array.isArray(params.input)) {
+      return;
+    }
+    await this.#agentSwitcher.prepareCodexTurn(params.threadId);
+  }
+
   async #readThreadHandoff(input: ThreadHandoffReadInput): Promise<Record<string, unknown>> {
     try {
       return await this.#threadHandoffs.read(input);
@@ -5815,6 +5831,9 @@ export class AppServerHost {
     if (location.thread) await this.#resolveThreadInteractions(location.thread);
     this.#routeObservationTracker.forgetThread(location.record.hostThreadId);
     this.#externalQueue.forget(location.record.hostThreadId);
+    await this.#threadHandoffs
+      .remove(location.record.hostThreadId)
+      .catch((error: unknown) => this.#diagnose(error));
     await this.#writer.json(rpcEnvelope(request, { result: {} }));
     await this.#writer.json({
       method: "thread/deleted",

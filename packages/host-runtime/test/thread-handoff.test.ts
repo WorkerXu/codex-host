@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "@codexhost/protocol-core";
 
@@ -254,6 +254,24 @@ describe("selection and the handoff block", () => {
     expect(handoffBudgetBytes("长".repeat(20_000))).toBeLessThan(HANDOFF_BUDGET_BYTES);
     expect(handoffBudgetBytes("x", 12)).toBe(0);
   });
+
+  it("does not grow the Agent list on every repeated switch", () => {
+    const items = Array.from({ length: 2_000 }, (_, index) => ({
+      ...item(`h${index + 1}.1`, "assistant", "答复", index + 1),
+      agent: index % 2 ? "pi" : "codex",
+    }));
+    const block = handoffBlock({
+      fromAgent: "codex",
+      fromLabel: "Codex",
+      agentLabel: (agent) => (agent === "codex" ? "Codex" : "Pi"),
+      threadId: "t",
+      sourceThreadId: "s",
+      items,
+      budgetBytes: 2_000,
+    });
+    expect(Buffer.byteLength(block.text)).toBeLessThanOrEqual(2_000);
+    expect(block.text).toContain("在 Codex、Pi 中");
+  });
 });
 
 describe("Codex import file and display snapshot", () => {
@@ -398,6 +416,21 @@ describe("handoff store", () => {
     expect(upgraded?.items.map(({ text }) => text)).toEqual(["旧问题", "旧回答"]);
     expect(store.cachedTurns("old-1")).toHaveLength(1);
   });
+
+  it("sees records created or deleted by another Host after an earlier read", async () => {
+    const directory = await temporaryDirectory();
+    const first = new ThreadHandoffStore(directory);
+    const second = new ThreadHandoffStore(directory);
+    expect(await first.load("target")).toBeNull();
+    await second.save(record("target", "source"));
+    expect((await first.load("target"))?.sourceThreadId).toBe("source");
+    await first.save(record("another", "another-source"));
+    expect((await second.findBySource("another-source"))?.hostThreadId).toBe("another");
+    expect((await first.findBySource("source"))?.hostThreadId).toBe("target");
+    await second.remove("target");
+    expect(await first.load("target")).toBeNull();
+    expect(first.cachedTurns("target")).toEqual([]);
+  });
 });
 
 describe("switching to Codex", () => {
@@ -410,12 +443,21 @@ describe("switching to Codex", () => {
     turns: conversation,
   };
 
-  async function fixture(options: { notify?: boolean; threadExists?: boolean } = {}) {
+  async function fixture(
+    options: {
+      notify?: boolean;
+      threadExists?: boolean;
+      source?: ThreadAgentSwitchSource;
+      injectionFailures?: number;
+    } = {},
+  ) {
     const home = await temporaryDirectory();
     const handoffs = new ThreadHandoffStore(path.join(home, "handoffs"));
     const requests: { method: string; params: JsonObject }[] = [];
     const notifications: JsonObject[] = [];
     const archived: string[] = [];
+    const importedFiles: string[] = [];
+    let injectionFailures = options.injectionFailures ?? 0;
     let reads = 0;
     const switcher: ThreadAgentSwitcher = new ThreadAgentSwitcher({
       adapters: new Map(),
@@ -426,7 +468,7 @@ describe("switching to Codex", () => {
       agentLabel: (id) => (id === "claude-code" ? "Claude Code" : id),
       readSource: async () => {
         reads += 1;
-        return source;
+        return options.source ?? source;
       },
       threadExists: async () => options.threadExists ?? true,
       requestOfficial: async (method, params): Promise<JsonObject> => {
@@ -436,6 +478,7 @@ describe("switching to Codex", () => {
             ((params.migrationItems as JsonObject[])[0]?.details as JsonObject)
               .sessions as JsonObject[]
           )[0] as JsonObject;
+          importedFiles.push(await readFile(session.path as string, "utf8"));
           if (options.notify !== false) {
             queueMicrotask(() =>
               switcher.observe({
@@ -474,6 +517,9 @@ describe("switching to Codex", () => {
         if (method === "thread/read") {
           return { id: 3, result: { thread: { id: params.threadId as string, cwd: "/work" } } };
         }
+        if (method === "thread/inject_items" && injectionFailures-- > 0) {
+          return { id: 4, error: { code: -1, message: "temporary injection failure" } };
+        }
         return { id: 4, result: {} };
       },
       registerExternalThread: () => {
@@ -491,7 +537,16 @@ describe("switching to Codex", () => {
       importTimeoutMs: 2_000,
       importPollAfterMs: 10,
     });
-    return { switcher, requests, notifications, archived, handoffs, home, reads: () => reads };
+    return {
+      switcher,
+      requests,
+      notifications,
+      archived,
+      handoffs,
+      home,
+      importedFiles,
+      reads: () => reads,
+    };
   }
 
   it("imports the messages, gives Codex the activity and keeps the whole history readable", async () => {
@@ -515,7 +570,8 @@ describe("switching to Codex", () => {
     expect(injected).toContain("$ ls budget");
     expect(injected).not.toContain("先看预算表");
     const saved = await run.handoffs.findBySource("source-1");
-    expect(saved).toMatchObject({ hostThreadId: "codex-1", targetAgent: "codex", turns: [] });
+    expect(saved).toMatchObject({ hostThreadId: "codex-1", targetAgent: "codex" });
+    expect(saved?.turns).toHaveLength(3);
     expect(saved?.items).toHaveLength(11);
     expect(run.notifications).toEqual([expect.objectContaining({ method: "thread/started" })]);
     expect(run.archived).toEqual(["source-1"]);
@@ -531,6 +587,104 @@ describe("switching to Codex", () => {
     });
     expect(run.requests.some(({ method }) => method === "thread/list")).toBe(true);
   });
+
+  it("removes stale import files while keeping a recent import from another switch", async () => {
+    const run = await fixture();
+    const directory = path.join(run.home, ".claude", "projects", "codexhost-handoff");
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "stale.jsonl"), "{}");
+    await utimes(path.join(directory, "stale.jsonl"), 1, 1);
+    await writeFile(path.join(directory, "recent.jsonl"), "{}");
+    await run.switcher.switch({ threadId: "source-1", agent: "codex" });
+    expect(await readdir(directory)).toEqual(["recent.jsonl"]);
+  });
+
+  it("removes a deleted Codex Thread's handoff so it cannot be returned on retry", async () => {
+    const run = await fixture();
+    await run.switcher.switch({ threadId: "source-1", agent: "codex" });
+    run.switcher.observe({ method: "thread/deleted", params: { threadId: "codex-1" } });
+    await vi.waitFor(async () => expect(await run.handoffs.findBySource("source-1")).toBeNull());
+    await run.switcher.switch({ threadId: "source-1", agent: "codex" });
+    expect(run.reads()).toBe(2);
+  });
+
+  it("retries injection and only marks activity delivered after Codex accepts it", async () => {
+    const run = await fixture({ injectionFailures: 1 });
+    await run.switcher.switch({ threadId: "source-1", agent: "codex" });
+    expect(run.requests.filter(({ method }) => method === "thread/inject_items")).toHaveLength(2);
+    const saved = await run.handoffs.load("codex-1");
+    expect(saved?.activityPending).toBeUndefined();
+    expect(saved?.deliveredItemIds).toContain("h1.2");
+  });
+
+  it("keeps failed delivery pending across Hosts and refuses a turn until delivery succeeds", async () => {
+    const run = await fixture({ injectionFailures: 3 });
+    await run.switcher.switch({ threadId: "source-1", agent: "codex" });
+    const otherHost = new ThreadHandoffStore(path.join(run.home, "handoffs"));
+    expect((await otherHost.load("codex-1"))?.activityPending).toBe(true);
+    expect((await otherHost.load("codex-1"))?.deliveredItemIds).not.toContain("h1.2");
+    await expect(run.switcher.prepareCodexTurn("codex-1")).rejects.toThrow("请重试发送");
+    expect((await otherHost.load("codex-1"))?.activityPending).toBe(true);
+    await run.switcher.prepareCodexTurn("codex-1");
+    expect((await otherHost.load("codex-1"))?.activityPending).toBeUndefined();
+    expect((await otherHost.load("codex-1"))?.deliveredItemIds).toContain("h1.2");
+    const requestCount = run.requests.length;
+    await run.switcher.prepareCodexTurn("codex-1");
+    expect(run.requests).toHaveLength(requestCount);
+  });
+
+  it("keeps the source visible if its handoff cannot be saved", async () => {
+    const run = await fixture();
+    vi.spyOn(run.handoffs, "save").mockRejectedValueOnce(new Error("disk full"));
+    await expect(run.switcher.switch({ threadId: "source-1", agent: "codex" })).rejects.toThrow(
+      "disk full",
+    );
+    expect(run.archived).toEqual([]);
+    expect(run.requests.some(({ method }) => method === "thread/inject_items")).toBe(false);
+  });
+
+  it.each([false, true])(
+    "carries earlier activity and attribution through an external source (legacy snapshot: %s)",
+    async (legacy) => {
+      const earlierItems = handoffItemsFromTurns(conversation, { agent: "grok" });
+      const earlierTurns = handoffSnapshotTurns(conversation, "handoff-middle");
+      const run = await fixture({
+        source: {
+          ...source,
+          threadId: "middle",
+          turns: [
+            ...(legacy ? [] : earlierTurns),
+            turn("own", [user("u", "继续"), agent("a", "继续好了")]),
+          ],
+        },
+      });
+      await run.handoffs.save({
+        formatVersion: 2,
+        hostThreadId: "middle",
+        sourceThreadId: "first",
+        sourceAgent: "grok",
+        sourceTitle: source.title,
+        targetAgent: "claude-code",
+        createdAt: new Date().toISOString(),
+        items: earlierItems,
+        turns: legacy ? [] : earlierTurns,
+        deliveredItemIds: [],
+      });
+      await run.switcher.switch({ threadId: "middle", agent: "codex" });
+      const saved = await run.handoffs.load("codex-1");
+      expect(saved?.items).toHaveLength(13);
+      expect(saved?.items.slice(0, 11)).toEqual(earlierItems);
+      expect(saved?.items[12]).toMatchObject({ id: "h4.2", agent: "claude-code" });
+      expect(saved?.turns).toHaveLength(4);
+      expect(JSON.stringify(saved?.turns)).toContain("ls budget");
+      const injected = JSON.stringify(
+        run.requests.filter(({ method }) => method === "thread/inject_items"),
+      );
+      expect(injected).toContain("ls budget");
+      expect(injected).toContain("grok");
+      expect(run.importedFiles[0]?.match(/先看预算表/gu)).toHaveLength(1);
+    },
+  );
 
   it("answers a retry with the Thread the first switch made", async () => {
     const run = await fixture();

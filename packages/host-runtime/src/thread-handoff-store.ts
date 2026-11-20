@@ -24,10 +24,15 @@ export interface ThreadHandoffRecord {
    * source, or its Harness, still being available.
    */
   items: HandoffItem[];
-  /** Read-only Turns shown above an external Thread's own history; empty for Codex. */
+  /**
+   * The source as read-only Turns: shown above an external Thread's own
+   * history, and carried on when the conversation moves again.
+   */
   turns: JsonObject[];
   /** Items the Agent received in its first request or injected context. */
   deliveredItemIds: string[];
+  /** Codex has the messages but its model has not received the activity around them yet. */
+  activityPending?: boolean;
 }
 
 const DEFAULT_LIST_LIMIT = 50;
@@ -64,25 +69,35 @@ export function defaultThreadHandoffDirectory(environment: NodeJS.ProcessEnv): s
   );
 }
 
-/** Records written before items were kept carry only the display Turns. */
+/**
+ * Records written before items were kept carry only the display Turns; items
+ * written before they named their Agent all came from the direct source.
+ */
 function upgrade(value: unknown, hostThreadId: string): ThreadHandoffRecord | null {
   if (!isRecord(value) || value.hostThreadId !== hostThreadId || !Array.isArray(value.turns)) {
     return null;
   }
   const turns = value.turns.filter(isRecord);
+  const sourceAgent = typeof value.sourceAgent === "string" ? value.sourceAgent : "";
   if (value.formatVersion === 2 && Array.isArray(value.items)) {
-    return value as unknown as ThreadHandoffRecord;
+    const record = value as unknown as ThreadHandoffRecord;
+    return {
+      ...record,
+      items: record.items.map((item) =>
+        item.role === "user" || item.agent || !sourceAgent ? item : { ...item, agent: sourceAgent },
+      ),
+    };
   }
   if (value.formatVersion !== 1) return null;
   return {
     formatVersion: 2,
     hostThreadId,
     sourceThreadId: typeof value.sourceThreadId === "string" ? value.sourceThreadId : "",
-    sourceAgent: typeof value.sourceAgent === "string" ? value.sourceAgent : "",
+    sourceAgent,
     sourceTitle: "",
     targetAgent: "",
     createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date(0).toISOString(),
-    items: handoffItemsFromTurns(turns),
+    items: handoffItemsFromTurns(turns, sourceAgent ? { agent: sourceAgent } : {}),
     turns,
     deliveredItemIds: [],
   };
@@ -103,7 +118,6 @@ async function writeAtomic(file: string, body: string): Promise<void> {
 export class ThreadHandoffStore {
   readonly #directory: string;
   readonly #cache = new Map<string, ThreadHandoffRecord | null>();
-  #sources: Map<string, string> | null = null;
   #indexWrite: Promise<void> = Promise.resolve();
 
   constructor(directory: string) {
@@ -120,7 +134,8 @@ export class ThreadHandoffStore {
   }
 
   async load(hostThreadId: string): Promise<ThreadHandoffRecord | null> {
-    if (this.#cache.has(hostThreadId)) return this.#cache.get(hostThreadId) ?? null;
+    // Connection Hosts share these files with the Host that performs switches.
+    // Re-read delivery state, including a record created after a previous miss.
     let record: ThreadHandoffRecord | null = null;
     try {
       record = upgrade(JSON.parse(await readFile(this.#file(hostThreadId), "utf8")), hostThreadId);
@@ -131,8 +146,8 @@ export class ThreadHandoffStore {
     return record;
   }
 
+  /** Read afresh each time: every Host of a remote listener writes the same index. */
   async #index(): Promise<Map<string, string>> {
-    if (this.#sources) return this.#sources;
     const sources = new Map<string, string>();
     try {
       const parsed = JSON.parse(
@@ -143,9 +158,11 @@ export class ThreadHandoffStore {
         if (typeof target === "string") sources.set(source, target);
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // A damaged index only loses the source lookup; the next save rewrites it.
+      if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
     }
-    this.#sources = sources;
     return sources;
   }
 
@@ -222,6 +239,7 @@ export class ThreadHandoffStore {
           turn: item.turn,
           kind: item.kind,
           role: item.role,
+          ...(item.agent ? { agent: item.agent } : {}),
           status: item.status,
           delivered: delivered.has(item.id),
         },
@@ -244,6 +262,7 @@ export class ThreadHandoffStore {
         turn: item.turn,
         kind: item.kind,
         role: item.role,
+        ...(item.agent ? { agent: item.agent } : {}),
         status: item.status,
         chars: item.text.length,
         delivered: delivered.has(item.id),
