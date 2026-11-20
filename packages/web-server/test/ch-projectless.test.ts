@@ -1,3 +1,8 @@
+import {
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_PARAM,
+  THREAD_FOLDERS_SET_METHOD,
+} from "@codexhost/shared-contracts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -166,4 +171,68 @@ it("does not resend an uncertain creation or allow reusing that draft to allocat
   assert.ok(!replace.ok);
   assert.equal(replace.error.code, "session/busy");
   assert.equal(starts, 1);
+});
+
+it("applies draft folders through the Host and shares updates on the canonical Thread", async (t) => {
+  const { root, host, workspaces, call, rpc } = setup(t);
+  const draft = await call<{ sessionId: string }>("session/create");
+  const folders = [join(root, "second"), join(root, "first")];
+  const invalid = await rpc.dispatch(THREAD_FOLDERS_SET_METHOD, {
+    args: { sessionId: draft.sessionId, folders: ["relative"] },
+  });
+  assert.equal(invalid.ok, false);
+
+  const folderRequest = (method: string, args: object) => rpc.dispatch(method, { args });
+  const savedDraft = await folderRequest(THREAD_FOLDERS_SET_METHOD, {
+    sessionId: draft.sessionId,
+    folders,
+  });
+  assert.ok(savedDraft.ok);
+  assert.equal(host.workingFolders.size, 0);
+  await call("session/prompt", {
+    sessionId: draft.sessionId,
+    requestId: "use-folders",
+    content: [{ type: "text", text: "Work in both folders" }],
+  });
+  const started = host.requests.find(({ method }) => method === "thread/start");
+  assert.deepEqual(started?.params[THREAD_FOLDERS_PARAM], folders);
+  assert.ok(started?.params.projectlessWorkspace);
+  const canonical = [...host.threads.values()].find((thread) => thread.id !== "selected");
+  assert.ok(canonical);
+  assert.equal(canonical.cwd, folders[0]);
+  assert.equal(workspaces.ownerOf(canonical.id), undefined);
+  assert.deepEqual(host.workingFolders.get(canonical.id)?.folders, folders);
+
+  const next = [join(root, "third"), folders[0]];
+  const saved = await folderRequest(THREAD_FOLDERS_SET_METHOD, {
+    sessionId: canonical.id,
+    folders: next,
+  });
+  assert.ok(saved.ok);
+  assert.deepEqual(host.workingFolders.get(canonical.id)?.folders, next);
+  const reopened = await folderRequest(THREAD_FOLDERS_GET_METHOD, { sessionId: canonical.id });
+  assert.ok(reopened.ok);
+  assert.deepEqual((reopened.value as { folders: string[] }).folders, next);
+  assert.equal(workspaces.ownerOf(canonical.id), undefined);
+});
+
+it("keeps the selected project when a draft chooses a different primary folder", async (t) => {
+  const { root, host, selected, call, rpc } = setup(t);
+  const draft = await call<{ sessionId: string }>("session/create", {
+    workspaceId: selected.workspaceId,
+  });
+  const worktree = join(root, "isolated-worktrees", "working-copy");
+  const result = await rpc.dispatch(THREAD_FOLDERS_SET_METHOD, {
+    args: { sessionId: draft.sessionId, folders: [worktree, join(root, "docs")] },
+  });
+  assert.ok(result.ok);
+  await call("session/prompt", {
+    sessionId: draft.sessionId,
+    requestId: "keep-project",
+    content: [{ type: "text", text: "Inspect the working copy" }],
+  });
+  const canonical = [...host.threads.values()].find((thread) => thread.id !== "selected");
+  assert.ok(canonical);
+  assert.equal(canonical.cwd, worktree);
+  assert.equal(host.projectSnapshot.assignments[canonical.id], "project-selected");
 });

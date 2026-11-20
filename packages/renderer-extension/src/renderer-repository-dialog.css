@@ -1,0 +1,289 @@
+.codexhost-repo-dialog {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 64px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-token-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-token-main-surface-primary);
+  color: var(--color-token-text-primary);
+  box-shadow: var(--shadow-dropdown-overlay);
+  font: var(--font-text-sm-size)/1.5 var(--font-sans);
+}
+.codexhost-repo-dialog::backdrop {
+  background: var(--modal-backdrop-background);
+}
+.codexhost-repo-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 12px;
+}
+.codexhost-repo-dialog h2 {
+  margin: 0;
+  font-size: var(--font-heading-sm-size, 18px);
+  font-weight: 600;
+}
+.codexhost-repo-dialog button {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.codexhost-repo-dialog button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.codexhost-repo-dialog button:focus-visible,
+.codexhost-repo-dialog input:focus-visible {
+  outline: 2px solid var(--color-token-focus-border);
+  outline-offset: 2px;
+}
+.codexhost-repo-quiet {
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  background: transparent;
+}
+.codexhost-repo-quiet:hover {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-repo-dialog .codexhost-repo-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-token-text-secondary);
+}
+.codexhost-repo-summary {
+  margin: 8px 24px 24px;
+  overflow-wrap: anywhere;
+}
+.codexhost-repo-summary p {
+  margin: 0;
+}
+.codexhost-repo-summary p:first-child {
+  font-weight: 500;
+}
+.codexhost-repo-summary [role="status"] {
+  margin-top: 4px;
+  color: var(--color-token-text-secondary);
+}
+.codexhost-repo-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 24px 16px;
+  border-bottom: 1px solid var(--color-token-border);
+}
+.codexhost-repo-tabs button {
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-token-text-secondary);
+}
+.codexhost-repo-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--color-token-text-primary);
+  color: var(--color-token-text-primary);
+}
+.codexhost-repo-search,
+.codexhost-repo-path {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 48px);
+  height: 36px;
+  margin: 0 24px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-token-border);
+  border-radius: var(--radius-md);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+.codexhost-repo-list {
+  max-height: min(360px, calc(100dvh - 320px));
+  min-height: 120px;
+  overflow: auto;
+  padding: 4px 16px 12px;
+}
+.codexhost-repo-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-lg);
+  padding: 12px 8px;
+  text-align: left;
+}
+.codexhost-repo-row:hover,
+.codexhost-repo-row:focus-visible {
+  background: var(--color-token-list-hover-background);
+}
+.codexhost-repo-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.codexhost-repo-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-repo-meta,
+.codexhost-repo-description {
+  color: var(--color-token-text-secondary);
+  font-size: var(--font-text-xs-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codexhost-repo-row time {
+  color: var(--color-token-text-tertiary);
+  font-size: var(--font-text-xs-size);
+  white-space: nowrap;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.codexhost-repo-message {
+  margin: 12px 24px 20px;
+  color: var(--color-token-text-secondary);
+  overflow-wrap: anywhere;
+}
+.codexhost-repo-message[role="alert"] {
+  color: var(--color-text-danger-surface);
+}
+.codexhost-repo-list > .codexhost-repo-message {
+  margin: 12px 8px 20px;
+}
+.codexhost-repo-list > .codexhost-repo-quiet {
+  margin-left: 8px;
+}
+.codexhost-repo-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-token-border);
+}
+.codexhost-repo-primary {
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-background-primary-solid);
+  color: var(--color-text-primary-solid) !important;
+  padding: 6px 12px;
+}
+.codexhost-repo-target {
+  padding: 0 24px 16px;
+}
+.codexhost-repo-target p {
+  margin: 0 0 8px;
+}
+.codexhost-repo-target-path {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.codexhost-repo-target-path span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-token-text-secondary);
+}
+.codexhost-repo-progress {
+  display: flex;
+  align-items: center;
+  padding: 0 24px 28px;
+  margin: 0;
+  list-style: none;
+}
+.codexhost-repo-progress li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-token-text-tertiary);
+  white-space: nowrap;
+}
+.codexhost-repo-progress li:not(:last-child) {
+  flex: 1;
+}
+.codexhost-repo-progress li:not(:last-child)::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  min-width: 8px;
+  margin-right: 8px;
+  background: var(--color-token-border);
+}
+.codexhost-repo-progress li[data-state="current"] {
+  color: var(--color-token-text-primary);
+  font-weight: 500;
+}
+.codexhost-repo-progress li[data-state="done"] {
+  color: var(--color-token-text-secondary);
+}
+.codexhost-repo-step-marker {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.codexhost-repo-progress [data-state="current"] > .codexhost-repo-step-marker {
+  width: 14px;
+  height: 14px;
+  margin: 1px;
+  border: 1.5px solid var(--color-token-border);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: codexhost-repo-spin 0.8s linear infinite;
+}
+.codexhost-repo-progress [data-state="pending"] > .codexhost-repo-step-marker::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+@keyframes codexhost-repo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .codexhost-repo-progress [data-state="current"] > .codexhost-repo-step-marker {
+    animation: none;
+  }
+}
+.codexhost-repo-browser {
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, calc(100dvh - 180px));
+  padding: 0 20px 16px;
+}
+.codexhost-repo-browser svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.codexhost-repo-browser :focus-visible {
+  outline: 2px solid var(--color-token-focus-border);
+  outline-offset: -2px;
+}
+.codexhost-repo-browser .codexhost-folders-primary {
+  color: var(--color-text-primary-solid);
+}
+@media (max-width: 480px) {
+  .codexhost-repo-row time {
+    display: none;
+  }
+}

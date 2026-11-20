@@ -84,6 +84,7 @@ export type HarnessExecutionPolicy = "default" | "unattended-full-access";
 
 export interface CreateSessionInput {
   kind: "create";
+  additionalDirectories?: readonly string[];
   cwd: string;
   environment?: Record<string, string | undefined>;
   executionPolicy?: HarnessExecutionPolicy;
@@ -100,6 +101,9 @@ export interface ResumeSessionInput {
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;
   kind: "resume";
+  additionalDirectories?: readonly string[];
+  /** Original native history directory when the execution cwd changes. */
+  previousCwd?: string;
   nativeRef: NativeSessionRef;
   cwd: string;
   environment?: Record<string, string | undefined>;
@@ -707,6 +711,8 @@ export interface HarnessAdapter {
    * without them that they load after its first message.
    */
   readonly liveCommandCatalog?: boolean;
+  /** The Adapter applies additionalDirectories through its native interface. */
+  readonly additionalDirectories?: boolean;
   readonly sessionImport?: HarnessSessionImportCapability;
   /** Read-only local usage for the machine-wide statistics; never starts a native process. */
   readonly usageStatistics?: HarnessUsageStatisticsCapability;

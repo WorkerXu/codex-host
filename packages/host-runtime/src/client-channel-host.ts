@@ -1,3 +1,4 @@
+import { THREAD_FOLDERS_GET_METHOD, THREAD_FOLDERS_SET_METHOD } from "@codexhost/shared-contracts";
 import type { HostApprovalInteraction, HostQuestionInteraction } from "@codexhost/harness-adapter";
 import type { StoredSectionPlacementV1, StoredThreadRecordV1 } from "@codexhost/mapping-store";
 import { jsonRpcRequestSchema, type JsonObject, type JsonValue } from "@codexhost/protocol-core";
@@ -38,6 +39,8 @@ import { decodeOfficialCodexModelSelection } from "./official-codex-model-ref.js
 import { nativeThreadSkillInput } from "./codex-runtime/native-thread-controls.js";
 
 const OFFICIAL_METHODS: Readonly<Record<string, "native" | "host">> = {
+  [THREAD_FOLDERS_GET_METHOD]: "host",
+  [THREAD_FOLDERS_SET_METHOD]: "host",
   "thread/read": "native",
   "thread/resume": "native",
   "thread/fork": "native",

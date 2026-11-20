@@ -11,6 +11,14 @@ import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { HarnessAvailability } from "./harness-availability.js";
 import {
+  CODE_REPOSITORIES_PREFIX,
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
+} from "@codexhost/shared-contracts";
+import type { CodeRepositories } from "./code-repositories.js";
+import { RepositoryError } from "./code-repository-process.js";
+import { ThreadFolders, rewriteFolderStart, threadEnvironmentId } from "./thread-folders.js";
+import {
   SHARED_DELEGATION_METHOD,
   sharedDelegationRegistration,
   dispatchSharedDelegation,
@@ -433,6 +441,8 @@ export interface AppServerHostOptions {
   accountControl?: CodexAccountControl;
   /** Shared by all Desktop/Remote Control sessions belonging to one Host. */
   officialRuntimeScope?: OfficialRuntimeScope;
+  codeRepositories?: CodeRepositories;
+  threadFoldersDataDirectory?: string;
   onCreateRequestRoute?: (observation: CreateRequestRouteObservation) => void;
   onRequestRoute?: (observation: RequestRouteObservation) => void;
   updateCoordinator?: HostUpdateCoordinator;
@@ -704,6 +714,7 @@ export class AppServerHost {
   > &
     AppServerHostOptions;
   readonly #nativeSettingsNotifications = new Set<(value: JsonValue) => void>();
+  readonly #threadFolders: ThreadFolders;
   #officialRuntime: OfficialRuntimeClient;
   #officialRuntimeScope: OfficialRuntimeScope;
   #ownsOfficialRuntimeScope: boolean;
@@ -829,6 +840,10 @@ export class AppServerHost {
     const environment = this.#options.environment ?? process.env;
     const home = environment.HOME ?? os.homedir();
     const permanentHome = path.resolve(environment.CODEX_HOME ?? path.join(os.homedir(), ".codex"));
+    this.#threadFolders = new ThreadFolders(
+      options.environment ?? process.env,
+      options.threadFoldersDataDirectory,
+    );
     this.#ownsOfficialRuntimeScope = options.officialRuntimeScope === undefined;
     this.#officialRuntimeScope =
       options.officialRuntimeScope ??
@@ -999,6 +1014,7 @@ export class AppServerHost {
       environment: this.#options.environment ?? process.env,
       repository: this.#repository,
       consumeOutputs: (thread) => this.#consumeHarnessOutputs(thread),
+      workingFolders: async (id) => (await this.#threadFolders.store.get(id))?.folders,
       onWorkspace: (cwd) => this.#skills?.prepare(cwd),
       diagnose: (error) => this.#diagnose(error),
       subagentRunning: (threadId) => this.#subagentThreadStatuses.get(threadId) === "active",
@@ -1849,6 +1865,28 @@ export class AppServerHost {
       });
       return;
     }
+    if (request.method.startsWith(CODE_REPOSITORIES_PREFIX)) {
+      const service = origin === "desktop" ? this.#options.codeRepositories : undefined;
+      this.#dispatchDesktopReply(request, async () => {
+        if (!service) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await service.request(request.method, request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(
+              request,
+              -32079,
+              error instanceof RepositoryError ? error.code : "connection_failed",
+            ),
+          );
+        }
+      });
+      return;
+    }
     if (request.method === THREAD_CATALOG_READ_METHOD) {
       this.#dispatchDesktopReply(request, () => this.#readThreadCatalog(request));
       return;
@@ -1877,6 +1915,8 @@ export class AppServerHost {
         request.method.startsWith("turn/") ||
         request.method.startsWith("codexhost/thread/") ||
         request.method.startsWith("codexhost/harness/") ||
+        request.method === THREAD_FOLDERS_GET_METHOD ||
+        request.method === THREAD_FOLDERS_SET_METHOD ||
         this.#options.sharedThreads.handlesControl(request.method))
     ) {
       try {
@@ -1889,6 +1929,36 @@ export class AppServerHost {
         await this.#writer.json(rpcError(request, -32090, errorMessage(error)));
         return;
       }
+    }
+    if (
+      request.method === THREAD_FOLDERS_GET_METHOD ||
+      request.method === THREAD_FOLDERS_SET_METHOD
+    ) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const result = await this.#threadFolders.handle(
+            request,
+            async (threadId, draftHarness) => {
+              await this.#waitForPlugins();
+              const location = threadId ? await this.#locateExternalThread(threadId) : null;
+              if (location?.kind === "error") throw new Error(location.error.message);
+              const harness =
+                location?.kind === "external"
+                  ? location.record.harnessId
+                  : (draftHarness ?? "codex");
+              return (
+                harness === "codex" ||
+                this.#externalAdapters.get(harness)?.additionalDirectories === true
+              );
+            },
+            (id) => this.clientEvents.changed(id, THREAD_FOLDERS_SET_METHOD),
+          );
+          await this.#writer.json(result);
+        } catch {
+          await this.#writer.json(rpcError(request, -32602, "无法读取或保存工作文件夹"));
+        }
+      });
+      return;
     }
     if (request.method === SKILLS_LIST_METHOD && this.#skills) {
       await handleSkillsList(request, this.#skills, {
@@ -2063,9 +2133,34 @@ export class AppServerHost {
             params: { ...(isRecord(original.params) ? original.params : {}), ...options },
           });
       }
+      const value = parseJsonFrame(frame);
+      if (
+        (request.method === "thread/start" || request.method === "turn/start") &&
+        isRecord(value)
+      ) {
+        const native = { ...request, params: value.params ?? {} } as JsonRpcRequest;
+        let prepared: JsonRpcRequest;
+        try {
+          prepared = await this.#threadFolders.prepare(native, async (threadId) =>
+            threadEnvironmentId(
+              await this.#officialRuntime.request("thread/read", { threadId, includeTurns: false }),
+            ),
+          );
+        } catch {
+          this.#pendingOfficialTurnStarts.delete(request.id);
+          this.#signalActiveWorkChanged();
+          await this.#writer.json(
+            rpcError(request, -32602, "无法应用工作文件夹，请重新打开对话后重试"),
+          );
+          return;
+        }
+        if (prepared !== native)
+          frame = encodeJsonFrame({ ...value, params: prepared.params ?? {} });
+      }
       await this.#officialRuntime.sendFrame(frame);
       this.#markDesktopRequestAnswered(request.id);
     } catch (error) {
+      this.#threadFolders.cancel(request.id);
       if (request.method === "turn/start") {
         this.#pendingOfficialTurnStarts.delete(request.id);
         this.#signalActiveWorkChanged();
@@ -2083,6 +2178,7 @@ export class AppServerHost {
     frame: Buffer<ArrayBufferLike>;
     value: JsonValue;
   }): Promise<void> {
+    await this.#threadFolders.observe(input.value).catch((error: unknown) => this.#diagnose(error));
     for (const listener of this.#nativeSettingsNotifications) listener(input.value);
     if (this.#options.externalOnly) {
       this.#client.observeNativeMessage(input.value);
@@ -2184,7 +2280,12 @@ export class AppServerHost {
 
   async #requestOfficial(method: string, params: JsonObject): Promise<JsonObject> {
     if (this.#options.externalOnly) await this.#initializeSharedOfficial();
-    return this.#officialRuntime.request(method, params);
+    return this.#threadFolders.requestNative(
+      method,
+      params,
+      (name, input) => this.#officialRuntime.request(name, input),
+      (error) => this.#diagnose(error),
+    );
   }
 
   async #requestClientNative(method: string, params: JsonObject): Promise<ConsoleHostReply> {
@@ -4551,6 +4652,15 @@ export class AppServerHost {
       );
       return;
     }
+    let folders: string[] | null;
+    try {
+      const rewritten = rewriteFolderStart(request);
+      request = rewritten.request;
+      folders = rewritten.folders;
+    } catch {
+      await this.#writer.json(rpcError(request, -32602, "请选择有效的工作文件夹"));
+      return;
+    }
     const params = requestObject(request);
     const route = decodeCreateRoute(request);
     // Renderer-side prewarms mark the request; main-process prewarms can mark only the Model.
@@ -4568,7 +4678,7 @@ export class AppServerHost {
     let projectlessWorkspace: StoredThreadRecordV1["projectlessWorkspace"];
     if (params.projectlessWorkspace !== undefined) {
       const choice = clientProjectlessWorkspaceSchema.safeParse(params.projectlessWorkspace);
-      if (!choice.success || cwd !== undefined || params.ephemeral === true) {
+      if (!choice.success || (cwd !== undefined && !folders) || params.ephemeral === true) {
         this.#routeObservationTracker.rejectCreate(request.id);
         await this.#writer.json(rpcError(request, -32602, "Invalid projectless workspace choice"));
         return;
@@ -4578,7 +4688,7 @@ export class AppServerHost {
           this.#options.environment ?? process.env,
           choice.data.prompt ?? "",
         );
-        cwd = allocated.cwd;
+        cwd = folders?.[0] ?? allocated.cwd;
         projectlessWorkspace = {
           workspaceRoot: allocated.workspaceRoot,
           outputDirectory: allocated.outputDirectory,
@@ -4623,6 +4733,9 @@ export class AppServerHost {
     const sessionResult = await adapter.open({
       kind: "create",
       cwd,
+      ...(folders && adapter.additionalDirectories
+        ? { additionalDirectories: folders.slice(1) }
+        : {}),
       environment: {
         ...(this.#options.environment ?? process.env),
         [DELEGATION_THREAD_ID_ENV]: record.hostThreadId,
@@ -4648,6 +4761,11 @@ export class AppServerHost {
             session.initialState.nativeRef,
           );
         }
+        if (folders && !prewarm && typeof params.projectId === "string" && params.projectId) {
+          record = await this.#repository.updateMetadata(record.hostThreadId, {
+            projectId: params.projectId,
+          });
+        }
         const thread = externalThreadValue({
           record,
           turns: [],
@@ -4656,6 +4774,9 @@ export class AppServerHost {
         const externalThread = this.#registerExternalThread({
           record,
           session,
+          ...(folders
+            ? { workingFolders: adapter.additionalDirectories ? folders : folders.slice(0, 1) }
+            : {}),
           unsubmittedPrewarm: prewarm,
           sessionId: record.hostThreadId,
           thread,
@@ -4666,6 +4787,11 @@ export class AppServerHost {
         });
         if (prewarm) {
           this.#externalPrewarms.register(externalThread);
+        }
+        if (folders && !prewarm) {
+          await this.#threadFolders
+            .applied(externalThread.id, folders)
+            .catch((error: unknown) => this.#diagnose(error));
         }
         this.#routeObservationTracker.bindCreatedThread(request.id, externalThread.id);
         await this.#writer.json(
@@ -4715,6 +4841,7 @@ export class AppServerHost {
     requestedThinkingOptionId?: HarnessThinkingOptionId;
     requestedPermissionModeId?: HarnessPermissionModeId;
     unsubmittedPrewarm?: boolean;
+    workingFolders?: readonly string[];
   }): ExternalThread {
     return this.#externalRuntime.register(input);
   }
@@ -5869,6 +5996,9 @@ export class AppServerHost {
     if (this.#closeRequested || this.#externalRuntime.get(thread.id) !== thread) {
       throw new ExternalSteerError(-32073, "External Thread is no longer available");
     }
+    const folders = await this.#threadFolders.store.get(thread.id);
+    const reopened = await this.#externalRuntime.applyWorkingFolders(thread, folders?.folders);
+    if (reopened) throw new ExternalSteerError(reopened.code, reopened.message);
     if (
       thread.running ||
       thread.activeTurnId ||
@@ -5912,6 +6042,11 @@ export class AppServerHost {
         input: [{ type: "text", text: injected.text }],
       });
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
+      if (folders) {
+        await this.#threadFolders
+          .applied(thread.id, folders.folders)
+          .catch((error: unknown) => this.#diagnose(error));
+      }
       await this.#releaseInjectedText(thread, turnId, injected);
       await this.#externalRuntime.capturePreview(thread, projection.projector.snapshotTurn());
       return { turnId, turn: projection.projector.pendingTurn(), gate };

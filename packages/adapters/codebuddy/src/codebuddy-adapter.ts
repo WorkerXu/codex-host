@@ -44,6 +44,7 @@ export interface CodeBuddyAdapterOptions {
 
 export class CodeBuddyAdapter implements HarnessAdapter {
   readonly harnessId;
+  readonly additionalDirectories: boolean;
   readonly commandCatalog?: HarnessCommandCatalog;
   readonly liveCommandCatalog = true;
   readonly sessionImport: CodeBuddySessionImport;
@@ -82,6 +83,7 @@ export class CodeBuddyAdapter implements HarnessAdapter {
   constructor(readonly options: CodeBuddyAdapterOptions = {}) {
     this.#profile = options.profile ?? CODEBUDDY_RUNTIME_PROFILE;
     this.harnessId = this.#profile.harnessId;
+    this.additionalDirectories = this.harnessId === CODEBUDDY_RUNTIME_PROFILE.harnessId;
     if (nativeCommandsEnabled(this.#profile)) {
       const commandCatalog =
         this.#profile.staticCommandCatalog ??

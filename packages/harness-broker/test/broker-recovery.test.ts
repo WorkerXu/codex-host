@@ -107,6 +107,7 @@ describe("broker recovery ownership", () => {
   });
   it("resumes the same live wrapper after broker restart with its confirmed native state", async () => {
     const f = await fixture();
+    const additionalDirectories = [path.join(f.root, "docs"), path.join(f.root, "shared code")];
     const modes = harnessPermissionModeCatalogSchema.parse({
       defaultModeId: "ask",
       modes: [
@@ -121,11 +122,13 @@ describe("broker recovery ownership", () => {
       harnessId: id,
       descriptorPath: f.descriptorPath,
       forwardDelegationEnvironment: true,
+      additionalDirectories: true,
     });
     cleanup.push(() => client.close());
     const created = await client.open({
       kind: "create",
       cwd: f.root,
+      additionalDirectories,
       environment: { CODEXHOST_THREAD_ID: "parent" },
     });
     if (!created.ok) throw Error(created.error.message);
@@ -175,6 +178,7 @@ describe("broker recovery ownership", () => {
       kind: "resume",
       nativeRef: ref,
       cwd: f.root,
+      additionalDirectories,
       model,
       permissionModeId: "plan",
       environment: { CODEXHOST_THREAD_ID: "parent" },

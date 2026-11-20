@@ -1,6 +1,7 @@
 import { HubAdminService } from "./hub-admin-service.js";
 import { getSkillsHub } from "./skills-hub/service.js";
 import { desktopJarvisServices } from "./desktop-jarvis.js";
+import { CodeRepositories } from "./code-repositories.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -464,6 +465,11 @@ export async function runHostRuntime(input: {
           officialRuntimeScope: official.officialRuntimeScope,
           accountControl: official.accountControl,
         };
+        const codeRepositories =
+          process.platform === "darwin" &&
+          delegationEnvironment.CODEXHOST_REMOTE_SSH_MANAGED !== "1"
+            ? new CodeRepositories({ environment: delegationEnvironment })
+            : undefined;
         if (!remoteControlPlan) {
           try {
             const host = new AppServerHost({
@@ -472,6 +478,7 @@ export async function runHostRuntime(input: {
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
+              ...(codeRepositories ? { codeRepositories } : {}),
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -614,6 +621,7 @@ export async function runHostRuntime(input: {
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
+        threadFoldersDataDirectory: sharedHostDataDirectory(delegationEnvironment),
         desktopInput: sharedOwner.input,
         desktopOutput: sharedOwner.output,
         diagnosticOutput: process.stderr,
@@ -658,6 +666,7 @@ export async function runHostRuntime(input: {
             stockCodexPath,
             arguments: [],
             environment: delegationEnvironment,
+            threadFoldersDataDirectory: sharedHostDataDirectory(delegationEnvironment),
             desktopInput,
             desktopOutput,
             diagnosticOutput,

@@ -78,7 +78,14 @@ export class AntigravityAcpTransport implements AntigravityAcpTransportLike {
         throw new AntigravityTransportError("notInstalled", "Antigravity CLI was not found");
       const invocation = antigravityInvocation(
         executable,
-        this.skipPermissions ? ["acp", "--dangerously-skip-permissions"] : ["acp"],
+        [
+          "acp",
+          ...(this.skipPermissions ? ["--dangerously-skip-permissions"] : []),
+          ...(this.options.additionalDirectories ?? []).flatMap((directory) => [
+            "--add-dir",
+            directory,
+          ]),
+        ],
         this.options.environment ?? process.env,
       );
       const child = spawn(invocation.command, invocation.arguments, {

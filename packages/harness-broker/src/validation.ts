@@ -33,6 +33,7 @@ export const brokerEnvironmentSchema = z
 const createSchema = z
   .object({
     kind: z.literal("create"),
+    additionalDirectories: z.array(cwdSchema).max(63).optional(),
     cwd: cwdSchema,
     executionPolicy: z.enum(["default", "unattended-full-access"]).optional(),
     environment: brokerEnvironmentSchema.optional(),
@@ -44,6 +45,8 @@ const createSchema = z
 const resumeSchema = z
   .object({
     kind: z.literal("resume"),
+    additionalDirectories: z.array(cwdSchema).max(63).optional(),
+    previousCwd: cwdSchema.optional(),
     environment: brokerEnvironmentSchema.optional(),
     permissionModeId: harnessPermissionModeIdSchema.optional(),
     model: harnessModelRefSchema.optional(),

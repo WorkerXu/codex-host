@@ -19,6 +19,7 @@ import { createDelegationPeerCatalogSource } from "./renderer-delegation-peer-ca
 import { createDesktopHubPages } from "./settings/desktop-hub-pages.js";
 import { createDesktopJarvis } from "./renderer-desktop-jarvis.js";
 import { installRendererJarvisMention } from "./renderer-jarvis-mention.js";
+import { mountRendererThreadFolders } from "./renderer-thread-folders.js";
 import {
   HARNESS_PREFERENCES_UPDATED_EVENT,
   rendererHarnessPreferences,
@@ -620,6 +621,7 @@ interface MountedComposer {
   control: ComposerAgentControl;
   codexUsageGate: RendererCodexUsageGate;
   modelTarget: readonly unknown[] | null;
+  workingFolders?: ReturnType<typeof mountRendererThreadFolders>;
   modelView: ExternalModelControlView;
   permissionModeView: ExternalPermissionModeControlView;
   ownershipStatus: ComposerOwnershipStatus;
@@ -1124,6 +1126,12 @@ export function installRendererBindingProbe(
 
   const renderMounted = (mounted: MountedComposer): void => {
     if (!isMountedComposer(mounted.composer)) return;
+    mounted.workingFolders ??= mountRendererThreadFolders(mounted.composer, () => ({
+      hostId: mounted.hostId,
+      target: mounted.modelTarget,
+      agent: controller.get(mounted.composer).agent,
+    }));
+    mounted.workingFolders.refresh();
     restorePendingDraftPreference(mounted);
     const hostId = mounted.hostId;
     mounted.control.setPlugins(
@@ -3227,6 +3235,7 @@ export function installRendererBindingProbe(
           usageRefreshTimers.delete(composer);
         }
         mounted.codexUsageGate.dispose();
+        mounted.workingFolders?.dispose();
         disposeComposerAgentControl(mounted.control);
         ownershipRecovery.delete(mounted);
         modelRecovery.delete(mounted);
@@ -3849,6 +3858,7 @@ export function installRendererBindingProbe(
         mounted.usageRequestGeneration += 1;
         usageRefreshAttempts.delete(mounted.composer);
         mounted.codexUsageGate.dispose();
+        mounted.workingFolders?.dispose();
         disposeComposerAgentControl(mounted.control);
       }
       mountedByComposer.clear();

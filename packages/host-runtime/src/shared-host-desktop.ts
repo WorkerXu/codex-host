@@ -1,5 +1,6 @@
 import type { HubAdminService } from "./hub-admin-service.js";
 import { desktopJarvisServices } from "./desktop-jarvis.js";
+import type { CodeRepositories } from "./code-repositories.js";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -80,6 +81,7 @@ export function sharedHostDesktop(
     prices: ModelPriceCatalog;
     updateCoordinator?: HostUpdateCoordinator;
     hubAdmin?: HubAdminService;
+    codeRepositories?: CodeRepositories;
     delegation(): DelegationControlRegistration | undefined;
     register(api: DelegationControlRegistration): (() => void) | undefined;
     connected: Set<AppServerHost>;
@@ -119,6 +121,9 @@ export function sharedHostDesktop(
       mappingStore: options.store,
       closeMappingStoreOnExit: false,
       modelPrices: options.prices,
+      ...(request && options.codeRepositories
+        ? { codeRepositories: options.codeRepositories }
+        : {}),
       sharedThreads: new SharedThreadBridge({
         connect: async () => options.owner.connect(),
         delegateCreates: true,

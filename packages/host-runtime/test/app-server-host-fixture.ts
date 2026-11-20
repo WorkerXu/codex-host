@@ -296,6 +296,7 @@ export function createFixture(
     modelService?: AppServerHostOptions["modelService"];
     consoleOpener?: HostConsoleOpener;
     webOpener?: AppServerHostOptions["webOpener"];
+    codeRepositories?: AppServerHostOptions["codeRepositories"];
     accountControl?: CodexAccountControl;
     officialRuntimeScope?: OfficialRuntimeScope;
     onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
@@ -385,6 +386,7 @@ export function createFixture(
     ...(options.runtimeMaintenance ? { runtimeMaintenance: options.runtimeMaintenance } : {}),
     ...(options.consoleOpener ? { consoleOpener: options.consoleOpener } : {}),
     ...(options.webOpener ? { webOpener: options.webOpener } : {}),
+    ...(options.codeRepositories ? { codeRepositories: options.codeRepositories } : {}),
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.usageStatistics ? { usageStatistics: options.usageStatistics } : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),

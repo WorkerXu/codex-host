@@ -1,5 +1,7 @@
 import { mountModelServiceSection } from "./model-service-section.js";
 import type { RendererModelServiceClient } from "../model-service-client.js";
+import { createCodeRepositoriesClient } from "../code-repositories-client.js";
+import { mountCodeRepositoriesSection } from "./code-repositories-section.js";
 import {
   REASONING_SOFT_WRAP_CHANGE_EVENT,
   readReasoningTranscriptSoftWrap,
@@ -63,6 +65,14 @@ export function createAppearanceSettingsPage(
         messages,
         getLoadedSessionsClient,
       );
+      if (ownerWindow.navigator.platform.startsWith("Mac")) {
+        mountCodeRepositoriesSection(
+          context,
+          createCodeRepositoriesClient(
+            () => ownerWindow.__codexhostHostRoutingV1?.forHost("local")?.manager ?? null,
+          ),
+        );
+      }
       return () => {
         ownerWindow.removeEventListener(REASONING_SOFT_WRAP_CHANGE_EVENT, sync);
         disposeIdleRelease();

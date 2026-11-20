@@ -42,6 +42,7 @@ import type {} from "@deepseek-ai/dsh-api-session-controller/client";
 import { SessionHarnessIcon } from "./SessionHarnessIcon.tsx";
 import { HostConnectionStatus } from "./HostConnectionStatus.tsx";
 import { SessionOpeningNotice } from "./SessionOpeningNotice.tsx";
+import { WorkingFolders } from "./WorkingFolders.tsx";
 import { HostUsageDock } from "./HostUsageDock.tsx";
 import type {
   ComposerAttachment,
@@ -469,6 +470,20 @@ export function apply(ctx: ClientContext): void {
         inject: () => ({ navigation: ctx.uiWorkspace }),
       },
       SessionOpeningNotice,
+    ),
+  );
+  ctx.slots.inject("conversation.input.dock", () =>
+    ctx.slots.register(
+      {
+        name: "conversation.input.dock",
+        id: "codexhost.working-folders",
+        locale: NS,
+        inject: () => ({
+          listDirectory: (path?: string, signal?: AbortSignal) =>
+            ctx.uiWorkspace.listDirectory(path, signal),
+        }),
+      },
+      WorkingFolders,
     ),
   );
   ctx.slots.inject("conversation.composer.dock", () =>

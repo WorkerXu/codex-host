@@ -51,6 +51,8 @@ interface ServerSession {
   generation: number;
   owner: string;
   cwd: string;
+  additionalDirectories?: readonly string[];
+  previousCwd?: string;
   environment?: OpenSessionInput["environment"];
   nativeId?: string;
   nativeRef?: HarnessSession["initialState"]["nativeRef"];
@@ -741,6 +743,12 @@ export async function startHarnessBrokerServer(input: {
             generation: 1,
             owner: state.id,
             cwd: openInput.cwd,
+            ...("additionalDirectories" in openInput && openInput.additionalDirectories
+              ? { additionalDirectories: openInput.additionalDirectories }
+              : {}),
+            ...(openInput.kind === "resume" && openInput.previousCwd
+              ? { previousCwd: openInput.previousCwd }
+              : {}),
             ...(openInput.environment ? { environment: openInput.environment } : {}),
             ...(nativeId ? { nativeId } : {}),
             ...(opened.value.initialState.nativeRef
@@ -914,6 +922,10 @@ export async function startHarnessBrokerServer(input: {
         const reopened = await input.adapter.open({
           kind: "resume",
           cwd: record.cwd,
+          ...(record.additionalDirectories
+            ? { additionalDirectories: record.additionalDirectories }
+            : {}),
+          ...(record.previousCwd ? { previousCwd: record.previousCwd } : {}),
           nativeRef,
           ...(record.environment ? { environment: record.environment } : {}),
         });

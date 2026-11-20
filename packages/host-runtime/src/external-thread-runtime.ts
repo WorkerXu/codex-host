@@ -51,6 +51,7 @@ export interface TurnProjectionGate {
 export interface ExternalThread {
   id: StoredThreadRecordV1["hostThreadId"];
   cwd: string;
+  workingFolders: readonly string[];
   harnessId: ExternalHarnessId;
   session: HarnessSession;
   outputTask: Promise<void>;
@@ -227,6 +228,7 @@ export class ExternalThreadRuntime {
   readonly #steeredTurnIds = new Map<string, Set<HostTurnId>>();
   readonly #subagentRunning: (threadId: string) => boolean;
   readonly #threads = new Map<string, ExternalThread>();
+  readonly #workingFolders: (id: string) => Promise<readonly string[] | undefined>;
   readonly #onWorkspace: ((cwd: string) => void) | undefined;
 
   constructor(input: {
@@ -234,6 +236,7 @@ export class ExternalThreadRuntime {
     environment?: NodeJS.ProcessEnv;
     repository: ExternalThreadRepository;
     consumeOutputs(thread: ExternalThread): Promise<void>;
+    workingFolders?(id: string): Promise<readonly string[] | undefined>;
     onWorkspace?(cwd: string): void;
     diagnose(error: unknown): void;
     subagentRunning?(threadId: string): boolean;
@@ -248,6 +251,7 @@ export class ExternalThreadRuntime {
     this.#environment = input.environment ?? process.env;
     this.#repository = input.repository;
     this.#consumeOutputs = input.consumeOutputs;
+    this.#workingFolders = input.workingFolders ?? (async () => undefined);
     this.#onWorkspace = input.onWorkspace;
     this.#diagnose = input.diagnose;
     this.#subagentRunning = input.subagentRunning ?? (() => false);
@@ -384,6 +388,7 @@ export class ExternalThreadRuntime {
     transportModelId?: string;
     restoredState?: HarnessSessionState;
     unsubmittedPrewarm?: boolean;
+    workingFolders?: readonly string[];
   }): ExternalThread {
     const harnessId = input.record.harnessId as ExternalHarnessId;
     if (!this.#adapters.has(harnessId)) {
@@ -412,7 +417,8 @@ export class ExternalThreadRuntime {
     }
     const externalThread: ExternalThread = {
       id: input.record.hostThreadId,
-      cwd: input.record.cwd,
+      cwd: input.workingFolders?.[0] ?? input.record.cwd,
+      workingFolders: input.workingFolders ?? [input.record.cwd],
       harnessId,
       session: input.session,
       outputTask: Promise.resolve(),
@@ -668,7 +674,43 @@ export class ExternalThreadRuntime {
     }
   }
 
-  async #reviveIdleSession(thread: ExternalThread): Promise<ExternalThreadRpcError | null> {
+  #folderOptions(
+    record: StoredThreadRecordV1,
+    folders: readonly string[],
+    supportsMultiple?: boolean,
+  ) {
+    const cwd = folders[0] ?? record.cwd;
+    return {
+      cwd,
+      ...(cwd !== record.cwd ? { previousCwd: record.cwd } : {}),
+      ...(supportsMultiple ? { additionalDirectories: folders.slice(1) } : {}),
+    };
+  }
+
+  async applyWorkingFolders(
+    thread: ExternalThread,
+    selected?: readonly string[],
+  ): Promise<ExternalThreadRpcError | null> {
+    if (!selected) return null;
+    return this.#withLifecycle(thread.id, async () => {
+      if (this.#threads.get(thread.id) !== thread)
+        return { code: -32076, message: "对话已重新加载，请重试" };
+      const adapter = this.#adapters.get(thread.harnessId);
+      const folders = adapter?.additionalDirectories ? selected : selected.slice(0, 1);
+      if (JSON.stringify(folders) === JSON.stringify(thread.workingFolders)) return null;
+      if (!this.#idleForRestore(thread))
+        return { code: -32072, message: "请等待当前任务完成后再应用工作文件夹" };
+      const error = await this.#reviveIdleSession(thread, folders);
+      return error
+        ? { code: error.code, message: "无法使用所选工作文件夹恢复对话，请检查目录后重试" }
+        : null;
+    });
+  }
+
+  async #reviveIdleSession(
+    thread: ExternalThread,
+    folders = thread.workingFolders,
+  ): Promise<ExternalThreadRpcError | null> {
     thread.sessionUnavailable = true;
     const harnessId = thread.record.harnessId as ExternalHarnessId;
     const adapter = this.#adapters.get(harnessId);
@@ -687,7 +729,7 @@ export class ExternalThreadRuntime {
     );
     const opened = await adapter.open({
       kind: "resume",
-      cwd: thread.record.cwd,
+      ...this.#folderOptions(thread.record, folders, adapter.additionalDirectories),
       environment: { ...this.#environment, [DELEGATION_THREAD_ID_ENV]: thread.record.hostThreadId },
       nativeRef: thread.record.nativeSessionRef as NativeSessionRef,
       knownTurnRefs: thread.record.turnMappings.map(({ nativeTurnRef }) => nativeTurnRef),
@@ -765,6 +807,9 @@ export class ExternalThreadRuntime {
         ...(effectivePermissionModeId ? { effectivePermissionModeId } : {}),
       };
       thread.session = session;
+      thread.workingFolders = folders;
+      thread.cwd = folders[0] ?? aligned.record.cwd;
+      this.#onWorkspace?.(thread.cwd);
       thread.record = aligned.record;
       thread.turns = aligned.turns;
       thread.historyHydrated = true;
@@ -967,11 +1012,13 @@ export class ExternalThreadRuntime {
       });
     }
     const restoredSelection = decodeExternalTransportSelection(harnessId, record.transportModelId);
+    const selected = preparedSession ? undefined : await this.#workingFolders(record.hostThreadId);
+    const folders = selected && !adapter.additionalDirectories ? selected.slice(0, 1) : selected;
     const opened = preparedSession
       ? { ok: true as const, value: preparedSession }
       : await adapter.open({
           kind: "resume",
-          cwd: record.cwd,
+          ...this.#folderOptions(record, folders ?? [record.cwd], adapter.additionalDirectories),
           environment: { ...this.#environment, [DELEGATION_THREAD_ID_ENV]: record.hostThreadId },
           nativeRef: record.nativeSessionRef as NativeSessionRef,
           knownTurnRefs: record.turnMappings.map(({ nativeTurnRef }) => nativeTurnRef),
@@ -1046,6 +1093,7 @@ export class ExternalThreadRuntime {
           : {}),
         ...(restoredState ? { restoredState } : {}),
         transportModelId,
+        ...(folders ? { workingFolders: folders } : {}),
       });
     } catch (error) {
       if (error instanceof ExternalSessionReleaseError) throw error;

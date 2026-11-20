@@ -16,6 +16,7 @@ export function createHarnessAdapter(context: HarnessPluginContext) {
       forwardDelegationEnvironment: true,
       commandCatalog: CODEBUDDY_COMMAND_CATALOG,
       liveCommandCatalog: true,
+      additionalDirectories: true,
       environment,
       isInstalled: () =>
         resolveHarnessExecutable(codeBuddyDiscoverySpec, { environment }) !== undefined,

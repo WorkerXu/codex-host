@@ -27,6 +27,7 @@ export function codeBuddyInvocation(
   environment: NodeJS.ProcessEnv,
   ephemeral: boolean,
   argumentsOverride?: string[],
+  additionalDirectories?: readonly string[],
 ) {
   const resolved = resolveHarnessExecutable(codeBuddyDiscoverySpec, { environment });
   if (!resolved)
@@ -40,6 +41,7 @@ export function codeBuddyInvocation(
       resolved.executable,
       argumentsOverride ?? [
         "--acp",
+        ...(additionalDirectories?.length ? ["--add-dir", ...additionalDirectories] : []),
         ...(ephemeral ? ["--no-session-persistence"] : []),
         ...(!ephemeral &&
         [

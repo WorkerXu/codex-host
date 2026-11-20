@@ -585,3 +585,5 @@ export {
   type JarvisLoginStopParams,
 } from "./jarvis.js";
 export * from "./model-service.js";
+export * from "./thread-folders.js";
+export * from "./code-repositories.js";

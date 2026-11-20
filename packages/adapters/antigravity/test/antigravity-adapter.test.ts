@@ -268,6 +268,30 @@ describe("Antigravity ACP Session", () => {
     expect(session.initialState.availableThinkingOptions).toEqual([]);
   });
   it.each(["create", "resume"] as const)(
+    "keeps the primary cwd and native extra folder options on %s",
+    async (kind) => {
+      const { adapter, transports } = fixture();
+      const cwd = process.cwd();
+      const additionalDirectories = ["/other/project", "/other/docs"];
+      const { session, outputs } = await sessionOf(
+        await adapter.open(
+          kind === "resume"
+            ? { kind, cwd, nativeRef: ref(), additionalDirectories }
+            : { kind, cwd, additionalDirectories },
+        ),
+      );
+      const active = await start(session, transports, "working-folders");
+      expect(required(transports.at(-1)).openSession).toHaveBeenCalledWith(
+        expect.objectContaining({ kind, cwd }),
+      );
+      expect(required(transports.at(-1)).options).toMatchObject({ cwd, additionalDirectories });
+      active.result.resolve({ stopReason: "end_turn" });
+      await completed(outputs, "working-folders");
+      await adapter.close();
+    },
+  );
+
+  it.each(["create", "resume"] as const)(
     "cancels during %s initialization without faulting or cancelling an unopened native Session",
     async (kind) => {
       const gate = deferred<InitializeResponse>();

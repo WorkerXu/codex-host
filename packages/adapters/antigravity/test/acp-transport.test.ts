@@ -32,7 +32,7 @@ readline.createInterface({input:process.stdin}).on('line', (line) => {
       setTimeout(() => process.stderr.write('super-secret-token\\n'), 10);
       return setTimeout(() => process.exit(9), 30);
     }
-    return result(req.id,{protocolVersion:1,agentCapabilities:{loadSession:true},_meta:{params:req.params,args:process.argv.slice(1),pid:process.pid}});
+    return result(req.id,{protocolVersion:1,agentCapabilities:{loadSession:true},_meta:{params:req.params,args:process.argv.slice(1),pid:process.pid,cwd:process.cwd()}});
   }
   if (req.method === 'session/new') {
     if (scenario === 'session-auth') return send({id:req.id,error:{code:-32000,message:'Credentials needed'}});
@@ -171,12 +171,23 @@ describe("native ACP stdio transport", () => {
     expect(child?.signalCode).toBe("SIGTERM");
   });
   it("initializes once with elicitation only and launches the correct flags", async () => {
-    const value = transport("normal", { skipPermissions: true });
+    const value = transport("normal", {
+      skipPermissions: true,
+      additionalDirectories: ["/extra", "/shared project"],
+    });
     const [first, second] = await Promise.all([value.initialize(), value.initialize()]);
     expect(second).toBe(first);
     expect(first._meta).toMatchObject({
       params: { protocolVersion: 1, clientCapabilities: { elicitation: { form: {} } } },
-      args: ["acp", "--dangerously-skip-permissions"],
+      args: [
+        "acp",
+        "--dangerously-skip-permissions",
+        "--add-dir",
+        "/extra",
+        "--add-dir",
+        "/shared project",
+      ],
+      cwd: process.cwd(),
     });
     expect((first._meta?.params as Record<string, unknown>).clientCapabilities).toEqual({
       elicitation: { form: {} },
