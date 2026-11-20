@@ -6,6 +6,7 @@ import {
   type DelegationThreadSnapshot,
   type HarnessInspectResult,
   type ThreadCancelResult,
+  type ThreadAnswerResult,
   type ThreadSendResult,
   type ThreadWatchListResult,
   type ThreadWatchResult,
@@ -29,6 +30,9 @@ function watchOutput(watch: DelegationStartResult["watch"]): { watch?: unknown }
             state: watch.state,
             notify: threadLink(watch.notifyThreadId),
             timeoutMs: watch.timeoutMs,
+            ...(watch.pendingQuestions !== undefined
+              ? { pendingQuestions: watch.pendingQuestions }
+              : {}),
           },
   };
 }
@@ -62,6 +66,9 @@ function snapshotOutput(
     harnessId: snapshot.harnessId,
     status: snapshot.status,
     ...(snapshot.timedOut !== undefined ? { timedOut: snapshot.timedOut } : {}),
+    ...(snapshot.pendingQuestions !== undefined
+      ? { pendingQuestions: snapshot.pendingQuestions }
+      : {}),
   };
   if (view === "messages") {
     if (typeof snapshot.hasMore !== "boolean") {
@@ -110,6 +117,7 @@ export function compactDelegationOutput(
         harnessId: result.harnessId,
         status: result.status,
         ...(result.cwd ? { cwd: result.cwd } : {}),
+        ...(result.worktree ? { worktree: result.worktree } : {}),
         ...(result.parentThreadId ? { parent: threadLink(result.parentThreadId) } : {}),
         ...(effective?.resolvedModelLabel ? { model: effective.resolvedModelLabel } : {}),
         ...(effective?.effectiveThinkingOptionId
@@ -137,6 +145,16 @@ export function compactDelegationOutput(
     case "thread read":
     case "thread wait":
       return snapshotOutput(body as DelegationThreadSnapshot, view);
+    case "thread answer": {
+      const result = body as ThreadAnswerResult;
+      return {
+        thread: threadLink(result.threadId, result.hostId),
+        interaction: result.interactionId,
+        turn: result.turnId,
+        harnessId: result.harnessId,
+        status: result.status,
+      };
+    }
     case "thread watch": {
       const result = body as ThreadWatchResult;
       return {
@@ -145,18 +163,25 @@ export function compactDelegationOutput(
         state: result.state,
         status: result.status,
         timeoutMs: result.timeoutMs,
+        ...(result.pendingQuestions !== undefined
+          ? { pendingQuestions: result.pendingQuestions }
+          : {}),
       };
     }
     case "thread watches": {
       const result = body as ThreadWatchListResult;
       return {
-        watches: result.watches.map(({ threadId, notifyThreadId, state, outcome, reason }) => ({
-          thread: threadLink(threadId),
-          notify: threadLink(notifyThreadId),
-          state,
-          ...(outcome ? { outcome } : {}),
-          ...(reason ? { reason } : {}),
-        })),
+        watches: result.watches.map(
+          ({ threadId, notifyThreadId, state, outcome, reason, turnId, interactionId }) => ({
+            thread: threadLink(threadId),
+            notify: threadLink(notifyThreadId),
+            state,
+            ...(outcome ? { outcome } : {}),
+            ...(outcome === "needsInput" && turnId ? { turn: turnId } : {}),
+            ...(outcome === "needsInput" && interactionId ? { interaction: interactionId } : {}),
+            ...(reason ? { reason } : {}),
+          }),
+        ),
       };
     }
     case "thread list": {

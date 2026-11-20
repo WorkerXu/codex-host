@@ -5,7 +5,11 @@ import {
   createDefaultRendererSettingsPages,
   createDefaultRendererSettingsRegistry,
 } from "../../src/settings/pages.js";
-import { RENDERER_SETTINGS_COLOR_SCHEME } from "../../src/settings/shell.js";
+import {
+  RENDERER_SETTINGS_COLOR_SCHEME,
+  SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS,
+  settingsSidebarPages,
+} from "../../src/settings/shell.js";
 
 describe("Renderer settings foundation", () => {
   it("inherits the Codex theme instead of forcing a dark settings surface", () => {
@@ -21,8 +25,13 @@ describe("Renderer settings foundation", () => {
       "Connections",
       "Remote connections",
       "Accounts",
-      "Session Import",
       "Usage statistics",
+      "技能",
+      "Jarvis",
+      "DingTalk",
+      "Agents",
+      "MCP Servers",
+      "Memory",
       "General",
       "Updates",
       "About",
@@ -31,8 +40,13 @@ describe("Renderer settings foundation", () => {
       "connections",
       "gateway",
       "accounts",
-      "session-import",
       "dashboard",
+      "session-import",
+      "search",
+      "routes",
+      "agents",
+      "connections",
+      "logs",
       "settings",
       "updates",
       "about",
@@ -42,6 +56,26 @@ describe("Renderer settings foundation", () => {
     expect(pages.every((page) => Object.isFrozen(page))).toBe(true);
   });
 
+  it("keeps About routable while hiding it and the Other section from the sidebar", () => {
+    const registry = createDefaultRendererSettingsRegistry();
+    expect(registry.getPage("about")).toBeDefined();
+    expect(SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS).toEqual(["about"]);
+    expect(settingsSidebarPages(registry).map(({ id }) => id)).toEqual([
+      "connections",
+      "remote-connections",
+      "accounts",
+      "usage-statistics",
+      "skills",
+      "jarvis",
+      "dingtalk",
+      "codex-agents",
+      "mcp-servers",
+      "memory",
+      "appearance",
+      "updates",
+    ]);
+  });
+
   it("publishes only available settings pages", () => {
     const pages = createDefaultRendererSettingsPages();
 
@@ -49,8 +83,13 @@ describe("Renderer settings foundation", () => {
       "connections",
       "remote-connections",
       "accounts",
-      "session-import",
       "usage-statistics",
+      "skills",
+      "jarvis",
+      "dingtalk",
+      "codex-agents",
+      "mcp-servers",
+      "memory",
       "appearance",
       "updates",
       "about",

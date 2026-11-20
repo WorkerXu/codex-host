@@ -1,3 +1,8 @@
+import { createDingTalkDispatchMatcher } from "./dingtalk-dispatch-matcher.js";
+import { ModelService } from "./model-service.js";
+import { CodeRepositories } from "./code-repositories.js";
+import { ModelServiceSettingsStore } from "./model-service-settings.js";
+import { getSkillsHub } from "./skills-hub/service.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
@@ -51,9 +56,17 @@ import { consoleEntrypoint, createHostConsoleOpener } from "./console-opener.js"
 import { createHostUpdateCoordinator, type HostUpdateCoordinator } from "./update-coordinator.js";
 import { ModelPriceCatalog, defaultModelPriceDirectory } from "./model-prices.js";
 import { UsageStatistics } from "./usage-statistics.js";
-import { ProjectGroupsService, defaultProjectGroupsDirectory } from "./project-groups-service.js";
+import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { ProjectMirrorService, defaultProjectMirrorDirectory } from "./project-mirror-service.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
+import { createJarvisService } from "./jarvis-service.js";
+import { runDwsRaw } from "./dingtalk-cli.js";
+import { downloadDingTalkMedia } from "./dingtalk-media.js";
+import { createDingTalkService } from "./dingtalk-service.js";
+import { CodexAgentStore } from "./codex-agents.js";
+import { DingTalkDispatchSettingsStore } from "./dingtalk-dispatch-settings.js";
+import { DingTalkDispatchStateStore } from "./dingtalk-dispatch-state.js";
+import { DingTalkDispatcher } from "./dingtalk-dispatcher.js";
 
 const STOCK_CODEX_PATH_ENV = "CODEXHOST_STOCK_CODEX_PATH";
 export const MANAGED_REMOTE_APP_SERVER_PROCESS_TITLE = "codexhost remote app-server listener";
@@ -163,7 +176,45 @@ async function prepareDelegationRuntime(input: {
       ),
   });
   const token = randomBytes(32).toString("hex");
-  const server = await startDelegationControlServer({ token, api: registry, watchApi: registry });
+  const server = await startDelegationControlServer({
+    token,
+    api: registry,
+    watchApi: registry,
+    skills: getSkillsHub(input.environment).local,
+    dingtalkDws: {
+      async runDingTalkDws(args) {
+        const raw = await runDwsRaw(args, {
+          environment: input.environment,
+          timeoutMs: 60_000,
+        });
+        return { ...raw };
+      },
+      async readDingTalkMedia(body) {
+        const text = (value: unknown): string => (typeof value === "string" ? value : "");
+        const request = {
+          conversationId: text(body.conversationId),
+          messageId: text(body.messageId),
+          resourceId: text(body.resourceId),
+          resourceIdType: text(body.resourceIdType),
+        };
+        if (
+          !request.conversationId ||
+          !request.messageId ||
+          !request.resourceId ||
+          !request.resourceIdType
+        ) {
+          return {
+            ok: false,
+            base64: null,
+            mimeType: null,
+            sizeBytes: null,
+            errorCode: "invalid_params",
+          };
+        }
+        return { ...(await downloadDingTalkMedia({ environment: input.environment, request })) };
+      },
+    },
+  });
   // Peer delegation depends on this file, but local delegation must keep
   // working when the data directory is not writable.
   const control: RuntimeControlHandle | undefined = await publishRuntimeControl({
@@ -301,11 +352,48 @@ export async function runHostRuntime(input: {
           accountControl: official.accountControl,
         };
         if (!remoteControlPlan) {
+          const modelSettings = new ModelServiceSettingsStore({});
+          const jarvis = createJarvisService({
+            isLocalHost: true,
+          });
+          const dingtalk = createDingTalkService({
+            isLocalHost: true,
+          });
+          const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
+          const dingTalkDispatch = new DingTalkDispatchSettingsStore({});
+          const dingTalkState = new DingTalkDispatchStateStore();
+          const desktopProjects = new DesktopProjectCatalogReader({});
+          let host: AppServerHost | undefined;
+          const dispatcher = new DingTalkDispatcher({
+            service: dingtalk,
+            settings: dingTalkDispatch,
+            agents: codexAgents,
+            state: dingTalkState,
+            projects: desktopProjects,
+            readNativeProject: (id) => {
+              if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
+              return host.readDingTalkProject(id);
+            },
+            matcher: createDingTalkDispatchMatcher({ settings: modelSettings }),
+            startThread: (input) => {
+              if (!host) throw new Error("Local Host is not ready for DingTalk dispatch");
+              return host.startDingTalkAgentRun(input);
+            },
+            diagnose: (error) =>
+              process.stderr.write(`codexhost DingTalk dispatch: ${String(error)}\n`),
+          });
           try {
-            const host = new AppServerHost({
+            host = new AppServerHost({
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
+              jarvis,
+              modelService: new ModelService(modelSettings),
+              codeRepositories: new CodeRepositories({ environment: delegationEnvironment }),
+              dingtalk,
+              codexAgents,
+              dingTalkDispatch,
+              dingTalkDispatcher: dispatcher,
               ...(process.platform !== "win32"
                 ? {
                     sharedThreads: new SharedThreadBridge({
@@ -318,11 +406,7 @@ export async function runHostRuntime(input: {
                 : {}),
               stockCodexPath,
               arguments: input.arguments,
-              environment: delegationEnvironment,
-              projectGroups: new ProjectGroupsService({
-                directory: defaultProjectGroupsDirectory(delegationEnvironment),
-                environment: delegationEnvironment,
-              }),
+              desktopProjects,
               projectMirror: new ProjectMirrorService({
                 directory: defaultProjectMirrorDirectory(delegationEnvironment),
               }),
@@ -333,30 +417,59 @@ export async function runHostRuntime(input: {
               ...(updateCoordinator ? { updateCoordinator } : {}),
               ...(consoleOpener ? { consoleOpener } : {}),
             });
-            return await runWithConsoleControl(
-              host,
-              consoleOpener !== undefined,
-              delegationEnvironment,
-            );
+            const dispatchStart = setTimeout(() => {
+              void dispatcher.start().catch((error: unknown) => {
+                process.stderr.write(`codexhost DingTalk dispatch: ${String(error)}\n`);
+              });
+            }, 2_000);
+            dispatchStart.unref?.();
+            try {
+              return await runWithConsoleControl(
+                host,
+                consoleOpener !== undefined,
+                delegationEnvironment,
+              );
+            } finally {
+              clearTimeout(dispatchStart);
+              dispatcher.dispose();
+            }
           } finally {
+            jarvis.dispose();
+            dingtalk.dispose();
             await official.close();
           }
         }
         const mappingStore = createProductionExternalThreadStore(delegationEnvironment);
         let listener: ReturnType<typeof createRemoteAppServerWebSocketListener> | undefined;
+        const jarvis = createJarvisService({
+          environment: delegationEnvironment,
+          isLocalHost: true,
+        });
+        const dingtalk = createDingTalkService({
+          environment: delegationEnvironment,
+          isLocalHost: true,
+        });
+        const codexAgents = new CodexAgentStore({ environment: delegationEnvironment });
+        const dingTalkDispatch = new DingTalkDispatchSettingsStore({
+          environment: delegationEnvironment,
+        });
         try {
           await mappingStore.initialize();
           const common = {
             stockCodexPath,
-            environment: delegationEnvironment,
+            jarvis,
+            modelService: new ModelService(
+              new ModelServiceSettingsStore({ environment: delegationEnvironment }),
+            ),
+            codeRepositories: new CodeRepositories({ environment: delegationEnvironment }),
+            dingtalk,
+            codexAgents,
+            dingTalkDispatch,
             ...shared,
             ...installedHarnessPluginOptions(delegationEnvironment, false, input.hostRuntimeUrl),
             mappingStore,
             closeMappingStoreOnExit: false,
-            projectGroups: new ProjectGroupsService({
-              directory: defaultProjectGroupsDirectory(delegationEnvironment),
-              environment: delegationEnvironment,
-            }),
+            desktopProjects: new DesktopProjectCatalogReader({}),
             projectMirror: new ProjectMirrorService({
               directory: defaultProjectMirrorDirectory(delegationEnvironment),
             }),
@@ -407,6 +520,8 @@ export async function runHostRuntime(input: {
             } finally {
               await mappingStore.close();
             }
+            jarvis.dispose();
+            dingtalk.dispose();
           }
         }
       },
@@ -452,10 +567,20 @@ export async function runHostRuntime(input: {
       await mappingStore.initialize();
       const sharedOwner = new SharedThreadOwner();
       let sharedDelegation: DelegationControlRegistration | undefined;
+      const jarvis = createJarvisService({
+        environment: delegationEnvironment,
+        isLocalHost: false,
+      });
+      const dingtalk = createDingTalkService({
+        environment: delegationEnvironment,
+        isLocalHost: true,
+      });
       const externalHost = new AppServerHost({
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
+        jarvis,
+        dingtalk,
         stockCodexPath,
         arguments: [],
         environment: delegationEnvironment,
@@ -488,6 +613,8 @@ export async function runHostRuntime(input: {
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
+            jarvis,
+            dingtalk,
             ...(sharedDelegation ? { sharedDelegation } : {}),
             sharedThreads: new SharedThreadBridge({
               connect: async () => sharedOwner.connect(),
@@ -497,7 +624,6 @@ export async function runHostRuntime(input: {
             }),
             stockCodexPath,
             arguments: [],
-            environment: delegationEnvironment,
             desktopInput,
             desktopOutput,
             diagnosticOutput,
@@ -569,6 +695,8 @@ export async function runHostRuntime(input: {
             } finally {
               await mappingStore.close();
             }
+            jarvis.dispose();
+            dingtalk.dispose();
           }
         }
       }

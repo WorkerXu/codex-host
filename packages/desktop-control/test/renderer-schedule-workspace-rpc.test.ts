@@ -14,7 +14,12 @@ const model = encodeHarnessPluginRoute({
   harnessId: harnessIdSchema.parse("pi"),
   model: harnessModelRefSchema.parse({ id: "chosen" }),
 });
-const workspace = { id: "project-a", label: "项目 A", cwd: "/work/项目 A" };
+const workspace = {
+  id: "project-a",
+  label: "项目 A",
+  cwd: "/work/项目 A",
+  roots: ["/work/项目 A"],
+};
 const created = {
   status: "created",
   conversationId: "external-empty",

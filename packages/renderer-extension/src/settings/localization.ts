@@ -9,6 +9,11 @@ import {
   harnessVersionChinese,
   type HarnessVersionMessages,
 } from "./harness-version-messages.js";
+import {
+  codexAgentsMessagesEnglish,
+  codexAgentsMessagesChinese,
+  type CodexAgentsMessages,
+} from "./codex-agents-messages.js";
 
 export const RENDERER_SETTINGS_LOCALES = ["en", "zh-CN"] as const;
 export type RendererSettingsLocale = (typeof RENDERER_SETTINGS_LOCALES)[number];
@@ -29,13 +34,13 @@ export interface RendererSettingsLanguageControl {
 
 export interface RendererSettingsMessages {
   readonly credentialImports: CredentialImportMessages;
+  readonly codexAgents: CodexAgentsMessages;
   readonly locale: RendererSettingsLocale;
   readonly title: string;
+  readonly brandName: string;
   readonly close: string;
-  readonly starOnGitHub: string;
   readonly sectionsLabel: string;
   readonly generalSection: string;
-  readonly otherSection: string;
   readonly appearanceDescription: string;
   readonly appearanceGroup: string;
   readonly loadedSessions: {
@@ -271,29 +276,57 @@ export interface RendererSettingsMessages {
   readonly updateCopyFailed: string;
   readonly updateDownloadFromReleases: string;
   readonly updateDownloadWindowsInstaller: string;
-  readonly updateStarCallout: string;
-  readonly updateStarLink: string;
   readonly aboutTagline: string;
   readonly aboutParagraphs: readonly string[];
   readonly aboutOpenSource: string;
-  readonly aboutStarCallout: string;
   readonly aboutRepository: string;
   readonly aboutConsole: string;
   readonly aboutConsoleOpen: string;
   readonly aboutConsoleOpening: string;
   readonly aboutConsoleFailed: string;
-  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId, string>>;
+  readonly jarvis: {
+    geminiSection: string;
+    geminiKeyPlaceholder: string;
+    geminiKeyConfigured: string;
+    geminiCleared: string;
+    geminiSave: string;
+    geminiSaving: string;
+    geminiSaved: string;
+    geminiClear: string;
+    geminiTesting: string;
+    geminiTest: string;
+    geminiTestOk: string;
+    geminiTestFailed: string;
+    machinesSection: string;
+    refresh: string;
+    refreshing: string;
+    install: string;
+    installing: string;
+    login: string;
+    loggingIn: string;
+    installed: string;
+    notInstalled: string;
+    notLoggedIn: string;
+    signedInAs: string;
+    cliVersion: string;
+    unreachable: string;
+    localMachine: string;
+    waitingForBrowser: string;
+    installProgress: string;
+    actionFailed: string;
+  };
+  readonly pageLabels: Readonly<Record<DefaultRendererSettingsPageId | "session-import", string>>;
 }
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportEnglish,
+  codexAgents: Object.freeze(codexAgentsMessagesEnglish),
   locale: "en",
   title: "Settings",
+  brandName: "Workbench",
   close: "Close settings",
-  starOnGitHub: "Star to support",
   sectionsLabel: "Settings sections",
   generalSection: "General",
-  otherSection: "Other",
   appearanceDescription: "Conversation display and local resource management.",
   appearanceGroup: "Appearance",
   loadedSessions: {
@@ -568,9 +601,6 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "Copy failed",
   updateDownloadFromReleases: "Download from GitHub Releases",
   updateDownloadWindowsInstaller: "Download Windows installer",
-  updateStarCallout:
-    "If CodexHost has helped you, please Star it on GitHub. It means a lot to us 👉",
-  updateStarLink: "GitHub",
   aboutTagline: "Run Pi and other Harnesses in Codex Desktop",
   aboutParagraphs: Object.freeze([
     "We believe Codex Desktop offers the best desktop development experience available today.",
@@ -578,13 +608,43 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     "codexhost lets you choose the Agent that actually executes tasks inside Codex Desktop, while preserving the native Codex experience and enabling them to collaborate.",
   ]),
   aboutOpenSource: "codexhost is an open-source project. The source code is available at:",
-  aboutStarCallout: "⭐ If this project helps you, please give us a Star! ⭐",
   aboutRepository: "Open-source repository",
   aboutConsole:
     "The codexhost console runs outside Codex Desktop. It shows startup diagnostics and logs, and can update codexhost even when Codex cannot start.",
   aboutConsoleOpen: "Open console",
   aboutConsoleOpening: "Opening…",
   aboutConsoleFailed: "The console could not be opened",
+  jarvis: {
+    geminiSection: "Gemini (optional)",
+    geminiKeyPlaceholder: "Enter a Gemini API key",
+    geminiKeyConfigured: "API key is saved",
+    geminiCleared: "API key removed",
+    geminiSave: "Save",
+    geminiSaving: "Saving…",
+    geminiSaved: "Saved",
+    geminiClear: "Clear",
+    geminiTesting: "Testing…",
+    geminiTest: "Test",
+    geminiTestOk: "Connection works in {latency} ms",
+    geminiTestFailed: "Connection failed: {reason}",
+    machinesSection: "Installed computers",
+    refresh: "Refresh",
+    refreshing: "Refreshing…",
+    install: "Install",
+    installing: "Installing…",
+    login: "Sign in",
+    loggingIn: "Waiting for the browser…",
+    installed: "Installed",
+    notInstalled: "Not installed",
+    notLoggedIn: "Not signed in",
+    signedInAs: "Signed in as {name}",
+    cliVersion: "Version {version}",
+    unreachable: "This machine is unreachable",
+    localMachine: "This machine",
+    waitingForBrowser: "Browser opened; complete authorization there…",
+    installProgress: "Transferring installer: {received} / {total}",
+    actionFailed: "Action failed: {reason}",
+  },
   pageLabels: Object.freeze({
     connections: "Connections",
     "remote-connections": "Remote connections",
@@ -592,6 +652,12 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     accounts: "Accounts",
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
+    skills: "技能",
+    jarvis: "Jarvis",
+    dingtalk: "DingTalk",
+    "codex-agents": "Agents",
+    "mcp-servers": "MCP Servers",
+    memory: "Memory",
     updates: "Updates",
     about: "About",
   }),
@@ -599,13 +665,13 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
 
 const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportChinese,
+  codexAgents: Object.freeze(codexAgentsMessagesChinese),
   locale: "zh-CN",
   title: "设置",
+  brandName: "工作台",
   close: "关闭设置",
-  starOnGitHub: "Star 支持",
   sectionsLabel: "设置分类",
   generalSection: "通用",
-  otherSection: "其他",
   appearanceDescription: "会话显示与本地资源管理。",
   appearanceGroup: "外观",
   loadedSessions: {
@@ -863,8 +929,6 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "复制失败",
   updateDownloadFromReleases: "前往 GitHub Releases 下载",
   updateDownloadWindowsInstaller: "下载 Windows 安装包",
-  updateStarCallout: "如果 CodexHost 帮到了你，请在 GitHub 点个 Star，这对我们意义重大 👉",
-  updateStarLink: "GitHub",
   aboutTagline: "在 Codex Desktop 中运行 Pi 和其他 Harness",
   aboutParagraphs: Object.freeze([
     "我们认为 Codex Desktop 提供了目前最好的桌面开发交互体验。",
@@ -872,13 +936,43 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     "codexhost 让你在 Codex Desktop 中选择真正执行任务的 Agent，同时保留 Codex 的原生体验，并让它们协作完成任务。",
   ]),
   aboutOpenSource: "codexhost 是一个开源项目，开源地址：",
-  aboutStarCallout: "⭐ 如果这个项目对你有帮助，请给我们一个 Star！⭐",
   aboutRepository: "开源仓库",
   aboutConsole:
     "codexhost 控制台独立于 Codex Desktop 运行，可以查看启动诊断和日志；即使 Codex 无法启动，也能在控制台更新 codexhost。",
   aboutConsoleOpen: "打开控制台",
   aboutConsoleOpening: "正在打开…",
   aboutConsoleFailed: "控制台打开失败",
+  jarvis: {
+    geminiSection: "Gemini（可选）",
+    geminiKeyPlaceholder: "输入 Gemini API Key",
+    geminiKeyConfigured: "已保存 API Key",
+    geminiCleared: "已清除 API Key",
+    geminiSave: "保存",
+    geminiSaving: "正在保存…",
+    geminiSaved: "已保存",
+    geminiClear: "清除",
+    geminiTesting: "正在测试…",
+    geminiTest: "测试",
+    geminiTestOk: "连接正常，耗时 {latency} ms",
+    geminiTestFailed: "连接失败：{reason}",
+    machinesSection: "已安装的机器",
+    refresh: "刷新",
+    refreshing: "正在刷新…",
+    install: "安装",
+    installing: "正在安装…",
+    login: "登录",
+    loggingIn: "等待浏览器完成登录…",
+    installed: "已安装",
+    notInstalled: "未安装",
+    notLoggedIn: "未登录",
+    signedInAs: "已登录：{name}",
+    cliVersion: "版本 {version}",
+    unreachable: "无法连接该机器",
+    localMachine: "本机",
+    waitingForBrowser: "已打开浏览器，请完成授权…",
+    installProgress: "正在传输安装包：{received} / {total}",
+    actionFailed: "操作失败：{reason}",
+  },
   pageLabels: Object.freeze({
     connections: "连接",
     "remote-connections": "远程连接",
@@ -886,6 +980,12 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     accounts: "账号",
     "session-import": "会话导入",
     "usage-statistics": "用量统计",
+    skills: "技能",
+    jarvis: "Jarvis",
+    dingtalk: "钉钉",
+    "codex-agents": "智能体",
+    "mcp-servers": "MCP 服务器",
+    memory: "记忆",
     updates: "更新",
     about: "关于",
   }),

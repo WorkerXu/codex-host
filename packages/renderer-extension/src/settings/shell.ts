@@ -1,5 +1,8 @@
+import hubAdminCss from "./hub-admin.css";
 import settingsCss from "./shell.css";
 import accountsCss from "./accounts.css";
+import dingtalkCss from "./dingtalk.css";
+import agentsCss from "./agents.css";
 import consoleComponentsCss from "../console/components.css";
 import usageCss from "../console/usage/usage.css";
 import tailwindCss from "./tailwind.css";
@@ -15,10 +18,19 @@ import {
   DEFAULT_RENDERER_SETTINGS_MESSAGES,
   type RendererSettingsMessages,
 } from "./localization.js";
-import { CODEXHOST_GITHUB_REPOSITORY_URL, createDefaultRendererSettingsRegistry } from "./pages.js";
+import { createDefaultRendererSettingsRegistry } from "./pages.js";
 import { attachRendererSettingsRailPage, type RendererSettingsRailPage } from "./rail-page.js";
 
 export const SETTINGS_SHELL_ATTRIBUTE = "data-codexhost-settings-shell";
+/** Pages that remain routable but are intentionally absent from the sidebar. */
+export const SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS = ["about"] as const;
+export function settingsSidebarPages(
+  registry: RendererSettingsPageRegistry,
+): readonly RendererSettingsPageDefinition[] {
+  return registry.pages.filter(
+    (page) => !(SETTINGS_SIDEBAR_HIDDEN_PAGE_IDS as readonly string[]).includes(page.id),
+  );
+}
 export const RENDERER_SETTINGS_COLOR_SCHEME = "inherit";
 
 export interface RendererSettingsShell {
@@ -73,7 +85,7 @@ export function mountRendererSettingsShell(
   const shadow = root.attachShadow({ mode: "open" });
   const style = ownerDocument.createElement("style");
   // Tailwind declares the cascade layer order, so it must precede the unlayered settings CSS.
-  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${consoleComponentsCss}\n${usageCss}`;
+  style.textContent = `${tailwindCss}\n${settingsCss}\n${accountsCss}\n${dingtalkCss}\n${agentsCss}\n${hubAdminCss}\n${consoleComponentsCss}\n${usageCss}`;
 
   // A page beside the native navigation rail, not a modal: the rail stays
   // usable and native navigation replaces the page.
@@ -94,7 +106,7 @@ export function mountRendererSettingsShell(
   brandCopy.className = "settings-brand__copy";
   const brandName = ownerDocument.createElement("span");
   brandName.className = "settings-brand__name";
-  brandName.textContent = "CodexHost";
+  brandName.textContent = messages.brandName;
   const brandTitle = ownerDocument.createElement("span");
   brandTitle.className = "settings-brand__title";
   brandTitle.id = "codexhost-settings-page-title";
@@ -128,6 +140,14 @@ export function mountRendererSettingsShell(
   page.append(pageContent);
   sidebar.append(navigation);
   layout.append(sidebar, page);
+
+  const setActivePage = (pageId: string): void => {
+    page.dataset.activePage = pageId;
+    pageContent.dataset.pageId = pageId;
+    // The DingTalk workbench is a chat surface: hide the settings navigation
+    // so the conversation uses the full content width.
+    layout.dataset.compact = String(pageId === "dingtalk");
+  };
   frame.append(header, layout);
   surface.append(frame);
   surface.setAttribute("aria-labelledby", brandTitle.id);
@@ -169,6 +189,7 @@ export function mountRendererSettingsShell(
     navigationState.select(pageId);
     disposeActivePage();
     setActiveNavigation(navigationButtons, pageId);
+    setActivePage(pageId);
     pageContent.replaceChildren();
     const scope = new RendererSettingsPageScope();
     activeScope = scope;
@@ -192,13 +213,8 @@ export function mountRendererSettingsShell(
     section.textContent = label;
     navigation.append(section);
   };
-  let otherSectionAdded = false;
   appendNavigationSection(messages.generalSection);
-  for (const definition of resolvedRegistry.pages) {
-    if (definition.id === "about" && !otherSectionAdded) {
-      appendNavigationSection(messages.otherSection);
-      otherSectionAdded = true;
-    }
+  for (const definition of settingsSidebarPages(resolvedRegistry)) {
     const button = ownerDocument.createElement("button");
     button.type = "button";
     button.className = "settings-nav-button";
@@ -210,18 +226,6 @@ export function mountRendererSettingsShell(
     navigationButtons.set(definition.id, button);
     navigation.append(button);
   }
-  const starLink = ownerDocument.createElement("a");
-  starLink.className = "settings-nav-button settings-nav-star-link";
-  starLink.href = CODEXHOST_GITHUB_REPOSITORY_URL;
-  starLink.target = "_blank";
-  starLink.rel = "noopener noreferrer";
-  starLink.setAttribute("aria-label", messages.starOnGitHub);
-  starLink.title = messages.starOnGitHub;
-  starLink.append(createRendererSettingsIcon("github", 17));
-  const starLabel = ownerDocument.createElement("span");
-  starLabel.textContent = messages.starOnGitHub;
-  starLink.append(starLabel);
-  navigation.append(starLink);
   const supported = true;
   const focusActiveNavigation = (): void => {
     navigationButtons

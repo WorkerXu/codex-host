@@ -360,6 +360,7 @@ export function mountRendererModelPicker(
   composerId: string,
   onSelectModel: (modelId: string) => void,
   onSelectThinking: (thinkingOptionId: string) => void,
+  onOpen?: () => void,
 ): RendererModelPickerControl {
   ensureRendererTriggerChipStyle(document);
   ensureModelOptionStyle(document);
@@ -557,6 +558,9 @@ export function mountRendererModelPicker(
   };
   const open = (): void => {
     if (trigger.disabled || pickerOpen()) return;
+    // Opening the picker is the user's cue to revalidate the selected Harness's
+    // catalog; the cached list keeps rendering until the fresh one arrives.
+    onOpen?.();
     selectionNotice.hide();
     if (control.thinkingOptions.size === 0) {
       openModelMenu(true);

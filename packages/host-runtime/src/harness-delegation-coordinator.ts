@@ -28,6 +28,7 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
   type DelegationConfigurationResult,
+  type DelegationPendingQuestion,
   type DelegationPeerOrigin,
   type DelegationStartInput,
   type DelegationStartResult,
@@ -41,6 +42,8 @@ import {
   type ThreadCancelResult,
   type ThreadListInput,
   type ThreadReadInput,
+  type ThreadAnswerInput,
+  type ThreadAnswerResult,
   type ThreadSendInput,
   type ThreadSendResult,
   type ThreadWaitInput,
@@ -52,14 +55,18 @@ import {
   type ExternalThreadRepository,
 } from "./external-thread-repository.js";
 import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-runtime.js";
-import { HarnessAvailabilityStore } from "./harness-availability-store.js";
+import {
+  HarnessAvailabilityStore,
+  harnessAvailabilityTtlMs,
+} from "./harness-availability-store.js";
 import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
 
 const IMPLICIT_DEDUPLICATION_MS = 30_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
-const AVAILABILITY_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
-const AVAILABILITY_INSPECT_TIMEOUT_MS = 2_000;
-const AVAILABILITY_CONCURRENCY = 6;
+const AVAILABILITY_INSPECT_TIMEOUT_MS = 8_000;
+const AVAILABILITY_CONCURRENCY = 3;
+/** A stale non-ready answer may wait this long before the cached value is returned. */
+const AVAILABILITY_LIMITED_WAIT_MS = 300;
 const AVAILABILITY_TIMEOUT = Symbol("availability-timeout");
 
 function isAvailabilityFailure(error: unknown): boolean {
@@ -109,7 +116,14 @@ async function forEachConcurrent<T>(
   await Promise.all(workers);
 }
 
-type ParentMetadata = { cwd?: string; title?: string };
+type ParentMetadata = { cwd?: string; title?: string; projectId?: string | null };
+
+export type OfficialDelegationStartInput = DelegationStartInput & {
+  parentThreadId: string;
+  cwd: string;
+  title: string;
+  desktopProject: NonNullable<StoredDelegationRecordV1["desktopProject"]>;
+};
 
 function truncateTitle(value: string, length: number): string {
   return value.slice(0, length).replace(/[\uD800-\uDBFF]$/u, "");
@@ -155,13 +169,16 @@ function terminal(status: DelegationThreadSnapshot["status"]): boolean {
 }
 
 function taskDigest(
-  input: Pick<DelegationStartInput, "task" | "model" | "thinkingOptionId"> & { cwd: string },
+  input: Pick<DelegationStartInput, "task" | "model" | "thinkingOptionId" | "projectId"> & {
+    cwd: string;
+  },
 ): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
         task: input.task,
         cwd: path.resolve(input.cwd),
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         modelId: input.model?.id ?? null,
         thinkingOptionId: input.thinkingOptionId ?? null,
       }),
@@ -192,6 +209,14 @@ function validateStart(input: DelegationStartInput): void {
       "Task name must contain 1 to 120 characters",
     );
   }
+  if (
+    input.projectId !== undefined &&
+    input.projectId !== null &&
+    (typeof input.projectId !== "string" ||
+      !input.projectId.trim() ||
+      input.projectId.length > 1024)
+  )
+    throw new DelegationControlError("INVALID_ARGUMENT", "projectId must be a project ID or null");
   if (input.cwd !== undefined && (typeof input.cwd !== "string" || !input.cwd.trim()))
     throw new DelegationControlError("INVALID_ARGUMENT", "cwd must not be empty");
   if (
@@ -258,19 +283,25 @@ export class HarnessDelegationCoordinator {
   ) => Promise<void>;
   readonly #notifyThreadStarted: (thread: JsonObject) => Promise<void>;
   readonly #inspectOfficial: (input: HarnessInspectInput) => Promise<HarnessInspectResult>;
+  readonly #answerQuestion: ((input: ThreadAnswerInput) => Promise<ThreadAnswerResult>) | undefined;
+  readonly #pendingQuestions: (threadId: string) => DelegationPendingQuestion[];
   readonly #readOfficial: (input: ThreadReadInput) => Promise<DelegationThreadSnapshot>;
   readonly #sendOfficial: (input: ThreadSendInput) => Promise<ThreadSendResult>;
   readonly #cancelOfficial: (input: ThreadCancelInput) => Promise<ThreadCancelResult>;
-  readonly #startOfficial: (
-    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
-  ) => Promise<DelegationStartResult>;
+  readonly #startOfficial: (input: OfficialDelegationStartInput) => Promise<DelegationStartResult>;
   readonly #listOfficial: (input: ThreadListInput) => Promise<DelegationThreadListResult>;
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
+  readonly #projectForThread:
+    ((threadId: string) => Promise<string | null | undefined>) | undefined;
   readonly #activeOfficialParents: () => string[];
   readonly #externalThreadBusy: (thread: ExternalThread) => boolean;
   readonly #pluginRoots: readonly string[];
   readonly #availabilityStore: HarnessAvailabilityStore;
-  readonly #availabilityRefreshing = new Set<RoutedHarnessId>();
+  /** One inspection per Harness, shared by the blocking and limited-wait paths. */
+  readonly #availabilityInspecting = new Map<
+    RoutedHarnessId,
+    Promise<HarnessInspection["status"]>
+  >();
 
   constructor(input: {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
@@ -290,22 +321,26 @@ export class HarnessDelegationCoordinator {
     startExternalTurn(thread: ExternalThread, text: string, turnId: string): Promise<void>;
     notifyThreadStarted(thread: JsonObject): Promise<void>;
     inspectOfficial(input: HarnessInspectInput): Promise<HarnessInspectResult>;
+    answerQuestion?(input: ThreadAnswerInput): Promise<ThreadAnswerResult>;
+    pendingQuestions?(threadId: string): DelegationPendingQuestion[];
     readOfficial(input: ThreadReadInput): Promise<DelegationThreadSnapshot>;
     sendOfficial(input: ThreadSendInput): Promise<ThreadSendResult>;
     cancelOfficial(input: ThreadCancelInput): Promise<ThreadCancelResult>;
-    startOfficial(
-      input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
-    ): Promise<DelegationStartResult>;
+    startOfficial(input: OfficialDelegationStartInput): Promise<DelegationStartResult>;
     listOfficial(input: ThreadListInput): Promise<DelegationThreadListResult>;
     officialThreadMetadata(threadId: string): Promise<ParentMetadata>;
+    projectForThread?(threadId: string): Promise<string | null | undefined>;
     activeOfficialParents(): string[];
     externalThreadBusy(thread: ExternalThread): boolean;
     pluginRoots?: readonly string[];
+    /** Share the Host's availability cache with the Desktop request path. */
+    availabilityStore?: HarnessAvailabilityStore;
   }) {
     this.#adapters = input.adapters;
     this.#environment = input.environment;
     this.#pluginRoots = input.pluginRoots ?? [];
-    this.#availabilityStore = new HarnessAvailabilityStore(input.environment);
+    this.#availabilityStore =
+      input.availabilityStore ?? new HarnessAvailabilityStore(input.environment);
     this.#externalRuntime = input.externalRuntime;
     this.#repository = input.repository;
     this.#registerExternalThread = input.registerExternalThread;
@@ -313,12 +348,15 @@ export class HarnessDelegationCoordinator {
     this.#notifyThreadStarted = input.notifyThreadStarted;
     this.#inspectOfficial = input.inspectOfficial;
     this.#readOfficial = input.readOfficial;
+    this.#answerQuestion = input.answerQuestion;
+    this.#pendingQuestions = input.pendingQuestions ?? (() => []);
     this.#sendOfficial = input.sendOfficial;
     this.#cancelOfficial = input.cancelOfficial;
     this.#startOfficial = input.startOfficial;
     this.#listOfficial = input.listOfficial;
     this.#officialThreadMetadata = input.officialThreadMetadata;
     this.#activeOfficialParents = input.activeOfficialParents;
+    this.#projectForThread = input.projectForThread;
     this.#externalThreadBusy = input.externalThreadBusy;
   }
 
@@ -331,6 +369,7 @@ export class HarnessDelegationCoordinator {
       hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined;
     const availability: NonNullable<HarnessListResult["availability"]> = {};
     const pending: RoutedHarnessId[] = [];
+    const limited: RoutedHarnessId[] = [];
     const stale: RoutedHarnessId[] = [];
     for (const harnessId of harnesses) {
       if (harnessId === "codex") {
@@ -344,21 +383,58 @@ export class HarnessDelegationCoordinator {
         pending.push(harnessId);
         continue;
       }
-      availability[harnessId] = cached.status;
-      if (input.refresh) pending.push(harnessId);
-      else if (Date.now() - cached.checkedAt >= AVAILABILITY_CACHE_TTL_MS) stale.push(harnessId);
+      const expired = Date.now() - cached.checkedAt >= harnessAvailabilityTtlMs(cached.status);
+      if (input.refresh) {
+        availability[harnessId] = cached.status;
+        pending.push(harnessId);
+      } else if (!expired) {
+        availability[harnessId] = cached.status;
+      } else if (cached.status === "ready" || cached.status === "notInstalled") {
+        // A stale positive answer still paints immediately; revalidate behind it.
+        availability[harnessId] = cached.status;
+        stale.push(harnessId);
+      } else {
+        // A transient failure must recover, but a slow check must not delay every
+        // menu open; wait briefly, then keep the cached value while it finishes.
+        availability[harnessId] = cached.status;
+        limited.push(harnessId);
+      }
     }
     await forEachConcurrent(pending, AVAILABILITY_CONCURRENCY, async (harnessId) => {
-      availability[harnessId] = await this.#inspectAvailability(
+      availability[harnessId] = await this.#inspectAvailabilityOnce(
         harnessId,
         fingerprintFor(harnessId),
       );
     });
+    if (limited.length > 0) {
+      await Promise.all(
+        limited.map(async (harnessId) => {
+          const inspection = this.#inspectAvailabilityOnce(harnessId, fingerprintFor(harnessId));
+          const status = await withTimeout(inspection, AVAILABILITY_LIMITED_WAIT_MS);
+          if (status !== AVAILABILITY_TIMEOUT) availability[harnessId] = status;
+        }),
+      );
+    }
     if (stale.length > 0) {
       // Stale-while-revalidate: the menu gets the cached answer immediately.
       void this.#refreshAvailability(stale, fingerprints, hasFingerprints).catch(() => undefined);
     }
     return { harnesses, availability };
+  }
+
+  #inspectAvailabilityOnce(
+    harnessId: RoutedHarnessId,
+    fingerprint: string | undefined,
+  ): Promise<HarnessInspection["status"]> {
+    const existing = this.#availabilityInspecting.get(harnessId);
+    if (existing) return existing;
+    const promise = this.#inspectAvailability(harnessId, fingerprint).finally(() => {
+      if (this.#availabilityInspecting.get(harnessId) === promise) {
+        this.#availabilityInspecting.delete(harnessId);
+      }
+    });
+    this.#availabilityInspecting.set(harnessId, promise);
+    return promise;
   }
 
   async #inspectAvailability(
@@ -375,7 +451,12 @@ export class HarnessDelegationCoordinator {
           adapter.inspect({ purpose: "availability" }),
           AVAILABILITY_INSPECT_TIMEOUT_MS,
         );
-        status = inspection === AVAILABILITY_TIMEOUT ? "unavailable" : inspection.status;
+        if (inspection === AVAILABILITY_TIMEOUT) {
+          // A slow concurrent CLI start is not evidence that the Harness is
+          // unavailable. Keep the last observation and do not rewrite the cache.
+          return (await this.#availabilityStore.get(harnessId))?.status ?? "unavailable";
+        }
+        status = inspection.status;
       } catch {
         status = "error";
       }
@@ -393,29 +474,21 @@ export class HarnessDelegationCoordinator {
     fingerprints: Map<string, string>,
     hasFingerprints: boolean,
   ): Promise<void> {
-    const targets = harnessIds.filter((harnessId) => {
-      if (this.#availabilityRefreshing.has(harnessId)) return false;
-      this.#availabilityRefreshing.add(harnessId);
-      return true;
+    await forEachConcurrent(harnessIds, AVAILABILITY_CONCURRENCY, async (harnessId) => {
+      await this.#inspectAvailabilityOnce(
+        harnessId,
+        hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined,
+      ).catch(() => undefined);
     });
-    try {
-      await forEachConcurrent(targets, AVAILABILITY_CONCURRENCY, async (harnessId) => {
-        try {
-          await this.#inspectAvailability(
-            harnessId,
-            hasFingerprints ? (fingerprints.get(harnessId) ?? "missing") : undefined,
-          );
-        } finally {
-          this.#availabilityRefreshing.delete(harnessId);
-        }
-      });
-    } catch {
-      for (const harnessId of targets) this.#availabilityRefreshing.delete(harnessId);
-    }
   }
 
   async invalidateAvailability(harnessId: RoutedHarnessId): Promise<void> {
     await this.#availabilityStore.invalidate(harnessId);
+  }
+
+  /** Generation of the Host's 24 h availability cache, used in directory fingerprints. */
+  availabilityGeneration(): Promise<number> {
+    return this.#availabilityStore.generation();
   }
 
   async inspect(input: HarnessInspectInput): Promise<HarnessInspectResult> {
@@ -447,6 +520,28 @@ export class HarnessDelegationCoordinator {
     const parent = origin
       ? { harnessId: "codex" as RoutedHarnessId }
       : await this.#parentMetadata(parentThreadId);
+    const desktopProject = {
+      ...(origin
+        ? {
+            sourceHostId: origin.hostId,
+            ...(origin.threadId ? { sourceThreadId: origin.threadId } : {}),
+          }
+        : { sourceThreadId: parentThreadId }),
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    };
+    const parentProjectId =
+      !origin && input.projectId === undefined
+        ? await this.#projectForThread?.(parentThreadId)
+        : undefined;
+    const projectId =
+      input.projectId !== undefined
+        ? input.projectId
+        : origin
+          ? undefined
+          : parentProjectId !== undefined
+            ? parentProjectId
+            : parent.projectId;
+    input = { ...input, ...(projectId !== undefined ? { projectId } : {}) };
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
     const title = delegationTitle(parent.title, input, origin !== undefined);
     if (input.harnessId === "codex") {
@@ -455,6 +550,7 @@ export class HarnessDelegationCoordinator {
         parentThreadId,
         cwd: selectedCwd,
         title,
+        desktopProject,
       });
       return {
         ...result,
@@ -536,6 +632,8 @@ export class HarnessDelegationCoordinator {
     let session: HarnessSession | null = null;
     return this.#externalRuntime.idleRelease.runOperation(childThreadId, async () => {
       try {
+        if (!origin && projectId)
+          record = await this.#repository.updateMetadata(childThreadId, { projectId });
         delegation = await this.#repository.createDelegation({
           delegationId,
           parentHostThreadId: hostThreadIdSchema.parse(parentThreadId),
@@ -545,6 +643,7 @@ export class HarnessDelegationCoordinator {
           status: "creating",
           ...(input.requestId ? { requestId: input.requestId } : {}),
           taskDigest: digest,
+          desktopProject,
         });
         const opened = await adapter.open({
           kind: "create",
@@ -731,6 +830,15 @@ export class HarnessDelegationCoordinator {
     return { threadId: thread.id, turnId, harnessId: thread.harnessId, cancelled: true };
   }
 
+  async answer(input: ThreadAnswerInput): Promise<ThreadAnswerResult> {
+    if (!this.#answerQuestion)
+      throw new DelegationControlError(
+        "QUESTION_NOT_PENDING",
+        "No Question reply handler is available",
+      );
+    return this.#answerQuestion(input);
+  }
+
   async read(input: ThreadReadInput): Promise<DelegationThreadSnapshot> {
     return this.#externalRuntime.idleRelease.runOperation(input.threadId, () => this.#read(input));
   }
@@ -738,7 +846,11 @@ export class HarnessDelegationCoordinator {
   async #read(input: ThreadReadInput): Promise<DelegationThreadSnapshot> {
     validateReadOptions(input);
     const location = await this.#externalRuntime.locate(input.threadId);
-    if (location.kind === "official") return this.#readOfficial(input);
+    if (location.kind === "official")
+      return {
+        ...(await this.#readOfficial(input)),
+        pendingQuestions: this.#pendingQuestions(input.threadId),
+      };
     if (location.kind === "error")
       throw new DelegationControlError("THREAD_NOT_FOUND", location.error.message);
     const resolution = await this.#externalRuntime.resolve(input.threadId);
@@ -783,7 +895,7 @@ export class HarnessDelegationCoordinator {
     if (delegation && delegation.status !== status) {
       await this.#repository.setDelegationStatus(delegation.delegationId, status);
     }
-    return snapshot;
+    return { ...snapshot, pendingQuestions: this.#pendingQuestions(thread.id) };
   }
 
   async wait(input: ThreadWaitInput): Promise<DelegationThreadSnapshot & { timedOut: boolean }> {
@@ -793,7 +905,8 @@ export class HarnessDelegationCoordinator {
     const deadline = Date.now() + input.timeoutMs;
     while (true) {
       const snapshot = await this.read(input);
-      if (terminal(snapshot.status)) return { ...snapshot, timedOut: false };
+      if (terminal(snapshot.status) || snapshot.pendingQuestions?.length)
+        return { ...snapshot, timedOut: false };
       const remaining = deadline - Date.now();
       if (remaining <= 0) return { ...snapshot, timedOut: true };
       await delay(Math.min(100, remaining));
@@ -820,6 +933,7 @@ export class HarnessDelegationCoordinator {
           ? {
               cwd: record.cwd,
               title: record.title,
+              ...(record.projectId ? { projectId: record.projectId } : {}),
               createdAt: record.createdAt,
               updatedAt: record.updatedAt,
             }
@@ -939,8 +1053,9 @@ export class HarnessDelegationCoordinator {
     if (record)
       return {
         harnessId: record.harnessId as RoutedHarnessId,
-        cwd: record.cwd,
+        cwd: this.#externalRuntime.get(parentThreadId)?.cwd ?? record.cwd,
         title: record.title,
+        ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
       };
     const metadata = await this.#officialThreadMetadata(parentThreadId).catch(() => ({}));
     return { harnessId: "codex", ...metadata };

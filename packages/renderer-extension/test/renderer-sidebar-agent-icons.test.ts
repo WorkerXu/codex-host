@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RendererAgent } from "../src/agent-selection-state.js";
 import type { RendererModelClient } from "../src/renderer-model-client.js";
 import { RendererMethodUnavailableError } from "../src/renderer-request-sender.js";
+import { createRendererStartupTrace } from "../src/renderer-startup-trace.js";
 import {
   installRendererSidebarAgentIcons,
   draftIdFromSidebarRowElement,
@@ -583,6 +584,111 @@ describe("Renderer sidebar Agent ownership", () => {
     expect(row.renders).toBeGreaterThan(renders);
     expect(client.listThreadOwnership).toHaveBeenCalledTimes(1);
     control.dispose();
+  });
+
+  it("paints persisted ownership and artwork before any reply and never clears on refresh", async () => {
+    const row = new FakeRow("pi-thread");
+    const dom = new FakeDom([row]);
+    const reply = Promise.withResolvers<ThreadOwnershipListResult>();
+    const client = clientWith(async () => reply.promise);
+    const plugin: HarnessPluginDescriptor = {
+      id: PI_HARNESS_ID,
+      name: "Pi",
+      version: "1",
+      icon: "data:image/svg+xml;base64,PHN2Zy8+",
+    };
+    const ownershipStore = {
+      read: vi.fn(() => new Map([["pi-thread", "pi"]])),
+      write: vi.fn(),
+    };
+    const control = installRendererSidebarAgentIcons({
+      getClient: () => client,
+      getCachedPlugins: () => [plugin],
+      ownershipStore,
+      dom,
+    });
+    try {
+      await settle();
+      // The icon is visible before the ownership round trip completes.
+      expect(row.agent).toBe("pi");
+      expect(row.plugin).toEqual(plugin);
+      expect(client.listThreadOwnership).toHaveBeenCalledOnce();
+
+      const clears = row.clears;
+      control.refresh();
+      await settle();
+      expect(row.agent).toBe("pi");
+      expect(row.clears).toBe(clears);
+
+      reply.resolve({
+        threads: [
+          {
+            threadId: "pi-thread" as HostThreadId,
+            owner: "external",
+            harnessId: CLAUDE_CODE_HARNESS_ID,
+          },
+        ],
+      });
+      await settle();
+      expect(row.agent).toBe("claude-code");
+      expect(ownershipStore.write).toHaveBeenCalledWith(
+        "local",
+        new Map([["pi-thread", "claude-code"]]),
+      );
+    } finally {
+      control.dispose();
+    }
+  });
+
+  it("keeps a known icon when a re-render briefly loses the Thread identity", async () => {
+    const row = new FakeRow("pi-thread");
+    const dom = new FakeDom([row]);
+    const client = clientWith(async ({ threadIds }) => ({
+      threads: [
+        {
+          threadId: threadIds[0] as HostThreadId,
+          owner: "external",
+          harnessId: PI_HARNESS_ID,
+        },
+      ],
+    }));
+    const control = installRendererSidebarAgentIcons({ getClient: () => client, dom });
+    try {
+      await settle();
+      expect(row.agent).toBe("pi");
+      const clears = row.clears;
+
+      row.id = null;
+      dom.change();
+      await settle();
+
+      expect(row.agent).toBe("pi");
+      expect(row.clears).toBe(clears);
+    } finally {
+      control.dispose();
+    }
+  });
+
+  it("reports the first rows and complete icon coverage to the startup trace", async () => {
+    const rows = [new FakeRow("first"), new FakeRow("second")];
+    const dom = new FakeDom(rows);
+    const client = clientWith(async ({ threadIds }) => ({
+      threads: threadIds.map((threadId) => ({
+        threadId,
+        owner: "external" as const,
+        harnessId: PI_HARNESS_ID,
+      })),
+    }));
+    const trace = createRendererStartupTrace(() => 10);
+    const control = installRendererSidebarAgentIcons({ getClient: () => client, trace, dom });
+    try {
+      await settle();
+      await settle();
+      expect(trace.snapshot().firstRowsMs).toBe(10);
+      expect(trace.snapshot().allIconsMs).toBe(10);
+    } finally {
+      control.dispose();
+    }
   });
 
   it("does not schedule retries for an unsupported ownership API and can recover after connection refresh", async () => {

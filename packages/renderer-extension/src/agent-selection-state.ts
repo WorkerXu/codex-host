@@ -99,7 +99,12 @@ export class DraftAgentController<Composer extends object> {
     preferredNewThreadAgent?: RendererAgent,
   ): Readonly<DraftComposerState> {
     const bound = this.#targetState(target);
-    if (bound) {
+    // A client new-thread identity names one draft. Once its Thread exists, Desktop may
+    // still assign that identity to the next new chat; reviving the locked state would
+    // turn that draft into an existing Thread (Codex only, no machine switch).
+    if (bound && target?.[0] === "default" && bound.phase === "locked") {
+      this.#forgetDraftTargets(bound);
+    } else if (bound) {
       this.#states.set(composer, bound);
       return bound;
     }
@@ -168,6 +173,7 @@ export class DraftAgentController<Composer extends object> {
     this.#pendingSubmissions.delete(state);
     state.agent = agent;
     state.phase = "locked";
+    this.#forgetDraftTargets(state);
     if (agent !== "codex") {
       state.configurationByAgent = {
         ...state.configurationByAgent,
@@ -240,6 +246,7 @@ export class DraftAgentController<Composer extends object> {
     const state = this.#state(composer);
     this.#pendingSubmissions.delete(state);
     state.phase = "locked";
+    this.#forgetDraftTargets(state);
     return state;
   }
   markSubmissionPending(composer: Composer): Readonly<DraftComposerState> {
@@ -273,8 +280,10 @@ export class DraftAgentController<Composer extends object> {
       this.#states.set(replacement, state);
     }
     if (isIdentifiedTarget(target) && !bound) this.#targetStates.push({ target, state });
-    if (isConversationTarget(target) && this.#pendingSubmissions.delete(state))
+    if (isConversationTarget(target) && this.#pendingSubmissions.delete(state)) {
       state.phase = "locked";
+      this.#forgetDraftTargets(state);
+    }
     return true;
   }
   async switchAgent(
@@ -308,6 +317,14 @@ export class DraftAgentController<Composer extends object> {
     return (
       this.#targetStates.find((candidate) => sameTarget(candidate.target, target))?.state ?? null
     );
+  }
+  /** A Thread owns the Agent now; its draft identity must not start another draft. */
+  #forgetDraftTargets(state: MutableComposerState): void {
+    for (let index = this.#targetStates.length - 1; index >= 0; index -= 1) {
+      const entry = this.#targetStates[index];
+      if (entry?.state === state && entry.target[0] === "default")
+        this.#targetStates.splice(index, 1);
+    }
   }
   #state(composer: Composer, initialAgent?: RendererAgent): MutableComposerState {
     const existing = this.#states.get(composer);

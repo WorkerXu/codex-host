@@ -12,6 +12,8 @@ export interface NativeScheduleWorkspace {
   id: string;
   label: string;
   cwd: string;
+  /** Every root of the local project, primary first. */
+  roots: string[];
 }
 export interface NativeScheduleWorkspaceThread {
   threadId: string;
@@ -42,7 +44,12 @@ export function readNativeScheduleWorkspaces(root: RendererHostRoot): NativeSche
       group.path.includes("\0")
     )
       return;
-    const next = { id: group.projectId, label: group.label || group.path, cwd: group.path };
+    const next = {
+      id: group.projectId,
+      label: group.label || group.path,
+      cwd: group.path,
+      roots: group.rootPaths.filter((root): root is string => typeof root === "string"),
+    };
     const previous = projects.get(next.id);
     if (previous && previous.cwd !== next.cwd) ambiguous.add(next.id);
     else projects.set(next.id, next);

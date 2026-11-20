@@ -391,13 +391,28 @@ async function codeBuddyHistory(
   };
 }
 
+export interface CodeBuddyHistoryReadOptions {
+  /** The directory this Native Session used before a working-folder change. */
+  previousCwd?: string;
+}
+
 export async function readNativeHistory(
   cwd: string,
   ref: NativeSessionRef,
   environment: NodeJS.ProcessEnv,
   profile: CodeBuddyRuntimeProfile = CODEBUDDY_RUNTIME_PROFILE,
+  options: CodeBuddyHistoryReadOptions = {},
 ): Promise<string> {
-  return (await codeBuddyNativeHistory(cwd, ref, environment, profile)).contents;
+  const previousCwd = options.previousCwd?.trim();
+  return (
+    await codeBuddyNativeHistory(
+      cwd,
+      ref,
+      environment,
+      profile,
+      previousCwd && previousCwd !== cwd ? { allowedHistoricalCwds: [previousCwd] } : undefined,
+    )
+  ).contents;
 }
 
 function parseRows(contents: string, tolerateIncompleteTail = false) {

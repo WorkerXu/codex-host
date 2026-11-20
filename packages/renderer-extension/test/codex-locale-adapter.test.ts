@@ -10,6 +10,7 @@ const { exportsForModule, importModule } = vi.hoisted(() => ({
 vi.mock("../src/codex-native-services.js", async (importOriginal) => {
   const original = await importOriginal<typeof NativeServices>();
   return {
+    isCodexServiceRegistry: original.isCodexServiceRegistry,
     loadCodexNativeServices: (...args: Parameters<typeof original.loadCodexNativeServices>) =>
       original.loadCodexNativeServices(args[0], args[1], importModule),
   };

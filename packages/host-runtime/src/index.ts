@@ -35,6 +35,15 @@ export type {
   RemoteAppServerWebSocketListener,
 } from "./remote-app-server.js";
 export { runDelegationCli, DELEGATION_HELP } from "./delegation-cli.js";
+export { DINGTALK_CLI_HELP, runDingTalkCli } from "./dingtalk-cli-command.js";
+export {
+  createDingTalkService,
+  DingTalkService,
+  DingTalkServiceError,
+} from "./dingtalk-service.js";
+export type { DingTalkServiceOptions } from "./dingtalk-service.js";
+export { createDingTalkCli } from "./dingtalk-cli.js";
+export { createDingTalkTransport } from "./dingtalk-transport.js";
 export { DelegationControlRegistry } from "./delegation-control-registry.js";
 export { startDelegationControlServer } from "./delegation-control-server.js";
 export { installDelegationSkills, CODEXHOST_DELEGATION_SKILL } from "./delegation-skill.js";
@@ -52,6 +61,9 @@ export type {
   DelegationStartResult,
   DelegationThreadListResult,
   DelegationThreadSnapshot,
+  DelegationPendingQuestion,
+  ThreadAnswerInput,
+  ThreadAnswerResult,
   ThreadListInput,
   ThreadReadInput,
   ThreadWaitInput,
@@ -117,3 +129,15 @@ export const packageMetadata = {
     updateManager.name,
   ],
 } as const;
+
+export { ModelServiceSettingsStore } from "./model-service-settings.js";
+export {
+  createStructuredQueryClient,
+  StructuredQueryError,
+  MODEL_SERVICE_MODELS,
+} from "./structured-query-client.js";
+export type {
+  StructuredQueryClientOptions,
+  StructuredQueryRequest,
+} from "./structured-query-client.js";
+export { probeRemoteThreadFolders } from "./thread-folders-probe.js";

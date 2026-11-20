@@ -28,7 +28,9 @@ async function fixture(
   adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi")),
   officialThreadCwd: (
     threadId: string,
-  ) => Promise<string | undefined | { cwd?: string; title?: string }> = async () => undefined,
+  ) => Promise<
+    string | undefined | { cwd?: string; title?: string; projectId?: string }
+  > = async () => undefined,
   environment: NodeJS.ProcessEnv = {},
   externalThreadBusy: (thread: ExternalThread) => boolean = (thread) => thread.running,
   activeOfficialParents: () => string[] = () => [],
@@ -51,7 +53,9 @@ async function fixture(
     consumeOutputs: async () => undefined,
     diagnose: () => undefined,
   });
+  const projectForThread = vi.fn(async (): Promise<string | null | undefined> => undefined);
   const coordinator = new HarnessDelegationCoordinator({
+    projectForThread,
     adapters,
     environment,
     externalRuntime: runtime,
@@ -92,6 +96,7 @@ async function fixture(
   return {
     adapter,
     coordinator,
+    projectForThread,
     directory,
     delivered,
     notifications,
@@ -113,6 +118,7 @@ function registrationFor(coordinator: HarnessDelegationCoordinator): DelegationC
     inspect: (input) => coordinator.inspect(input),
     start: (input) => coordinator.start(input),
     send: (input) => coordinator.send(input),
+    answer: (input) => coordinator.answer(input),
     cancel: (input) => coordinator.cancel(input),
     read: (input) => coordinator.read(input),
     wait: (input) => coordinator.wait(input),
@@ -408,26 +414,142 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 
-  it("times out a slow availability inspection and caches the result", async () => {
+  it("rechecks a cached transient failure after ten minutes and recovers", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const original = adapter.inspect.bind(adapter);
+    let failing = true;
+    const inspect = vi.spyOn(adapter, "inspect").mockImplementation(async (input) =>
+      failing
+        ? {
+            status: "unavailable" as const,
+            error: { code: "unavailable", message: "temporary", retryable: true },
+          }
+        : original(input),
+    );
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      // Inside the short failure window the cached answer is reused.
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(1_000_000 + 10 * 60_000 + 1);
+      failing = false;
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a cached failure when its recheck is slow and heals in the background", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const original = adapter.inspect.bind(adapter);
+    const slow = Promise.withResolvers<Awaited<ReturnType<typeof adapter.inspect>>>();
+    let inspections = 0;
+    const inspect = vi.spyOn(adapter, "inspect").mockImplementation(async (input) => {
+      inspections += 1;
+      if (inspections === 1) {
+        return {
+          status: "unavailable",
+          error: { code: "unavailable", message: "temporary", retryable: true },
+        };
+      }
+      if (inspections === 2) return slow.promise;
+      return original(input);
+    });
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      const generationBefore = await value.coordinator.availabilityGeneration();
+
+      vi.setSystemTime(1_000_000 + 10 * 60_000 + 1);
+      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(300);
+      // The slow check did not block the menu beyond its 300 ms budget.
+      await expect(pending).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(generationBefore);
+
+      slow.resolve(await original({}));
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBeGreaterThan(
+        generationBefore,
+      );
+      // The next conditional directory read sees the healed status and a new fingerprint.
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a ready status when a refresh check times out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
+    const inspect = vi.spyOn(adapter, "inspect");
+    const value = await fixture(adapter);
+    try {
+      await expect(
+        value.coordinator.listHarnesses({ includeAvailability: true }),
+      ).resolves.toMatchObject({ availability: { pi: "ready" } });
+      const generation = await value.coordinator.availabilityGeneration();
+      inspect.mockImplementation(
+        () => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>,
+      );
+
+      const pending = value.coordinator.listHarnesses({
+        includeAvailability: true,
+        refresh: true,
+      });
+      await vi.advanceTimersByTimeAsync(8_000);
+      // The slow concurrent CLI start did not turn a ready answer into unavailable.
+      await expect(pending).resolves.toMatchObject({ availability: { pi: "ready" } });
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(generation);
+    } finally {
+      await value.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not cache a first-check timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
     const adapter = new FakeHarnessAdapter(harnessIdSchema.parse("pi"));
     const inspect = vi
       .spyOn(adapter, "inspect")
       .mockImplementation(() => new Promise(() => undefined) as ReturnType<typeof adapter.inspect>);
     const value = await fixture(adapter);
     try {
-      const pending = value.coordinator.listHarnesses({ includeAvailability: true });
-      await vi.advanceTimersByTimeAsync(2_000);
-      await expect(pending).resolves.toMatchObject({
-        harnesses: ["codex", "pi"],
-        availability: { codex: "ready", pi: "unavailable" },
-      });
-      expect(inspect).toHaveBeenCalledTimes(1);
+      const first = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(first).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      await expect(value.coordinator.availabilityGeneration()).resolves.toBe(0);
 
-      await expect(
-        value.coordinator.listHarnesses({ includeAvailability: true }),
-      ).resolves.toMatchObject({ availability: { pi: "unavailable" } });
-      expect(inspect).toHaveBeenCalledTimes(1);
+      // With no cached timeout entry, the next read must inspect again.
+      const second = value.coordinator.listHarnesses({ includeAvailability: true });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(second).resolves.toMatchObject({ availability: { pi: "unavailable" } });
+      expect(inspect).toHaveBeenCalledTimes(2);
     } finally {
       await value.close();
       vi.useRealTimers();
@@ -1050,3 +1172,114 @@ describe("HarnessDelegationCoordinator", () => {
     }
   });
 });
+
+describe("delegation project inheritance", () => {
+  it.each([undefined, "override-project", null])(
+    "resolves project independently of child cwd (%s)",
+    async (projectId) => {
+      const value = await fixture(undefined, async () => ({
+        cwd: "/parent",
+        projectId: "parent-project",
+      }));
+      try {
+        const result = await value.coordinator.start({
+          harnessId: "pi",
+          task: "check folders",
+          cwd: "/different",
+          parentThreadId: "parent",
+          ...(projectId !== undefined ? { projectId } : {}),
+        });
+        const record = await value.repository.find(result.threadId);
+        expect(record?.projectId).toBe(
+          projectId === null ? undefined : (projectId ?? "parent-project"),
+        );
+        expect(record?.cwd).toBe(path.resolve("/different"));
+      } finally {
+        await value.close();
+      }
+    },
+  );
+  it("persists peer origin and explicit Desktop project for renderer assignment", async () => {
+    const value = await fixture();
+    try {
+      const result = await value.coordinator.start({
+        harnessId: "pi",
+        task: "remote task",
+        cwd: "/remote",
+        projectId: "mac-project",
+        origin: { kind: "peer", hostId: "local", threadId: "mac-parent" },
+      });
+      const stored = await value.repository.getDelegationByChild(
+        hostThreadIdSchema.parse(result.threadId),
+      );
+      expect(stored?.desktopProject).toEqual({
+        sourceHostId: "local",
+        sourceThreadId: "mac-parent",
+        projectId: "mac-project",
+      });
+      expect((await value.repository.find(result.threadId))?.projectId).toBeUndefined();
+    } finally {
+      await value.close();
+    }
+  });
+});
+
+it.each([null, "desktop-project"])(
+  "prefers Desktop's assignment over stale native metadata (%s)",
+  async (projectId) => {
+    const value = await fixture(undefined, async () => ({
+      cwd: "/parent",
+      projectId: "stale-native",
+    }));
+    value.projectForThread.mockResolvedValue(projectId);
+    try {
+      const child = await value.coordinator.start({
+        harnessId: "pi",
+        task: "check",
+        parentThreadId: "parent",
+      });
+      expect((await value.repository.find(child.threadId))?.projectId).toBe(projectId ?? undefined);
+    } finally {
+      await value.close();
+    }
+  },
+);
+
+it.each([undefined, "override", null])(
+  "inherits an external parent's stored project when Desktop is unavailable (%s)",
+  async (projectId) => {
+    const value = await fixture();
+    try {
+      const parent = await value.repository.createProvisional({
+        hostThreadId: hostThreadIdSchema.parse("external-parent"),
+        createRequestId: "external-parent",
+        harnessId: harnessIdSchema.parse("pi"),
+        cwd: "/parent",
+        title: "Parent",
+        transportModelId: "codexhost/pi-native",
+        ephemeral: false,
+        historyMode: "paginated",
+      });
+      await value.repository.updateMetadata(parent.hostThreadId, { projectId: "stored-project" });
+      const child = await value.coordinator.start({
+        harnessId: "pi",
+        task: "check",
+        parentThreadId: parent.hostThreadId,
+        cwd: "/different",
+        ...(projectId !== undefined ? { projectId } : {}),
+      });
+      expect((await value.repository.find(child.threadId))?.projectId).toBe(
+        projectId === null ? undefined : (projectId ?? "stored-project"),
+      );
+      expect(
+        (await value.repository.getDelegationByChild(hostThreadIdSchema.parse(child.threadId)))
+          ?.desktopProject,
+      ).toEqual({
+        sourceThreadId: parent.hostThreadId,
+        ...(projectId !== undefined ? { projectId } : {}),
+      });
+    } finally {
+      await value.close();
+    }
+  },
+);

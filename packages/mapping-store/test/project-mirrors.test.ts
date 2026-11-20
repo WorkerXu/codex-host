@@ -39,20 +39,16 @@ function mirror(label = "demo"): ProjectMirrorRecord {
 }
 
 describe("Project mirror store", () => {
-  it("starts empty and persists acknowledgements and mirrors", async () => {
+  it("starts empty and persists mirrors", async () => {
     const directory = await temporaryDirectory();
     const store = new ProjectMirrorStore({ directory });
     await expect(store.list()).resolves.toEqual({
       formatVersion: 1,
       revision: 0,
       projects: {},
-      acknowledged: {},
     });
 
-    const acknowledged = await store.upsert(0, "local-alpha", { acknowledge: true });
-    expect(acknowledged).toMatchObject({ revision: 1, acknowledged: { "local-alpha": true } });
-
-    const written = await store.upsert(1, "local-alpha", { record: mirror() });
+    const written = await store.upsert(0, "local-alpha", { record: mirror() });
     expect(written.projects["local-alpha"]).toMatchObject({ label: "demo" });
     await expect(store.list()).resolves.toEqual(written);
 
@@ -61,29 +57,52 @@ describe("Project mirror store", () => {
     expect((await readdir(directory)).filter((name) => name.includes(".tmp-"))).toEqual([]);
   });
 
-  it("updates and removes a mirror without clearing the acknowledgement", async () => {
+  it("updates and removes a mirror", async () => {
     const directory = await temporaryDirectory();
     const store = new ProjectMirrorStore({ directory });
-    await store.upsert(0, "local-alpha", { acknowledge: true });
-    await store.upsert(1, "local-alpha", { record: mirror() });
+    await store.upsert(0, "local-alpha", { record: mirror() });
 
-    const updated = await store.upsert(2, "local-alpha", { record: mirror("demo 2") });
+    const updated = await store.upsert(1, "local-alpha", { record: mirror("demo 2") });
     expect(updated.projects["local-alpha"]?.label).toBe("demo 2");
-    expect(updated.acknowledged).toEqual({ "local-alpha": true });
 
-    const removed = await store.upsert(3, "local-alpha", { record: null });
+    const removed = await store.upsert(2, "local-alpha", { record: null });
     expect(removed.projects).toEqual({});
-    expect(removed.acknowledged).toEqual({ "local-alpha": true });
   });
 
   it("rejects a stale revision instead of overwriting another window", async () => {
     const directory = await temporaryDirectory();
     const store = new ProjectMirrorStore({ directory });
-    await store.upsert(0, "local-alpha", { acknowledge: true });
+    await store.upsert(0, "local-alpha", { record: mirror() });
 
     await expect(store.upsert(0, "local-alpha", { record: mirror() })).rejects.toBeInstanceOf(
       ProjectMirrorRevisionConflictError,
     );
+  });
+
+  it("still reads a registry written by the confirmed-mirror version", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(
+      projectMirrorsFilePath(directory),
+      JSON.stringify({
+        formatVersion: 1,
+        revision: 4,
+        projects: { "local-alpha": mirror() },
+        acknowledged: { "local-alpha": true },
+      }),
+      "utf8",
+    );
+    const store = new ProjectMirrorStore({ directory });
+
+    await expect(store.list()).resolves.toMatchObject({
+      revision: 4,
+      projects: { "local-alpha": { label: "demo" } },
+    });
+    const written = await store.upsert(4, "local-alpha", { record: mirror("demo 2") });
+    expect(written).toEqual({
+      formatVersion: 1,
+      revision: 5,
+      projects: { "local-alpha": mirror("demo 2") },
+    });
   });
 
   it("quarantines an invalid file and continues with an empty registry", async () => {
@@ -95,7 +114,6 @@ describe("Project mirror store", () => {
       formatVersion: 1,
       revision: 0,
       projects: {},
-      acknowledged: {},
     });
     expect(store.takeQuarantine()).toBe("mirrors.json.1800000000000.invalid");
   });

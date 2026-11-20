@@ -34,6 +34,7 @@ function api(overrides: Partial<Parameters<typeof startDelegationControlServer>[
     listHarnesses: vi.fn(async () => ({ harnesses: ["codex" as const, "pi" as const] })),
     inspect: vi.fn(),
     start: vi.fn(),
+    answer: vi.fn(),
     send: vi.fn(),
     cancel: vi.fn(),
     read: vi.fn(),

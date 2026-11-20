@@ -60,16 +60,21 @@ export class DelegationPeerCatalogService {
       const stale = this.#now() - this.#cache.loadedAt >= this.#cacheTtlMs;
       if (stale) {
         // Stale-while-revalidate: the menu gets the cached catalog immediately.
-        void this.#refresh().catch(() => undefined);
+        void this.#refresh(false).catch(() => undefined);
       }
       return this.#cache.value;
     }
-    return this.#refresh();
+    return this.#refresh(input.refresh === true);
   }
 
-  #refresh(): Promise<DelegationPeerCatalog> {
-    if (this.#inflight) return this.#inflight;
-    const request = this.#load().finally(() => {
+  #refresh(refresh: boolean): Promise<DelegationPeerCatalog> {
+    if (this.#inflight) {
+      if (!refresh) return this.#inflight;
+      // A manual refresh must not reuse an answer that started before it.
+      const pending = this.#inflight;
+      return pending.catch(() => undefined).then(() => this.#refresh(true));
+    }
+    const request = this.#load(refresh).finally(() => {
       if (this.#inflight === request) this.#inflight = undefined;
     });
     this.#inflight = request;
@@ -108,7 +113,7 @@ export class DelegationPeerCatalogService {
     return result as unknown as DelegationThreadSnapshot;
   }
 
-  async #load(): Promise<DelegationPeerCatalog> {
+  async #load(refresh: boolean): Promise<DelegationPeerCatalog> {
     const config = await readPeerConfig(this.#environment);
     const peers = await Promise.all(
       Object.entries(config.peers)
@@ -119,7 +124,7 @@ export class DelegationPeerCatalogService {
               environment: this.#environment,
               peer: { name, ...entry, linkHostId: entry.hostIds[0] ?? name },
               route: "/v1/harness/list",
-              body: { includeAvailability: true },
+              body: { includeAvailability: true, ...(refresh ? { refresh: true } : {}) },
               timeoutMs: this.#catalogTimeoutMs,
               ...(this.#spawnImpl ? { spawnImpl: this.#spawnImpl } : {}),
             });

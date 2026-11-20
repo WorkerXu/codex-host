@@ -128,6 +128,14 @@ describe("DelegationPeerCatalogService", () => {
     expect(fake.calls).toHaveLength(2);
     await service.listPeers({ refresh: true });
     expect(fake.calls).toHaveLength(4);
+    // The peer Host must re-inspect its non-ready Harnesses too, not serve its
+    // own cached answer back to the manual refresh.
+    for (const call of fake.calls.slice(-2)) {
+      expect(JSON.parse(call.body).body).toEqual({ includeAvailability: true, refresh: true });
+    }
+    for (const call of fake.calls.slice(0, 2)) {
+      expect(JSON.parse(call.body).body).toEqual({ includeAvailability: true });
+    }
   });
 
   it("serves a stale catalog immediately and revalidates in the background", async () => {

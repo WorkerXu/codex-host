@@ -95,6 +95,15 @@ export function createHelpTooltip(
   return wrapper;
 }
 
+/** Native input semantics with the Desktop checkbox geometry and theme tokens. */
+export function createPreferenceCheckbox(document: Document): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className =
+    "relative m-0 size-[18px] shrink-0 cursor-pointer appearance-none rounded-[var(--radius-xs,4px)] border border-settings-checkbox-border bg-transparent p-0 transition-colors duration-150 hover:border-settings-checkbox-border-hover checked:border-settings-checkbox-checked checked:bg-settings-checkbox-checked after:pointer-events-none after:absolute after:top-0.5 after:left-[5px] after:h-[9px] after:w-[5px] after:rotate-45 after:border-r-2 after:border-b-2 after:border-settings-checkbox-mark after:opacity-0 checked:after:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-settings-focus disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none";
+  return input;
+}
+
 export function createPreferenceSwitch(
   document: Document,
   id: string,

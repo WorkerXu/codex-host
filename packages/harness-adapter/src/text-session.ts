@@ -83,6 +83,8 @@ export interface InspectHarnessInput {
 export type HarnessExecutionPolicy = "default" | "unattended-full-access";
 
 export interface CreateSessionInput {
+  /** Native extra writable/accessible directories, when supported by the Adapter. */
+  additionalDirectories?: readonly string[];
   kind: "create";
   cwd: string;
   environment?: Record<string, string | undefined>;
@@ -93,6 +95,7 @@ export interface CreateSessionInput {
 }
 
 export interface ResumeSessionInput {
+  additionalDirectories?: readonly string[];
   /** Persisted configuration hints, not new user commands. The Adapter owns restoration:
    * initialize lazy configuration, restore a saved mode, or retain authoritative native state.
    * Host never replays configuration commands after open; publish the confirmed state.
@@ -102,6 +105,9 @@ export interface ResumeSessionInput {
   kind: "resume";
   nativeRef: NativeSessionRef;
   cwd: string;
+  /** Directory the Native Session was last opened in, when the working folders changed.
+   * Adapters that verify history ownership may accept this one prior directory. */
+  previousCwd?: string;
   environment?: Record<string, string | undefined>;
   knownTurnRefs?: NativeTurnRef[];
   permissionModeId?: HarnessPermissionModeId;
@@ -544,6 +550,19 @@ export interface ItemDetachedEvent {
   itemId: HostItemId;
 }
 
+/**
+ * The Harness produced new output after its Turn completed (idle-time
+ * background work). The Item starts and stays detached on the completed
+ * Turn; it settles later with `item.updated` / `item.completed` on the
+ * same Turn, exactly like an `item.detached` Item. Adapters must emit it
+ * only while no successor Turn has started, and only for text Items.
+ */
+export interface ItemBackgroundStartedEvent {
+  type: "item.background.started";
+  turnId: HostTurnId;
+  item: HostItem;
+}
+
 export interface TurnCompletedEvent {
   type: "turn.completed";
   turnId: HostTurnId;
@@ -578,6 +597,7 @@ export type HostEvent =
   | ItemUpdatedEvent
   | ItemCompletedEvent
   | ItemDetachedEvent
+  | ItemBackgroundStartedEvent
   | InteractionClosedEvent
   | TurnCompletedEvent
   | SessionFaultedEvent;
@@ -650,6 +670,8 @@ export interface HarnessSessionImportCapability {
 }
 
 export interface HarnessAdapter {
+  /** The Adapter forwards additionalDirectories through its native interface. */
+  readonly additionalDirectories?: boolean;
   /** Native CLI version checks and explicit updates. Never updates the Host plugin,
    * starts a model Turn, or restarts existing Sessions. Commands are Adapter-owned.
    */

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -127,6 +127,129 @@ afterEach(async () => {
 });
 
 describe("delegation CLI peer routing", () => {
+  it("forwards worktree preparation to the target Host without reading its cwd locally", async () => {
+    const env = await environment();
+    const worktree = { path: "/peer/repository.worktrees/task", branch: "task", base: "abc123" };
+    const { spawnImpl, inputs } = peerSpawn([
+      {
+        threadId: "child",
+        deepLink: "codex://threads/child",
+        harnessId: "pi",
+        status: "running",
+        cwd: worktree.path,
+        worktree,
+      },
+    ]);
+    const result = await run(
+      [
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "review",
+        "--host",
+        "mac",
+        "--cwd",
+        "/peer/repository",
+        "--worktree",
+        "task",
+        "--base",
+        "main",
+        "--format",
+        "compact",
+      ],
+      { environment: env, spawnImpl },
+    );
+    expect(result.code).toBe(0);
+    expect(inputs).toEqual([
+      {
+        route: "/v1/delegate/start",
+        body: {
+          harnessId: "pi",
+          task: "review",
+          cwd: "/peer/repository",
+          worktree: "task",
+          base: "main",
+          origin: { kind: "peer", hostId: "remote-ssh-discovered:self" },
+        },
+      },
+    ]);
+    expect(JSON.parse(result.output)).toMatchObject({
+      thread: "thread://child?hostId=remote-ssh-discovered%3Amac",
+      worktree,
+    });
+  });
+
+  it.each([{ cwd: [] }, { cwd: ["--cwd", "relative/repository"] }])(
+    "requires an explicit absolute peer source cwd (%j)",
+    async ({ cwd }) => {
+      const env = await environment();
+      const { spawnImpl, inputs } = peerSpawn([]);
+      const result = await run(
+        [
+          "delegate",
+          "start",
+          "--harness",
+          "pi",
+          "--task",
+          "review",
+          "--host",
+          "mac",
+          "--worktree",
+          "task",
+          ...cwd,
+        ],
+        { environment: env, spawnImpl },
+      );
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.diagnostics).error.message).toContain("explicit absolute --cwd");
+      expect(inputs).toEqual([]);
+    },
+  );
+
+  it("answers on the linked peer and preserves its Host in the compact receipt", async () => {
+    const env = await environment();
+    const file = path.join(env.CODEXHOST_USER_DIR ?? "", "reply.json");
+    const result = { answers: { value: { answers: ["Keep"] } } };
+    await writeFile(file, JSON.stringify(result));
+    const peer = peerSpawn([
+      {
+        threadId: "t",
+        turnId: "turn",
+        interactionId: "opaque",
+        harnessId: "pi",
+        status: "running",
+      },
+    ]);
+    const output = new PassThrough();
+    expect(
+      await runDelegationCli({
+        arguments: [
+          "thread",
+          "answer",
+          "thread://t?hostId=remote-ssh-discovered%3Amac",
+          "--interaction",
+          "opaque",
+          "--answers-file",
+          file,
+          "--format",
+          "compact",
+        ],
+        environment: env,
+        output,
+        spawnImpl: peer.spawnImpl,
+      }),
+    ).toBe(0);
+    expect(peer.inputs).toEqual([
+      { route: "/v1/thread/answer", body: { threadId: "t", interactionId: "opaque", result } },
+    ]);
+    expect(JSON.parse(outputText(output))).toMatchObject({
+      thread: "thread://t?hostId=remote-ssh-discovered%3Amac",
+      interaction: "opaque",
+    });
+  });
+
   it.each([
     ["harness list", ["harness", "list", "--host", "mac"], "/v1/harness/list", {}],
     [

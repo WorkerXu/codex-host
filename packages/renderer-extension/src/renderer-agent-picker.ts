@@ -10,6 +10,7 @@ import type {
 } from "./agent-selection-state.js";
 import type { CodexAccountSummary, HarnessPluginDescriptor } from "@codexhost/shared-contracts";
 import { createRendererAgentIcon, rendererAgentLabel } from "./renderer-agent-icon.js";
+import { keepEditorFocusOnPress } from "./renderer-native-at-menu.js";
 import { requestConnectionsPageFocus } from "./settings/connections-page.js";
 import {
   rendererSettingsMessages,
@@ -374,6 +375,11 @@ export function mountRendererAgentPicker(
       trigger.focus();
       if (!selected) onSelect(agent);
     });
+    // Desktop rebuilds the Composer toolbar when the editor loses focus. A
+    // normal button press would blur the editor on pointerdown and detach this
+    // menu before its click handler runs, which presents as "clicking an Agent
+    // does nothing". Keep the editor focused for the whole press.
+    keepEditorFocusOnPress(button);
 
     const action =
       agent === "codex"
@@ -414,6 +420,7 @@ export function mountRendererAgentPicker(
                 onDownload(agent);
               }
             });
+            keepEditorFocusOnPress(control);
             return control;
           })();
     const row = document.createElement("div");

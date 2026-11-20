@@ -122,6 +122,12 @@ describe("Codex thread/fork protocol boundary", () => {
         "fork",
       ),
     ).toEqual({ code: -32080, message: "External Fork Checkpoint is unavailable" });
+    expect(
+      mapExternalThreadHarnessError(
+        { code: "invalidRequest", message: "Native Session belongs elsewhere", retryable: false },
+        "resume",
+      ),
+    ).toEqual({ code: -32602, message: "外部对话恢复请求无效，请重新打开对话后重试" });
   });
 
   it("maps missing Harness configuration without exposing native diagnostics", () => {

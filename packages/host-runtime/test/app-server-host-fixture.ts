@@ -23,7 +23,7 @@ import type { OfficialRuntimeScope } from "../src/codex-runtime/official-runtime
 import type { OfficialAppServerConnection } from "../src/official-app-server-connection.js";
 import type { HostUpdateCoordinator } from "../src/update-coordinator.js";
 import type { HostConsoleOpener } from "../src/console-opener.js";
-import type { ProjectGroupsService } from "../src/project-groups-service.js";
+import type { DesktopProjectCatalogReader } from "../src/desktop-project-catalog.js";
 
 export class FakeOfficialProcess extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -290,9 +290,17 @@ export function createFixture(
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
-    projectGroups?: ProjectGroupsService;
+    desktopProjects?: DesktopProjectCatalogReader;
     externalOnly?: boolean;
     delegationPeers?: AppServerHostOptions["delegationPeers"];
+    hubAdmin?: AppServerHostOptions["hubAdmin"];
+    jarvis?: AppServerHostOptions["jarvis"];
+    modelService?: AppServerHostOptions["modelService"];
+    codeRepositories?: AppServerHostOptions["codeRepositories"];
+    skillsHub?: AppServerHostOptions["skillsHub"];
+    dingtalk?: AppServerHostOptions["dingtalk"];
+    codexAgents?: AppServerHostOptions["codexAgents"];
+    dingTalkDispatch?: AppServerHostOptions["dingTalkDispatch"];
   } = {},
 ) {
   const adapter =
@@ -358,10 +366,18 @@ export function createFixture(
           },
         }
       : {}),
+    ...(options.hubAdmin ? { hubAdmin: options.hubAdmin } : {}),
+    ...(options.jarvis ? { jarvis: options.jarvis } : {}),
+    ...(options.modelService ? { modelService: options.modelService } : {}),
+    ...(options.codeRepositories ? { codeRepositories: options.codeRepositories } : {}),
+    ...(options.skillsHub ? { skillsHub: options.skillsHub } : {}),
+    ...(options.dingtalk ? { dingtalk: options.dingtalk } : {}),
+    ...(options.codexAgents ? { codexAgents: options.codexAgents } : {}),
+    ...(options.dingTalkDispatch ? { dingTalkDispatch: options.dingTalkDispatch } : {}),
     ...(options.updateCoordinator ? { updateCoordinator: options.updateCoordinator } : {}),
     ...(options.runtimeMaintenance ? { runtimeMaintenance: options.runtimeMaintenance } : {}),
     ...(options.consoleOpener ? { consoleOpener: options.consoleOpener } : {}),
-    ...(options.projectGroups ? { projectGroups: options.projectGroups } : {}),
+    ...(options.desktopProjects ? { desktopProjects: options.desktopProjects } : {}),
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.usageStatistics ? { usageStatistics: options.usageStatistics } : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),

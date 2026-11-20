@@ -26,8 +26,15 @@
 | [`architecture/external-thread-media.md`](architecture/external-thread-media.md) | 外部 Thread 中本地图片的 Desktop 加载条件、Agent 消息媒体路径改写和用户消息图片附件还原；修改媒体显示或排查图片不显示时阅读。 |
 | [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
 | [`architecture/delegation-thread-list.md`](architecture/delegation-thread-list.md) | 委派 CLI 列表的共享 catalog、独立来源分页、查询绑定与活列表一致性边界。 |
+| [`architecture/delegation-worktrees.md`](architecture/delegation-worktrees.md) | 委派代码任务的独立分支与 worktree、跨主机创建和失败现场保留。 |
+| [`architecture/delegation-questions.md`](architecture/delegation-questions.md) | 委派线程待答问题、Desktop/CLI 回答所有权、异步问题与生命周期边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
+| [`architecture/skills-hub.md`](architecture/skills-hub.md) | 每机技能中央库、技能库/按 Agent 界面、仅已安装 Agent、链接预览与撤销、跨机同步和冲突选择；修改技能中心时阅读。 |
 | [`architecture/peer-delegation.md`](architecture/peer-delegation.md) | 通过 SSH 别名跨机器调用 Host Runtime 控制 API 的 peer 配置、控制文件、传输、`#` 选择器与跨机 watch；修改跨机委派时阅读。 |
+| [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Jarvis `@` 的「工作台」入口、Bug 搜索模式、Gemini 整句结构化查询、共享模型服务与错误处理、按需项目解析、提交时详情展开和远程安装/登录转发；修改 Jarvis 集成时阅读。 |
+| [`architecture/dingtalk.md`](architecture/dingtalk.md) | 钉钉工作台的 `@` 入口、最近 48 小时未读列表、跨机 `dws` 路由与事件流、智能体监听派发和卡片回复、本机已读、关键词搜索与提交时展开；修改钉钉集成时阅读。 |
+| [`architecture/codex-agents.md`](architecture/codex-agents.md) | 工作台「智能体」页的 `$CODEX_HOME/agents` 读写、TOML 未知键保留、模型目录、钉钉分发设置与审批边界；修改自定义 Agent 或钉钉设置时阅读。 |
+| [`architecture/hub-admin.md`](architecture/hub-admin.md) | MCPHub 与 MemHub 管理页的 Mac Host 常驻转发、内存令牌、全访问密钥校验、操作白名单、只读记忆查询与缓存刷新。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
 | [`architecture/turn-activity-folding.md`](architecture/turn-activity-folding.md) | 回合完成后过程折叠的 Desktop 条件与 `final_answer` 推断规则；修改 Agent 消息阶段投影或排查过程无法收起时阅读。 |
@@ -41,9 +48,10 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
-| [`harnesses/antigravity/antigravity-tool-approval.md`](harnesses/antigravity/antigravity-tool-approval.md) | agy 的危险跳过权限、旧模式拒绝和问题桥边界；修改权限或交互时阅读。 |
+| [`harnesses/antigravity/native-acp.md`](harnesses/antigravity/native-acp.md) | 原生 ACP 会话、SQLite 历史、权限交互、后台输出及回移边界。 |
+| [`harnesses/antigravity/antigravity-tool-approval.md`](harnesses/antigravity/antigravity-tool-approval.md) | agy 原生 ACP 权限模式、工具审批和表单提问；修改权限或交互时阅读。 |
 | [`harnesses/antigravity/antigravity-subagents.md`](harnesses/antigravity/antigravity-subagents.md) | agy 原生 Subagent 生命周期、Transcript 和公共投影；修改 Subagent 支持时阅读。 |
-| [`harnesses/antigravity/antigravity-question-interaction-postmortem.md`](harnesses/antigravity/antigravity-question-interaction-postmortem.md) | Ask Question 失败历史、后续 Hook 桥实测和限制；排查 agy 提问交互时阅读。 |
+| [`harnesses/antigravity/antigravity-question-interaction-postmortem.md`](harnesses/antigravity/antigravity-question-interaction-postmortem.md) | Ask Question 失败与 Hook 桥历史、后续原生 ACP 替代；排查 agy 提问交互时阅读。 |
 
 ### Claude Code
 
@@ -130,9 +138,10 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
-| [`product/harness-schedules.md`](product/harness-schedules.md) | 设置侧栏直达官方任务页，原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
-| [`architecture/cross-host-project-groups.md`](architecture/cross-host-project-groups.md) | 跨机项目组：组配置、本地 Desktop 项目目录读取、原生项目块排序/缩进、组标题与新对话；修改侧边栏组功能时阅读。 |
-| [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | 跨机同名项目：只填名字项目识别、远程同名目录与项目创建、Agent 菜单「其他机器」入口、Harness 预选与自动分组；修改跨机项目入口时阅读。 |
+| [`product/harness-schedules.md`](product/harness-schedules.md) | 官方任务页的原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
+| [`architecture/thread-folders.md`](architecture/thread-folders.md) | 对话工作文件夹、多目录环境、GitHub / GitLab 克隆与跨机传输、凭据管理和 Desktop 根目录显示边界。 |
+| [`architecture/sidebar-sections.md`](architecture/sidebar-sections.md) | 侧栏分区合并视图：隐藏项目头、按最近活动归并原生对话行、分区头「显示项目分组」开关与失败回退；修改分区显示时阅读。 |
+| [`architecture/cross-host-project-mirror.md`](architecture/cross-host-project-mirror.md) | 跨机同名项目：本机与远程的只填名字项目识别、两个方向的同名目录与项目创建、Agent 菜单「其他机器」入口、Harness 预选与自动分组；修改跨机项目入口时阅读。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |
 | [`product/usage-metering.md`](product/usage-metering.md) | 外部 Harness 与官方 Codex 的会话用量、插件可选能力、实时刷新、费用、缓存命中、首字延迟及速度限制；修改计量、价格表或 `pricing.json` 时阅读。 |
 | [`product/usage-statistics.md`](product/usage-statistics.md) | 控制台与 Desktop 内置设置的全局用量统计：独立 Codex 统计插件、各 Harness 原生会话去重、按模型 ID 读时计价与缓存；新增读取器或修改统计口径时阅读。 |

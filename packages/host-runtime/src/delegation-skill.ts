@@ -3,10 +3,13 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 14;
+const SKILL_VERSION = 16;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
+  // v15 shipped by this fork, before delegated question replies.
+  "6462ae8c4ae3c6434e104a117431cad2ef76e2fa1e87b7735d1fe4fbe7c68a1b",
+  "7caa62a4fed8a0d4ae2f757bc28e80da05fefc6bc2b46b231d42d57c01461a32",
   "9d2f491850fb0b4084a31ba9b5e4a550b5e833747af322090d8ed0ff80b88c30",
   "2bb0aebb9b06febbc6c0c0bcdb0b32506c7cdbf8dc3b734cc6b2a86621270e4e",
   "aff258622dc8ff321f32b15620d081e578cb9c9ed1134d6a57f35ca8e7762c0a",
@@ -46,6 +49,11 @@ description: >
 
 # Execute the task
 
+New delegated Threads inherit the caller's Desktop project even when their
+working folders differ. Use \`--project <projectId>\` to override it, or
+\`--project none\` to start without a project. Cross-machine children are assigned
+by the Desktop renderer when it connects.
+
 Run the CLI through the executable in CODEXHOST_CLI_PATH. If you need command
 details, run help with the form for your shell:
 
@@ -58,6 +66,15 @@ user to add CODEXHOST_CLI_PATH to shell_environment_policy.include_only.
 Commands shown by help and in \`next\` begin with \`codexhost\`; run them the
 same way.
 
+For delegated code changes in a Git repository, prefer a dedicated checkout with
+\`delegate start --worktree <unique-branch>\`. The Host creates it before starting
+the child; do not run a separate Git worktree command. Use \`--base <ref>\` to choose
+a base, otherwise the source checkout's HEAD is used. Uncommitted changes are not
+copied. Cross-machine starts require an explicit absolute \`--cwd\` on the target
+Host. Read the returned \`worktree\` metadata. If a start fails and reports
+\`worktreeRetained\`, inspect that checkout and Thread before retrying; do not
+delete or overwrite it. Merge and cleanup are separate explicit operations.
+
 A delegation mention may contain complete \`codexhost delegate start\` commands.
 Execute them directly, replacing \`<task>\` and \`<short-name>\`; do not run
 \`--help\` or \`peer list\` first. Otherwise, use CLI help as the authoritative
@@ -69,7 +86,7 @@ links directly for subsequent commands.
 
 Run \`codexhost peer list\` to see configured machines and their Host IDs. Pass
 \`--host <peer>\` to \`delegate start\`, \`harness list|inspect\`, and
-\`thread read|send|cancel|wait\` to operate on that machine. A task link with a
+\`thread read|send|cancel|wait|answer\` to operate on that machine. A task link with a
 \`hostId\` carries the machine; reuse the link for follow-up commands so routing
 is automatic. Use \`thread wait <thread> --host <peer>\` for a bounded wait.
 
@@ -80,7 +97,7 @@ that machine.
 \`delegate start --host <peer> --watch true\` and
 \`thread watch <thread> --host <peer>\` register a watch on this machine. The
 Host notifies this Thread once with \`[codexhost thread watch]\` when the remote
-Thread stops. \`thread watches\` lists local and cross-machine watches;
+Thread stops or needs an answer. \`thread watches\` lists local and cross-machine watches;
 \`thread watch <thread> --host <peer> --cancel\` removes one. Cross-machine
 watches live in memory and are lost when the Host Runtime restarts.
 
@@ -103,10 +120,11 @@ user’s request and the task:
 
 - send a follow-up message to the same Thread;
 - cancel its current Turn;
-- read its current state immediately;
+- read its current state and pendingQuestions immediately;
+- answer a pending Question through \`thread answer <thread> --interaction <id> --answers-file <file>\`;
 - wait for a bounded period;
 - check it again later;
-- watch it, so the Host notifies this Thread once when the watched Thread stops
+- watch it, so the Host notifies this Thread once when the watched Thread stops or needs an answer
   and no waiting or polling is needed meanwhile;
 - leave it running in the background.
 
@@ -114,6 +132,16 @@ For a new delegation, prefer \`delegate start --watch true\` and then end this
 Turn. Do not poll with repeated \`thread wait\`; the watch notification starts a
 new Turn. Use a bounded wait only when the user asked to wait or watch
 registration is unavailable.
+
+If read/wait returns pendingQuestions, use its opaque interactionId and original
+request. For kind=requestUserInput, put the existing requestUserInput result in
+a JSON file; for requestUserInputAsync, use {"answer":"your answer"}. Submit it
+with \`thread answer\`; never use \`thread send\` as a substitute. An empty
+pendingQuestions list means none; a missing field means an older Runtime.
+QUESTION_NOT_PENDING means that request is no longer answerable. After answering,
+register a new watch for the next Question or completion. A receipt confirms only
+submission; read/wait reports the actual execution state. Ask the user when the
+Question requires their decision rather than guessing their preference.
 
 A watch notification reports execution state only. Read the Thread before
 judging or reporting its work.

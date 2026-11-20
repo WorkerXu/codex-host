@@ -1,3 +1,7 @@
+import { mountCodeRepositoriesSection } from "./code-repositories-section.js";
+import type { CodeRepositoriesClient } from "../code-repositories-client.js";
+import { mountModelServiceSection } from "./model-service-section.js";
+import type { RendererModelServiceClient } from "../model-service-client.js";
 import {
   REASONING_SOFT_WRAP_CHANGE_EVENT,
   readReasoningTranscriptSoftWrap,
@@ -17,6 +21,8 @@ import {
 export function createAppearanceSettingsPage(
   messages: RendererSettingsMessages,
   getLoadedSessionsClient: () => LoadedSessionsClient | null = () => null,
+  modelService: RendererModelServiceClient | null = null,
+  codeRepositories: CodeRepositoriesClient | null = null,
 ): RendererSettingsPageDefinition {
   return Object.freeze({
     id: "appearance",
@@ -29,10 +35,6 @@ export function createAppearanceSettingsPage(
       const heading = document.createElement("div");
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.appearance;
-
-      const description = document.createElement("p");
-      description.className = "settings-page-description";
-      description.textContent = messages.appearanceDescription;
 
       const { group, card } = createPreferenceGroup(document, messages.appearanceGroup);
       const softWrapId = preferenceId("reasoning-soft-wrap");
@@ -53,7 +55,10 @@ export function createAppearanceSettingsPage(
       row.item.append(toggle);
       card.append(row.item);
 
-      context.content.append(heading, description, group);
+      context.content.append(heading);
+      mountModelServiceSection(context, modelService);
+      mountCodeRepositoriesSection(context, codeRepositories);
+      context.content.append(group);
       const disposeIdleRelease = mountIdleReleaseControls(
         context,
         messages,

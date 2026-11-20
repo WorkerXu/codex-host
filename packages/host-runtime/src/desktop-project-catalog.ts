@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   desktopProjectsCatalogSchema,
+  threadProjectAssignmentSchema,
   type DesktopLocalProject,
   type DesktopProjectsCatalog,
   type DesktopRemoteConnection,
@@ -67,12 +68,8 @@ function remoteProject(value: unknown): DesktopRemoteProject | null {
 }
 
 function assignment(value: unknown): ThreadProjectAssignment | null {
-  const entry = record(value);
-  if (!entry) return null;
-  const kind =
-    entry.projectKind === "local" || entry.projectKind === "remote" ? entry.projectKind : null;
-  const projectId = string(entry.projectId);
-  return kind && projectId ? { projectKind: kind, projectId } : null;
+  const parsed = threadProjectAssignmentSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function connection(value: unknown): DesktopRemoteConnection | null {
@@ -94,7 +91,7 @@ function connection(value: unknown): DesktopRemoteConnection | null {
     : null;
 }
 
-function normalize(raw: unknown, readAt: string): DesktopProjectsCatalog {
+function normalize(raw: unknown, readAt: string, localScope: string): DesktopProjectsCatalog {
   const root = record(raw) ?? {};
   const atom = record(root["electron-persisted-atom-state"]) ?? {};
   const value = (key: string): unknown => root[key] ?? atom[key];
@@ -119,6 +116,13 @@ function normalize(raw: unknown, readAt: string): DesktopProjectsCatalog {
     selected && selectedProjectId && (selected.type === "local" || selected.type === "remote")
       ? { type: selected.type, projectId: selectedProjectId }
       : null;
+  const migration = record(value("app-server-project-id-by-legacy-project-id-by-host"));
+  const mapped = record(migration?.[localScope]);
+  const appServerProjectIds = Object.fromEntries(
+    Object.entries(mapped ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
+    ),
+  );
   const homeDirectory = os.homedir();
   return desktopProjectsCatalogSchema.parse({
     localProjects,
@@ -126,6 +130,7 @@ function normalize(raw: unknown, readAt: string): DesktopProjectsCatalog {
       .map(remoteProject)
       .filter((entry): entry is DesktopRemoteProject => entry !== null),
     threadProjectAssignments,
+    ...(mapped ? { appServerProjectIds } : {}),
     codexManagedRemoteConnections: (Array.isArray(remoteConnections) ? remoteConnections : [])
       .map(connection)
       .filter((entry): entry is DesktopRemoteConnection => entry !== null),
@@ -163,7 +168,7 @@ export class DesktopProjectCatalogReader {
     return this.#file;
   }
 
-  async read(): Promise<DesktopProjectsCatalog> {
+  async read(options: { fresh?: boolean } = {}): Promise<DesktopProjectsCatalog> {
     let metadata: Awaited<ReturnType<typeof stat>>;
     try {
       metadata = await stat(this.#file);
@@ -175,6 +180,7 @@ export class DesktopProjectCatalogReader {
       );
     }
     if (
+      !options.fresh &&
       this.#cached &&
       this.#cached.mtimeMs === metadata.mtimeMs &&
       this.#cached.size === metadata.size &&
@@ -196,14 +202,22 @@ export class DesktopProjectCatalogReader {
 
     let value: DesktopProjectsCatalog;
     try {
-      value = normalize(JSON.parse(text), this.#now().toISOString());
+      value = normalize(
+        JSON.parse(text),
+        this.#now().toISOString(),
+        `local:${path.dirname(this.#file)}`,
+      );
     } catch {
       // Desktop may be between its temp-file rename and the previous snapshot;
       // retry once before treating the file as invalid.
       await new Promise((resolve) => setTimeout(resolve, this.#retryDelayMs));
       try {
         text = await readFile(this.#file, "utf8");
-        value = normalize(JSON.parse(text), this.#now().toISOString());
+        value = normalize(
+          JSON.parse(text),
+          this.#now().toISOString(),
+          `local:${path.dirname(this.#file)}`,
+        );
       } catch (error) {
         throw new DesktopProjectCatalogError("INVALID", "Codex Desktop project state is invalid", {
           cause: error,

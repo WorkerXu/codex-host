@@ -26,15 +26,14 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe("Project mirror service", () => {
-  it("lists acknowledgements and records", async () => {
+  it("lists and stamps mirror records", async () => {
     const directory = await temporaryDirectory();
     const service = new ProjectMirrorService({
       directory,
       now: () => new Date("2026-11-12T03:00:05.000Z"),
     });
-    await service.upsert({ revision: 0, sourceProjectId: "local-alpha", acknowledge: true });
     const result = await service.upsert({
-      revision: 1,
+      revision: 0,
       sourceProjectId: "local-alpha",
       record: {
         hostId: "remote-ssh-discovered:colab",
@@ -46,8 +45,7 @@ describe("Project mirror service", () => {
       },
     });
 
-    expect(result.revision).toBe(2);
-    expect(result.acknowledged).toEqual(["local-alpha"]);
+    expect(result.revision).toBe(1);
     expect(result.projects["local-alpha"]).toMatchObject({
       remotePath: "/root/Documents/ChatGPT/alpha",
       updatedAt: "2026-11-12T03:00:05.000Z",
@@ -57,9 +55,9 @@ describe("Project mirror service", () => {
   it("reports revision conflicts", async () => {
     const directory = await temporaryDirectory();
     const service = new ProjectMirrorService({ directory });
-    await service.upsert({ revision: 0, sourceProjectId: "local-alpha", acknowledge: true });
+    await service.upsert({ revision: 0, sourceProjectId: "local-alpha", record: null });
     await expect(
-      service.upsert({ revision: 0, sourceProjectId: "local-alpha", acknowledge: true }),
+      service.upsert({ revision: 0, sourceProjectId: "local-alpha", record: null }),
     ).rejects.toBeInstanceOf(ProjectMirrorRevisionConflictError);
   });
 });

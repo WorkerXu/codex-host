@@ -7,6 +7,7 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import type * as RendererComposerDom from "../src/renderer-composer-dom.js";
+import { rendererAgentPickerView } from "../src/renderer-agent-picker.js";
 import {
   isRendererModelPickerDisabled,
   rendererModelSelectionFailed,
@@ -34,6 +35,13 @@ const testState = vi.hoisted(() => ({
   prewarmClears: 0,
   notifyMutations: null as null | ((records: MutationRecord[]) => void),
   animationFrames: [] as FrameRequestCallback[],
+}));
+
+vi.mock("../src/renderer-thread-folders.js", () => ({
+  mountRendererThreadFolders: () => ({ refresh: vi.fn(), dispose: vi.fn() }),
+}));
+vi.mock("../src/renderer-delegation-projects.js", () => ({
+  installRendererDelegationProjects: () => ({ refresh: vi.fn(), dispose: vi.fn() }),
 }));
 
 vi.mock("../src/renderer-composer-dom.js", async (importOriginal) => {
@@ -223,10 +231,16 @@ function installFakeBrowser(): void {
   testState.prewarmClears = 0;
   testState.notifyMutations = null;
   testState.animationFrames = [];
+  const localStorageValues = new Map<string, string>();
   const window_ = {
     addEventListener: listeners.addEventListener.bind(listeners),
     removeEventListener: listeners.removeEventListener.bind(listeners),
     dispatchEvent: listeners.dispatchEvent.bind(listeners),
+    localStorage: {
+      getItem: (key: string) => localStorageValues.get(key) ?? null,
+      setItem: (key: string, value: string) => localStorageValues.set(key, value),
+      removeItem: (key: string) => localStorageValues.delete(key),
+    },
     requestAnimationFrame: (callback: FrameRequestCallback) =>
       testState.animationFrames.push(callback),
     cancelAnimationFrame: vi.fn(),
@@ -475,7 +489,7 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
         listHarnessPlugins,
         inspectHarness: vi.fn(
           async (input: { harnessId: string }, options?: RendererRequestOptions) => {
-            if (!options) return catalog.promise;
+            if (options?.priority === "interactive") return catalog.promise;
             return input.harnessId === pendingHarness ? pending.promise : readyInspection();
           },
         ),
@@ -510,7 +524,10 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
         );
         await vi.waitFor(() => {
           expect(probe.lockedSelection()?.agent).toBe("claude-code");
-          expect(remote.inspectHarness).toHaveBeenCalledWith({ harnessId: "claude-code" });
+          expect(remote.inspectHarness).toHaveBeenCalledWith(
+            { harnessId: "claude-code" },
+            { priority: "interactive" },
+          );
           expect(testState.renderedModelViews.at(-1)).toMatchObject({
             status: modelFirst ? "ready" : "loading",
           });
@@ -527,10 +544,15 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
           { harnessId: "pi", refresh: false, purpose: "availability" },
           { priority: "background" },
         );
-        expect(remote.inspectThread).toHaveBeenCalledWith({ threadId: "thread-a" });
+        expect(remote.inspectThread).toHaveBeenCalledWith(
+          { threadId: "thread-a" },
+          { priority: "interactive" },
+        );
         expect(probe.status().availability[pendingHarness]).toBe("checking");
         const foregroundCalls = () =>
-          remote.inspectHarness.mock.calls.filter(([, options]) => options === undefined).length;
+          remote.inspectHarness.mock.calls.filter(
+            ([, options]) => options?.priority === "interactive",
+          ).length;
         expect(foregroundCalls()).toBe(1);
         const renderedBeforeDiscovery = testState.renderedModelViews.length;
         pending.resolve(readyInspection());
@@ -1383,7 +1405,10 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
       testState.selectModel?.("claude-model-v1.b3B1cw");
       await vi.waitFor(() => expect(local.selectThreadModel).toHaveBeenCalled());
       await vi.waitFor(() => expect(testState.renderedModelViews.at(-1)?.status).toBe("ready"));
-      expect(local.inspectThread).toHaveBeenCalledWith({ threadId: "thread-a" });
+      expect(local.inspectThread).toHaveBeenCalledWith(
+        { threadId: "thread-a" },
+        { priority: "interactive" },
+      );
       expect(remote.inspectThread).not.toHaveBeenCalled();
       expect(testState.renderedModelViews.at(-1)?.status).toBe("ready");
       expect(
@@ -1458,7 +1483,10 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(hostA.inspectThread).toHaveBeenCalledWith({ threadId: "thread-a" });
+    expect(hostA.inspectThread).toHaveBeenCalledWith(
+      { threadId: "thread-a" },
+      { priority: "interactive" },
+    );
     expect(modelControl.clientForHost).toHaveBeenCalledWith("host-a");
     expect(genericHostB.inspectHarness).not.toHaveBeenCalledWith({ harnessId: "claude-code" });
     expect(testState.renderedModelViews.at(-1)).not.toMatchObject({ status: "error" });
@@ -1480,7 +1508,8 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
       listHarnessPlugins,
       inspectHarness: vi.fn(
         ({ harnessId }: { harnessId: string }, options?: RendererRequestOptions) => {
-          if (harnessId !== "claude-code" || options) return Promise.resolve(readyInspection());
+          if (harnessId !== "claude-code" || options?.priority !== "interactive")
+            return Promise.resolve(readyInspection());
           claudeInspections += 1;
           return pendingCatalog;
         },
@@ -1580,7 +1609,10 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     await vi.waitFor(() =>
       expect(testState.renderedModelViews.at(-1)).toMatchObject({ status: "ready" }),
     );
-    expect(hostA.inspectHarness).toHaveBeenCalledWith({ harnessId: "claude-code" });
+    expect(hostA.inspectHarness).toHaveBeenCalledWith(
+      { harnessId: "claude-code" },
+      { priority: "interactive" },
+    );
   });
 
   it("reloads a ready draft catalog when the Composer changes Hosts", async () => {
@@ -1746,5 +1778,447 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     expect(testState.renderedModelViews).not.toContainEqual(
       expect.objectContaining({ status: "error" }),
     );
+  });
+
+  it("returns a reused Composer to its draft when a new chat follows a submitted Thread", async () => {
+    installFakeBrowser();
+    testState.modelTarget = ["default", "client-new-thread:submitted"];
+    const host = {
+      listHarnessPlugins,
+      inspectHarness: vi.fn(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const modelControl = {
+      currentHostId: () => "local",
+      clientForHost: () => host,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    probe.setAdapter(
+      { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+      undefined,
+      () => true,
+      modelControl as never,
+    );
+    const notify = testState.notifyMutations;
+    assert(notify);
+    const flushStructure = () => {
+      notify([
+        {
+          type: "childList",
+          target: { nodeType: 1, parentElement: undefined },
+          addedNodes: [],
+          removedNodes: [],
+        } as unknown as MutationRecord,
+      ]);
+      for (const callback of testState.animationFrames.splice(0)) callback(performance.now());
+    };
+
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "draft" });
+    testState.documentListeners.get("keydown")?.({
+      target: testState.editor,
+      key: "Enter",
+      shiftKey: false,
+      isComposing: false,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "draft" });
+
+    testState.modelTarget = ["conversation", "thread-a"];
+    flushStructure();
+    expect(probe.status().selections[0]).toMatchObject({ agent: "codex", phase: "locked" });
+
+    // The same Composer root starts the next new chat.
+    testState.modelTarget = ["default", "client-new-thread:next"];
+    flushStructure();
+    const reused = probe.status().selections[0];
+    expect(reused).toMatchObject({ phase: "draft" });
+    await vi.waitFor(() =>
+      expect(probe.harnessDirectory("local").availability["claude-code"]).toBe("ready"),
+    );
+    const availability = probe.harnessDirectory("local").availability;
+    expect(
+      rendererAgentPickerView(
+        { agent: reused?.agent ?? "codex", phase: reused?.phase ?? "draft" },
+        "ready",
+        false,
+        probe.status().enabledAgents,
+        availability,
+      ),
+    ).toMatchObject({
+      triggerDisabled: false,
+      optionDisabled: { "claude-code": false },
+    });
+  });
+
+  it("paints the cached Thread footer and inspects its Harness alongside Thread inspection", async () => {
+    installFakeBrowser();
+    const { writeCachedThreadPresentation } =
+      await import("../src/renderer-thread-presentation-cache.js");
+    const cachedModel = harnessModelRefSchema.parse({ id: "claude-model-v1.cached" });
+    const thinkingOptionId = harnessThinkingOptionIdSchema.parse("high");
+    writeCachedThreadPresentation("local", "thread-a", {
+      agent: "claude-code",
+      model: cachedModel,
+      thinkingOptionId,
+      catalog: {
+        models: [{ ref: cachedModel, label: "Cached Claude" }],
+        defaultModel: cachedModel,
+        thinkingOptions: [{ id: thinkingOptionId, label: "High" }],
+      },
+    });
+    const threadReply = Promise.withResolvers<Record<string, unknown>>();
+    const harnessReply = Promise.withResolvers<unknown>();
+    const host = {
+      listHarnessPlugins,
+      inspectHarness: vi.fn(async (_input: unknown, options?: RendererRequestOptions) =>
+        options?.priority === "interactive" ? harnessReply.promise : readyInspection(),
+      ),
+      inspectThread: vi.fn(async () => threadReply.promise),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        {
+          ...host,
+          currentHostId: () => "local",
+          clientForHost: () => host,
+        } as never,
+      );
+
+      // Both requests start before the Thread inspection answers.
+      await vi.waitFor(() =>
+        expect(host.inspectHarness).toHaveBeenCalledWith(
+          { harnessId: "claude-code" },
+          { priority: "interactive" },
+        ),
+      );
+      expect(host.inspectThread).toHaveBeenCalled();
+      // The footer names the cached Model instead of showing "Loading models...".
+      expect(testState.renderedModelViews.at(-1)).toMatchObject({
+        status: "loading",
+        catalog: expect.objectContaining({ defaultModel: cachedModel }),
+        selected: cachedModel,
+        selectedThinkingOptionId: thinkingOptionId,
+      });
+      expect(probe.status().selections[0]).toMatchObject({ agent: "claude-code", phase: "locked" });
+
+      threadReply.resolve({
+        owner: "external",
+        harnessId: "claude-code",
+        transportModelId: `codexhost/claude-code-native@${cachedModel.id}@bypassPermissions@${thinkingOptionId}`,
+        effectiveModel: cachedModel,
+        effectiveThinkingOptionId: thinkingOptionId,
+        availableThinkingOptions: [{ id: thinkingOptionId, label: "High" }],
+        history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
+        locked: true,
+      });
+      await vi.waitFor(() =>
+        expect(probe.lockedSelection()).toMatchObject({
+          agent: "claude-code",
+          model: cachedModel,
+        }),
+      );
+      // The prefetched inspection is reused rather than requested a second time.
+      expect(
+        host.inspectHarness.mock.calls.filter(([, options]) => options?.priority === "interactive"),
+      ).toHaveLength(1);
+      expect(testState.renderedModelViews.at(-1)).toMatchObject({
+        status: "loading",
+        selected: cachedModel,
+      });
+
+      harnessReply.resolve({
+        status: "ready",
+        catalog: {
+          models: [{ ref: cachedModel, label: "Fresh Claude" }],
+          defaultModel: cachedModel,
+          thinkingOptions: [{ id: thinkingOptionId, label: "High" }],
+        },
+        capabilities: {
+          configuration: {
+            selectModel: true,
+            selectThinkingOption: true,
+            selectPermissionMode: false,
+            permissionModeScope: "live",
+          },
+          history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
+        },
+      });
+      await vi.waitFor(() =>
+        expect(testState.renderedModelViews.at(-1)).toMatchObject({
+          status: "ready",
+          selected: cachedModel,
+        }),
+      );
+      expect(testState.renderedModelViews.at(-1)?.catalog?.models[0]?.label).toBe("Fresh Claude");
+
+      const startup = probe.status().startup;
+      expect(startup.routingReadyMs.local).toBeTypeOf("number");
+      expect(startup.requests).toContainEqual(
+        expect.objectContaining({ method: "thread/inspect", hostId: "local", ok: true }),
+      );
+      expect(startup.requests).toContainEqual(
+        expect.objectContaining({
+          method: "harness/inspect",
+          hostId: "local",
+          priority: "interactive",
+          ok: true,
+        }),
+      );
+      const composerId = probe.status().selections[0]?.composerId;
+      expect(composerId).toBeDefined();
+      expect(startup.composers[composerId ?? ""]).toMatchObject({
+        agent: "claude-code",
+        namedAtMs: expect.any(Number),
+        readyAtMs: expect.any(Number),
+      });
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("inspects a locked Thread even when cached availability says unavailable", async () => {
+    installFakeBrowser();
+    const { writeCachedHarnessDirectory } =
+      await import("../src/renderer-harness-directory-cache.js");
+    const threadModel = harnessModelRefSchema.parse({ id: "claude-model-v1.b3B1cw" });
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins: [
+        harnessPluginDescriptorSchema.parse({
+          id: "claude-code",
+          name: "Claude Code",
+          version: "1",
+        }),
+      ],
+      availability: { "claude-code": "unavailable" },
+      webUi: {},
+    });
+    const host = {
+      listHarnessPlugins: vi.fn(async () => ({ unchanged: true, fingerprint: "fp-1" })),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({
+        owner: "external",
+        harnessId: "claude-code",
+        transportModelId: `codexhost/claude-code-native@${threadModel.id}@bypassPermissions@auto`,
+        effectiveModel: threadModel,
+        history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
+        locked: true,
+      })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      // The cached "unavailable" is stale. A locked Thread already names its
+      // Harness, so the live inspection must run and heal the shared cache.
+      await vi.waitFor(() =>
+        expect(host.inspectHarness).toHaveBeenCalledWith(
+          { harnessId: "claude-code" },
+          { priority: "interactive" },
+        ),
+      );
+      expect(testState.renderedModelViews).not.toContainEqual(
+        expect.objectContaining({ error: "claude-code runtime is unavailable" }),
+      );
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("keeps the loading state when no Thread presentation is cached", async () => {
+    installFakeBrowser();
+    const threadReply = Promise.withResolvers<Record<string, unknown>>();
+    const host = {
+      listHarnessPlugins,
+      inspectHarness: vi.fn(async (_input: unknown, options?: RendererRequestOptions) =>
+        options?.priority === "interactive" ? new Promise(() => undefined) : readyInspection(),
+      ),
+      inspectThread: vi.fn(async () => threadReply.promise),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      await vi.waitFor(() => expect(host.inspectThread).toHaveBeenCalled());
+      // No Harness is known yet, so nothing can be inspected in parallel.
+      expect(host.inspectHarness).not.toHaveBeenCalledWith(
+        { harnessId: "claude-code" },
+        { priority: "interactive" },
+      );
+      // Once ownership resolves, the footer has nothing to name and shows the
+      // loading state rather than an invented Model.
+      threadReply.resolve({
+        owner: "external",
+        harnessId: "claude-code",
+        transportModelId:
+          "codexhost/claude-code-native@claude-model-v1.uncached@bypassPermissions@auto",
+        effectiveModel: harnessModelRefSchema.parse({ id: "claude-model-v1.uncached" }),
+        history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
+        locked: true,
+      });
+      await vi.waitFor(() =>
+        expect(testState.renderedModelViews.at(-1)).toMatchObject({ status: "loading" }),
+      );
+      const view = testState.renderedModelViews.at(-1);
+      expect(view).not.toHaveProperty("catalog");
+      expect(view).not.toHaveProperty("selected");
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("paints a persisted directory and asks for one conditional plugin list", async () => {
+    installFakeBrowser();
+    const { writeCachedHarnessDirectory } =
+      await import("../src/renderer-harness-directory-cache.js");
+    const plugins = [
+      harnessPluginDescriptorSchema.parse({ id: "pi", name: "Pi", version: "1" }),
+      harnessPluginDescriptorSchema.parse({
+        id: "claude-code",
+        name: "Claude Code",
+        version: "1",
+      }),
+    ];
+    writeCachedHarnessDirectory("local", {
+      fingerprint: "fp-1",
+      plugins,
+      availability: { pi: "ready", "claude-code": "ready" },
+      webUi: {},
+    });
+    const host = {
+      listHarnessPlugins: vi.fn(async (input?: { ifNoneMatch?: string; refresh?: boolean }) =>
+        input?.ifNoneMatch === "fp-1" && input.refresh !== true
+          ? { unchanged: true, fingerprint: "fp-1" }
+          : { plugins, availability: { pi: "ready", "claude-code": "ready" }, fingerprint: "fp-1" },
+      ),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "pi", "claude-code"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      // The cached directory is readable synchronously, before the conditional
+      // request answers.
+      expect(probe.harnessDirectory("local")).toMatchObject({
+        plugins,
+        availability: { pi: "ready", "claude-code": "ready" },
+      });
+      await vi.waitFor(() => expect(host.listHarnessPlugins).toHaveBeenCalledOnce());
+      expect(host.listHarnessPlugins.mock.calls[0]?.[0]).toEqual({ ifNoneMatch: "fp-1" });
+      // No per-Harness availability sweep: only the directory request ran.
+      expect(
+        host.inspectHarness.mock.calls.filter(
+          ([params]) => (params as { purpose?: string }).purpose === "availability",
+        ),
+      ).toHaveLength(0);
+      expect(
+        probe.status().startup.requests.filter(({ method }) => method === "harness/inspect"),
+      ).toHaveLength(0);
+
+      // A manual refresh ignores the fingerprint and re-inspects availability.
+      await probe.refreshHarnessDirectory("local");
+      expect(host.listHarnessPlugins.mock.calls.at(-1)?.[0]).toEqual({ refresh: true });
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("falls back to the per-Harness availability sweep for a legacy Host", async () => {
+    installFakeBrowser();
+    const plugins = [harnessPluginDescriptorSchema.parse({ id: "pi", name: "Pi", version: "1" })];
+    const host = {
+      // `createRendererModelClient` already retried a rejected conditional
+      // request with the legacy empty params and returned this shape.
+      listHarnessPlugins: vi
+        .fn<(input?: unknown) => Promise<{ plugins: typeof plugins }>>()
+        .mockImplementation(async () => ({ plugins })),
+      inspectHarness: vi
+        .fn<(input: unknown) => Promise<ReturnType<typeof readyInspection>>>()
+        .mockImplementation(async () => readyInspection()),
+      inspectThread: vi.fn(async () => ({ owner: "codex", locked: true })),
+      inspectThreadCommands: vi.fn(async () => ({ commands: [] })),
+      inspectThreadUsage: vi.fn(async () => ({ threadId: "thread-a", usage: null })),
+      subscribeThreadUsage: () => () => undefined,
+    };
+    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
+    const probe = installRendererBindingProbe({
+      enabledAgents: ["codex", "pi"],
+      defaultAgent: "codex",
+    });
+    try {
+      probe.setAdapter(
+        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
+        undefined,
+        undefined,
+        { ...host, currentHostId: () => "local", clientForHost: () => host } as never,
+      );
+      await vi.waitFor(() => expect(probe.harnessDirectory("local").availability.pi).toBe("ready"));
+      expect(host.listHarnessPlugins.mock.calls.map(([input]) => input)).toEqual([
+        { ifNoneMatch: "" },
+      ]);
+      expect(host.inspectHarness).toHaveBeenCalledWith(
+        { harnessId: "pi", refresh: false, purpose: "availability" },
+        { priority: "background" },
+      );
+    } finally {
+      probe.dispose();
+    }
   });
 });

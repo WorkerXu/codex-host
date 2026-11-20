@@ -830,3 +830,81 @@ it.each([true, false])(
     }
   },
 );
+
+it("keeps working folders scoped to a draft and preserves its explicit project", async () => {
+  const fixture = setup();
+  const routing = await install(fixture);
+  try {
+    const policy = policyOf(routing.forComposer());
+    policy.selectWorkingFolders?.("client-new-thread:folders", ["/main", "/extra"]);
+    const selected = creation("startConversation", "gpt-6.1-sol", {
+      clientThreadId: "client-new-thread:folders",
+    }) as unknown[];
+    const expression = selected[1] as unknown[];
+    const args = expression[3] as Record<string, unknown>[];
+    // The native draft still belongs to a project whose roots are the creation default.
+    args[0] = {
+      ...args[0],
+      projectId: "keep-project",
+      workspaceRoots: ["/project-root"],
+    };
+    fixture.post(selected);
+    const untouched = creation("startConversation", "gpt-6.1-sol", {
+      clientThreadId: "client-new-thread:other",
+    });
+    fixture.post(untouched);
+    const modified = ((fixture.sent[0] as unknown[])[1] as unknown[])[3] as Record<
+      string,
+      unknown
+    >[];
+    expect(modified[0]).toMatchObject({
+      cwd: "/main",
+      // `runtimeWorkspaceRoots` only exists on `thread/start` params. The
+      // `startConversation` input names its roots `workspaceRoots`.
+      workspaceRoots: [["/main", "/extra"]],
+      projectId: "keep-project",
+    });
+    expect(modified[0]).not.toHaveProperty("runtimeWorkspaceRoots");
+    expect(fixture.sent[1]).toEqual(untouched);
+  } finally {
+    routing.dispose();
+  }
+});
+
+it("replaces project roots with the draft's ordered folders on submit", async () => {
+  const fixture = setup();
+  const routing = await install(fixture);
+  try {
+    const draft = "client-new-thread:mac-new-chat";
+    policyOf(routing.forComposer()).selectWorkingFolders?.(draft, [
+      "/Users/me/Downloads/service.stock.java",
+      "/Users/me/Downloads/service.stock",
+    ]);
+    const call = creation("startConversation", "gpt-6.1-sol", {
+      clientThreadId: draft,
+    }) as unknown[];
+    const args = (call[1] as unknown[])[3] as Record<string, unknown>[];
+    // Desktop still reports the project as the draft's workspace before submit.
+    args[0] = {
+      ...args[0],
+      cwd: "/Users/me/Documents/project",
+      workspaceRoots: ["/Users/me/Documents/project"],
+      projectId: "codex-acceptance-2",
+    };
+    fixture.post(call);
+    const modified = ((fixture.sent[0] as unknown[])[1] as unknown[])[3] as Record<
+      string,
+      unknown
+    >[];
+    expect(modified[0]).toMatchObject({
+      cwd: "/Users/me/Downloads/service.stock.java",
+      workspaceRoots: [
+        ["/Users/me/Downloads/service.stock.java", "/Users/me/Downloads/service.stock"],
+      ],
+      projectId: "codex-acceptance-2",
+    });
+    expect(modified[0]).not.toHaveProperty("runtimeWorkspaceRoots");
+  } finally {
+    routing.dispose();
+  }
+});

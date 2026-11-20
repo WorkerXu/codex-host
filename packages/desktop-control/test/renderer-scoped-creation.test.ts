@@ -264,3 +264,135 @@ it.each([false, true])(
     expect(draft.modelSettings).toBeNull();
   },
 );
+
+it("hands the draft's working folders to native creation in the requested order", async () => {
+  const seen: Record<string, unknown>[] = [];
+  const pool = {
+    hasPrewarmedThread: () => false,
+    consumePrewarmedThread: vi.fn(),
+    deletePrewarmedThread: vi.fn(),
+  };
+  const creation = {
+    params: { prewarmedThreadManager: pool },
+    async createConversation(input: Record<string, unknown>) {
+      seen.push(input);
+      return null;
+    },
+  };
+  const policy = isolateRendererPrewarmConsumption(
+    { threadCreation: creation, startConversation: vi.fn() },
+    vi.fn(),
+  );
+  const collaborationMode = mode("gpt-5");
+  policy?.selectWorkingFolders(
+    "client-new-thread:a",
+    ["/colab", "/extra", "/downloads"],
+    [collaborationMode],
+  );
+  await creation.createConversation({
+    collaborationMode,
+    cwd: "/project",
+    workspaceRoots: ["/project"],
+    projectId: "keep-project",
+  });
+  expect(seen).toEqual([
+    {
+      collaborationMode,
+      cwd: "/colab",
+      workspaceRoots: ["/colab", "/extra", "/downloads"],
+      projectId: "keep-project",
+    },
+  ]);
+  policy?.dispose();
+});
+
+it("keeps concurrent native creations' folder requests separate across asynchronous preparation", async () => {
+  const sent = vi.fn();
+  const client = { sendRequest: sent };
+  const pool = {
+    hasPrewarmedThread: () => false,
+    consumePrewarmedThread: vi.fn(),
+    deletePrewarmedThread: vi.fn(),
+  };
+  class Creation {
+    constructor(
+      readonly params: { requestClient: typeof client; prewarmedThreadManager: typeof pool },
+    ) {}
+    async createConversation(input: Record<string, unknown>, ready: Promise<void>) {
+      await ready;
+      return this.params.requestClient.sendRequest("thread/start", {
+        cwd: input.cwd,
+        projectId: input.projectId,
+      });
+    }
+  }
+  const creation = new Creation({ requestClient: client, prewarmedThreadManager: pool });
+  const manager = { threadCreation: creation, startConversation: vi.fn() };
+  const policy = isolateRendererPrewarmConsumption(manager, vi.fn(), { client, send: sent });
+  const a = mode("native");
+  const b = mode("native");
+  policy?.selectWorkingFolders("client-new-thread:a", ["/a", "/extra-a"], [a.collaborationMode]);
+  policy?.selectWorkingFolders("client-new-thread:b", ["/b", "/extra-b"], [b.collaborationMode]);
+  const ready = Promise.withResolvers<undefined>();
+  const first = creation.createConversation({ ...a, projectId: "project-a" }, ready.promise);
+  await creation.createConversation({ ...b, projectId: "project-b" }, Promise.resolve());
+  ready.resolve(undefined);
+  await first;
+  expect(sent.mock.calls.map((call) => call[1])).toEqual([
+    {
+      cwd: "/b",
+      projectId: "project-b",
+      runtimeWorkspaceRoots: ["/b", "/extra-b"],
+      codexhostWorkingFolders: ["/b", "/extra-b"],
+    },
+    {
+      cwd: "/a",
+      projectId: "project-a",
+      runtimeWorkspaceRoots: ["/a", "/extra-a"],
+      codexhostWorkingFolders: ["/a", "/extra-a"],
+    },
+  ]);
+  policy?.dispose();
+});
+
+it("binds the 2026-11 Desktop model hook layout with one inserted cell", () => {
+  const update = vi.fn();
+  const draft = { modelSettings: null, isManuallyChanged: false };
+  const row = Array<unknown>(14).fill(null);
+  Object.assign(row, {
+    6: "client-new-thread:b",
+    7: "client-new-thread:b",
+    9: update,
+    10: draft,
+    11: true,
+    12: update,
+    13: { draftSettings: draft, isNewThreadDraft: true, updateDraftSettings: update },
+  });
+  const context = { usesAccountPreferences: false };
+  const setModel = vi.fn();
+  // Shape read from the real Desktop on 2026-11-17: 25 cells, positions +1.
+  const modelRow = Array<unknown>(25).fill(null);
+  Object.assign(modelRow, {
+    7: null,
+    8: null,
+    11: true,
+    13: context,
+    14: update,
+    15: setModel,
+    18: context,
+    21: setModel,
+    22: context,
+    24: { ...context, setModelAndReasoningEffort: setModel },
+  });
+  const element = {
+    parentElement: null,
+    __reactFiber$test: { updateQueue: { memoCache: { data: [modelRow, row] } } },
+  };
+  expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toEqual({
+    update,
+    usesAccountPreferences: false,
+  });
+  // A 25-cell row that does not carry the reviewed positions is still rejected.
+  modelRow[22] = { usesAccountPreferences: false };
+  expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toBeNull();
+});

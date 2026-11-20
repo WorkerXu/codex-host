@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./usage-metering": {
+      "types": "./dist/usage-metering.d.ts",
+      "import": "./dist/usage-metering.js"
     }
   },
   "scripts": {
@@ -26,6 +30,7 @@
     "@codexhost/shared-contracts": "0.0.0",
     "@codexhost/update-manager": "0.0.0",
     "@deepseek-ai/cordis": "4.0.4",
+    "smol-toml": "1.8.0",
     "ws": "8.21.3"
   }
 }

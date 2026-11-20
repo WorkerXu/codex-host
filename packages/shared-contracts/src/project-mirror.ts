@@ -29,7 +29,8 @@ export const projectMirrorsFileSchema = z
     formatVersion: z.literal(1),
     revision: z.number().int().nonnegative(),
     projects: z.record(projectIdSchema, projectMirrorRecordSchema),
-    acknowledged: z.record(projectIdSchema, z.literal(true)),
+    /** Written by versions that gated the mirror behind a first-use confirmation. */
+    acknowledged: z.record(projectIdSchema, z.literal(true)).optional(),
   })
   .strict();
 
@@ -41,22 +42,16 @@ export const projectMirrorListResultSchema = z
   .object({
     revision: z.number().int().nonnegative(),
     projects: z.record(projectIdSchema, projectMirrorRecordSchema),
-    acknowledged: z.array(projectIdSchema),
   })
   .strict();
 
 export type ProjectMirrorListResult = z.infer<typeof projectMirrorListResultSchema>;
 
-/**
- * `record: null` removes an existing mirror; omitting `record` keeps it.
- * `acknowledge` records that the user accepted the name-only classification
- * for this source project.
- */
+/** `record: null` removes an existing mirror; omitting `record` keeps it. */
 export const projectMirrorUpsertParamsSchema = z
   .object({
     revision: z.number().int().nonnegative(),
     sourceProjectId: projectIdSchema,
-    acknowledge: z.literal(true).optional(),
     record: projectMirrorRecordSchema.nullable().optional(),
   })
   .strict();

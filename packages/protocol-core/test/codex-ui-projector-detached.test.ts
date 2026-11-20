@@ -25,6 +25,28 @@ function startedProjector(): CodexTurnProjector {
 }
 
 describe("Codex UI projector detached command Items", () => {
+  it("only accepts idle background text after the Turn completes", () => {
+    const projector = startedProjector();
+    const item = {
+      type: "agentMessage" as const,
+      itemId: hostItemIdSchema.parse("idle"),
+      text: "wake",
+    };
+    expect(() => projector.project({ type: "item.background.started", turnId, item })).toThrow(
+      "foreground output must use item.started",
+    );
+    projector.project({ type: "item.detached", turnId, itemId: command.itemId });
+    projector.project({ type: "turn.completed", turnId, outcome: { status: "succeeded" } });
+    expect(() =>
+      projector.project({ type: "item.background.started", turnId, item: command }),
+    ).toThrow("Only a text Item");
+    expect(
+      projector.project({ type: "item.background.started", turnId, item }).messages,
+    ).toMatchObject([
+      { method: "item/started", params: { turnId, item: { id: "idle", text: "wake" } } },
+    ]);
+  });
+
   it("completes the Turn while a detached command keeps running, then settles it", () => {
     const projector = startedProjector();
     projector.project({ type: "item.detached", turnId, itemId: command.itemId }, 1_200);

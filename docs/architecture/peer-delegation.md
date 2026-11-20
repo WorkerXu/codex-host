@@ -4,7 +4,7 @@
 
 ## 目标与边界
 
-- 让 `delegate start`、`harness list|inspect`、`thread read|send|cancel|wait` 可以用 `--host <peer 名或 Host ID>` 指向另一台机器。
+- 让 `delegate start`、`harness list|inspect`、`thread read|send|cancel|wait|answer` 可以用 `--host <peer 名或 Host ID>` 指向另一台机器。
 - Thread 链接 `thread://<id>?hostId=<x>` 中的 Host ID 可以自动解析到对应 peer。
 - 复用每台机器已有的本机控制 API，不新增远程 RPC 协议，也不开放任意 URL 转发。
 - 第一版由调用方本机登记跨机 watch，后台轮询远端 Thread；跨机 `delegate start` 不建立父子关系。
@@ -78,7 +78,7 @@ Host Runtime 启动控制服务后，在固定用户目录下写入：
 - 从 stdin 读取一个 JSON 对象：`{"route":"/v1/thread/read","body":{...}}`。
 - `route` 必须属于控制 API 白名单：
   `/v1/harness/list`、`/v1/harness/inspect`、`/v1/delegate/start`、
-  `/v1/thread/send`、`/v1/thread/cancel`、`/v1/thread/read`、
+  `/v1/thread/answer`、`/v1/thread/send`、`/v1/thread/cancel`、`/v1/thread/read`、
   `/v1/thread/wait`、`/v1/thread/list`。`/v1/thread/watch` 和 `/v1/thread/watches` 第一版不跨机，不在白名单内。
 - 不接受 URL、endpoint、token 或路由参数；所有连接信息只从本机控制文件读取。
 - 请求体上限 2 MiB，与 Host Runtime 控制服务一致。
@@ -139,12 +139,12 @@ ssh \
 
 ## `#` 选择器与 mention
 
-- Renderer 通过 Host Runtime 的 `codexhost/delegation/peers/list` RPC 获取机器目录。选择这个来源而不是复用 Desktop 的 Host 连接，是因为 `peers.json` 才是 CLI 实际路由的权威配置；RPC 还能在 Desktop 没有对应 SSH 连接时列出机器，并复用同一套 peer 传输验证连通性。
+- Renderer 通过**当前对话所在 Host** 的 `codexhost/delegation/peers/list` RPC 获取机器目录，并按 Host 分别缓存。`peers.json` 属于执行对话的那台机器的 Host Runtime，两端的 peer 列表并不相同（Mac 列出 `oracle-main`，oracle-main 列出 `mac`）；用本机目录会在远端对话里显示错误的机器分组和无法执行的 `--host`。选择这个来源而不是复用 Desktop 的 Host 连接，是因为 `peers.json` 才是 CLI 实际路由的权威配置；RPC 还能在 Desktop 没有对应 SSH 连接时列出机器，并复用同一套 peer 传输验证连通性。
 - Host Runtime 读取 `peers.json`，并发调用每个 peer 的 `harness list`（`includeAvailability: true`，catalog 超时 15 秒）。远端把 availability 持久化到 `~/.codexhost/cache/harness-availability.json`（不是 `runtime/`，与 token 无关），默认 24 小时；记录 `checkedAt`。每个 Harness 的 inspect 最多 2 秒、最多 6 个并发，超时按 `unavailable` 处理；只有无缓存或缓存失效时才走这条检查路径。缓存带插件版本/目录指纹，插件安装、卸载、升级或 `delegate start` 报告未安装/不可用时会立即失效对应项；`harness list --availability true --refresh true` 强制同步刷新。只保留 `ready` 的 Harness，整台机器没有可用 Harness 时不显示该组。peer catalog 内存缓存 1 小时并 stale-while-revalidate；某台机器失败时返回 `state: "unreachable"` 和错误摘要，并保留上一次成功的可用 Harness 列表用于置灰展示。
-- 选择器先列本机 Harness，再按 peer 分组列出远端 Harness；行文本形如 `Grok · oracle-sg`。分组标题优先使用 Desktop 连接目录中该 peer `hostIds` 对应的 `displayName`（与侧边栏 remote host 名一致）；hostId 对不上时再用 peer 的 SSH 别名/主机名匹配，最后回退 `peers.json` 的 peer 名。不可达但已知 Harness 的机器显示为置灰行；从未成功获取过 Harness 的机器显示为单个置灰行（不重复标题），错误文案本地化为「连接超时」/「连接失败」。输入查询可以匹配 Harness 名、ID 或机器名。
+- 选择器先列当前对话 Host 自己的 Harness，再按该 Host 的 peer 分组列出其它机器的 Harness。分组标题优先使用 Desktop 连接目录中该 peer `hostIds` 对应的 `displayName`（与侧边栏 remote host 名一致）；`hostIds` 含 `local` 的 peer 就是本机，标题是「此计算机」（与 Desktop 文件夹栏一致）；hostId 对不上时再用 peer 的 SSH 别名/主机名匹配，最后回退 `peers.json` 的 peer 名。Harness 图标取自该 peer 对应 Host 的插件目录，未加载时回退本机同 ID 插件的图标与名称。不可达但已知 Harness 的机器显示为置灰行；从未成功获取过 Harness 的机器显示为单个置灰行（不重复标题），错误文案本地化为「连接超时」/「连接失败」。输入查询可以匹配 Harness 名、ID 或机器名。
 - 选中远端 Harness 后，mention 链接为 `[@Grok](subagent://codexhost.grok?host=oracle-sg)`；`host` 是 peer 名。旧的无 `host` 链接继续按本机处理。
 - Host 端的 mention rewrite 会生成可直接执行的完整命令，包含 `--host`、`--task-name`、`--task`、`--watch true` 和 `--format compact`，并明确要求不要先跑 `--help` 或 `peer list`；本机 mention 不带 host，行为不变。
-- 随包安装的 delegation 技能同步升级到 v13：有完整命令时直接执行，优先 `delegate start --watch true` 后结束本轮，不循环 `thread wait`；只有缺少命令细节时才查 help。
+- 随包安装的 delegation 技能（v15）：有完整命令时直接执行，优先 `delegate start --watch true` 后结束本轮，不循环 `thread wait`；只有缺少命令细节时才查 help。
 
 ## CLI 路由
 
@@ -219,9 +219,20 @@ ssh \
 - CLI 的 `--host` 路由、self Host ID 本地路由、Thread 引用自动路由、跨机 start 限制、Host 限定链接和 Desktop read 回退。
 - 跨机 start 在目标机 0 个、1 个、多个活跃 Thread 下都成功创建顶层子 Thread，且 delegation 的 `parentHostThreadId` 是来源 sentinel，不是任何活跃 Thread；本地 start 的父推断保持不变。
 - mention 的 host 序列化/解析、旧格式兼容，以及 rewrite 指令里的 `--host`。
-- peer catalog 的缓存、可用性过滤（只保留 `ready`）、单 Harness 2 秒超时、24 小时持久化与 stale-while-revalidate、插件指纹/启动失败失效、`--refresh` 强制刷新、不可达状态、上次成功 Harness 的置灰保留，以及 Renderer 的 1 小时 stale-while-revalidate、机器分组、Desktop 显示名/SSH 别名回退、单行本地化错误和 host-qualified mention。
+- peer catalog 的缓存、可用性过滤（只保留 `ready`）、单 Harness 2 秒超时、24 小时持久化与 stale-while-revalidate、插件指纹/启动失败失效、`--refresh` 强制刷新、不可达状态、上次成功 Harness 的置灰保留，以及 Renderer 的按 Host 独立缓存（1 小时 stale-while-revalidate）、机器分组、Desktop 显示名/SSH 别名回退、本机 peer 的「此计算机」标题、peer 宿主图标、单行本地化错误和 host-qualified mention。
 - mention 重写生成可直接执行的完整命令（含 `--watch true` 和 `--format compact`），并明确不先跑 `--help` / `peer list`。
 - 跨机 watch 的轮询间隔、指数退避、终态只通知一次、超时、取消、watching 列表、peer 首次不可达和运行中失联。
 - `delegation-skill` 内容包含 `peer list`、`--host`、跨机 watch 和禁止读取 `~/.codexhost/runtime/` 的约束。
 
 测试通过注入的 spawn 模拟 SSH，不会建立真实连接。真实跨机连通性、主机密钥、远端 `PATH` 和远端 Host Runtime 状态需要在部署环境中另行验证。
+
+
+## 对话项目归属
+
+`delegate start` 默认继承发起对话的项目，与子对话 `--cwd` 无关。未显式指定 `--cwd` 时，使用父会话当前主工作文件夹。`--project <projectId>` 显式指定项目，`--project none` 创建无项目子对话；显式选择优先于继承。同机原生 Codex 在 `thread/start` 携带 `projectId`，外部 Harness 把它保存在 Thread metadata。
+
+跨机的项目 ID 属于 Desktop，不能当作目标机器 app-server 的项目 ID。同主机与跨主机派发都会保存待登记的 Desktop 项目意图：来源 Thread、跨机时的来源 Host 和显式项目选择。未指定项目时始终让 Mac Renderer 根据 Desktop 中父 Thread 的实时 membership 解析继承，远程 Host 读不到 Mac catalog 不会被当作显式无项目。外部父对话保留自身 metadata 的项目作为执行层回退；它不替代 Desktop 的实时归属。
+
+Renderer 使用 `appServices.threadProjectAssignments.readMemberships()` 和 `setMembership({hostId, threadId, assignment, projectless})` 登记，远程 assignment 包含项目所属的 `hostId`。服务未就绪、调用失败、父分配尚未加载时保留记录并重试；成功后去重，刷新期间收到的归属通知会触发再次读取。已有人工作出的子对话归属（包括无项目）不被覆盖。
+
+工作文件夹、持久化与真实 Desktop 绑定限制见 [对话工作文件夹](thread-folders.md)。

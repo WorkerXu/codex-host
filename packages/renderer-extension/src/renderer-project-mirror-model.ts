@@ -1,8 +1,4 @@
-import type {
-  DesktopSelectedProject,
-  ProjectGroup,
-  ProjectGroupMember,
-} from "@codexhost/shared-contracts";
+import type { DesktopProjectsCatalog, DesktopSelectedProject } from "@codexhost/shared-contracts";
 
 export interface MirrorSourceProject {
   id: string;
@@ -10,7 +6,27 @@ export interface MirrorSourceProject {
   rootPaths: readonly string[];
 }
 
+/** A source project and the machine whose Desktop owns it. */
+export interface MirrorProjectSource extends MirrorSourceProject {
+  hostId: string;
+  kind: "local" | "remote";
+}
+
+export type ProjectEligibilityReason =
+  "eligible" | "no-project" | "missing-project" | "not-name-only";
+
+export type MirrorSourceResolution =
+  | { source: MirrorProjectSource; reason: "eligible"; error: null }
+  | {
+      source: null;
+      reason: Exclude<ProjectEligibilityReason, "eligible">;
+      error: string | null;
+    };
+
 const INVALID_DIRECTORY_CHARACTER = /[<>:"/\\|?*\u0000-\u001f]/u;
+// Desktop creates name-only projects directly under its default parent; on a
+// remote machine that parent is `~/Documents/ChatGPT` under the remote home.
+const REMOTE_NAME_ONLY_PARENT = /(?:^|\/)Documents\/ChatGPT$/u;
 
 /** Desktop's own sanitization is not exported; match its observable result. */
 export function sanitizeMirrorDirectoryName(name: string): string {
@@ -20,6 +36,13 @@ export function sanitizeMirrorDirectoryName(name: string): string {
     .join("")
     .replace(/[ .]+$/gu, "");
   return replaced.length === 0 ? "New project" : replaced;
+}
+
+/** `<name>` or Desktop's numbered `<name> 2` folder name. */
+function isNameOnlyBasename(name: string, basename: string): boolean {
+  const expected = sanitizeMirrorDirectoryName(name);
+  if (basename === expected) return true;
+  return /^\d+$/u.test(basename.slice(expected.length + 1)) && basename.startsWith(`${expected} `);
 }
 
 export function isNameOnlyProject(
@@ -33,9 +56,83 @@ export function isNameOnlyProject(
   const parent = separator >= 0 ? root.slice(0, separator) : root;
   const basename = separator >= 0 ? root.slice(separator + 1) : root;
   if (parent !== defaultProjectParent.replace(/[\\/]+$/u, "")) return false;
-  const expected = sanitizeMirrorDirectoryName(project.name);
-  if (basename === expected) return true;
-  return /^\d+$/u.test(basename.slice(expected.length + 1)) && basename.startsWith(`${expected} `);
+  return isNameOnlyBasename(project.name, basename);
+}
+
+/**
+ * A project Desktop created by name on another machine. Its remote home differs
+ * from this Mac's, so only the `Documents/ChatGPT/<name>` shape is comparable.
+ */
+export function isNameOnlyRemoteProject(project: { label: string; remotePath: string }): boolean {
+  const separator = project.remotePath.lastIndexOf("/");
+  if (separator <= 0) return false;
+  const parent = project.remotePath.slice(0, separator);
+  if (!REMOTE_NAME_ONLY_PARENT.test(parent)) return false;
+  return isNameOnlyBasename(project.label, project.remotePath.slice(separator + 1));
+}
+
+/** An existing local project the mirror may reuse instead of creating `<name> 2`. */
+export function findNameOnlyLocalProject(
+  projects: readonly MirrorSourceProject[],
+  name: string,
+  defaultProjectParent: string | undefined,
+): MirrorSourceProject | undefined {
+  const trimmed = name.trim();
+  return projects.find(
+    (project) => project.name === trimmed && isNameOnlyProject(project, defaultProjectParent),
+  );
+}
+
+/**
+ * Classify the Composer's project for the mirror. Local and remote name-only
+ * projects are both eligible; the source machine comes with the project.
+ */
+export function resolveMirrorSource(
+  catalog: DesktopProjectsCatalog,
+  selected: DesktopSelectedProject,
+): MirrorSourceResolution {
+  if (selected.type === "local") {
+    const project = catalog.localProjects[selected.projectId];
+    if (!project)
+      return {
+        source: null,
+        reason: "missing-project",
+        error: `Project ${selected.projectId} is missing from the Desktop catalog`,
+      };
+    if (!isNameOnlyProject(project, catalog.defaultProjectParent))
+      return { source: null, reason: "not-name-only", error: null };
+    return {
+      source: {
+        id: project.id,
+        name: project.name,
+        rootPaths: project.rootPaths,
+        hostId: "local",
+        kind: "local",
+      },
+      reason: "eligible",
+      error: null,
+    };
+  }
+  const project = catalog.remoteProjects.find(({ id }) => id === selected.projectId);
+  if (!project)
+    return {
+      source: null,
+      reason: "missing-project",
+      error: `Project ${selected.projectId} is missing from the Desktop catalog`,
+    };
+  if (!isNameOnlyRemoteProject(project))
+    return { source: null, reason: "not-name-only", error: null };
+  return {
+    source: {
+      id: project.id,
+      name: project.label,
+      rootPaths: [project.remotePath],
+      hostId: project.hostId,
+      kind: "remote",
+    },
+    reason: "eligible",
+    error: null,
+  };
 }
 
 /** Deterministic candidates mirroring Desktop's `<name>`, `<name> 2`, `<name> 3` rule. */
@@ -47,77 +144,6 @@ export function mirrorDirectoryCandidates(parent: string, name: string, limit = 
     candidates.push(`${normalizedParent}/${base} ${index}`);
   }
   return candidates;
-}
-
-export interface MirrorGroupPlan {
-  groups: ProjectGroup[];
-  action: "created" | "appended" | "skipped-other-group";
-  changed: boolean;
-}
-
-function memberKey(member: ProjectGroupMember): string {
-  return `${member.projectKind}\u0000${member.projectId}`;
-}
-
-function sameMember(left: ProjectGroupMember, right: ProjectGroupMember): boolean {
-  return memberKey(left) === memberKey(right);
-}
-
-/**
- * One project may belong to one group only. A mirror never moves a project out
- * of an existing group; it reports the conflict so the caller can toast once.
- */
-export function planMirrorGroup(input: {
-  groups: readonly ProjectGroup[];
-  name: string;
-  source: ProjectGroupMember;
-  mirror: ProjectGroupMember;
-  createId: () => string;
-  now: string;
-}): MirrorGroupPlan {
-  const name = input.name.trim();
-  const targetMembers = [input.source, input.mirror];
-  const owner = input.groups.find((group) =>
-    group.members.some((member) => targetMembers.some((target) => sameMember(member, target))),
-  );
-  if (owner && owner.name.trim() !== name) {
-    return { groups: [...input.groups], action: "skipped-other-group", changed: false };
-  }
-  const group = input.groups.find((candidate) => candidate.name.trim() === name);
-  if (!group) {
-    const order =
-      input.groups.reduce((maximum, candidate) => Math.max(maximum, candidate.order), -1) + 1;
-    return {
-      action: "created",
-      changed: true,
-      groups: [
-        ...input.groups,
-        {
-          id: input.createId(),
-          name,
-          order,
-          collapsed: false,
-          members: [...targetMembers],
-          createdAt: input.now,
-          updatedAt: input.now,
-        },
-      ],
-    };
-  }
-  const missing = targetMembers.filter(
-    (target) => !group.members.some((member) => sameMember(member, target)),
-  );
-  if (missing.length === 0)
-    return { groups: [...input.groups], action: "appended", changed: false };
-  return {
-    action: "appended",
-    changed: true,
-    groups: input.groups.map((candidate) =>
-      candidate === group
-        ? { ...candidate, members: [...candidate.members, ...missing], updatedAt: input.now }
-        : candidate,
-    ),
-  };
 }
 
 export interface MirrorDestinationInput {
@@ -133,6 +159,8 @@ export interface MirrorDestinationInput {
 export interface MirrorDestination {
   path: string;
   projectId: string | null;
+  /** What the probe saw for `path`; lets the caller skip a duplicate check. */
+  state: "directory" | "missing";
 }
 
 /**
@@ -148,12 +176,15 @@ export async function chooseMirrorDestination(
     const desktopProject = input.desktopProjects.find(
       (project) => project.id === input.known?.remoteProjectId,
     );
-    if (desktopProject) return { path: desktopProject.remotePath, projectId: desktopProject.id };
+    if (desktopProject)
+      return { path: desktopProject.remotePath, projectId: desktopProject.id, state: "directory" };
     const appProject = input.appProjects.some((project) =>
       project.roots.some((root) => root.path === input.known?.remotePath),
     );
-    if (appProject || (await input.directoryState(input.known.remotePath)) === "directory")
-      return { path: input.known.remotePath, projectId: null };
+    if (appProject) return { path: input.known.remotePath, projectId: null, state: "directory" };
+    const knownState = await input.directoryState(input.known.remotePath);
+    if (knownState === "directory")
+      return { path: input.known.remotePath, projectId: null, state: knownState };
   }
   for (const candidate of input.candidates) {
     const desktopProject = input.desktopProjects.find(
@@ -161,7 +192,7 @@ export async function chooseMirrorDestination(
     );
     if (desktopProject) {
       if (desktopProject.label !== input.name) continue;
-      return { path: candidate, projectId: desktopProject.id };
+      return { path: candidate, projectId: desktopProject.id, state: "directory" };
     }
     const appProject = input.appProjects.find((project) =>
       project.roots.some((root) => root.path === candidate),
@@ -169,7 +200,7 @@ export async function chooseMirrorDestination(
     if (appProject && appProject.name !== input.name) continue;
     const state = await input.directoryState(candidate);
     if (state === "other") continue;
-    return { path: candidate, projectId: null };
+    return { path: candidate, projectId: null, state };
   }
   return null;
 }

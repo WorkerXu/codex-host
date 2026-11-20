@@ -33,6 +33,7 @@ function registration(threadId: string): DelegationControlRegistration {
       status: "running" as const,
       next: { read: "read", wait: "wait" },
     })),
+    answer: vi.fn(),
     send: vi.fn(async () => ({
       threadId,
       turnId: `turn-${threadId}`,

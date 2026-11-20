@@ -66,7 +66,9 @@ import {
   harnessConfigurationStateSchema,
   harnessInspectParamsSchema,
   harnessInspectionSchema,
+  harnessPluginListParamsSchema,
   harnessPluginListResultSchema,
+  type HarnessPluginListParams,
   type HarnessPluginListResult,
   harnessWebUiOpenParamsSchema,
   harnessWebUiOpenResultSchema,
@@ -215,7 +217,7 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   listLoadedSessions?(): Promise<LoadedSession[]>;
   currentHostId?(composer?: Element): string | null;
   knownHostIds?(): readonly string[];
-  listHarnessPlugins?(): Promise<HarnessPluginListResult>;
+  listHarnessPlugins?(input?: HarnessPluginListParams): Promise<HarnessPluginListResult>;
   clientForHost?(hostId: string): RendererModelClient | null;
   forkThread(input: ExternalThreadForkParams): Promise<ExternalThreadForkResult>;
   inspectHarness(
@@ -223,7 +225,10 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
     options?: RendererRequestOptions,
   ): Promise<HarnessInspection>;
   openHarnessWebUi?(input: HarnessWebUiOpenParams): Promise<void>;
-  inspectThread(input: ThreadInspectionParams): Promise<ThreadInspection>;
+  inspectThread(
+    input: ThreadInspectionParams,
+    options?: RendererRequestOptions,
+  ): Promise<ThreadInspection>;
   inspectHarnessCommands(input: HarnessCommandsInspectParams): Promise<HarnessCommandCatalog>;
   inspectThreadCommands(input: ThreadCommandsInspectParams): Promise<HarnessCommandCatalog>;
   executeThreadCommand(input: ThreadCommandExecuteParams): Promise<ThreadCommandExecuteResult>;
@@ -443,28 +448,45 @@ export function createRendererModelClient(
       return externalThreadForkResultSchema.parse(result);
     },
     inspectHarness,
-    async listHarnessPlugins(): Promise<HarnessPluginListResult> {
-      return harnessPluginListResultSchema.parse(
-        await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
-      );
+    async listHarnessPlugins(input?: HarnessPluginListParams): Promise<HarnessPluginListResult> {
+      const params = input ? harnessPluginListParamsSchema.parse(input) : {};
+      try {
+        return harnessPluginListResultSchema.parse(
+          await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, params),
+        );
+      } catch (error) {
+        // Hosts that predate conditional directory fetches reject the new params;
+        // fall back to the legacy empty request and its `{ plugins }` result.
+        if (!input || !isInvalidParams(error)) throw error;
+        return harnessPluginListResultSchema.parse(
+          await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
+        );
+      }
     },
     async openHarnessWebUi(input: HarnessWebUiOpenParams): Promise<void> {
       const params = harnessWebUiOpenParamsSchema.parse(input);
       const result = await manager.sendRequest(HARNESS_WEB_UI_OPEN_METHOD, params);
       harnessWebUiOpenResultSchema.parse(result);
     },
-    async inspectThread(input: ThreadInspectionParams): Promise<ThreadInspection> {
+    async inspectThread(
+      input: ThreadInspectionParams,
+      options?: RendererRequestOptions,
+    ): Promise<ThreadInspection> {
       const params = threadInspectionParamsSchema.parse(input);
+      const send = (method: string, requestParams: unknown) =>
+        options === undefined
+          ? manager.sendRequest(method, requestParams)
+          : manager.sendRequest(method, requestParams, options);
       let result: unknown;
       try {
-        result = await manager.sendRequest(THREAD_INSPECT_METHOD, params);
+        result = await send(THREAD_INSPECT_METHOD, params);
       } catch (error) {
         if (!(error instanceof RendererMethodUnavailableError)) throw error;
 
         // Stock Codex has no Host inspection API. Verify its native Thread on
         // this same connection; neither an RPC failure nor a missing Account
         // establishes ownership. Match the external markers used by the Host.
-        await verifyNativeCodexThread(manager.sendRequest, params.threadId);
+        await verifyNativeCodexThread(send, params.threadId);
         return { owner: "codex", locked: true };
       }
       return threadInspectionSchema.parse(result);

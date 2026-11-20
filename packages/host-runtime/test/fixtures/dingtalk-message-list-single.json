@@ -1,0 +1,30 @@
+{
+  "fixtureNote": "Captured from a real `dws chat message list --format json` response; names, text and ids are redacted, field shapes are unchanged.",
+  "arguments": [],
+  "complete": true,
+  "contractVersion": "im.message-list.v1",
+  "count": 1,
+  "hasMore": false,
+  "messages": [
+    {
+      "content": "上下文消息 1",
+      "conversationId": "cid-fixture",
+      "createTime": "2026-11-17 17:09:33",
+      "messageId": "msg-fixture-00",
+      "openConversationId": "cid-fixture",
+      "openMessageId": "msg-fixture-00",
+      "sendType": "user",
+      "sender": "成员A",
+      "senderId": "open-fixture-1",
+      "senderOpenDingTalkId": "open-fixture-1",
+      "text": "上下文消息 1"
+    }
+  ],
+  "nextPage": null,
+  "pagesFetched": 1,
+  "paginationKnown": true,
+  "partial": false,
+  "stopReason": "source_complete",
+  "success": true,
+  "truncated": false
+}

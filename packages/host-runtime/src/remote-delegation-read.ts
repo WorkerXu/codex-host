@@ -1,5 +1,9 @@
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
-import { delegationReadParamsSchema, harnessIdSchema } from "@codexhost/shared-contracts";
+import {
+  delegationReadParamsSchema,
+  harnessIdSchema,
+  jsonObjectSchema,
+} from "@codexhost/shared-contracts";
 import { z } from "zod";
 import {
   DelegationControlError,
@@ -31,6 +35,17 @@ const snapshot = z.object({
     )
     .optional(),
   hasMore: z.boolean().optional(),
+  pendingQuestions: z
+    .array(
+      z.object({
+        interactionId: z.string(),
+        kind: z.enum(["requestUserInput", "requestUserInputAsync"]),
+        turnId: z.string(),
+        expiresAt: z.string().optional(),
+        request: jsonObjectSchema,
+      }),
+    )
+    .optional(),
   nextCursor: z.string().nullable(),
 });
 

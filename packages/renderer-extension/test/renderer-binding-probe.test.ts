@@ -16,6 +16,7 @@ import {
   draftPermissionMode,
   draftThinkingOptionForModel,
   isLateConversationTarget,
+  isNewDraftTarget,
   isComposerModelWriteAllowed,
   isOwnershipSubmissionBlocked,
   lockedPermissionMode,
@@ -1494,6 +1495,18 @@ describe("Renderer Composer DOM behavior", () => {
       shouldTransferComposerState(firstConversationTarget, otherConversationTarget, "locked"),
     ).toBe(false);
     expect(shouldTransferComposerState(null, firstConversationTarget, "locked")).toBe(false);
+  });
+
+  it("recognizes a reused Composer root that starts a new chat", () => {
+    const conversationTarget = ["conversation", "opaque-1"];
+    const draftTarget = ["default", "client-new-thread:next"];
+
+    expect(isNewDraftTarget(conversationTarget, draftTarget)).toBe(true);
+    expect(isNewDraftTarget(["default", "client-new-thread:old"], draftTarget)).toBe(true);
+    expect(isNewDraftTarget(null, draftTarget)).toBe(true);
+    expect(isNewDraftTarget(draftTarget, [...draftTarget])).toBe(false);
+    expect(isNewDraftTarget(conversationTarget, ["conversation", "opaque-2"])).toBe(false);
+    expect(isNewDraftTarget(draftTarget, null)).toBe(false);
   });
 
   it("allows native Model writes only for a new-Thread draft target", () => {

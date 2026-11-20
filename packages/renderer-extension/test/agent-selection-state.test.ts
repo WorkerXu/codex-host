@@ -527,6 +527,30 @@ describe("Renderer draft Agent controller", () => {
     expect(agents.modelForAgent(newDraft, "pi")).toBeUndefined();
   });
 
+  it("starts a new draft when Desktop reuses a submitted client new-thread identity", async () => {
+    const agents = controller();
+    const draft = {};
+    const conversation = {};
+    const nextChat = {};
+    const operations = { applyAgent: () => true, clearPrewarm: async () => undefined };
+    const target = ["default", "client-new-thread:submitted"];
+
+    agents.mount(draft, target, "pi");
+    await agents.switchAgent(draft, "claude-code", operations);
+    agents.markSubmissionPending(draft);
+    expect(agents.transfer(draft, conversation, ["conversation", "new-thread"])).toBe(true);
+    expect(agents.get(conversation)).toMatchObject({ agent: "claude-code", phase: "locked" });
+
+    // Desktop names the next new chat with the same client Thread identity.
+    const started = agents.mount(nextChat, [...target], "codex");
+    expect(started).toMatchObject({ phase: "draft", agent: "codex" });
+    expect(started).not.toBe(agents.get(conversation));
+    expect(agents.isSubmissionPending(nextChat)).toBe(false);
+
+    const reopened = agents.mount({}, ["conversation", "new-thread"]);
+    expect(reopened).toMatchObject({ agent: "claude-code", phase: "locked" });
+  });
+
   it("does not share selection between drafts without a stable identity", () => {
     const agents = controller();
     const original = {};

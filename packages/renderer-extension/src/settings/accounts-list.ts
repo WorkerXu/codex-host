@@ -283,6 +283,7 @@ export function renderHarnessAccountRows(
   importAction?: HTMLElement | null,
   hideEmails = false,
   plugin?: HarnessPluginDescriptor,
+  usageState?: { freshness: "live" | "cached"; observedAt: string | null },
 ): HTMLTableRowElement[] {
   const row = document.createElement("tr");
   row.className = "settings-account-row";
@@ -310,7 +311,12 @@ export function renderHarnessAccountRows(
   const usage = account.credits
     ? renderAccountUsage(
         document,
-        { status: "ready", credits: account.credits, freshness: "live", observedAt: null },
+        {
+          status: "ready",
+          credits: account.credits,
+          freshness: usageState?.freshness ?? "live",
+          observedAt: usageState?.observedAt ?? null,
+        },
         messages,
         display,
         () => undefined,

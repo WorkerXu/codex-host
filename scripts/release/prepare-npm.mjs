@@ -600,7 +600,8 @@ if (userArguments.length === 0) {
   userArguments[0] === "delegate" ||
   userArguments[0] === "thread" ||
   userArguments[0] === "peer" ||
-  userArguments[0] === "peer-exec"
+  userArguments[0] === "peer-exec" ||
+  userArguments[0] === "dingtalk"
 ) {
   launchArguments = null;
   delegationArguments = userArguments;

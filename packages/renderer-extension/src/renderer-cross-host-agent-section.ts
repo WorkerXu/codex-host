@@ -2,6 +2,7 @@ import createElement from "lucide/dist/esm/createElement.mjs";
 import Server from "lucide/dist/esm/icons/server.mjs";
 
 import { createRendererAgentIcon } from "./renderer-agent-icon.js";
+import { keepEditorFocusOnPress } from "./renderer-native-at-menu.js";
 import type {
   CrossHostHarness,
   CrossHostHarnessCatalog,
@@ -16,10 +17,8 @@ export interface CrossHostAgentSelection {
 export interface CrossHostAgentSectionOptions {
   document: Document;
   catalog: CrossHostHarnessCatalog;
-  acknowledged: boolean;
   loading?: boolean;
   error?: string | null;
-  onAcknowledge(): void;
   onSelect(selection: CrossHostAgentSelection): void;
   onClose(): void;
 }
@@ -31,11 +30,7 @@ export interface CrossHostAgentSectionState {
 
 export interface CrossHostAgentSection {
   element: HTMLElement;
-  refresh(
-    catalog: CrossHostHarnessCatalog,
-    acknowledged: boolean,
-    state?: CrossHostAgentSectionState,
-  ): void;
+  refresh(catalog: CrossHostHarnessCatalog, state?: CrossHostAgentSectionState): void;
   dispose(): void;
 }
 
@@ -100,6 +95,9 @@ function rowButton(document: Document, depth: number, rightPadding: number): HTM
   button.addEventListener("pointerleave", () => {
     button.style.background = "transparent";
   });
+  // Same press-focus contract as the Agent rows: a focused Composer must not
+  // be rebuilt by Desktop before this row's click handler runs.
+  keepEditorFocusOnPress(button);
   return button;
 }
 
@@ -180,7 +178,6 @@ export function createCrossHostAgentSection(
 ): CrossHostAgentSection {
   const { document } = options;
   let catalog = options.catalog;
-  let acknowledged = options.acknowledged;
   let loading = options.loading ?? false;
   let error = options.error ?? null;
   let expandedHostId: string | null = null;
@@ -222,23 +219,6 @@ export function createCrossHostAgentSection(
 
   const render = (): void => {
     body.replaceChildren();
-    if (!acknowledged) {
-      const enable = rowButton(document, 0, 8);
-      enable.textContent = "启用跨机对话";
-      enable.style.color = "#6d9fff";
-      enable.addEventListener("click", (event) => {
-        event.preventDefault();
-        options.onAcknowledge();
-      });
-      body.append(
-        secondaryLine(
-          document,
-          "把对话放到另一台机器上运行；首次使用需要确认此项目是按名字自动创建的。",
-        ),
-        enable,
-      );
-      return;
-    }
     if (loading) {
       body.append(secondaryLine(document, "正在加载其他机器…"));
       return;
@@ -304,9 +284,8 @@ export function createCrossHostAgentSection(
 
   return {
     element,
-    refresh(nextCatalog, nextAcknowledged, state) {
+    refresh(nextCatalog, state) {
       catalog = nextCatalog;
-      acknowledged = nextAcknowledged;
       if (state?.loading !== undefined) loading = state.loading;
       if (state?.error !== undefined) error = state.error;
       if (

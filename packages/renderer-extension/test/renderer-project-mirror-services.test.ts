@@ -28,6 +28,13 @@ describe("project mirror Desktop services", () => {
             label: input.label,
           };
         },
+        createLocal: async (input: { name: string }) => {
+          calls.push(`createLocal:${input.name}`);
+          return {
+            projectId: "local-project",
+            rootPaths: [`/Users/test/Documents/ChatGPT/${input.name}`],
+          };
+        },
       },
       workspaceFiles: {
         createDirectory: async (input: { path: string }) => {

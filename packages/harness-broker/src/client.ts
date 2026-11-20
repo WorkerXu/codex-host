@@ -717,6 +717,7 @@ class BrokeredHarnessSession implements HarnessSession {
 }
 
 export class BrokeredHarnessAdapter implements HarnessAdapter {
+  readonly additionalDirectories: boolean;
   readonly #sessions = new Set<BrokeredHarnessSession>();
   readonly commandCatalog?: HarnessCommandCatalog;
   readonly liveCommandCatalog?: boolean;
@@ -751,6 +752,7 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
   constructor(
     input: {
       harnessId?: string;
+      additionalDirectories?: boolean;
       /** Plugin-owned capability; defaults to true for existing Broker consumers. */
       accountCredits?: boolean;
       /** Enable only when the plugin implements native Session import in its broker. */
@@ -771,6 +773,7 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
     } = {},
   ) {
     this.harnessId = harnessPluginIdSchema.parse(input.harnessId ?? "claude-code");
+    this.additionalDirectories = input.additionalDirectories === true;
     if (input.sessionImport) {
       this.sessionImport = createBrokerSessionImportCapability({
         harnessId: this.harnessId,

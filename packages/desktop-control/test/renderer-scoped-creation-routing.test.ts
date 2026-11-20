@@ -45,6 +45,29 @@ describe("draft-scoped native creation routing", () => {
     expect(f.started.mock.contexts[0]).toBe(f.manager);
   });
 
+  it("applies the draft's working folders to its native creation input", async () => {
+    const f = fixture();
+    f.control.selectWorkingFolders(draft, ["/colab", "/extra"]);
+    const input = {
+      collaborationMode: mode("gpt-reserve"),
+      cwd: "/project",
+      workspaceRoots: ["/project"],
+      projectId: "keep-project",
+    };
+    const result = await f.manager.startConversation(input, { clientThreadId: draft });
+    expect(result).toMatchObject({
+      cwd: "/colab",
+      workspaceRoots: ["/colab", "/extra"],
+      projectId: "keep-project",
+    });
+    expect(result).not.toHaveProperty("runtimeWorkspaceRoots");
+    expect(input).toMatchObject({ cwd: "/project", workspaceRoots: ["/project"] });
+    const other = { collaborationMode: mode("gpt-reserve"), cwd: "/project" };
+    await expect(
+      f.manager.startConversation(other, { clientThreadId: "client-new-thread:other" }),
+    ).resolves.toBe(other);
+  });
+
   it("captures each invocation before asynchronous native preparation and later selection changes", async () => {
     const f = fixture();
     const ready = Promise.withResolvers<undefined>();

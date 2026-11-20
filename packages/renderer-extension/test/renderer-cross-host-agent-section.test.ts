@@ -141,33 +141,12 @@ function button(root: FakeElement, label: string): FakeElement {
 }
 
 describe("cross-host Agent section", () => {
-  it("asks for first-use confirmation before listing machines", () => {
-    const onAcknowledge = vi.fn();
-    const section = createCrossHostAgentSection({
-      document: document as unknown as Document,
-      catalog,
-      acknowledged: false,
-      onAcknowledge,
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    expect(section.element.textContent).toContain("启用跨机对话");
-    expect(section.element.textContent).not.toContain("oracle-sg");
-    [...section.element.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "启用跨机对话")
-      ?.click();
-    expect(onAcknowledge).toHaveBeenCalledOnce();
-    section.dispose();
-  });
-
   it("lists machines, disables offline peers, and reports Harness selection", () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
     const section = createCrossHostAgentSection({
       document: document as unknown as Document,
       catalog,
-      acknowledged: true,
-      onAcknowledge: vi.fn(),
       onSelect,
       onClose,
     });
@@ -192,18 +171,19 @@ describe("cross-host Agent section", () => {
     const section = createCrossHostAgentSection({
       document: document as unknown as Document,
       catalog: { machines: [], loadedPeers: 0 },
-      acknowledged: true,
       loading: true,
-      onAcknowledge: vi.fn(),
       onSelect: vi.fn(),
       onClose: vi.fn(),
     });
     expect(section.element.textContent).toContain("正在加载其他机器…");
     expect(section.element.textContent).not.toContain("oracle-sg");
-    section.refresh({ machines: [], loadedPeers: 0 }, true, {
-      loading: false,
-      error: "其他机器不可用",
-    });
+    section.refresh(
+      { machines: [], loadedPeers: 0 },
+      {
+        loading: false,
+        error: "其他机器不可用",
+      },
+    );
     expect(section.element.textContent).toContain("其他机器不可用");
     section.dispose();
   });

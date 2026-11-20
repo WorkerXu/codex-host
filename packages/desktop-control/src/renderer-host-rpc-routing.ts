@@ -110,6 +110,10 @@ export function installRendererHostRpcRouting(
   // still issues each creation call; the selected carrier is applied to that call.
   const externalDrafts = new Map<string, { model: string; owner: RendererHostRoutePolicy }>();
   const selectedModels = new Map<string, string>();
+  const folderDrafts = new Map<
+    string,
+    { folders: readonly string[]; owner: RendererHostRoutePolicy }
+  >();
   const prewarmCarrier = (carrier: string): string | null => {
     const prefix = "codexhost/plugin-v1@";
     if (!carrier.startsWith(prefix)) return null;
@@ -162,9 +166,11 @@ export function installRendererHostRpcRouting(
     // A creation can omit its native Model; a registered external draft still needs its carrier.
     const nativeModel = typeof settings.model === "string" ? settings.model : null;
     let model: string | null = null;
+    let folders: readonly string[] | undefined;
     if (path[0] === "startConversation") {
       const draftId = isRecord(options) ? options.clientThreadId : null;
       model = typeof draftId === "string" ? (externalDrafts.get(draftId)?.model ?? null) : null;
+      folders = typeof draftId === "string" ? folderDrafts.get(draftId)?.folders : undefined;
     } else if (path[0] === "prewarmConversation") {
       // Desktop prewarms only local drafts; the pool is keyed by workspace, not Model.
       if (input.ephemeral !== true) publishDraftWorkspace("local", input.cwd);
@@ -174,7 +180,7 @@ export function installRendererHostRpcRouting(
       const carrier = nativeModel?.startsWith("codexhost/") ? nativeModel : selected;
       model = carrier ? prewarmCarrier(carrier) : null;
     }
-    if (!model) return message;
+    if (!model && !folders) return message;
     // A creation that names a different external carrier keeps it.
     if (
       path[0] === "startConversation" &&
@@ -191,7 +197,20 @@ export function installRendererHostRpcRouting(
         [
           {
             ...input,
-            collaborationMode: { ...input.collaborationMode, settings: { ...settings, model } },
+            // The `startConversation` input carries `workspaceRoots`; `runtimeWorkspaceRoots`
+            // belongs to the `thread/start` params Desktop derives from it and is ignored here.
+            // This object is already capnweb wire format: a plain array would be read as a
+            // special value tag (`["/path"]` → "unknown special value"), so escape it as
+            // capnweb does, by wrapping it in one more array.
+            ...(folders ? { cwd: folders[0], workspaceRoots: [[...folders]] } : {}),
+            ...(model
+              ? {
+                  collaborationMode: {
+                    ...input.collaborationMode,
+                    settings: { ...settings, model },
+                  },
+                }
+              : {}),
           },
           ...args.slice(1),
         ],
@@ -268,6 +287,7 @@ export function installRendererHostRpcRouting(
       },
     });
     const clearDrafts = (): void => {
+      for (const [id, draft] of folderDrafts) if (draft.owner === policy) folderDrafts.delete(id);
       for (const [draftId, draft] of externalDrafts) {
         if (draft.owner === policy) externalDrafts.delete(draftId);
       }
@@ -305,6 +325,12 @@ export function installRendererHostRpcRouting(
         // order, so this discards any prewarm requested for the previous selection.
         void clear().catch(() => undefined);
         return true;
+      },
+      selectWorkingFolders(draftId: string, folders: readonly string[]): void {
+        if (!isCurrent() || !draftId.startsWith("client-new-thread:") || !folders.length)
+          throw new Error("Desktop 工作文件夹绑定不可用");
+        folderDrafts.set(draftId, { folders: [...folders], owner: policy });
+        void clear().catch(() => undefined);
       },
       clear,
       dispose() {
@@ -416,6 +442,7 @@ export function installRendererHostRpcRouting(
       for (const hostId of [...routes.keys()]) retire(hostId);
       discovery = null;
       externalDrafts.clear();
+      folderDrafts.clear();
       selectedModels.clear();
       if (port.postMessage === postMessage) port.postMessage = originalPostMessage;
       if (target.__codexhostHostRoutingV1 === routing) {

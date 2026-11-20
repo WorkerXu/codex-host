@@ -17,7 +17,14 @@ const record = {
 };
 
 describe("Project mirror contracts", () => {
-  it("accepts a revisioned registry with one acknowledged source", () => {
+  it("accepts a revisioned registry and keeps legacy acknowledgement fields readable", () => {
+    expect(
+      projectMirrorsFileSchema.parse({
+        formatVersion: 1,
+        revision: 2,
+        projects: { "local-alpha": record },
+      }),
+    ).toEqual({ formatVersion: 1, revision: 2, projects: { "local-alpha": record } });
     expect(
       projectMirrorsFileSchema.parse({
         formatVersion: 1,
@@ -25,7 +32,7 @@ describe("Project mirror contracts", () => {
         projects: { "local-alpha": record },
         acknowledged: { "local-alpha": true },
       }),
-    ).toMatchObject({ revision: 2, acknowledged: { "local-alpha": true } });
+    ).toMatchObject({ revision: 2 });
   });
 
   it("rejects incomplete mirror records", () => {
@@ -33,7 +40,7 @@ describe("Project mirror contracts", () => {
     expect(projectMirrorRecordSchema.safeParse({ ...record, extra: true }).success).toBe(false);
   });
 
-  it("allows acknowledge-only and removal updates", () => {
+  it("accepts record and removal updates without a first-use acknowledgement", () => {
     expect(
       projectMirrorUpsertParamsSchema.parse({ revision: 0, sourceProjectId: "local-alpha" }),
     ).toEqual({ revision: 0, sourceProjectId: "local-alpha" });
@@ -41,10 +48,16 @@ describe("Project mirror contracts", () => {
       projectMirrorUpsertParamsSchema.parse({
         revision: 1,
         sourceProjectId: "local-alpha",
-        acknowledge: true,
         record: null,
       }),
-    ).toMatchObject({ acknowledge: true, record: null });
+    ).toMatchObject({ record: null });
+    expect(
+      projectMirrorUpsertParamsSchema.safeParse({
+        revision: 1,
+        sourceProjectId: "local-alpha",
+        acknowledge: true,
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps catalog fields optional for older Hosts", () => {

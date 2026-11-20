@@ -38,6 +38,7 @@ export function createHarnessAccounts(
   signal: AbortSignal,
   getClient: () => RendererHarnessAccountClient | null,
   onChange: () => void,
+  options: { shouldInspect?: (harnessId: string) => boolean } = {},
 ) {
   let accounts: HarnessAccount[] = [];
   let refreshing = false;
@@ -58,42 +59,48 @@ export function createHarnessAccounts(
     if (signal.aborted) return true;
     const byAccount = new Map(accounts.map((account) => [accountKey(account), account]));
     await Promise.all(
-      sources.sources.map(async (source) => {
-        try {
-          const result = await client.inspectHarnessAccount({
-            harnessId: source.harnessId,
-            ...(force ? { refresh: true } : {}),
-          });
-          if (signal.aborted || result.harnessId !== source.harnessId) return;
-          for (const key of [...byAccount.keys()]) {
-            if (byAccount.get(key)?.harnessId === result.harnessId) byAccount.delete(key);
-          }
-          const reported = result.accounts ?? (result.account ? [result.account] : []);
-          for (const account of reported) {
-            const row = {
-              ...account,
-              harnessId: result.harnessId,
-              harnessName: result.harnessName,
-            };
-            byAccount.set(accountKey(row), row);
-          }
-        } catch {
-          if (!signal.aborted) {
+      sources.sources
+        .filter((source) => force || options.shouldInspect?.(source.harnessId) !== false)
+        .map(async (source) => {
+          try {
+            const result = await client.inspectHarnessAccount({
+              harnessId: source.harnessId,
+              ...(force ? { refresh: true } : {}),
+            });
+            if (signal.aborted || result.harnessId !== source.harnessId) return;
             for (const key of [...byAccount.keys()]) {
-              if (byAccount.get(key)?.harnessId === source.harnessId) byAccount.delete(key);
+              if (byAccount.get(key)?.harnessId === result.harnessId) byAccount.delete(key);
+            }
+            const reported = result.accounts ?? (result.account ? [result.account] : []);
+            for (const account of reported) {
+              const row = {
+                ...account,
+                harnessId: result.harnessId,
+                harnessName: result.harnessName,
+              };
+              byAccount.set(accountKey(row), row);
+            }
+          } catch {
+            if (!signal.aborted) {
+              for (const key of [...byAccount.keys()]) {
+                if (byAccount.get(key)?.harnessId === source.harnessId) byAccount.delete(key);
+              }
             }
           }
-        }
-        if (!signal.aborted) {
-          accounts = sortedAccounts(byAccount.values());
-          onChange();
-        }
-      }),
+          if (!signal.aborted) {
+            accounts = sortedAccounts(byAccount.values());
+            onChange();
+          }
+        }),
     );
     return true;
   };
 
   return {
+    /** Paint the last persisted rows before the first live inspection finishes. */
+    seed(next: readonly HarnessAccount[]): void {
+      if (accounts.length === 0 && !signal.aborted) accounts = sortedAccounts(next);
+    },
     get accounts(): readonly HarnessAccount[] {
       return accounts;
     },
@@ -109,7 +116,9 @@ export function createHarnessAccounts(
       if (!client) return;
       refreshing = true;
       status = "loading";
-      accounts = [];
+      // Keep the last rows visible; a live refresh updates them in place. A
+      // Harness the directory now reports as missing must not keep stale rows.
+      accounts = accounts.filter((account) => options.shouldInspect?.(account.harnessId) !== false);
       onChange();
       let failed = false;
       try {
@@ -129,8 +138,6 @@ export function createHarnessAccounts(
         if (!signal.aborted) accounts = sortedAccounts(result.accounts);
       } catch {
         failed = true;
-        // Do not keep stale identities after authentication changes or a failed query.
-        if (!signal.aborted) accounts = [];
       } finally {
         refreshing = false;
         if (!signal.aborted) {

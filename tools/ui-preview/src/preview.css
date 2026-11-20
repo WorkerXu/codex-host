@@ -1,0 +1,251 @@
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--color-token-bg-primary, #f5f5f5);
+  color: var(--color-token-text-primary, #0d0d0d);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#preview-root {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-stage-root {
+  display: flex;
+}
+
+.preview-stage {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-token-main-surface-primary, #fff);
+}
+
+.preview-projects {
+  display: flex;
+  width: 260px;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  background: var(--color-token-side-bar-background, #f5f5f5);
+  border-right: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
+}
+
+.preview-projects-heading {
+  padding: 6px 8px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: var(--font-text-xs-size, 12px);
+  line-height: var(--font-text-xs-line-height, 18px);
+}
+
+.preview-project-row {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--color-token-text-secondary, rgba(13, 13, 13, 0.65));
+  font-size: var(--font-text-sm-size, 14px);
+}
+
+.preview-project-row {
+  padding-left: 32px;
+  color: var(--color-token-text-primary, #0d0d0d);
+}
+
+.preview-project-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+.preview-canvas {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  background: var(--color-token-main-surface-primary, #fff);
+}
+
+.preview-thread {
+  max-width: 680px;
+}
+
+.preview-thread h1 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.preview-thread p {
+  margin: 0 0 32px;
+  color: var(--color-token-text-secondary, rgba(13, 13, 13, 0.65));
+  font-size: var(--font-text-sm-size, 14px);
+  line-height: 22px;
+}
+
+.preview-composer {
+  padding: 14px 16px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: var(--font-text-sm-size, 14px);
+  background: var(--color-token-main-surface-primary, #fff);
+  border: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
+  border-radius: var(--composer-radius, 22px);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 4%);
+}
+
+.preview-canvas--composer {
+  align-items: flex-end;
+}
+
+.preview-composer-card {
+  width: min(760px, 100%);
+  margin-bottom: 24px;
+  padding: 14px 16px 8px;
+  background: var(--color-token-main-surface-primary, #fff);
+  border: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
+  border-radius: var(--composer-radius, 22px);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 4%);
+}
+
+.preview-composer-input {
+  padding: 4px 2px 14px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: var(--font-text-sm-size, 14px);
+}
+
+.preview-composer-editor {
+  min-height: 26px;
+  padding: 4px 2px 14px;
+  color: var(--color-token-text-primary, #0d0d0d);
+  font-size: var(--font-text-sm-size, 14px);
+  line-height: 22px;
+  outline: none;
+}
+
+.preview-at-menu {
+  display: flex;
+  width: 320px;
+  max-height: 340px;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-token-dropdown-background, #fff);
+  border: 1px solid var(--color-token-border-default, rgba(13, 13, 13, 0.08));
+  border-radius: var(--menu-radius, 12px);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
+}
+
+/* The native scroller is the single owner of every section, including ours. */
+.preview-at-menu > [data-mention-list-scroll-area] {
+  max-height: 340px;
+}
+
+/* Fallback only; the exported Desktop stylesheet supplies the real row look. */
+.preview-at-menu [data-codexhost-workbench-section] {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+/*
+ * The exported shadow context only carries light token values. These preview
+ * approximations keep dark captures legible; they are marked approximate in
+ * report.json and never ship in the workbench CSS.
+ */
+html[data-theme="dark"]:not([data-native-theme="true"]) {
+  --color-token-main-surface-primary: #202020;
+  --color-token-text-primary: #ececec;
+  --color-token-text-secondary: #b4b4b4;
+  --color-token-text-tertiary: #8a8a8a;
+  --color-token-border-default: rgb(255 255 255 / 12%);
+  --color-token-border-light: rgb(255 255 255 / 8%);
+  --color-token-list-hover-background: rgb(255 255 255 / 7%);
+  --color-token-text-link-foreground: #66aaf9;
+  --color-token-interactive-bg-secondary-hover: rgb(255 255 255 / 10%);
+  --color-token-bg-primary: #191919;
+  --color-token-dropdown-background: #232323;
+  --color-token-on-accent: #ffffff;
+  --color-background-danger-solid: #f87171;
+  --shadow-card: 0 4px 14px rgb(0 0 0 / 30%);
+}
+
+/* Native-shaped project sidebar used by the empty-machine scenarios. */
+.preview-native-section-body {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.preview-native-project-list {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.preview-native-project-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.preview-native-project-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+.preview-native-project-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-native-project-trailing {
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: 12px;
+}
+
+.preview-thread-row {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  margin-left: 34px;
+  overflow: hidden;
+  padding: 0 8px;
+  color: var(--color-token-text-primary, #0d0d0d);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 6px;
+}
+
+.preview-thread-row:hover {
+  background: var(--color-token-list-hover-background, rgba(13, 13, 13, 0.05));
+}
+
+.preview-empty-chat {
+  margin-left: 34px;
+  padding: 6px 8px;
+  color: var(--color-token-text-tertiary, rgba(13, 13, 13, 0.5));
+  font-size: 12px;
+}
+
+html[data-theme="dark"] .preview-projects {
+  background: var(--color-token-side-bar-background);
+  border-right-color: var(--color-token-border-default);
+}
+
+.preview-agent-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}

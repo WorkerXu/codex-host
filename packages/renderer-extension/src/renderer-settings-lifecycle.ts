@@ -1,8 +1,15 @@
+import type { CodeRepositoriesClient } from "./code-repositories-client.js";
+import type { RendererModelServiceClient } from "./model-service-client.js";
+import type { RendererSkillsSettingsOptions } from "./settings/skills-page.js";
+import type { HubAdminPageOptions } from "./settings/mcp-admin-page.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
 import type { RemoteConnectionsControl } from "./remote-connections-control.js";
 import type { LoadedSessionsClient } from "./settings/loaded-sessions-table.js";
 import type { HarnessSchedulesPageOptions } from "./settings/harness-schedules-page.js";
+import type { RendererJarvisSettingsOptions } from "./settings/jarvis-page.js";
+import type { RendererDingTalkPageOptions } from "./settings/dingtalk-page.js";
+import type { RendererCodexAgentsSettingsOptions } from "./settings/codex-agents-page.js";
 import { readCodexLocaleSettings, type CodexLocaleSettings } from "./codex-locale-adapter.js";
 import {
   rendererSettingsMessages,
@@ -39,6 +46,13 @@ export interface RendererSettingsLifecycleOptions {
   requestUsageStatistics?: RendererUsageStatisticsRequest;
   /** Machines the usage statistics page may read besides the local Host. */
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider;
+  jarvis?: RendererJarvisSettingsOptions;
+  modelService?: RendererModelServiceClient;
+  codeRepositories?: CodeRepositoriesClient;
+  dingtalk?: RendererDingTalkPageOptions;
+  hubAdmin?: HubAdminPageOptions;
+  codexAgents?: RendererCodexAgentsSettingsOptions;
+  skills?: RendererSkillsSettingsOptions;
   openImportedThread?: RendererImportedThreadOpener;
   onLocaleChange?(locale: RendererSettingsLocale): void;
 }
@@ -98,6 +112,13 @@ export function installRendererSettingsLifecycle(
             },
           }
         : undefined,
+      options.jarvis,
+      options.dingtalk,
+      options.codexAgents,
+      options.modelService,
+      options.codeRepositories,
+      options.skills,
+      options.hubAdmin,
     );
     const nextShell = installRendererSettingsShell(definitions, messages, ownerWindow.document, {
       onOpenChange(open) {

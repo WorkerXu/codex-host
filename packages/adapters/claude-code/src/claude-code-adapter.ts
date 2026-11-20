@@ -91,9 +91,14 @@ import { ClaudeCodeExecutableError, resolveClaudeCodeExecutable } from "./comman
 import { ClaudePendingSessions, isPendingClaudeSession } from "./pending-session.js";
 import { forkClaudeSession } from "./claude-fork.js";
 import { remapForkedSessionReferences } from "./claude-fork-references.js";
-import { mapClaudeSnapshot, mapClaudeSubagentSnapshot } from "./claude-history.js";
+import {
+  isPersistedClaudeMessageId,
+  mapClaudeSnapshot,
+  mapClaudeSubagentSnapshot,
+} from "./claude-history.js";
 import { claudeTranscriptItemId } from "./item-identity.js";
 import { readClaudeTranscript } from "./claude-transcript.js";
+import { readClaudeQueuedCommand } from "./claude-queued-command.js";
 import {
   CLAUDE_DEFAULT_MODEL_REF,
   decodeClaudeModelRef,
@@ -123,6 +128,7 @@ import { ClaudeBackgroundCommandItems } from "./background-command-items.js";
 import { ClaudeToolLifecycle } from "./tool-lifecycle.js";
 import { estimateClaudeRequestCostUsd } from "./usage-estimate.js";
 import { ClaudeSteerMissedTurnError } from "./transport.js";
+import { claudeUserContent } from "./turn-input.js";
 import type {
   ClaudeAdapterDependencies,
   ClaudeApprovalRequest,
@@ -336,6 +342,8 @@ const DEFAULT_CONTINUATION_QUIESCENCE_MS = 2_000;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+const SYNTHETIC_AUTONOMOUS_TURN_KEY_PATTERN = /^autonomous-\d+$/u;
 
 function safeNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -604,6 +612,7 @@ class ClaudeHarnessSession implements HarnessSession {
   readonly #createTransport: ClaudeAdapterDependencies["createTransport"];
   readonly #bypassPermissionsAvailable: boolean;
   readonly #cwd: string;
+  readonly #additionalDirectories: readonly string[];
   readonly #nativeRef: NativeSessionRef;
   readonly #onClosed: () => void;
   readonly #onPlanLimitObserved: (planLimit: ClaudePlanLimitEvent) => ClaudePlanLimitEvent | null;
@@ -661,6 +670,7 @@ class ClaudeHarnessSession implements HarnessSession {
     onClosed: () => void,
     onPlanLimitObserved: (planLimit: ClaudePlanLimitEvent) => ClaudePlanLimitEvent | null,
     options: {
+      additionalDirectories?: readonly string[];
       environment?: NodeJS.ProcessEnv;
       bypassPermissionsAvailable: boolean;
       openMode: "create" | "resume";
@@ -684,6 +694,7 @@ class ClaudeHarnessSession implements HarnessSession {
     },
   ) {
     this.#cwd = cwd;
+    this.#additionalDirectories = options.additionalDirectories ?? [];
     this.#lastAssistantResponseAtUnix = options.usageHistory.lastResponseAtUnix;
     this.#accountCreditsSupported = options.accountCreditsSupported;
     const composerIndicators = claudePromptCacheIndicators(
@@ -771,45 +782,59 @@ class ClaudeHarnessSession implements HarnessSession {
     this.#readingHistory = true;
     try {
       let messages: unknown[];
-      try {
-        // Native result frames can arrive before the transcript batch is written.
-        const deadline = Date.now() + this.#closeTimeoutMs;
-        for (;;) {
+      // Native result frames can arrive before the transcript batch is written.
+      const deadline = Date.now() + this.#closeTimeoutMs;
+      for (;;) {
+        try {
           messages =
             (await this.#readSessionMessages({
               cwd: this.#cwd,
               sessionId: this.#sessionId,
             })) ?? [];
-          const ids = new Set(
-            messages.flatMap((message) =>
-              isRecord(message) && typeof message.uuid === "string" ? [message.uuid] : [],
-            ),
-          );
-          if (this.#unpersistedMessageIds.every((id) => ids.has(id))) {
-            this.#unpersistedMessageIds = [];
-            break;
-          }
-          if (Date.now() >= deadline || this.#phase !== "open") {
-            return {
-              ok: false,
-              error: {
-                code: "sessionBusy",
-                message: "Claude Code history is still being persisted",
-                retryable: true,
-              },
-            };
-          }
-          await delay(25);
+        } catch {
+          return {
+            ok: false,
+            error: {
+              code: "nativeFailure",
+              message: "Claude Code history could not be read",
+              retryable: true,
+            },
+          };
         }
-      } catch {
-        return {
-          ok: false,
-          error: {
-            code: "nativeFailure",
-            message: "Claude Code history could not be read",
-            retryable: true,
-          },
-        };
+        let ids: Set<string>;
+        try {
+          ids = new Set(
+            messages.flatMap((message) => {
+              if (!isRecord(message) || typeof message.uuid !== "string") return [];
+              const queued = readClaudeQueuedCommand(message, this.#sessionId);
+              return queued ? [message.uuid, queued.sourceUuid] : [message.uuid];
+            }),
+          );
+        } catch {
+          return {
+            ok: false,
+            error: {
+              code: "protocolError",
+              message: "Claude Code history is invalid",
+              retryable: false,
+            },
+          };
+        }
+        if (this.#unpersistedMessageIds.every((id) => isPersistedClaudeMessageId(id, ids))) {
+          this.#unpersistedMessageIds = [];
+          break;
+        }
+        if (Date.now() >= deadline || this.#phase !== "open") {
+          return {
+            ok: false,
+            error: {
+              code: "sessionBusy",
+              message: "Claude Code history is still being persisted",
+              retryable: true,
+            },
+          };
+        }
+        await delay(25);
       }
       if (messages.length === 0 && isPendingClaudeSession(this.#nativeRef)) {
         try {
@@ -910,6 +935,7 @@ class ClaudeHarnessSession implements HarnessSession {
     }
 
     this.#acceptingTurn = true;
+    const content = await claudeUserContent(text);
     const startingTransport = this.#transport === null;
     let transport: ClaudeTurnTransport;
     try {
@@ -1006,7 +1032,7 @@ class ClaudeHarnessSession implements HarnessSession {
         nativeTurnKey,
         formatVersion: 1,
       });
-      const running = transport.runTurn(text, nativeTurnRef.nativeTurnKey, (event) => {
+      const running = transport.runTurn(content, nativeTurnRef.nativeTurnKey, (event) => {
         this.#handleTurnEvent(active, event);
       });
       // Claude preserves caller-assigned User Message UUIDs in native history.
@@ -1023,14 +1049,6 @@ class ClaudeHarnessSession implements HarnessSession {
   }
 
   async #steer(command: TurnSteerCommand): Promise<HarnessResult<TurnSteerAccepted>> {
-    const active = this.#active;
-    if (!active || active.command.turnId !== command.turnId) {
-      return { ok: false, error: invalidState("Claude Code steer target is not the active Turn") };
-    }
-    if (active.cancellationRequested) {
-      // A cancelled Turn must not take more input; its Segments are being interrupted.
-      return { ok: false, error: invalidState("Claude Code steer target is being cancelled") };
-    }
     const text = command.input.map((input) => input.text).join("\n");
     if (text.length === 0) {
       return {
@@ -1041,6 +1059,16 @@ class ClaudeHarnessSession implements HarnessSession {
           retryable: false,
         },
       };
+    }
+    // Attachments are read before the target checks, so the Turn cannot end in between.
+    const content = await claudeUserContent(text, { steer: true });
+    const active = this.#active;
+    if (!active || active.command.turnId !== command.turnId) {
+      return { ok: false, error: invalidState("Claude Code steer target is not the active Turn") };
+    }
+    if (active.cancellationRequested) {
+      // A cancelled Turn must not take more input; its Segments are being interrupted.
+      return { ok: false, error: invalidState("Claude Code steer target is being cancelled") };
     }
     const transport = this.#transport;
     if (!transport) {
@@ -1061,7 +1089,7 @@ class ClaudeHarnessSession implements HarnessSession {
     const messageId = this.#randomUUID();
     active.steersAwaitingNative.add(messageId);
     try {
-      await transport.steer(text, messageId, (started) =>
+      await transport.steer(content, messageId, (started) =>
         this.#takeOverSteer(active, messageId, started),
       );
     } catch (error) {
@@ -1791,6 +1819,7 @@ class ClaudeHarnessSession implements HarnessSession {
     try {
       transport = this.#createTransport({
         cwd: this.#cwd,
+        additionalDirectories: this.#additionalDirectories,
         sessionId: this.#sessionId,
         openMode: this.#openMode,
         ...(model ? { model } : {}),
@@ -2931,11 +2960,17 @@ class ClaudeHarnessSession implements HarnessSession {
       : null;
     // New Segments cannot confirm that earlier Turns have reached the transcript.
     // Only readSnapshot clears IDs after observing them all in native history.
-    if (active.userMessageId || active.checkpointId) {
+    // A Turn cancelled before producing any checkpoint may never reach disk; avoid
+    // blocking later history reads forever on its unpersisted userMessageId.
+    const trackUserMessageId =
+      active.userMessageId !== null &&
+      !SYNTHETIC_AUTONOMOUS_TURN_KEY_PATTERN.test(active.userMessageId) &&
+      (outcome.status !== "cancelled" || active.checkpointId !== null);
+    if (trackUserMessageId || active.checkpointId) {
       this.#unpersistedMessageIds = [
         ...new Set([
           ...this.#unpersistedMessageIds,
-          ...(active.userMessageId ? [active.userMessageId] : []),
+          ...(trackUserMessageId && active.userMessageId ? [active.userMessageId] : []),
           ...(active.checkpointId ? [active.checkpointId] : []),
         ]),
       ];
@@ -3026,6 +3061,7 @@ class ClaudeHarnessSession implements HarnessSession {
 }
 
 export class ClaudeCodeAdapter implements HarnessAdapter {
+  readonly additionalDirectories = true;
   readonly commandCatalog = claudeCommandCatalog;
   readonly liveCommandCatalog = true;
   readonly harnessId: HarnessId = claudeCodeHarnessId;
@@ -3540,6 +3576,9 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       (planLimit) => this.#recordPlanLimit(session, planLimit),
       {
         ...(environment ? { environment } : {}),
+        ...((input.kind === "create" || input.kind === "resume") && input.additionalDirectories
+          ? { additionalDirectories: input.additionalDirectories }
+          : {}),
         bypassPermissionsAvailable,
         openMode,
         pendingSessions: this.#pendingSessions,

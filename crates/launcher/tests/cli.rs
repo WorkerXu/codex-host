@@ -193,7 +193,7 @@ fn help_prints_usage_to_stdout_and_succeeds() {
         for command in [
             "codexhost --version",
             "codexhost harness list|inspect ...",
-            "codexhost thread send|cancel|read|wait|watch|watches|list ...",
+            "codexhost thread send|cancel|read|wait|answer|watch|watches|list ...",
             "codexhost broker install|status|stop|uninstall",
         ] {
             assert!(stdout.contains(command), "{argument}: {command}");

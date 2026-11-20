@@ -3,9 +3,9 @@ import {
   installRendererBindingProbe,
   type RendererBindingProbeApi,
 } from "./renderer-binding-probe.js";
-import { installRendererProjectGroups } from "./renderer-project-groups.js";
 import { installCurrentRendererAdapter } from "./versioned-renderer-adapter.js";
 import { installRendererProjectMirror } from "./renderer-project-mirror.js";
+import { installRendererSidebarSections } from "./renderer-sidebar-sections.js";
 
 export function installRendererBinding(
   enabledAgents?: readonly RendererAgent[],
@@ -16,6 +16,14 @@ export function installRendererBinding(
   } catch (error) {
     console.error(
       "codexhost project mirror installation failed",
+      error instanceof Error ? error.name : "UnknownError",
+    );
+  }
+  try {
+    installRendererSidebarSections();
+  } catch (error) {
+    console.error(
+      "codexhost sidebar section installation failed",
       error instanceof Error ? error.name : "UnknownError",
     );
   }
@@ -34,14 +42,6 @@ export function installRendererBinding(
       modelUpdates: 0,
       hook: null,
     });
-  }
-  try {
-    installRendererProjectGroups();
-  } catch (error) {
-    console.error(
-      "codexhost project groups installation failed",
-      error instanceof Error ? error.name : "UnknownError",
-    );
   }
   return binding;
 }

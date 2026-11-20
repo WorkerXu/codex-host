@@ -1,10 +1,14 @@
+import { runSkillsCli } from "./skills-hub/cli.js";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
+import type { JsonValue } from "@codexhost/protocol-core";
 import type { Writable } from "node:stream";
 
 import { delegationCliHelp, type DelegationCliCommand } from "./delegation-cli-help.js";
 import { parseDelegationArguments, type DelegationCliArguments } from "./delegation-cli-options.js";
 import { compactDelegationOutput } from "./delegation-cli-output.js";
 import { runPeerExec } from "./peer-exec.js";
+import { DINGTALK_CLI_HELP, runDingTalkCli } from "./dingtalk-cli-command.js";
 import { runPeerCli } from "./peer-cli.js";
 import {
   peerThreadReference,
@@ -15,6 +19,7 @@ import {
 import { DEFAULT_PEER_TIMEOUT_MS, requestPeerRoute, type PeerSpawn } from "./peer-transport.js";
 
 export { DELEGATION_HELP } from "./delegation-cli-help.js";
+export { DINGTALK_CLI_HELP };
 
 import {
   DEFAULT_WATCH_TIMEOUT_MS,
@@ -85,6 +90,18 @@ function positiveInteger(value: string | undefined, name: string, maximum?: numb
     );
   }
   return number;
+}
+
+/** Load the existing reply result; its owner interprets and validates it. */
+function questionReply(source: string, path: string): JsonValue {
+  try {
+    return JSON.parse(source) as JsonValue;
+  } catch (error) {
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      `Answers file '${path}' is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function value(parsed: DelegationCliArguments, name: string): string | undefined {
@@ -317,11 +334,23 @@ export async function runDelegationCli(input: {
     if (input.arguments[0] === "peer-exec") {
       return await runPeerExec({ environment, output });
     }
+    if (input.arguments[0] === "skills") {
+      return runSkillsCli({ arguments: input.arguments.slice(1), environment, output });
+    }
     if (input.arguments[0] === "peer") {
       return await runPeerCli({
         arguments: input.arguments.slice(1),
         environment,
         output,
+      });
+    }
+    if (input.arguments[0] === "dingtalk") {
+      return await runDingTalkCli({
+        arguments: input.arguments.slice(1),
+        environment,
+        output,
+        diagnosticOutput,
+        ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
       });
     }
     const [group, command, ...rest] = input.arguments;
@@ -421,7 +450,10 @@ export async function runDelegationCli(input: {
         "--harness",
         "--task",
         "--task-name",
+        "--project",
         "--cwd",
+        "--worktree",
+        "--base",
         "--model",
         "--thinking",
         "--parent-thread",
@@ -447,6 +479,27 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "Cross-machine delegate start does not support --parent-thread",
         );
+      const worktree = value(parsed, "--worktree");
+      const base = value(parsed, "--base");
+      if (base !== undefined && worktree === undefined)
+        throw new DelegationControlError("INVALID_ARGUMENT", "--base requires --worktree");
+      // Peer paths belong to the target machine; never resolve them against this CLI's cwd.
+      const requestedCwd = value(parsed, "--cwd");
+      if (
+        worktree !== undefined &&
+        target !== "local" &&
+        (!requestedCwd || !path.isAbsolute(requestedCwd))
+      )
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Cross-machine --worktree requires an explicit absolute --cwd",
+        );
+      const worktreeCwd =
+        worktree === undefined
+          ? cwdOption(parsed)
+          : target === "local"
+            ? path.resolve(process.cwd(), requestedCwd ?? ".")
+            : requestedCwd;
       // A remote Runtime has no local parent Thread; the caller environment is
       // intentionally ignored so the child is not attached to a foreign ID.
       const caller = callerThreadId(environment);
@@ -477,10 +530,18 @@ export async function runDelegationCli(input: {
         body: {
           harnessId,
           task,
+          ...(value(parsed, "--project") !== undefined
+            ? {
+                projectId:
+                  value(parsed, "--project") === "none" ? null : value(parsed, "--project"),
+              }
+            : {}),
           ...(value(parsed, "--task-name") !== undefined
             ? { taskName: value(parsed, "--task-name") }
             : {}),
-          ...(cwdOption(parsed) ? { cwd: cwdOption(parsed) } : {}),
+          ...(worktreeCwd ? { cwd: worktreeCwd } : {}),
+          ...(worktree !== undefined ? { worktree } : {}),
+          ...(base !== undefined ? { base } : {}),
           ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
           ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),
@@ -672,6 +733,55 @@ export async function runDelegationCli(input: {
         command === "read" ? "thread read" : "thread wait",
         withPeerHostId(result, target),
         view,
+      );
+      return 0;
+    }
+    if (group === "thread" && command === "answer") {
+      rejectUnknown(parsed, ["--interaction", "--answers-file", "--host"]);
+      if (parsed.positionals.length !== 1)
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "thread answer requires one Thread identifier",
+        );
+      const threadId = parsed.positionals[0];
+      const interactionId = value(parsed, "--interaction");
+      const answersFile = value(parsed, "--answers-file");
+      if (!threadId || !interactionId?.trim() || !answersFile) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Thread identifier, --interaction <id>, and --answers-file <file> are required",
+        );
+      }
+      let source: string;
+      try {
+        source = await readFile(answersFile, "utf8");
+      } catch (error) {
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          `Answers file '${answersFile}' could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const reference = readThreadReference(threadId);
+      const host = threadHost(parsed, reference);
+      const target = await resolveHostTarget(environment, host);
+      writeResult(
+        "thread answer",
+        withPeerHostId(
+          await requestHosted({
+            environment,
+            target,
+            ...(host ? { host } : {}),
+            path: "/v1/thread/answer",
+            body: {
+              threadId: reference.threadId,
+              interactionId,
+              result: questionReply(source, answersFile),
+            },
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+            ...(input.spawnImpl ? { spawnImpl: input.spawnImpl } : {}),
+          }),
+          target,
+        ),
       );
       return 0;
     }

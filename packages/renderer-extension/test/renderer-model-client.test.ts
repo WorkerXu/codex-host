@@ -318,6 +318,37 @@ describe("Renderer fixed Model request client", () => {
     await expect(remote?.listHarnessPlugins?.()).rejects.toThrow();
   });
 
+  it("requests the conditional directory and falls back for a Host without it", async () => {
+    const plugin = { id: "pi", name: "Pi", version: "1" };
+    const sendRequest = vi
+      .fn()
+      .mockResolvedValueOnce({
+        plugins: [plugin],
+        fingerprint: "fp-1",
+        availability: { pi: "ready" },
+      })
+      .mockRejectedValueOnce({ code: -32602, message: "Invalid Harness plugin list params" })
+      .mockResolvedValueOnce({ plugins: [plugin] })
+      .mockResolvedValueOnce({ unchanged: true, fingerprint: "fp-1" });
+    const client = createRendererModelClient([{ sendRequest }]);
+    await expect(client?.listHarnessPlugins?.({ ifNoneMatch: "fp-1" })).resolves.toEqual({
+      plugins: [plugin],
+      fingerprint: "fp-1",
+      availability: { pi: "ready" },
+    });
+    expect(sendRequest).toHaveBeenLastCalledWith(HARNESS_PLUGIN_LIST_METHOD, {
+      ifNoneMatch: "fp-1",
+    });
+    await expect(client?.listHarnessPlugins?.({ ifNoneMatch: "fp-1" })).resolves.toEqual({
+      plugins: [plugin],
+    });
+    expect(sendRequest).toHaveBeenLastCalledWith(HARNESS_PLUGIN_LIST_METHOD, {});
+    await expect(client?.listHarnessPlugins?.({ ifNoneMatch: "fp-1" })).resolves.toEqual({
+      unchanged: true,
+      fingerprint: "fp-1",
+    });
+  });
+
   it("opens the console through its fixed Host method and validates the address", async () => {
     const sendRequest = vi
       .fn()

@@ -140,13 +140,30 @@ function optionalField<Name extends string>(
   return value === undefined ? {} : ({ [name]: value } as Partial<Record<Name, string>>);
 }
 
+function invalidOperationMessage(
+  operation: "create" | "read" | "resume" | "fork" | "turn",
+): string {
+  switch (operation) {
+    case "create":
+      return "外部对话创建请求无效，请重试";
+    case "read":
+      return "外部对话读取请求无效，请重试";
+    case "resume":
+      return "外部对话恢复请求无效，请重新打开对话后重试";
+    case "fork":
+      return "外部对话派生请求无效，请重试";
+    case "turn":
+      return "外部对话消息请求无效，请重试";
+  }
+}
+
 export function mapExternalThreadHarnessError(
   error: HarnessError,
   operation: "create" | "read" | "resume" | "fork" | "turn",
 ): ExternalThreadRpcError {
   switch (error.code) {
     case "invalidRequest":
-      return { code: -32602, message: `External Thread ${operation} request is invalid` };
+      return { code: -32602, message: invalidOperationMessage(operation) };
     case "sessionBusy":
       return { code: -32072, message: "External Thread has an active operation" };
     case "unsupported":

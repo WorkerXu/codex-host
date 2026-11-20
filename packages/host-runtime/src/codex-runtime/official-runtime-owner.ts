@@ -416,6 +416,21 @@ export class OfficialRuntimeOwner {
       return;
     const value = event.value;
     if (!object(value)) return client.output(event);
+    if (value.method === "serverRequest/resolved" && object(value.params)) {
+      for (const [requestId, originalId] of client.serverRequests) {
+        if (originalId !== value.params.requestId) continue;
+        client.serverRequests.delete(requestId);
+        const projected = { ...value, params: { ...value.params, requestId } };
+        await client.output({
+          ...event,
+          value: projected,
+          frame: Buffer.from(`${JSON.stringify(projected)}\n`),
+        });
+        return;
+      }
+      // A client can retire only a request identity it was shown.
+      return;
+    }
     if (typeof value.id === "string" || typeof value.id === "number") {
       if (typeof value.method === "string") {
         const id = `codexhost:server:${client.id}:${event.generation}:${randomUUID()}`;

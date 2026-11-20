@@ -1,3 +1,24 @@
+import { alignBackgroundTextRun, backgroundItemText } from "./background-output.js";
+import type { ModelService } from "./model-service.js";
+import type { CodeRepositories } from "./code-repositories.js";
+import { RepositoryError } from "./code-repository-process.js";
+import { DingTalkNativeRunner } from "./dingtalk-native-runner.js";
+import {
+  DELEGATION_PROJECTS_METHOD,
+  DELEGATION_PROJECTS_CHANGED_METHOD,
+} from "@codexhost/shared-contracts";
+import { ThreadFolders, parseWorkingFolders, threadEnvironmentId } from "./thread-folders.js";
+import {
+  THREAD_FOLDERS_GET_METHOD,
+  THREAD_FOLDERS_SET_METHOD,
+  threadFoldersGetParamsSchema,
+  threadFoldersSetParamsSchema,
+} from "@codexhost/shared-contracts";
+import { SKILLS_HUB_METHOD } from "@codexhost/shared-contracts";
+import { getSkillsHub, skillsError, type SkillsHubService } from "./skills-hub/service.js";
+import { HUB_ADMIN_METHOD } from "@codexhost/shared-contracts";
+import { HubAdminService } from "./hub-admin-service.js";
+import { HubAdminError } from "./hub-admin-http.js";
 import {
   THREAD_QUESTIONS_LIST_METHOD,
   THREAD_QUESTION_RESPOND_METHOD,
@@ -15,19 +36,95 @@ import {
   REMOTE_UPDATE_METHOD,
   remoteUpdateParamsSchema,
   DESKTOP_PROJECTS_CATALOG_METHOD,
-  PROJECT_GROUPS_LIST_METHOD,
-  PROJECT_GROUPS_REPLACE_METHOD,
   PROJECT_MIRROR_LIST_METHOD,
   PROJECT_MIRROR_UPSERT_METHOD,
-  projectGroupsReplaceParamsSchema,
   projectMirrorUpsertParamsSchema,
+  JARVIS_STATUS_METHOD,
+  JARVIS_BUG_SEARCH_METHOD,
+  JARVIS_BUG_SEARCH_CANCEL_METHOD,
+  JARVIS_PROJECT_LIST_METHOD,
+  JARVIS_PROJECT_BUG_TITLE_METHOD,
+  JARVIS_PROJECT_BUG_SEARCH_METHOD,
+  jarvisBugSearchCancelParamsSchema,
+  jarvisProjectListParamsSchema,
+  jarvisProjectBugTitleParamsSchema,
+  jarvisProjectBugSearchParamsSchema,
+  JARVIS_SETTINGS_GET_METHOD,
+  JARVIS_SETTINGS_SET_METHOD,
+  JARVIS_SETTINGS_TEST_METHOD,
+  JARVIS_INSTALL_METHOD,
+  JARVIS_DOWNLOAD_START_METHOD,
+  JARVIS_DOWNLOAD_CHUNK_METHOD,
+  JARVIS_INSTALL_UPLOAD_METHOD,
+  JARVIS_LOGIN_START_METHOD,
+  JARVIS_LOGIN_FORWARD_METHOD,
+  JARVIS_LOGIN_STOP_METHOD,
+  jarvisBugSearchParamsSchema,
+  jarvisSettingsSetParamsSchema,
+  jarvisInstallParamsSchema,
+  jarvisDownloadStartParamsSchema,
+  jarvisDownloadChunkParamsSchema,
+  jarvisInstallUploadParamsSchema,
+  jarvisLoginForwardParamsSchema,
+  jarvisLoginStopParamsSchema,
+  DINGTALK_STATUS_METHOD,
+  DINGTALK_SETTINGS_GET_METHOD,
+  DINGTALK_SETTINGS_SET_METHOD,
+  DINGTALK_CONVERSATIONS_METHOD,
+  DINGTALK_PREVIEW_METHOD,
+  DINGTALK_DETAILS_METHOD,
+  DINGTALK_MESSAGES_METHOD,
+  DINGTALK_MEMBERS_METHOD,
+  DINGTALK_RESOURCE_METHOD,
+  DINGTALK_SEND_METHOD,
+  DINGTALK_SEARCH_METHOD,
+  DINGTALK_RESOLVE_METHOD,
+  DINGTALK_VIEWED_METHOD,
+  DINGTALK_PREFETCH_METHOD,
+  DINGTALK_DIAGNOSTICS_METHOD,
+  DINGTALK_TIMING_METHOD,
+  DINGTALK_CHANGED_METHOD,
+  dingtalkStatusParamsSchema,
+  dingtalkConversationsParamsSchema,
+  dingtalkPreviewParamsSchema,
+  dingtalkDetailsSchema,
+  dingtalkMessagesParamsSchema,
+  dingtalkMembersParamsSchema,
+  dingtalkResourceParamsSchema,
+  dingtalkSendParamsSchema,
+  dingtalkSearchParamsSchema,
+  dingtalkResolveParamsSchema,
+  dingtalkViewedParamsSchema,
+  dingtalkPrefetchParamsSchema,
+  dingtalkDiagnosticsParamsSchema,
+  dingtalkTimingParamsSchema,
+  dingtalkSettingsSetParamsSchema,
+  CODEX_AGENT_LIST_METHOD,
+  CODEX_AGENT_READ_METHOD,
+  CODEX_AGENT_SAVE_METHOD,
+  CODEX_AGENT_DELETE_METHOD,
+  CODEX_AGENT_CATALOG_METHOD,
+  codexAgentListResultSchema,
+  codexAgentRecordSchema,
+  codexAgentReadParamsSchema,
+  codexAgentSaveParamsSchema,
+  codexAgentDeleteParamsSchema,
+  codexAgentDeleteResultSchema,
+  DINGTALK_DISPATCH_GET_METHOD,
+  DINGTALK_DISPATCH_SET_METHOD,
+  DINGTALK_DISPATCH_STATUS_METHOD,
+  DINGTALK_DISPATCH_SCORE_METHOD,
+  DINGTALK_DISPATCH_RUN_METHOD,
+  dingtalkDispatchSettingsSchema,
+  dingtalkDispatchStatusSchema,
+  dingtalkDispatchMessageParamsSchema,
+  dingtalkDispatchRunParamsSchema,
+  dingtalkDispatchScoreResultSchema,
+  dingtalkDispatchRunResultSchema,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
+import type { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
-import {
-  ProjectGroupRevisionConflictError,
-  type ProjectGroupsService,
-} from "./project-groups-service.js";
 import {
   ProjectMirrorRevisionConflictError,
   type ProjectMirrorService,
@@ -82,6 +179,21 @@ import {
   rewriteDelegationMentionInput,
   rewriteDelegationMentionText,
 } from "./delegation-mention-rewrite.js";
+import { hasJarvisCarrier } from "./jarvis-mention-rewrite.js";
+import { hasDingTalkCarrier, stripDingTalkMentions } from "@codexhost/shared-contracts";
+import { JarvisServiceError, type JarvisService } from "./jarvis-service.js";
+import { DingTalkServiceError, type DingTalkService } from "./dingtalk-service.js";
+import type {
+  DingTalkDispatchRun,
+  DingTalkDispatchThreadInput,
+} from "./dingtalk-dispatch-types.js";
+import type { DingTalkDispatcher } from "./dingtalk-dispatcher.js";
+import { CodexAgentError, type CodexAgentStore } from "./codex-agents.js";
+import { codexAgentCatalogFromModelList } from "./codex-agent-models.js";
+import type {
+  DingTalkDispatchAgent,
+  DingTalkDispatchSettingsStore,
+} from "./dingtalk-dispatch-settings.js";
 import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
@@ -232,8 +344,13 @@ import {
   DELEGATION_THREAD_ID_ENV,
   DelegationControlError,
 } from "./delegation-types.js";
-import { HarnessDelegationCoordinator } from "./harness-delegation-coordinator.js";
+import {
+  HarnessDelegationCoordinator,
+  type OfficialDelegationStartInput,
+} from "./harness-delegation-coordinator.js";
 import { loadHarnessPlugins } from "./harness-plugin-loader.js";
+import { harnessPluginFingerprints } from "./harness-plugin-fingerprint.js";
+import { HarnessAvailabilityStore } from "./harness-availability-store.js";
 import type { HarnessPluginRegistry } from "./harness-plugin-registry.js";
 import {
   HARNESS_LAUNCH_SETTINGS_GET_METHOD,
@@ -255,9 +372,14 @@ import type {
   ThreadCancelResult,
   ThreadListInput,
   ThreadReadInput,
+  ThreadAnswerInput,
+  ThreadAnswerResult,
+  DelegationPendingQuestion,
   ThreadSendInput,
   ThreadSendResult,
 } from "./delegation-types.js";
+import { QuestionInteractions } from "./question-interactions.js";
+import { nativeQuestionReply, type NativeAsyncQuestions } from "./native-async-questions.js";
 import { projectDelegationThreadSnapshot } from "./delegation-snapshot.js";
 import { rememberNativeListSeconds } from "./delegation-thread-list-merge.js";
 import {
@@ -397,10 +519,27 @@ export interface AppServerHostOptions {
   runtimeMaintenance?: RuntimeMaintenance;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
-  /** Local-only project-group configuration and Desktop project catalog reads. */
-  projectGroups?: ProjectGroupsService;
+  /** Local-only read access to the Desktop project catalog. */
+  desktopProjects?: DesktopProjectCatalogReader;
   /** Local-only registry of remote projects created for local source projects. */
   projectMirror?: ProjectMirrorService;
+  /** Jarvis `@` suggestions, mention expansion and per-machine CLI management. */
+  jarvis?: JarvisService;
+  /** Desktop-local shared model credentials and structured connection tests. */
+  modelService?: ModelService;
+  codeRepositories?: CodeRepositories;
+  /** Central skills inventory, agent discovery and per-skill sync. */
+  skillsHub?: Pick<SkillsHubService, "request">;
+  /** MCP server and memory administration through allowlisted localhost services. */
+  hubAdmin?: HubAdminService;
+  /** DingTalk workbench, mention expansion and dws routing. */
+  dingtalk?: DingTalkService;
+  /** Local-only Codex custom agent files under `$CODEX_HOME/agents`. */
+  codexAgents?: CodexAgentStore;
+  /** Local-only DingTalk dispatch settings read by the separate listener runtime. */
+  dingTalkDispatch?: DingTalkDispatchSettingsStore;
+  /** Local-only runtime that listens, matches and starts dispatched Threads. */
+  dingTalkDispatcher?: Pick<DingTalkDispatcher, "status" | "score" | "run">;
   onDelegationApi?: (api: DelegationControlRegistration) => (() => void) | undefined;
   /** Peer names and Harness catalogs for the Renderer's `#` picker. */
   delegationPeers?: Pick<DelegationPeerCatalogApi, "listPeers">;
@@ -443,6 +582,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function codexAgentParamError(
+  issues: ReadonlyArray<{ path: readonly PropertyKey[] }>,
+): CodexAgentError {
+  const field = issues[0]?.path[0];
+  if (field === "name") return new CodexAgentError("invalid_name", "Invalid agent name");
+  if (field === "fileName") {
+    return new CodexAgentError("invalid_file_name", "Invalid agent file name");
+  }
+  return new CodexAgentError("invalid_params", "Invalid agent settings");
+}
+
 function officialThreadBusy(thread: Record<string, unknown> | null): boolean {
   if (thread && isRecord(thread.status) && thread.status.type === "active") return true;
   const turns = thread && Array.isArray(thread.turns) ? thread.turns : [];
@@ -454,6 +604,19 @@ function officialThreadBusy(thread: Record<string, unknown> | null): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Optional CLI fields may be present as undefined; JSON values cannot carry them. */
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value))
+    return value.filter((item) => item !== undefined).map((item) => stripUndefined(item)) as T;
+  if (value !== null && typeof value === "object") {
+    const clean: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value))
+      if (item !== undefined) clean[key] = stripUndefined(item);
+    return clean as T;
+  }
+  return value;
 }
 
 /**
@@ -661,6 +824,7 @@ class OrderedWriter {
     private readonly stream: Writable,
     /** Returns true for a message it consumed instead of the stream. */
     private readonly intercept: (value: JsonValue) => boolean = () => false,
+    private readonly observe: (value: JsonValue) => Promise<void> = async () => {},
   ) {}
 
   frame(frame: Buffer<ArrayBufferLike>): Promise<void> {
@@ -668,8 +832,10 @@ class OrderedWriter {
   }
 
   json(value: JsonValue): Promise<void> {
-    if (this.intercept(value)) return Promise.resolve();
-    return this.#enqueue(() => writeJsonFrame(this.stream, value));
+    return this.#enqueue(async () => {
+      await this.observe(value);
+      if (!this.intercept(value)) await writeJsonFrame(this.stream, value);
+    });
   }
 
   #enqueue(operation: () => Promise<void>): Promise<void> {
@@ -709,14 +875,29 @@ export class AppServerHost {
   readonly #modelPrices: ModelPriceCatalog;
   readonly #observedSessionUsage: ObservedSessionUsage;
   #repository: ExternalThreadRepository;
+  readonly #threadFolders: ThreadFolders;
   #pendingDesktopApprovals = new Map<HostApprovalRequestId, PendingDesktopApproval>();
+  // Only multi-select cards retain the shared Host question protocol.
   #pendingDesktopQuestions = new Map<HostQuestionRequestId, PendingDesktopQuestion>();
+  readonly #questions = new QuestionInteractions({
+    run: (threadId, operation) =>
+      this.#externalRuntime.idleRelease.runOperation(threadId, operation),
+    resolved: (threadId, requestId) =>
+      this.#writer.json({ method: "serverRequest/resolved", params: { threadId, requestId } }),
+    diagnose: (error) => this.#diagnose(error),
+  });
+  readonly #asyncQuestions: NativeAsyncQuestions;
   #nextApprovalRequestId = HOST_APPROVAL_REQUEST_ID_MAX;
   #nextQuestionRequestId = HOST_QUESTION_REQUEST_ID_MAX;
   #delegationCoordinator: HarnessDelegationCoordinator;
+  readonly #availabilityStore: HarnessAvailabilityStore;
   #sessionImportRequests: SessionImportRequests | undefined;
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
+  #unsubscribeDingTalk: (() => void) | undefined;
+  readonly #dingTalkNativeRunner = new DingTalkNativeRunner((method, params) =>
+    this.#requestOfficial(method, params),
+  );
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
@@ -745,6 +926,7 @@ export class AppServerHost {
   readonly #desktopRequests = new DesktopRequestQueue();
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
+  readonly #hubAdmin: Pick<HubAdminService, "request" | "stop">;
 
   constructor(options: AppServerHostOptions) {
     this.#options = {
@@ -753,6 +935,9 @@ export class AppServerHost {
       diagnosticOutput: process.stderr,
       ...options,
     };
+    this.#threadFolders = new ThreadFolders(options.environment ?? process.env);
+    this.#hubAdmin =
+      options.hubAdmin ?? new HubAdminService({ environment: options.environment ?? process.env });
     this.#modelPrices = options.modelPrices ?? new ModelPriceCatalog();
     this.#observedSessionUsage = new ObservedSessionUsage(
       () =>
@@ -762,11 +947,25 @@ export class AppServerHost {
       this.#modelPrices,
       (error) => this.#diagnose(error),
     );
-    this.#writer = new OrderedWriter(this.#options.desktopOutput, (value) => {
-      this.#noteDesktopReply(value);
-      return this.#takeConsoleReply(value);
-    });
+    this.#writer = new OrderedWriter(
+      this.#options.desktopOutput,
+      (value) => {
+        this.#noteDesktopReply(value);
+        return this.#takeConsoleReply(value);
+      },
+      (value) =>
+        this.#threadFolders.observe(value).catch((error: unknown) => this.#diagnose(error)),
+    );
+    // A shared service can serve several Desktop sessions; each Host keeps its
+    // own subscription instead of replacing the previous session's notifier.
+    this.#unsubscribeDingTalk =
+      this.#options.dingtalk?.addNotifier((event) => {
+        void this.#writer
+          .json({ method: DINGTALK_CHANGED_METHOD, params: event })
+          .catch(() => undefined);
+      }) ?? undefined;
     const environment = this.#options.environment ?? process.env;
+    this.#availabilityStore = new HarnessAvailabilityStore(environment);
     this.#launchSettings = new HarnessLaunchSettingsStore(
       this.#options.pluginContext?.environment ?? environment,
     );
@@ -797,6 +996,7 @@ export class AppServerHost {
                 }),
           ),
       });
+    this.#asyncQuestions = this.#officialRuntimeScope.asyncQuestions;
     this.#accountControl =
       options.accountControl ??
       new SingleNativeCodexAccount(() => ({
@@ -816,6 +1016,8 @@ export class AppServerHost {
       onBackendStopped: () => {
         this.#pendingOfficialTurnStarts.clear();
         this.#activeOfficialTurns.clear();
+        this.#officialServerRequests.clear();
+        void this.#questions.closeWhere((request) => request.harnessId === "codex");
         this.#signalActiveWorkChanged();
       },
       output: async (output) =>
@@ -851,6 +1053,7 @@ export class AppServerHost {
       }
     }
     this.#externalRuntime = new ExternalThreadRuntime({
+      workingFolders: async (id) => (await this.#threadFolders.store.get(id))?.folders ?? null,
       adapters: this.#externalAdapters,
       environment: this.#options.environment ?? process.env,
       repository: this.#repository,
@@ -869,6 +1072,7 @@ export class AppServerHost {
           ![...this.#pendingDesktopApprovals.values()].some(
             (pending) => pending.thread === thread,
           ) &&
+          this.#questions.read(thread.id).length === 0 &&
           ![...this.#pendingDesktopQuestions.values()].some((pending) => pending.thread === thread),
       },
     });
@@ -887,10 +1091,19 @@ export class AppServerHost {
       cancelOfficial: (input) => this.#cancelOfficialDelegationThread(input),
       startOfficial: (input) => this.#startOfficialDelegation(input),
       listOfficial: (input) => this.#listDelegationThreads(input),
+      projectForThread: async (threadId) => {
+        const catalog = await this.#options.desktopProjects?.read().catch(() => null);
+        return catalog
+          ? (catalog.threadProjectAssignments[threadId]?.projectId ?? null)
+          : undefined;
+      },
       officialThreadMetadata: (threadId) => this.#readOfficialThreadMetadata(threadId),
       activeOfficialParents: () => [...this.#activeOfficialTurns.keys()],
       externalThreadBusy: (thread) => this.#externalThreadBusy(thread),
+      answerQuestion: (input) => this.#answerDelegationQuestion(input),
+      pendingQuestions: (threadId) => this.#pendingDelegationQuestions(threadId),
       ...(this.#options.pluginRoots ? { pluginRoots: this.#options.pluginRoots } : {}),
+      availabilityStore: this.#availabilityStore,
     });
     const maintenanceOperation = <T>(run: () => Promise<T>): Promise<T> =>
       options.runtimeMaintenance ? options.runtimeMaintenance.operation(run) : run();
@@ -918,6 +1131,7 @@ export class AppServerHost {
         maintenanceOperation(() =>
           this.#waitForPlugins().then(() => this.#delegationCoordinator.send(input)),
         ),
+      answer: (input) => maintenanceOperation(() => this.#delegationCoordinator.answer(input)),
       cancel: (input) =>
         this.#waitForPlugins().then(() => this.#delegationCoordinator.cancel(input)),
       read: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.read(input)),
@@ -937,6 +1151,8 @@ export class AppServerHost {
   close(): void {
     if (this.#closeRequested) return;
     this.#closeRequested = true;
+    this.#unsubscribeDingTalk?.();
+    this.#unsubscribeDingTalk = undefined;
     this.#options.sharedThreads?.close();
     this.#externalRuntime.idleRelease.disable();
     this.#pluginLoadAbort.abort();
@@ -949,6 +1165,7 @@ export class AppServerHost {
   }
 
   async #closeOfficialRuntime(): Promise<void> {
+    await this.#questions.closeWhere(() => true);
     this.#nativeAccountObserver?.close();
     if (this.#ownsOfficialRuntimeScope) await this.#officialRuntimeScope.close();
     await this.#officialRuntime.close();
@@ -1078,7 +1295,10 @@ export class AppServerHost {
       await this.#closeOfficialRuntime();
       return this.#closeRequested ? 0 : 1;
     } finally {
+      this.#dingTalkNativeRunner.dispose();
       this.#options.sharedThreads?.close();
+      this.#unsubscribeDingTalk?.();
+      this.#unsubscribeDingTalk = undefined;
       this.#pluginLoadAbort.abort();
       // Stop replacement waiters before waiting for their tracked Host operations.
       this.#externalSteering.close();
@@ -1110,6 +1330,7 @@ export class AppServerHost {
       this.#unregisterDelegationApi = undefined;
       this.#unsubscribeAccountState?.();
       this.#unsubscribeAccountState = undefined;
+      await this.#hubAdmin.stop().catch((error) => this.#diagnose(error));
       if (this.#options.closeMappingStoreOnExit !== false) {
         await this.#repository.close().catch((error) => this.#diagnose(error));
       }
@@ -1352,6 +1573,69 @@ export class AppServerHost {
     frame: Buffer<ArrayBufferLike>,
   ): Promise<void> {
     if (this.#closeRequested) return;
+    if (request.method === DELEGATION_PROJECTS_METHOD) {
+      const assignments = (await this.#repository.listDelegations()).flatMap((delegation) =>
+        delegation.desktopProject
+          ? [{ threadId: delegation.childHostThreadId, ...delegation.desktopProject }]
+          : [],
+      );
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse({ assignments }) }),
+      );
+      return;
+    }
+    if (
+      request.method === THREAD_FOLDERS_GET_METHOD ||
+      request.method === THREAD_FOLDERS_SET_METHOD
+    ) {
+      try {
+        if (request.method === THREAD_FOLDERS_SET_METHOD) {
+          const { threadId, folders } = threadFoldersSetParamsSchema.parse(request.params);
+          const selection = await this.#threadFolders.select(
+            threadId,
+            parseWorkingFolders(folders),
+          );
+          await this.#writer.json(
+            rpcEnvelope(request, { result: jsonValueSchema.parse(selection) }),
+          );
+        } else {
+          const { threadId, harnessId: draftHarness } = threadFoldersGetParamsSchema.parse(
+            request.params,
+          );
+          await this.#waitForPlugins();
+          const location = threadId ? await this.#locateExternalThread(threadId) : null;
+          const harnessId =
+            location?.kind === "external" ? location.record.harnessId : (draftHarness ?? "codex");
+          await this.#writer.json(
+            rpcEnvelope(request, {
+              result: jsonValueSchema.parse({
+                selection: threadId ? await this.#threadFolders.store.get(threadId) : null,
+                recent: await this.#threadFolders.recent(),
+                additionalDirectories:
+                  harnessId === "codex" ||
+                  this.#externalAdapters.get(harnessId as ExternalHarnessId)
+                    ?.additionalDirectories === true,
+              }),
+            }),
+          );
+        }
+      } catch (error) {
+        await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+      }
+      return;
+    }
+    if (request.method === "thread/start") {
+      try {
+        const rewritten = await this.#threadFolders.prepare(request, async () => null, false);
+        if (rewritten !== request) {
+          request = rewritten;
+          frame = encodeJsonFrame(request as unknown as JsonObject);
+        }
+      } catch (error) {
+        await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+        return;
+      }
+    }
     if (
       request.method === RUNTIME_STATUS_METHOD ||
       request.method === REMOTE_UPDATE_METHOD ||
@@ -1400,18 +1684,104 @@ export class AppServerHost {
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
       return;
     }
-    if (
-      request.method === PROJECT_GROUPS_LIST_METHOD ||
-      request.method === PROJECT_GROUPS_REPLACE_METHOD ||
-      request.method === DESKTOP_PROJECTS_CATALOG_METHOD
-    ) {
-      if (this.#options.externalOnly || !this.#options.projectGroups) {
+    if (request.method.startsWith("codexhost/code-repositories/")) {
+      this.#dispatchDesktopReply(request, async () => {
+        if (!this.#options.codeRepositories) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await this.#options.codeRepositories.request(
+            request.method,
+            request.params,
+          );
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(
+              request,
+              -32602,
+              error instanceof RepositoryError ? error.code : "invalid_params",
+            ),
+          );
+        }
+      });
+      return;
+    }
+    if (request.method.startsWith("codexhost/model-service/")) {
+      this.#dispatchDesktopReply(request, async () => {
+        if (!this.#options.modelService) {
+          await this.#writer.json(rpcError(request, -32601, "local_only"));
+          return;
+        }
+        try {
+          const result = await this.#options.modelService.request(request.method, request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch {
+          await this.#writer.json(rpcError(request, -32602, "invalid_params"));
+        }
+      });
+      return;
+    }
+    if (request.method === SKILLS_HUB_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service =
+            this.#options.skillsHub ?? getSkillsHub(this.#options.environment ?? process.env);
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32096, skillsError(error)));
+        }
+      });
+      return;
+    }
+    if (request.method === HUB_ADMIN_METHOD) {
+      this.#dispatchDesktopReply(request, async () => {
+        try {
+          const service = this.#hubAdmin;
+          const result = await service.request(request.params);
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        } catch (error) {
+          await this.#writer.json(
+            rpcError(request, -32096, error instanceof HubAdminError ? error.code : "failed"),
+          );
+        }
+      });
+      return;
+    }
+    if (request.method.startsWith("codexhost/hub-admin/")) {
+      await this.#writer.json(rpcError(request, -32601, "invalid"));
+      return;
+    }
+    if (request.method.startsWith("codexhost/jarvis/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleJarvisRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/codex-agents/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleCodexAgentsRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/dingtalk-dispatch/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleDingTalkDispatchRequest(request));
+      return;
+    }
+    if (request.method.startsWith("codexhost/dingtalk/")) {
+      this.#dispatchDesktopReply(request, () => this.#handleDingTalkRequest(request));
+      return;
+    }
+    if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
+      const catalog = this.#options.desktopProjects;
+      if (this.#options.externalOnly || !catalog) {
         await this.#writer.json(
-          rpcError(request, -32601, "Project groups are available on the local Host only"),
+          rpcError(request, -32601, "Desktop projects require the local Host"),
         );
-        return;
+      } else {
+        this.#dispatchDesktopReply(request, async () => {
+          const result = await catalog.read();
+          await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        });
       }
-      this.#dispatchDesktopReply(request, () => this.#handleProjectGroupsRequest(request));
       return;
     }
     if (
@@ -1785,15 +2155,7 @@ export class AppServerHost {
       return;
     }
     if (request.method === "codexhost/harness/plugins/list") {
-      this.#dispatchDesktopReply(request, async () => {
-        if (!harnessPluginListParamsSchema.safeParse(request.params).success) {
-          await this.#writer.json(rpcError(request, -32602, "Invalid Harness plugin list params"));
-          return;
-        }
-        await this.#waitForPlugins();
-        const result = harnessPluginListResultSchema.parse({ plugins: this.#pluginDescriptors });
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-      });
+      this.#dispatchDesktopReply(request, () => this.#harnessPluginsList(request));
       return;
     }
     if (isSessionImportRequest(request.method)) {
@@ -2102,6 +2464,22 @@ export class AppServerHost {
         );
       }
       if (await this.#writeResolutionError(request, resolution)) return;
+      if (resolution.kind !== "external") {
+        try {
+          request = await this.#threadFolders.prepare(
+            request,
+            async (id) =>
+              threadEnvironmentId(
+                await this.#requestOfficial("thread/read", { threadId: id, includeTurns: false }),
+              ),
+            false,
+          );
+          frame = encodeJsonFrame(request as unknown as JsonObject);
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+          return;
+        }
+      }
       if (resolution.kind === "external") {
         this.#dispatchDesktopReply(
           request,
@@ -2300,7 +2678,7 @@ export class AppServerHost {
     );
   }
 
-  /** Native Codex Turns: turn `#` delegation chips into an explicit Skill-backed request. */
+  /** Native Codex Turns: expand Jarvis details and turn `#` chips into an explicit request. */
   async #rewriteOfficialDelegationMentions(
     request: JsonRpcRequest,
     frame: Buffer<ArrayBufferLike>,
@@ -2308,22 +2686,89 @@ export class AppServerHost {
     if (request.method !== "turn/start" && request.method !== "turn/steer") return frame;
     if (!isRecord(request.params) || !Array.isArray(request.params.input)) return frame;
     const input = request.params.input as JsonValue[];
+    const hasDelegation = input.some(
+      (item) =>
+        isRecord(item) &&
+        typeof item.text === "string" &&
+        item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
+    );
+    let changed = false;
+    let dingtalkChanged = false;
+    const expanded: JsonValue[] = [];
+    const textIndexes: number[] = [];
+    for (const item of input) {
+      if (isRecord(item) && typeof item.text === "string") {
+        let text = item.text;
+        if (hasJarvisCarrier(text)) text = await this.#expandJarvisText(text);
+        if (hasDingTalkCarrier(text)) {
+          const before = text;
+          text = await this.#expandDingTalkText(text);
+          if (text !== before) dingtalkChanged = true;
+        }
+        if (text !== item.text) changed = true;
+        textIndexes.push(expanded.length);
+        expanded.push({ ...item, text } as JsonObject);
+      } else {
+        expanded.push(item);
+      }
+    }
+    // A long carrier can be split across adjacent text items (Desktop wraps it
+    // after the label). Expand the joined run and keep one text item.
     if (
-      !input.some(
+      !dingtalkChanged &&
+      textIndexes.length > 1 &&
+      input.some(
         (item) =>
-          isRecord(item) &&
-          typeof item.text === "string" &&
-          item.text.includes(DELEGATION_MENTION_PATH_PREFIX),
+          isRecord(item) && typeof item.text === "string" && item.text.includes("dingtalk://"),
       )
     ) {
-      return frame;
+      const joined = textIndexes
+        .map((index) => String((expanded[index] as JsonObject).text ?? ""))
+        .join("\n");
+      if (hasDingTalkCarrier(joined)) {
+        const next = await this.#expandDingTalkText(joined);
+        if (next !== joined) {
+          const first = expanded[textIndexes[0] as number] as JsonObject;
+          expanded[textIndexes[0] as number] = { ...first, text: next };
+          for (const index of textIndexes.slice(1)) expanded[index] = null;
+          changed = true;
+        }
+      }
     }
-    const rewritten = rewriteDelegationMentionInput(input, await managedDelegationSkillReference());
-    if (!rewritten) return frame;
+    const normalized = expanded.some((item) => item === null)
+      ? expanded.filter((item): item is JsonValue => item !== null)
+      : expanded;
+    if (!changed && !hasDelegation) return frame;
+    const rewritten = hasDelegation
+      ? rewriteDelegationMentionInput(normalized, await managedDelegationSkillReference())
+      : null;
+    if (!changed && !rewritten) return frame;
     return encodeJsonFrame({
       ...(request as unknown as JsonObject),
-      params: { ...(request.params as JsonObject), input: rewritten },
+      params: { ...(request.params as JsonObject), input: rewritten ?? normalized },
     });
+  }
+
+  /** Details are fetched on the Host that runs the Thread; a failure is a note, not a Turn error. */
+  async #expandJarvisText(text: string): Promise<string> {
+    if (!this.#options.jarvis) return text;
+    try {
+      return await this.#options.jarvis.expandMentions(text);
+    } catch (error) {
+      this.#diagnose(error);
+      return text;
+    }
+  }
+
+  /** DingTalk reads route to the configured Host; failure is a note, not a Turn error. */
+  async #expandDingTalkText(text: string): Promise<string> {
+    if (!this.#options.dingtalk) return text;
+    try {
+      return await this.#options.dingtalk.expandMentions(text);
+    } catch (error) {
+      this.#diagnose(error);
+      return dingTalkReadFailureNote(text);
+    }
   }
 
   async #forwardOfficialNonRequest(
@@ -2389,15 +2834,10 @@ export class AppServerHost {
     frame: Buffer<ArrayBufferLike>;
     value: JsonValue;
   }): Promise<void> {
-    if (this.#options.externalOnly) {
-      // Native children created through Delegation still have a native owner
-      // and lifecycle. Their rendering stays on the GUI's native connection.
-      await this.#observeOfficialTurnLifecycle(input.value);
-      return;
-    }
     const parsed = input.value;
+    if (isRecord(parsed) && typeof parsed.method === "string" && isRecord(parsed.params))
+      this.#asyncQuestions.observe(parsed.method, parsed.params as JsonObject);
     const observedAtMs = Date.now();
-    this.#observeOfficialTurnStartResponse(parsed);
     let forwarded: JsonValue = parsed;
     if (isRecord(parsed) && typeof parsed.method === "string" && "id" in parsed) {
       const originalId = parsed.id;
@@ -2407,6 +2847,14 @@ export class AppServerHost {
         forwarded = { ...parsed, id: forwardedId };
       }
     }
+    forwarded = this.#observeOfficialServerRequest(parsed, forwarded);
+    if (this.#options.externalOnly) {
+      await this.#observeOfficialTurnLifecycle(parsed);
+      return;
+    }
+    if (forwarded === null) return;
+    await this.#threadFolders.observe(parsed).catch((error: unknown) => this.#diagnose(error));
+    this.#observeOfficialTurnStartResponse(parsed);
     const accountScopedNotification =
       isRecord(parsed) &&
       typeof parsed.method === "string" &&
@@ -2422,6 +2870,7 @@ export class AppServerHost {
     } catch (error) {
       this.#diagnose(error);
     }
+    this.#dingTalkNativeRunner.observe(parsed);
     this.#routeObservationTracker.bindOfficialResponse(parsed);
     const privateTelemetry =
       isRecord(parsed) &&
@@ -2450,16 +2899,91 @@ export class AppServerHost {
     }
   }
 
+  #observeOfficialServerRequest(parsed: JsonValue, forwarded: JsonValue): JsonValue | null {
+    if (!isRecord(forwarded)) return forwarded;
+    const params = forwarded.params;
+    if (
+      forwarded.method === "item/tool/requestUserInput" &&
+      typeof forwarded.id === "string" &&
+      isRecord(params) &&
+      typeof params.threadId === "string" &&
+      typeof params.turnId === "string"
+    ) {
+      const requestId = forwarded.id;
+      this.#questions.register({
+        requestId,
+        threadId: params.threadId,
+        turnId: params.turnId,
+        harnessId: "codex",
+        request: params as JsonObject,
+        retire: () => {
+          this.#officialServerRequests.delete(requestId);
+        },
+        respond: async (reply) => {
+          const original = this.#officialServerRequests.get(requestId);
+          if (original !== undefined) {
+            this.#officialServerRequests.delete(requestId);
+            await this.#officialRuntime.send({ ...reply, id: original });
+            return;
+          }
+          throw new DelegationControlError(
+            "QUESTION_NOT_PENDING",
+            "Native Question reply route is no longer available",
+          );
+        },
+      });
+    }
+    if (
+      forwarded.method !== "serverRequest/resolved" ||
+      !isRecord(parsed) ||
+      !isRecord(parsed.params)
+    )
+      return forwarded;
+    for (const [requestId, originalId] of this.#officialServerRequests) {
+      if (originalId !== parsed.params.requestId) continue;
+      this.#officialServerRequests.delete(requestId);
+      void this.#questions.close(requestId, false);
+      return {
+        ...forwarded,
+        params: { ...(forwarded.params as JsonObject), requestId },
+      } as JsonObject;
+    }
+    // A reply already consumed the mapping; never forward an unmatched native ID.
+    return null;
+  }
+
   async #requestOfficial(method: string, params: JsonObject): Promise<JsonObject> {
     if (this.#options.externalOnly) {
       // Project and section metadata remain owned by native Codex. This
       // private client negotiates its own connection, never a GUI's session.
+      await this.#officialRuntime.initialize();
       await this.#officialRuntime.initializeProtocol({
         clientInfo: { name: "codexhost-shared-threads", version: "1" },
         capabilities: { experimentalApi: true },
       });
     }
-    return this.#officialRuntime.request(method, params);
+    if (method !== "turn/start") return this.#officialRuntime.request(method, params);
+    const request = {
+      id: `codexhost:folders:${randomUUID()}`,
+      method,
+      params,
+    } as unknown as JsonRpcRequest;
+    const prepared = await this.#threadFolders.prepare(
+      request,
+      async (threadId) =>
+        threadEnvironmentId(
+          await this.#requestOfficial("thread/read", { threadId, includeTurns: false }),
+        ),
+      false,
+    );
+    const response = await this.#officialRuntime.request(
+      method,
+      isRecord(prepared.params) ? prepared.params : params,
+    );
+    await this.#threadFolders
+      .observe({ ...response, id: request.id })
+      .catch((error: unknown) => this.#diagnose(error));
+    return response;
   }
 
   #inspectHarnessAccount(
@@ -2507,9 +3031,32 @@ export class AppServerHost {
     }
   }
 
+  async readDingTalkProject(projectId: string): Promise<{ id: string; roots: string[] }> {
+    const response = await this.#requestOfficial("project/read", { projectId });
+    const result = isRecord(response.result) ? response.result : null;
+    const project = result && isRecord(result.project) ? result.project : null;
+    if (!project || project.id !== projectId || !Array.isArray(project.roots)) {
+      throw new Error("工作项目已不存在，请在智能体设置里重新选择");
+    }
+    const roots = project.roots.flatMap((root) =>
+      isRecord(root) && typeof root.path === "string" ? [root.path] : [],
+    );
+    return { id: projectId, roots };
+  }
+
+  startDingTalkAgentRun(input: DingTalkDispatchThreadInput): Promise<DingTalkDispatchRun> {
+    return this.#dingTalkNativeRunner.start(input);
+  }
+
   async #observeOfficialTurnLifecycle(value: JsonValue): Promise<void> {
     if (!isRecord(value) || !isRecord(value.params)) return;
     const params = value.params;
+    if (value.method === "thread/closed" && typeof params.threadId === "string") {
+      await this.#questions.closeWhere((request) => request.threadId === params.threadId);
+      this.#activeOfficialTurns.delete(params.threadId);
+      this.#signalActiveWorkChanged();
+      return;
+    }
     if (value.method === "turn/started" && typeof params.threadId === "string") {
       const turn = isRecord(params.turn) ? params.turn : null;
       if (turn && typeof turn.id === "string") {
@@ -2518,6 +3065,10 @@ export class AppServerHost {
       }
     }
     if (value.method === "turn/completed" && typeof params.threadId === "string") {
+      const endedTurn = isRecord(params.turn) ? params.turn : null;
+      await this.#questions.closeWhere(
+        (request) => request.threadId === params.threadId && request.turnId === endedTurn?.id,
+      );
       this.#forgetPendingOfficialTurnStarts(params.threadId);
       this.#activeOfficialTurns.delete(params.threadId);
       this.#signalActiveWorkChanged();
@@ -2569,17 +3120,27 @@ export class AppServerHost {
     return thread !== null || childDelegation !== null || delegation !== null;
   }
 
-  async #readOfficialThreadMetadata(threadId: string): Promise<{ cwd?: string; title?: string }> {
+  async #readOfficialThreadMetadata(
+    threadId: string,
+  ): Promise<{ cwd?: string; title?: string; projectId?: string }> {
     const response = await this.#requestOfficial("thread/read", { threadId, includeTurns: false });
     if (isRecord(response.error)) return {};
     const result = isRecord(response.result) ? response.result : null;
     const thread = result && isRecord(result.thread) ? result.thread : null;
     if (!thread) return {};
+    const primaryEnvironment =
+      Array.isArray(thread.environments) && isRecord(thread.environments[0])
+        ? thread.environments[0]
+        : null;
+    const cwd = typeof primaryEnvironment?.cwd === "string" ? primaryEnvironment.cwd : thread.cwd;
     const title =
       typeof thread.name === "string" && thread.name.trim() ? thread.name : thread.preview;
     return {
-      ...(typeof thread.cwd === "string" && thread.cwd.trim() ? { cwd: thread.cwd } : {}),
+      ...(typeof cwd === "string" && cwd.trim() ? { cwd } : {}),
       ...(typeof title === "string" && title.trim() ? { title } : {}),
+      ...(typeof thread.projectId === "string" && thread.projectId
+        ? { projectId: thread.projectId }
+        : {}),
     };
   }
 
@@ -2663,7 +3224,7 @@ export class AppServerHost {
   }
 
   async #startOfficialDelegation(
-    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
+    input: OfficialDelegationStartInput,
   ): Promise<DelegationStartResult> {
     let requestedModel: HarnessModelRef | undefined;
     try {
@@ -2677,6 +3238,7 @@ export class AppServerHost {
         JSON.stringify({
           task: input.task,
           cwd: input.cwd,
+          ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
           modelId: requestedModel?.id ?? null,
           thinkingOptionId: input.thinkingOptionId ?? null,
         }),
@@ -2755,6 +3317,7 @@ export class AppServerHost {
     }
     const started = await this.#officialRuntime.request("thread/start", {
       cwd: input.cwd,
+      ...(!input.origin && input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(nativeModelId ? { model: nativeModelId } : {}),
       approvalPolicy: "never",
       sandbox: "danger-full-access",
@@ -2803,7 +3366,9 @@ export class AppServerHost {
         status: pendingTerminal ?? "running",
         ...(input.requestId ? { requestId: input.requestId } : {}),
         taskDigest: digest,
+        desktopProject: input.desktopProject,
       });
+      await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
       return {
         delegationId,
         threadId,
@@ -2975,6 +3540,7 @@ export class AppServerHost {
     const turns = Array.isArray(thread.turns)
       ? thread.turns.filter((turn): turn is JsonObject => isRecord(turn))
       : [];
+    this.#asyncQuestions.observeTurns(input.threadId, turns.slice(-5));
     const running =
       this.#activeOfficialTurns.has(input.threadId) ||
       (isRecord(thread.status) && thread.status.type === "active");
@@ -2995,6 +3561,93 @@ export class AppServerHost {
       await this.#repository.setDelegationStatus(delegation.delegationId, snapshot.status);
     }
     return snapshot;
+  }
+
+  #asyncQuestionPrefix(): string {
+    return `${this.#consoleRequestPrefix}question:${this.#officialRuntimeScope.owner.generation}:`;
+  }
+
+  #pendingDelegationQuestions(threadId: string): DelegationPendingQuestion[] {
+    const asynchronous = this.#asyncQuestions
+      .pending(threadId, this.#asyncQuestionPrefix())
+      .flatMap((pending): DelegationPendingQuestion[] =>
+        pending.turnId === undefined
+          ? []
+          : [
+              {
+                interactionId: pending.requestId,
+                kind: "requestUserInputAsync",
+                turnId: pending.turnId,
+                request: pending.request,
+              },
+            ],
+      );
+    return [...this.#questions.read(threadId), ...asynchronous];
+  }
+
+  async #answerDelegationQuestion(input: ThreadAnswerInput): Promise<ThreadAnswerResult> {
+    if (input.result === undefined)
+      throw new DelegationControlError("INVALID_ARGUMENT", "Question reply result is required");
+    const prefix = this.#asyncQuestionPrefix();
+    if (
+      typeof input.interactionId !== "string" ||
+      !input.interactionId.startsWith(`${prefix}async:`)
+    )
+      return this.#questions.answer(input);
+    const pending = this.#asyncQuestions.find(input.interactionId, prefix);
+    if (!pending || pending.turnId === undefined || pending.claimed)
+      throw new DelegationControlError("QUESTION_NOT_PENDING", "Question is no longer pending");
+    if (pending.threadId !== input.threadId)
+      throw new DelegationControlError("INVALID_ARGUMENT", "Question belongs to another Thread");
+    const answer = isRecord(input.result) ? input.result.answer : undefined;
+    if (typeof answer !== "string" || !answer.trim())
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "Async Question requires a non-empty answer",
+      );
+    const generation = this.#officialRuntimeScope.owner.generation;
+    const accepted = await this.#asyncQuestions.respond(
+      input.interactionId,
+      input.threadId,
+      { answers: { [pending.question.id]: { answers: [answer] } } },
+      prefix,
+      async (method, params) => {
+        if (generation !== this.#officialRuntimeScope.owner.generation)
+          return {
+            error: { code: -32094, message: "Host generation changed; refresh the Thread" },
+          };
+        if (method === "turn/start") {
+          const resumed = nativeQuestionReply(
+            await this.#requestOfficial("thread/resume", {
+              threadId: input.threadId,
+              excludeTurns: true,
+            }),
+          );
+          if ("error" in resumed) return resumed;
+          if (generation !== this.#officialRuntimeScope.owner.generation)
+            return {
+              error: { code: -32094, message: "Host generation changed; refresh the Thread" },
+            };
+        }
+        const reply = nativeQuestionReply(await this.#requestOfficial(method, params));
+        return generation === this.#officialRuntimeScope.owner.generation
+          ? reply
+          : { error: { code: -32094, message: "Host generation changed; refresh the Thread" } };
+      },
+    );
+    if (!accepted)
+      throw new DelegationControlError("QUESTION_NOT_PENDING", "Question is no longer pending");
+    return {
+      threadId: input.threadId,
+      interactionId: input.interactionId,
+      turnId: pending.turnId,
+      harnessId: "codex",
+      status: "running",
+      next: {
+        read: `codexhost thread read ${input.threadId}`,
+        wait: `codexhost thread wait ${input.threadId} --timeout-ms 30000`,
+      },
+    };
   }
 
   async #listDelegationThreads(input: ThreadListInput): Promise<DelegationThreadListResult> {
@@ -3406,39 +4059,387 @@ export class AppServerHost {
     }
   }
 
-  async #handleProjectGroupsRequest(request: JsonRpcRequest): Promise<void> {
-    const service = this.#options.projectGroups;
+  async #handleDingTalkRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.dingtalk;
     if (!service) {
+      await this.#writer.json(rpcError(request, -32601, "DingTalk is unavailable on this Host"));
+      return;
+    }
+    try {
+      const result = await this.#runDingTalkMethod(service, request);
       await this.#writer.json(
-        rpcError(request, -32601, "Project groups are available on the local Host only"),
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
+    } catch (error) {
+      if (error instanceof DingTalkServiceError) {
+        await this.#writer.json(rpcError(request, -32094, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32094, "dingtalk_failed"));
+    }
+  }
+
+  async #runDingTalkMethod(service: DingTalkService, request: JsonRpcRequest): Promise<unknown> {
+    if (request.method === DINGTALK_STATUS_METHOD) {
+      const params = dingtalkStatusParamsSchema.parse(request.params ?? {});
+      return await service.status(params.refresh);
+    }
+    if (request.method === DINGTALK_SETTINGS_GET_METHOD) return await service.settings();
+    if (request.method === DINGTALK_CONVERSATIONS_METHOD) {
+      const parsed = dingtalkConversationsParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk conversation request");
+      }
+      return await service.conversations();
+    }
+    if (request.method === DINGTALK_DETAILS_METHOD) {
+      const parsed = dingtalkDetailsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk details request");
+      return await service.details(parsed.data.conversations);
+    }
+    if (request.method === DINGTALK_PREVIEW_METHOD) {
+      const parsed = dingtalkPreviewParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk preview request");
+      }
+      return await service.preview(parsed.data.conversationId);
+    }
+    if (request.method === DINGTALK_MESSAGES_METHOD) {
+      const parsed = dingtalkMessagesParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk message request");
+      }
+      return await service.messages(parsed.data);
+    }
+    if (request.method === DINGTALK_MEMBERS_METHOD) {
+      const parsed = dingtalkMembersParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk member request");
+      }
+      return await service.members(parsed.data.conversationId);
+    }
+    if (request.method === DINGTALK_RESOURCE_METHOD) {
+      const parsed = dingtalkResourceParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk resource request");
+      }
+      return await service.resource(parsed.data);
+    }
+    if (request.method === DINGTALK_SEND_METHOD) {
+      const parsed = dingtalkSendParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk message");
+      }
+      return await service.send(parsed.data);
+    }
+    if (request.method === DINGTALK_SEARCH_METHOD) {
+      const parsed = dingtalkSearchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk search");
+      }
+      return await service.search(parsed.data);
+    }
+    if (request.method === DINGTALK_RESOLVE_METHOD) {
+      const parsed = dingtalkResolveParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk reference");
+      }
+      const mention =
+        parsed.data.messageIds && parsed.data.messageIds.length > 0
+          ? {
+              kind: "messages" as const,
+              conversationId: parsed.data.conversationId,
+              messageIds: parsed.data.messageIds,
+              label: "",
+            }
+          : {
+              kind: "conversation" as const,
+              conversationId: parsed.data.conversationId,
+              label: "",
+            };
+      return await service.resolve(mention);
+    }
+    if (request.method === DINGTALK_VIEWED_METHOD) {
+      const parsed = dingtalkViewedParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk view state");
+      }
+      return await service.markViewed(
+        parsed.data.conversationId,
+        parsed.data.lastMessageAt,
+        parsed.data.active !== false,
+      );
+    }
+    if (request.method === DINGTALK_SETTINGS_SET_METHOD) {
+      const parsed = dingtalkSettingsSetParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk settings");
+      }
+      return await service.updateSettings(parsed.data);
+    }
+    if (request.method === DINGTALK_PREFETCH_METHOD) {
+      const parsed = dingtalkPrefetchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk prefetch request");
+      }
+      return await service.prefetch(parsed.data);
+    }
+    if (request.method === DINGTALK_DIAGNOSTICS_METHOD) {
+      const parsed = dingtalkDiagnosticsParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk diagnostics request");
+      }
+      return await service.diagnostics(parsed.data);
+    }
+    if (request.method === DINGTALK_TIMING_METHOD) {
+      const parsed = dingtalkTimingParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new DingTalkServiceError("invalid_params", "Invalid DingTalk timing request");
+      }
+      return await service.recordTiming(parsed.data);
+    }
+    throw new DingTalkServiceError("unknown_method", "Unknown DingTalk method");
+  }
+
+  async #handleJarvisRequest(request: JsonRpcRequest): Promise<void> {
+    const service = this.#options.jarvis;
+    if (!service) {
+      await this.#writer.json(rpcError(request, -32601, "Jarvis is unavailable on this Host"));
+      return;
+    }
+    try {
+      const result = await this.#runJarvisMethod(service, request);
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
+    } catch (error) {
+      if (error instanceof JarvisServiceError) {
+        await this.#writer.json(rpcError(request, -32094, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32094, "jarvis_failed"));
+    }
+  }
+
+  async #runJarvisMethod(service: JarvisService, request: JsonRpcRequest): Promise<unknown> {
+    if (request.method === JARVIS_STATUS_METHOD) return await service.status();
+    if (request.method === JARVIS_SETTINGS_GET_METHOD) return await service.settings();
+    if (request.method === JARVIS_SETTINGS_TEST_METHOD) return await service.testSettings();
+    if (request.method === JARVIS_LOGIN_START_METHOD) return await service.startLogin();
+    if (request.method === JARVIS_INSTALL_METHOD) {
+      const parsed = jarvisInstallParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid install request");
+      return await service.install();
+    }
+    if (request.method === JARVIS_BUG_SEARCH_CANCEL_METHOD) {
+      const parsed = jarvisBugSearchCancelParamsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid search cancellation");
+      service.cancelSearch(parsed.data.requestId);
+      return {};
+    }
+    if (request.method === JARVIS_PROJECT_LIST_METHOD) {
+      const parsed = jarvisProjectListParamsSchema.safeParse(request.params ?? {});
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis project list request");
+      }
+      return await service.listProjects(parsed.data);
+    }
+    if (request.method === JARVIS_PROJECT_BUG_TITLE_METHOD) {
+      const parsed = jarvisProjectBugTitleParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis title preview request");
+      }
+      return await service.previewProjectBugTitle(parsed.data);
+    }
+    if (request.method === JARVIS_PROJECT_BUG_SEARCH_METHOD) {
+      const parsed = jarvisProjectBugSearchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis project search request");
+      }
+      return await service.searchProjectBugs(parsed.data);
+    }
+    if (request.method === JARVIS_BUG_SEARCH_METHOD) {
+      const parsed = jarvisBugSearchParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis bug search request");
+      }
+      return await service.searchBugs(parsed.data);
+    }
+    if (request.method === JARVIS_SETTINGS_SET_METHOD) {
+      const parsed = jarvisSettingsSetParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        throw new JarvisServiceError("invalid_params", "Invalid Jarvis settings");
+      }
+      return await service.updateSettings(parsed.data);
+    }
+    if (request.method === JARVIS_DOWNLOAD_START_METHOD) {
+      const parsed = jarvisDownloadStartParamsSchema.safeParse(request.params);
+      if (!parsed.success)
+        throw new JarvisServiceError("invalid_params", "Invalid download request");
+      return await service.startDownload(parsed.data.release);
+    }
+    if (request.method === JARVIS_DOWNLOAD_CHUNK_METHOD) {
+      const parsed = jarvisDownloadChunkParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid download chunk");
+      return await service.downloadChunk(parsed.data.token, parsed.data.offset, parsed.data.length);
+    }
+    if (request.method === JARVIS_INSTALL_UPLOAD_METHOD) {
+      const parsed = jarvisInstallUploadParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid upload chunk");
+      return await service.uploadChunk(parsed.data);
+    }
+    if (request.method === JARVIS_LOGIN_FORWARD_METHOD) {
+      const parsed = jarvisLoginForwardParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid login forward");
+      return await service.forwardLogin(parsed.data);
+    }
+    if (request.method === JARVIS_LOGIN_STOP_METHOD) {
+      const parsed = jarvisLoginStopParamsSchema.safeParse(request.params);
+      if (!parsed.success) throw new JarvisServiceError("invalid_params", "Invalid login stop");
+      service.stopForward(parsed.data.forwardId);
+      return {};
+    }
+    throw new JarvisServiceError("unknown_method", "Unknown Jarvis method");
+  }
+
+  async #handleCodexAgentsRequest(request: JsonRpcRequest): Promise<void> {
+    const store = this.#options.codexAgents;
+    if (!store) {
+      await this.#writer.json(
+        rpcError(request, -32601, "Codex agents are available on the local Host only"),
       );
       return;
     }
     try {
-      if (request.method === PROJECT_GROUPS_LIST_METHOD) {
-        const result = await service.list();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-        return;
+      let result: unknown;
+      if (request.method === CODEX_AGENT_LIST_METHOD) {
+        result = codexAgentListResultSchema.parse(await store.list());
+      } else if (request.method === CODEX_AGENT_READ_METHOD) {
+        const params = codexAgentReadParamsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new CodexAgentError("invalid_file_name", "Invalid agent file name");
+        }
+        result = codexAgentRecordSchema.parse(await store.read(params.data.fileName));
+      } else if (request.method === CODEX_AGENT_SAVE_METHOD) {
+        const params = codexAgentSaveParamsSchema.safeParse(request.params);
+        if (!params.success) throw codexAgentParamError(params.error.issues);
+        result = codexAgentRecordSchema.parse(await store.save(params.data));
+      } else if (request.method === CODEX_AGENT_DELETE_METHOD) {
+        const params = codexAgentDeleteParamsSchema.safeParse(request.params);
+        if (!params.success) throw codexAgentParamError(params.error.issues);
+        await store.delete(params.data.fileName, params.data.expectedRevision);
+        result = codexAgentDeleteResultSchema.parse({ fileName: params.data.fileName });
+      } else if (request.method === CODEX_AGENT_CATALOG_METHOD) {
+        result = await this.#readCodexAgentCatalog();
+      } else {
+        throw new CodexAgentError("invalid_params", "Unknown Codex agent method");
       }
-      if (request.method === DESKTOP_PROJECTS_CATALOG_METHOD) {
-        const result = await service.readDesktopCatalog();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-        return;
-      }
-      const parsed = projectGroupsReplaceParamsSchema.safeParse(request.params);
-      if (!parsed.success) {
-        await this.#writer.json(rpcError(request, -32602, "Invalid project group configuration"));
-        return;
-      }
-      const result = await service.replace(parsed.data);
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
     } catch (error) {
-      if (error instanceof ProjectGroupRevisionConflictError) {
-        await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
+      if (error instanceof CodexAgentError) {
+        await this.#writer.json(rpcError(request, -32095, error.code));
         return;
       }
-      await this.#writer.json(rpcError(request, -32083, "Project groups request failed"));
       this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32095, "io_failed"));
+    }
+  }
+
+  async #readCodexAgentCatalog(): Promise<unknown> {
+    try {
+      const response = await this.#requestOfficial("model/list", {});
+      if (isRecord(response.error)) {
+        return { available: false, models: [], defaultModel: null };
+      }
+      return codexAgentCatalogFromModelList(response);
+    } catch (error) {
+      this.#diagnose(error);
+      return { available: false, models: [], defaultModel: null };
+    }
+  }
+
+  async #handleDingTalkDispatchRequest(request: JsonRpcRequest): Promise<void> {
+    const store = this.#options.dingTalkDispatch;
+    if (!store) {
+      await this.#writer.json(
+        rpcError(
+          request,
+          -32601,
+          "DingTalk dispatch settings are available on the local Host only",
+        ),
+      );
+      return;
+    }
+    try {
+      let result: unknown;
+      if (request.method === DINGTALK_DISPATCH_GET_METHOD) {
+        result = await store.read(await this.#dingTalkDispatchAgents());
+      } else if (request.method === DINGTALK_DISPATCH_SCORE_METHOD) {
+        const params = dingtalkDispatchMessageParamsSchema.safeParse(request.params);
+        const dispatcher = this.#options.dingTalkDispatcher;
+        if (!params.success || !dispatcher) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch score request");
+        }
+        result = dingtalkDispatchScoreResultSchema.parse(
+          await dispatcher.score(params.data.conversationId, params.data.messageId),
+        );
+      } else if (request.method === DINGTALK_DISPATCH_RUN_METHOD) {
+        const params = dingtalkDispatchRunParamsSchema.safeParse(request.params);
+        const dispatcher = this.#options.dingTalkDispatcher;
+        if (!params.success || !dispatcher) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch request");
+        }
+        result = dingtalkDispatchRunResultSchema.parse(
+          await dispatcher.run(
+            params.data.conversationId,
+            params.data.messageId,
+            params.data.agents,
+          ),
+        );
+      } else if (request.method === DINGTALK_DISPATCH_STATUS_METHOD) {
+        result = dingtalkDispatchStatusSchema.parse(
+          (await this.#options.dingTalkDispatcher?.status()) ?? {},
+        );
+      } else if (request.method === DINGTALK_DISPATCH_SET_METHOD) {
+        const params = dingtalkDispatchSettingsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new CodexAgentError("invalid_params", "Invalid DingTalk dispatch settings");
+        }
+        result = await store.write(params.data);
+      } else {
+        throw new CodexAgentError("invalid_params", "Unknown DingTalk dispatch method");
+      }
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
+    } catch (error) {
+      if (error instanceof CodexAgentError) {
+        await this.#writer.json(rpcError(request, -32095, error.code));
+        return;
+      }
+      this.#diagnose(error);
+      await this.#writer.json(rpcError(request, -32095, "io_failed"));
+    }
+  }
+
+  /** Null keeps existing entries when the agent list cannot be read. */
+  async #dingTalkDispatchAgents(): Promise<DingTalkDispatchAgent[] | null> {
+    const store = this.#options.codexAgents;
+    if (!store) return null;
+    try {
+      const listed = await store.list();
+      return listed.agents.map((agent) => ({
+        fileName: agent.fileName,
+        name: agent.name,
+        description: agent.description,
+      }));
+    } catch {
+      return null;
     }
   }
 
@@ -3453,7 +4454,9 @@ export class AppServerHost {
     try {
       if (request.method === PROJECT_MIRROR_LIST_METHOD) {
         const result = await service.list();
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+        await this.#writer.json(
+          rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+        );
         return;
       }
       const parsed = projectMirrorUpsertParamsSchema.safeParse(request.params);
@@ -3462,7 +4465,9 @@ export class AppServerHost {
         return;
       }
       const result = await service.upsert(parsed.data);
-      await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      await this.#writer.json(
+        rpcEnvelope(request, { result: jsonValueSchema.parse(stripUndefined(result)) }),
+      );
     } catch (error) {
       if (error instanceof ProjectMirrorRevisionConflictError) {
         await this.#writer.json(rpcError(request, -32082, errorMessage(error).slice(0, 500)));
@@ -3470,6 +4475,131 @@ export class AppServerHost {
       }
       await this.#writer.json(rpcError(request, -32083, "Project mirror request failed"));
       this.#diagnose(error);
+    }
+  }
+
+  /**
+   * Conditional directory key: plugin identities, manifest/icon hashes, the 24 h
+   * availability generation and the running Host version. Any of them changing
+   * makes an `ifNoneMatch` request return the full directory again.
+   */
+  async #harnessDirectoryFingerprint(): Promise<string> {
+    const hash = createHash("sha256");
+    const roots = this.#options.pluginRoots ?? [];
+    const manifests =
+      roots.length > 0
+        ? await harnessPluginFingerprints(roots).catch(() => new Map<string, string>())
+        : new Map<string, string>();
+    for (const plugin of [...this.#pluginDescriptors].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )) {
+      hash.update(plugin.id).update("\u0000");
+      hash.update(plugin.version).update("\u0000");
+      hash.update(manifests.get(plugin.id) ?? "missing").update("\u0000");
+      hash
+        .update(
+          createHash("sha256")
+            .update(plugin.icon ?? "")
+            .update(JSON.stringify(plugin.iconStyle ?? null))
+            .digest("hex"),
+        )
+        .update("\u0000");
+    }
+    const generation = await this.#delegationCoordinator.availabilityGeneration();
+    const runningVersion = await this.#options.runtimeMaintenance
+      ?.status()
+      .then((status) => status.runningVersion)
+      .catch(() => null);
+    hash.update(`availability:${generation}\u0000host:${runningVersion ?? "unknown"}`);
+    return hash.digest("hex");
+  }
+
+  async #pluginAvailability(
+    pluginIds: readonly string[],
+    refresh: boolean,
+  ): Promise<Record<string, "ready" | "notInstalled" | "unavailable" | "error">> {
+    let availability: Partial<Record<string, string>> = {};
+    try {
+      const listed = await this.#delegationCoordinator.listHarnesses({
+        includeAvailability: true,
+        ...(refresh ? { refresh: true } : {}),
+      });
+      availability = listed.availability ?? {};
+    } catch {
+      // The directory still lets the Renderer show install state; an unanswered
+      // availability is reported as an error instead of hiding the plugins.
+    }
+    return Object.fromEntries(
+      pluginIds.map((id) => [
+        id,
+        availability[id] === "ready" ||
+        availability[id] === "notInstalled" ||
+        availability[id] === "unavailable" ||
+        availability[id] === "error"
+          ? availability[id]
+          : "error",
+      ]),
+    );
+  }
+
+  async #harnessPluginsList(request: JsonRpcRequest): Promise<void> {
+    const params = harnessPluginListParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      await this.#writer.json(rpcError(request, -32602, "Invalid Harness plugin list params"));
+      return;
+    }
+    await this.#waitForPlugins();
+    // An absent conditional field means an older Renderer: keep the exact
+    // legacy shape so its strict result schema keeps parsing.
+    if (params.data.ifNoneMatch === undefined && params.data.refresh === undefined) {
+      await this.#writer.json(
+        rpcEnvelope(request, {
+          result: jsonValueSchema.parse({ plugins: this.#pluginDescriptors }),
+        }),
+      );
+      return;
+    }
+    const sessionPluginIds = this.#pluginDescriptors
+      .filter(({ kind }) => kind !== "usage")
+      .map(({ id }) => id);
+    const availability = await this.#pluginAvailability(
+      sessionPluginIds,
+      params.data.refresh === true,
+    );
+    const fingerprint = await this.#harnessDirectoryFingerprint();
+    const unchanged = params.data.refresh !== true && params.data.ifNoneMatch === fingerprint;
+    const result = harnessPluginListResultSchema.parse(
+      unchanged
+        ? { unchanged: true, fingerprint }
+        : { plugins: this.#pluginDescriptors, availability, fingerprint },
+    );
+    await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+  }
+
+  /** Manifest/directory identity for one plugin, shared with availability entries. */
+  async #harnessPluginFingerprint(harnessId: string): Promise<string | undefined> {
+    const roots = this.#options.pluginRoots ?? [];
+    if (roots.length === 0) return undefined;
+    const fingerprints = await harnessPluginFingerprints(roots).catch(
+      () => new Map<string, string>(),
+    );
+    return fingerprints.get(harnessId) ?? "missing";
+  }
+
+  /** The interactive inspection is authoritative; keep the shared cache in step. */
+  async #recordHarnessAvailability(
+    harnessId: string,
+    status: "ready" | "notInstalled" | "unavailable" | "error",
+  ): Promise<void> {
+    try {
+      const fingerprint = await this.#harnessPluginFingerprint(harnessId);
+      await this.#availabilityStore.set(harnessId, {
+        status,
+        checkedAt: Date.now(),
+        ...(fingerprint ? { fingerprint } : {}),
+      });
+    } catch {
+      // Availability caching is best effort; the inspection result still answers.
     }
   }
 
@@ -3485,6 +4615,7 @@ export class AppServerHost {
     );
     const adapter = registered?.[1];
     if (!adapter) {
+      await this.#recordHarnessAvailability(params.data.harnessId, "unavailable");
       await this.#writer.json(
         rpcError(request, -32077, `Harness '${params.data.harnessId}' is unavailable`),
       );
@@ -3498,6 +4629,7 @@ export class AppServerHost {
         ...(params.data.purpose ? { purpose: params.data.purpose } : {}),
       });
     } catch (error) {
+      await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, `Harness inspection failed: ${errorMessage(error)}`),
       );
@@ -3505,11 +4637,13 @@ export class AppServerHost {
     }
     const validated = harnessInspectionSchema.safeParse(inspection);
     if (!validated.success) {
+      await this.#recordHarnessAvailability(params.data.harnessId, "error");
       await this.#writer.json(
         rpcError(request, -32077, "Harness inspection returned an invalid result"),
       );
       return;
     }
+    await this.#recordHarnessAvailability(params.data.harnessId, validated.data.status);
     await this.#writer.json(
       rpcEnvelope(request, { result: jsonValueSchema.parse(validated.data) }),
     );
@@ -4317,6 +5451,10 @@ export class AppServerHost {
     let record: StoredThreadRecordV1;
     try {
       record = await this.#repository.createProvisional(recordInput);
+      if (typeof params.projectId === "string" && params.projectId)
+        record = await this.#repository.updateMetadata(record.hostThreadId, {
+          projectId: params.projectId,
+        });
     } catch {
       this.#routeObservationTracker.rejectCreate(request.id);
       await this.#writer.json(rpcError(request, -32081, "External Thread could not be persisted"));
@@ -4326,6 +5464,13 @@ export class AppServerHost {
     const sessionResult = await adapter.open({
       kind: "create",
       cwd,
+      ...(adapter.additionalDirectories && Array.isArray(params.runtimeWorkspaceRoots)
+        ? {
+            additionalDirectories: params.runtimeWorkspaceRoots.filter(
+              (p): p is string => typeof p === "string" && p !== cwd,
+            ),
+          }
+        : {}),
       environment: {
         ...(this.#options.environment ?? process.env),
         [DELEGATION_THREAD_ID_ENV]: record.hostThreadId,
@@ -4551,6 +5696,7 @@ export class AppServerHost {
       emittedAtMs: Date.now(),
       params: { thread: { ...thread, turns: [] } },
     });
+    await this.#writer.json({ method: DELEGATION_PROJECTS_CHANGED_METHOD, params: {} });
   }
 
   async #revertExternalThread(
@@ -4668,6 +5814,7 @@ export class AppServerHost {
     location: Extract<ExternalThreadLocation, { kind: "external" }>,
   ): Promise<void> {
     try {
+      const folders = await this.#threadFolders.store.get(location.record.hostThreadId);
       const thread = {
         ...(location.thread
           ? { ...location.thread.thread, turns: [] }
@@ -4676,6 +5823,7 @@ export class AppServerHost {
               turns: [],
               sessionId: await this.#repository.sessionTreeId(location.record),
             })),
+        cwd: location.thread?.cwd ?? folders?.appliedFolders?.[0] ?? location.record.cwd,
         ...(await this.#externalSectionFields(location.record.hostThreadId)),
       };
       await this.#writer.json(rpcEnvelope(request, { result: { thread } }));
@@ -4712,6 +5860,7 @@ export class AppServerHost {
         result: {
           thread: {
             ...thread.thread,
+            cwd: thread.cwd,
             ...(await this.#externalSectionFields(thread.record.hostThreadId)),
             turns: readTurns,
           },
@@ -4850,11 +5999,14 @@ export class AppServerHost {
    */
   #withOpenBackgroundCommands(thread: ExternalThread, turns: JsonObject[]): JsonObject[] {
     return turns.map((turn) => {
-      const open = thread.projectedTurns
-        .get((turn as { id: HostTurnId }).id)
-        ?.projector.openDetachedWireItems();
-      if (!open || open.size === 0) return turn;
-      const remaining = new Map(open);
+      const projection = thread.projectedTurns.get((turn as { id: HostTurnId }).id)?.projector;
+      const open = projection?.openDetachedWireItems();
+      const background = projection?.backgroundWireItems();
+      const foreground = projection?.foregroundWireItems();
+      if ((!open || open.size === 0) && (!background || background.size === 0)) return turn;
+      const remaining = new Map(open ?? []);
+      // Background text is matched by type and content below; only commands use Item-id overlay.
+      for (const itemId of background?.keys() ?? []) remaining.delete(itemId);
       const items = (turn as { items: JsonObject[] }).items.map((item) => {
         const id = (item as { id: HostItemId }).id;
         const live = remaining.get(id);
@@ -4862,6 +6014,36 @@ export class AppServerHost {
         remaining.delete(id);
         return live;
       });
+      const historicalCount = items.length;
+      const consumedEnd = new Map<string, number>();
+      const liveItems = [...(background?.values() ?? [])].filter(
+        (item) => backgroundItemText(item) !== "",
+      );
+      for (const [index, live] of liveItems.entries()) {
+        const liveText = backgroundItemText(live);
+        if (liveText === null) {
+          items.push(live);
+          continue;
+        }
+        if (typeof live.type !== "string") {
+          items.push(live);
+          continue;
+        }
+        const aligned = alignBackgroundTextRun(
+          items,
+          historicalCount,
+          live.type,
+          liveText,
+          consumedEnd.get(live.type) ?? 0,
+          [...(foreground?.values() ?? [])],
+          index === liveItems.length - 1 && items.length === historicalCount,
+        );
+        if (aligned === null) {
+          items.push(live);
+          continue;
+        }
+        consumedEnd.set(live.type, aligned);
+      }
       return {
         ...turn,
         items: [...items, ...remaining.values()],
@@ -4873,6 +6055,43 @@ export class AppServerHost {
     return thread.running || this.#externalSteering.hasPending(thread.id);
   }
 
+  async #prepareExternalFolderInput(
+    thread: ExternalThread,
+    text: string,
+  ): Promise<{ id: string; text: string }> {
+    if (this.#pendingExternalCommandRequests.has(thread.id))
+      throw new ExternalSteerError(-32072, "External Thread is preparing input");
+    const request = {
+      id: `codexhost:folders:${randomUUID()}`,
+      method: "turn/start",
+      params: { threadId: thread.id, input: [{ type: "text", text }] },
+    } as unknown as JsonRpcRequest;
+    this.#pendingExternalCommandRequests.add(thread.id);
+    try {
+      const prepared = await this.#threadFolders.prepare(
+        request,
+        async () => null,
+        true,
+        this.#externalAdapters.get(thread.harnessId)?.additionalDirectories === true,
+      );
+      const selection = await this.#threadFolders.store.get(thread.id);
+      const folders = this.#threadFolders.foldersForRequest(request.id);
+      if (folders && JSON.stringify(folders) !== JSON.stringify(selection?.appliedFolders)) {
+        const error = await this.#externalRuntime.changeWorkingFolders(thread, folders);
+        if (error) throw new ExternalSteerError(error.code, error.message);
+      }
+      return {
+        id: String(request.id),
+        text: requestText(isRecord(prepared.params) ? prepared.params : {}),
+      };
+    } catch (error) {
+      await this.#threadFolders.observe({ id: request.id, error: {} });
+      throw error;
+    } finally {
+      this.#pendingExternalCommandRequests.delete(thread.id);
+    }
+  }
+
   async #startDelegatedExternalTurn(
     thread: ExternalThread,
     text: string,
@@ -4881,6 +6100,8 @@ export class AppServerHost {
     if (this.#externalThreadBusy(thread)) {
       throw new Error("External Thread already has an active Turn");
     }
+    const folderInput = await this.#prepareExternalFolderInput(thread, text);
+    text = folderInput.text;
     const turnId = hostTurnIdSchema.parse(requestedTurnId);
     const projection: ProjectedTurn = {
       projector: new CodexTurnProjector({
@@ -4905,6 +6126,7 @@ export class AppServerHost {
       input: [{ type: "text", text }],
     });
     if (!result.ok) {
+      await this.#threadFolders.observe({ id: folderInput.id, error: result.error });
       thread.running = false;
       thread.activeTurnId = null;
       thread.projectedTurns.delete(turnId);
@@ -4912,6 +6134,9 @@ export class AppServerHost {
       this.#signalActiveWorkChanged();
       throw new Error(result.error.message);
     }
+    await this.#threadFolders
+      .observe({ id: folderInput.id, result: {} })
+      .catch((error: unknown) => this.#diagnose(error));
   }
 
   async #startExternalTurn(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
@@ -5208,27 +6433,32 @@ export class AppServerHost {
     thread: ExternalThread,
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
-    await insertNativeSteer(thread, input, {
-      project: async (turnId, item, clientUserMessageId) => {
-        const projection = this.#projectedTurn(thread, turnId);
-        if (clientUserMessageId) {
-          projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
-        }
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: { type: "item.started", turnId, item },
-        });
-        await this.#projectHarnessOutput(thread, {
-          kind: "event",
-          event: {
-            type: "item.completed",
-            turnId,
-            snapshot: { item, outcome: { status: "succeeded" } },
-          },
-        });
+    await insertNativeSteer(
+      thread,
+      input,
+      {
+        project: async (turnId, item, clientUserMessageId) => {
+          const projection = this.#projectedTurn(thread, turnId);
+          if (clientUserMessageId) {
+            projection.projector.bindUserMessageClientId(item.itemId, clientUserMessageId);
+          }
+          await this.#projectHarnessOutput(thread, {
+            kind: "event",
+            event: { type: "item.started", turnId, item },
+          });
+          await this.#projectHarnessOutput(thread, {
+            kind: "event",
+            event: {
+              type: "item.completed",
+              turnId,
+              snapshot: { item, outcome: { status: "succeeded" } },
+            },
+          });
+        },
+        diagnose: (error) => this.#diagnose(error),
       },
-      diagnose: (error) => this.#diagnose(error),
-    });
+      (text) => this.#expandJarvisText(text),
+    );
     return {
       turnId: input.turnId,
       gate: { promise: Promise.resolve(), resolve: () => undefined },
@@ -5332,6 +6562,8 @@ export class AppServerHost {
     ) {
       throw new ExternalSteerError(-32072, "External Thread already has an active Turn");
     }
+    const folderInput = await this.#prepareExternalFolderInput(thread, text);
+    text = folderInput.text;
     const turnId = hostTurnIdSchema.parse(randomUUID());
     const startedAtMs = Date.now();
     const projection: ProjectedTurn = {
@@ -5361,19 +6593,24 @@ export class AppServerHost {
       if (thread.unsubmittedPrewarm && (await this.#externalRuntime.submitPrewarm(thread))) {
         await this.#notifyExternalThreadStarted(thread.thread);
       }
+      const harnessText = await this.#expandJarvisText(rewriteDelegationMentionText(text));
       const result = await thread.session.execute({
         type: "turn.start",
         turnId,
         input: [
           {
             type: "text",
-            text: withInjectedContext(injected?.prefix, rewriteDelegationMentionText(text)),
+            text: withInjectedContext(injected?.prefix, harnessText),
           },
         ],
       });
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
+      await this.#threadFolders
+        .observe({ id: folderInput.id, result: {} })
+        .catch((error: unknown) => this.#diagnose(error));
       return { turnId, turn: projection.projector.pendingTurn(), gate };
     } catch (error) {
+      await this.#threadFolders.observe({ id: folderInput.id, error: {} });
       injected?.restore();
       restoreExecutionHost();
       thread.running = false;
@@ -5633,6 +6870,7 @@ export class AppServerHost {
       return;
     }
     if (event.type === "session.faulted") {
+      await this.#questions.closeWhere((request) => request.threadId === thread.id);
       for (const pending of [...this.#pendingDesktopQuestions.values()]) {
         if (pending.shared && pending.thread === thread)
           this.#retireDesktopQuestion(pending.interaction.interactionId, thread);
@@ -5696,6 +6934,10 @@ export class AppServerHost {
       return;
     }
     if (event.type === "turn.completed") {
+      const turnId = event.turnId;
+      await this.#questions.closeWhere(
+        (request) => request.threadId === thread.id && request.turnId === turnId,
+      );
       for (const pending of [...this.#pendingDesktopQuestions.values()]) {
         if (
           pending.shared &&
@@ -5706,6 +6948,11 @@ export class AppServerHost {
       }
     }
     if (event.type === "interaction.closed") {
+      const interactionId = event.interactionId;
+      await this.#questions.closeWhere(
+        (request) =>
+          request.threadId === thread.id && request.nativeInteractionId === interactionId,
+      );
       await this.#resolveDesktopApproval(event.interactionId, thread);
       await this.#resolveDesktopQuestion(event.interactionId, thread);
     }
@@ -5732,6 +6979,7 @@ export class AppServerHost {
     }
     const result = projection.projector.project(event as ProjectableHostEvent);
     if (event.type === "turn.started") {
+      this.#dropSettledTurnProjections(thread, event.turnId);
       await this.#setThreadStatus(thread, { type: "active", activeFlags: [] });
     }
     if (event.type === "turn.completed") {
@@ -5749,8 +6997,8 @@ export class AppServerHost {
       thread.historyHydrated = false;
       thread.running = false;
       thread.activeTurnId = null;
-      // Detached Items (native background commands) settle on this Turn later.
-      if (!projection.projector.hasOpenDetachedItems) thread.projectedTurns.delete(event.turnId);
+      // Native ACP can emit background text while idle; retain the latest completed Turn.
+      this.#dropSettledTurnProjections(thread, event.turnId);
       thread.responseGates.delete(event.turnId);
       thread.pendingSteerProjections.clear();
       this.#signalActiveWorkChanged();
@@ -5781,8 +7029,10 @@ export class AppServerHost {
     if (
       event.type === "item.completed" &&
       projection.projector.completed &&
-      !projection.projector.hasOpenDetachedItems
+      !projection.projector.hasOpenDetachedItems &&
+      event.turnId !== thread.projectedTerminalTurnId
     ) {
+      thread.turns = this.#withOpenBackgroundCommands(thread, thread.turns);
       thread.projectedTurns.delete(event.turnId);
     }
     for (const message of result.messages) await this.#writer.json(message);
@@ -6086,6 +7336,7 @@ export class AppServerHost {
   }
 
   async #resolveThreadInteractions(thread: ExternalThread): Promise<void> {
+    await this.#questions.closeWhere((request) => request.threadId === thread.id);
     for (const pending of [...this.#pendingDesktopApprovals.values()]) {
       if (pending.thread === thread)
         await this.#resolveDesktopApproval(pending.interaction.interactionId, thread);
@@ -6232,28 +7483,73 @@ export class AppServerHost {
     for (const message of result.messages) await this.#writer.json(message);
 
     const requestId = this.#allocateQuestionRequestId();
-    const expiresAtMs = interaction.expiresAt ? Date.parse(interaction.expiresAt) : Number.NaN;
-    const timeoutMs = Number.isFinite(expiresAtMs) ? Math.max(0, expiresAtMs - Date.now()) : null;
-    const pending: PendingDesktopQuestion = {
-      shared,
-      responding: false,
-      thread,
-      interaction,
-      projection: result.questionRequest,
-      timeout: null,
-    };
-    if (timeoutMs !== null) {
-      pending.timeout = setTimeout(() => {
-        void this.#cancelExpiredQuestion(requestId).catch((error) => this.#diagnose(error));
-      }, timeoutMs);
+    if (shared) {
+      const expiresAtMs = interaction.expiresAt ? Date.parse(interaction.expiresAt) : Number.NaN;
+      const timeoutMs = Number.isFinite(expiresAtMs) ? Math.max(0, expiresAtMs - Date.now()) : null;
+      const pending: PendingDesktopQuestion = {
+        shared,
+        responding: false,
+        thread,
+        interaction,
+        projection: result.questionRequest,
+        timeout: null,
+      };
+      if (timeoutMs !== null) {
+        pending.timeout = setTimeout(() => {
+          void this.#cancelExpiredQuestion(requestId).catch((error) => this.#diagnose(error));
+        }, timeoutMs);
+      }
+      this.#pendingDesktopQuestions.set(requestId, pending);
+      // Multi-select groups have one owner/surface; never also publish a native single-choice card.
+      return;
     }
-    this.#pendingDesktopQuestions.set(requestId, pending);
-    // Multi-select groups have one owner/surface; never also publish a native single-choice card.
-    if (shared) return;
+    this.#questions.register({
+      requestId,
+      threadId: thread.id,
+      harnessId: thread.harnessId,
+      turnId: interaction.turnId,
+      nativeInteractionId: interaction.interactionId,
+      ...(interaction.expiresAt ? { expiresAt: interaction.expiresAt } : {}),
+      request: result.questionRequest.request.params as JsonObject,
+      respond: async (reply) => {
+        if (
+          this.#externalRuntime.get(thread.id) !== thread ||
+          this.#externalRuntime.idleRelease.failure(thread)
+        ) {
+          throw new DelegationControlError(
+            "QUESTION_NOT_PENDING",
+            "Question Thread is no longer active",
+          );
+        }
+        let response;
+        try {
+          response =
+            "error" in reply
+              ? { type: "question" as const, answers: {}, cancelled: true as const }
+              : result.questionRequest.parseResponse(reply.result);
+        } catch (error) {
+          this.#diagnose(error);
+          response = { type: "question" as const, answers: {}, cancelled: true as const };
+        }
+        const submitted = await thread.session.execute({
+          type: "interaction.respond",
+          interactionId: interaction.interactionId,
+          response,
+        });
+        if (submitted.ok) return;
+        const code =
+          submitted.error.code === "invalidState"
+            ? "QUESTION_NOT_PENDING"
+            : submitted.error.code === "invalidRequest"
+              ? "INVALID_ARGUMENT"
+              : "DELEGATION_FAILED";
+        throw new DelegationControlError(code, submitted.error.message);
+      },
+    });
     try {
       await this.#writer.json({ id: requestId, ...result.questionRequest.request });
     } catch (error) {
-      this.#retireDesktopQuestion(interaction.interactionId, thread);
+      await this.#questions.close(requestId, false);
       await thread.session
         .execute({
           type: "interaction.respond",
@@ -6266,41 +7562,10 @@ export class AppServerHost {
   }
 
   async #handleDesktopQuestionResponse(value: JsonValue): Promise<boolean> {
-    if (!isRecord(value) || !isHostQuestionRequestId(value.id)) return false;
-    const requestId = value.id;
-    const pending = this.#pendingDesktopQuestions.get(requestId);
-    if (!pending || pending.shared) return true;
-    return this.#externalRuntime.idleRelease.runOperation(pending.thread.id, async () => {
-      if (
-        this.#externalRuntime.get(pending.thread.id) !== pending.thread ||
-        this.#externalRuntime.idleRelease.failure(pending.thread)
-      )
-        return true;
-      if (this.#options.externalOnly)
-        await this.#resolveDesktopQuestion(pending.interaction.interactionId, pending.thread);
-      else this.#pendingDesktopQuestions.delete(requestId);
-      if (pending.timeout) clearTimeout(pending.timeout);
-
-      let response;
-      try {
-        response =
-          "error" in value
-            ? { type: "question" as const, answers: {}, cancelled: true as const }
-            : pending.projection.parseResponse(value.result);
-      } catch (error) {
-        this.#diagnose(error);
-        response = { type: "question" as const, answers: {}, cancelled: true as const };
-      }
-      const result = await pending.thread.session.execute({
-        type: "interaction.respond",
-        interactionId: pending.interaction.interactionId,
-        response,
-      });
-      if (!result.ok && result.error.code !== "invalidState") {
-        this.#diagnose(`Question response failed: ${result.error.message}`);
-      }
+    if (await this.#questions.handleDesktopResponse(value, this.#options.externalOnly === true))
       return true;
-    });
+    // Shared cards answer through their existing RPC; consume late external replies too.
+    return isRecord(value) && isHostQuestionRequestId(value.id);
   }
 
   async #cancelExpiredQuestion(requestId: HostQuestionRequestId): Promise<void> {
@@ -6367,6 +7632,15 @@ export class AppServerHost {
       emittedAtMs: Date.now(),
       params: { threadId: thread.id, status },
     });
+  }
+
+  /** Fold late text before retiring settled projections at the next Turn. */
+  #dropSettledTurnProjections(thread: ExternalThread, keep: HostTurnId): void {
+    thread.turns = this.#withOpenBackgroundCommands(thread, thread.turns);
+    for (const [id, { projector }] of thread.projectedTurns) {
+      if (id !== keep && projector.completed && !projector.hasOpenDetachedItems)
+        thread.projectedTurns.delete(id);
+    }
   }
 
   #projectedTurn(thread: ExternalThread, turnId: HostTurnId): ProjectedTurn {
@@ -6471,4 +7745,26 @@ export class AppServerHost {
   #diagnose(error: unknown): void {
     this.#options.diagnosticOutput.write(`codexhost Host Runtime: ${errorMessage(error)}\n`);
   }
+}
+
+/**
+ * When the Host cannot read a mentioned DingTalk conversation, the agent still
+ * gets the conversation ids and the routed CLI entry, so it does not look for
+ * a local `dws` that only exists on the DingTalk Host.
+ */
+export function dingTalkReadFailureNote(text: string): string {
+  const { text: readable, mentions } = stripDingTalkMentions(text);
+  if (mentions.length === 0) return text;
+  const lines = mentions.map(
+    (mention) => `- 「${mention.label}」：conversationId=${mention.conversationId}`,
+  );
+  return [
+    readable,
+    "",
+    "[codexhost DingTalk]",
+    "Host 这次没能读取下面提到的钉钉会话内容。",
+    ...lines,
+    "钉钉 CLI（dws）只装在 DingTalk Host 上，本机没有 dws，不要在本机查找或安装。",
+    "需要读取时运行 `codexhost dingtalk dws -- <只读 dws 参数>`，例如 `codexhost dingtalk dws -- chat message list --conversation-id '<conversationId>'`。",
+  ].join("\n");
 }

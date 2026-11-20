@@ -313,6 +313,15 @@
   text-align: right;
   white-space: nowrap;
 }
+.settings-account-usage__updated {
+  grid-column: 1 / -1;
+  min-height: 13px;
+  color: var(--settings-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
 .settings-account-usage__message {
   color: var(--settings-muted);
 }

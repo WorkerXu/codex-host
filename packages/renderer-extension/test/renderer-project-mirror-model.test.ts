@@ -1,26 +1,33 @@
-import type { ProjectGroup } from "@codexhost/shared-contracts";
 import { describe, expect, it } from "vitest";
+
+import type { DesktopProjectsCatalog } from "@codexhost/shared-contracts";
 
 import {
   chooseMirrorDestination,
+  findNameOnlyLocalProject,
   isNameOnlyProject,
+  isNameOnlyRemoteProject,
   mirrorDirectoryCandidates,
-  planMirrorGroup,
   readComposerProject,
+  resolveMirrorSource,
   sanitizeMirrorDirectoryName,
 } from "../src/renderer-project-mirror-model.js";
 
 const parent = "/Users/test/Documents/ChatGPT";
+const remoteParent = "/home/oracle/Documents/ChatGPT";
 
-function group(name: string, members: ProjectGroup["members"]): ProjectGroup {
+function catalog(overrides: Partial<DesktopProjectsCatalog> = {}): DesktopProjectsCatalog {
   return {
-    id: `group-${name}`,
-    name,
-    order: 0,
-    collapsed: false,
-    members,
-    createdAt: "2026-11-12T03:00:00.000Z",
-    updatedAt: "2026-11-12T03:00:00.000Z",
+    localProjects: {},
+    remoteProjects: [],
+    threadProjectAssignments: {},
+    codexManagedRemoteConnections: [],
+    projectOrder: [],
+    selectedProject: null,
+    homeDirectory: "/Users/test",
+    defaultProjectParent: parent,
+    readAt: "2026-11-17T03:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -92,62 +99,102 @@ describe("composer project context", () => {
   });
 });
 
-describe("project group planning", () => {
-  const source = {
-    projectKind: "local" as const,
-    projectId: "local-alpha",
-    rootPaths: [`${parent}/alpha`],
-    label: "alpha",
-  };
-  const mirror = {
-    projectKind: "remote" as const,
-    projectId: "remote-alpha",
-    hostId: "remote-ssh-discovered:colab",
-    remotePath: "/root/Documents/ChatGPT/alpha",
-    label: "alpha",
-  };
+describe("remote name-only projects", () => {
+  it("accepts the same name-only shape under another machine's home", () => {
+    expect(
+      isNameOnlyRemoteProject({ label: "codex验收", remotePath: `${remoteParent}/codex验收` }),
+    ).toBe(true);
+    expect(
+      isNameOnlyRemoteProject({ label: "codex验收", remotePath: `${remoteParent}/codex验收 2` }),
+    ).toBe(true);
+  });
 
-  it("creates a group named after the project", () => {
-    const plan = planMirrorGroup({
-      groups: [],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "new-group",
-      now: "2026-11-12T03:00:00.000Z",
-    });
-    expect(plan.action).toBe("created");
-    expect(plan.groups[0]).toMatchObject({
-      id: "new-group",
-      name: "alpha",
-      members: [source, mirror],
+  it("rejects other parents, renamed folders, and nested roots", () => {
+    expect(isNameOnlyRemoteProject({ label: "root", remotePath: "/root" })).toBe(false);
+    expect(isNameOnlyRemoteProject({ label: "repo", remotePath: "/home/oracle/repo" })).toBe(false);
+    expect(
+      isNameOnlyRemoteProject({ label: "other", remotePath: `${remoteParent}/codex验收` }),
+    ).toBe(false);
+    expect(isNameOnlyRemoteProject({ label: "app", remotePath: `${remoteParent}/app/src` })).toBe(
+      false,
+    );
+  });
+
+  it("reuses a same-name local project instead of creating a numbered duplicate", () => {
+    const projects = [
+      { id: "one", name: "codex验收", rootPaths: [`${parent}/codex验收`] },
+      { id: "two", name: "codex验收", rootPaths: ["/work/codex验收"] },
+    ];
+    expect(findNameOnlyLocalProject(projects, "codex验收", parent)?.id).toBe("one");
+    expect(findNameOnlyLocalProject(projects, "missing", parent)).toBeUndefined();
+  });
+});
+
+describe("mirror source resolution", () => {
+  it("accepts a local name-only project", () => {
+    const resolved = resolveMirrorSource(
+      catalog({
+        localProjects: {
+          "local-alpha": { id: "local-alpha", name: "alpha", rootPaths: [`${parent}/alpha`] },
+        },
+      }),
+      { type: "local", projectId: "local-alpha" },
+    );
+    expect(resolved).toMatchObject({
+      reason: "eligible",
+      source: { id: "local-alpha", name: "alpha", hostId: "local", kind: "local" },
     });
   });
 
-  it("appends only missing members to an existing same-name group", () => {
-    const plan = planMirrorGroup({
-      groups: [group("alpha", [source])],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "unused",
-      now: "2026-11-12T03:00:00.000Z",
+  it("accepts a name-only project that lives on another machine", () => {
+    const resolved = resolveMirrorSource(
+      catalog({
+        remoteProjects: [
+          {
+            id: "remote-codex",
+            hostId: "remote-ssh-discovered:oracle-main",
+            remotePath: `${remoteParent}/codex验收`,
+            label: "codex验收",
+          },
+        ],
+      }),
+      { type: "remote", projectId: "remote-codex" },
+    );
+    expect(resolved).toMatchObject({
+      reason: "eligible",
+      source: {
+        id: "remote-codex",
+        name: "codex验收",
+        hostId: "remote-ssh-discovered:oracle-main",
+        kind: "remote",
+        rootPaths: [`${remoteParent}/codex验收`],
+      },
     });
-    expect(plan.action).toBe("appended");
-    expect(plan.groups[0]?.members).toEqual([source, mirror]);
   });
 
-  it("skips when either project already belongs to another group", () => {
-    const plan = planMirrorGroup({
-      groups: [group("other", [mirror])],
-      name: "alpha",
-      source,
-      mirror,
-      createId: () => "unused",
-      now: "2026-11-12T03:00:00.000Z",
+  it("keeps a remote project that is not name-only out of the picker", () => {
+    expect(
+      resolveMirrorSource(
+        catalog({
+          remoteProjects: [
+            {
+              id: "root-project",
+              hostId: "remote-ssh-codex-managed:root",
+              remotePath: "/root",
+              label: "root",
+            },
+          ],
+        }),
+        { type: "remote", projectId: "root-project" },
+      ),
+    ).toEqual({ source: null, reason: "not-name-only", error: null });
+  });
+
+  it("reports a project that disappeared from the catalog", () => {
+    expect(resolveMirrorSource(catalog(), { type: "remote", projectId: "gone" })).toMatchObject({
+      source: null,
+      reason: "missing-project",
     });
-    expect(plan.action).toBe("skipped-other-group");
-    expect(plan.groups).toHaveLength(1);
   });
 });
 
@@ -172,7 +219,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({}),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: "remote-alpha" });
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: "remote-alpha", state: "directory" });
   });
 
   it("skips a path owned by a differently named project", async () => {
@@ -186,7 +233,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null, state: "missing" });
   });
 
   it("reuses an existing directory without a project", async () => {
@@ -200,7 +247,7 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "directory" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha`, projectId: null, state: "directory" });
   });
 
   it("skips a file and uses the next numbered directory", async () => {
@@ -214,6 +261,6 @@ describe("mirror destination choice", () => {
         appProjects: [],
         directoryState: directoryState({ [`${parent}/alpha`]: "other" }),
       }),
-    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null });
+    ).resolves.toEqual({ path: `${parent}/alpha 2`, projectId: null, state: "missing" });
   });
 });

@@ -39,7 +39,6 @@ export function emptyProjectMirrorsFile(): ProjectMirrorsFile {
     formatVersion: PROJECT_MIRRORS_FORMAT_VERSION,
     revision: 0,
     projects: {},
-    acknowledged: {},
   };
 }
 
@@ -94,15 +93,14 @@ export async function writeProjectMirrorsFile(
 }
 
 export interface ProjectMirrorUpdate {
-  acknowledge?: true;
   /** `null` removes the mirror; omitting the field keeps the current record. */
   record?: ProjectMirrorRecord | null;
 }
 
 /**
- * Independent mirror registry beside the project-group configuration. It never
- * touches Desktop state; it only remembers which remote projects codexhost
- * created and which source projects the user confirmed as name-only.
+ * Registry of remote project mirrors. It never
+ * touches Desktop state; it only remembers which projects codexhost created on
+ * the other machine.
  */
 export class ProjectMirrorStore {
   readonly #directory: string;
@@ -140,8 +138,6 @@ export class ProjectMirrorStore {
       if (current.revision !== revision)
         throw new ProjectMirrorRevisionConflictError(revision, current.revision);
       let projects = { ...current.projects };
-      const acknowledged = { ...current.acknowledged };
-      if (update.acknowledge) acknowledged[sourceProjectId] = true;
       if (update.record === null) {
         projects = Object.fromEntries(
           Object.entries(projects).filter(([projectId]) => projectId !== sourceProjectId),
@@ -153,7 +149,6 @@ export class ProjectMirrorStore {
         formatVersion: PROJECT_MIRRORS_FORMAT_VERSION,
         revision: current.revision + 1,
         projects,
-        acknowledged,
       } satisfies ProjectMirrorsFile;
       return writeProjectMirrorsFile(this.file, next);
     });
