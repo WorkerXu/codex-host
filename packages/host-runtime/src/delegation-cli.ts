@@ -452,6 +452,8 @@ export async function runDelegationCli(input: {
         "--task-name",
         "--project",
         "--cwd",
+        "--worktree",
+        "--base",
         "--model",
         "--thinking",
         "--parent-thread",
@@ -477,6 +479,27 @@ export async function runDelegationCli(input: {
           "INVALID_ARGUMENT",
           "Cross-machine delegate start does not support --parent-thread",
         );
+      const worktree = value(parsed, "--worktree");
+      const base = value(parsed, "--base");
+      if (base !== undefined && worktree === undefined)
+        throw new DelegationControlError("INVALID_ARGUMENT", "--base requires --worktree");
+      // Peer paths belong to the target machine; never resolve them against this CLI's cwd.
+      const requestedCwd = value(parsed, "--cwd");
+      if (
+        worktree !== undefined &&
+        target !== "local" &&
+        (!requestedCwd || !path.isAbsolute(requestedCwd))
+      )
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "Cross-machine --worktree requires an explicit absolute --cwd",
+        );
+      const worktreeCwd =
+        worktree === undefined
+          ? cwdOption(parsed)
+          : target === "local"
+            ? path.resolve(process.cwd(), requestedCwd ?? ".")
+            : requestedCwd;
       // A remote Runtime has no local parent Thread; the caller environment is
       // intentionally ignored so the child is not attached to a foreign ID.
       const caller = callerThreadId(environment);
@@ -516,7 +539,9 @@ export async function runDelegationCli(input: {
           ...(value(parsed, "--task-name") !== undefined
             ? { taskName: value(parsed, "--task-name") }
             : {}),
-          ...(cwdOption(parsed) ? { cwd: cwdOption(parsed) } : {}),
+          ...(worktreeCwd ? { cwd: worktreeCwd } : {}),
+          ...(worktree !== undefined ? { worktree } : {}),
+          ...(base !== undefined ? { base } : {}),
           ...(value(parsed, "--model") ? { model: { id: value(parsed, "--model") } } : {}),
           ...(value(parsed, "--thinking") ? { thinkingOptionId: value(parsed, "--thinking") } : {}),
           ...(parentThread ? { parentThreadId: normalizeThreadId(parentThread) } : {}),

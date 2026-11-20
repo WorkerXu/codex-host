@@ -117,6 +117,7 @@ export function compactDelegationOutput(
         harnessId: result.harnessId,
         status: result.status,
         ...(result.cwd ? { cwd: result.cwd } : {}),
+        ...(result.worktree ? { worktree: result.worktree } : {}),
         ...(result.parentThreadId ? { parent: threadLink(result.parentThreadId) } : {}),
         ...(effective?.resolvedModelLabel ? { model: effective.resolvedModelLabel } : {}),
         ...(effective?.effectiveThinkingOptionId

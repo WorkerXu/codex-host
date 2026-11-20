@@ -66,6 +66,15 @@ user to add CODEXHOST_CLI_PATH to shell_environment_policy.include_only.
 Commands shown by help and in \`next\` begin with \`codexhost\`; run them the
 same way.
 
+For delegated code changes in a Git repository, prefer a dedicated checkout with
+\`delegate start --worktree <unique-branch>\`. The Host creates it before starting
+the child; do not run a separate Git worktree command. Use \`--base <ref>\` to choose
+a base, otherwise the source checkout's HEAD is used. Uncommitted changes are not
+copied. Cross-machine starts require an explicit absolute \`--cwd\` on the target
+Host. Read the returned \`worktree\` metadata. If a start fails and reports
+\`worktreeRetained\`, inspect that checkout and Thread before retrying; do not
+delete or overwrite it. Merge and cleanup are separate explicit operations.
+
 A delegation mention may contain complete \`codexhost delegate start\` commands.
 Execute them directly, replacing \`<task>\` and \`<short-name>\`; do not run
 \`--help\` or \`peer list\` first. Otherwise, use CLI help as the authoritative

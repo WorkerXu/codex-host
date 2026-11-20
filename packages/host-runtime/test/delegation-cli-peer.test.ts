@@ -127,6 +127,87 @@ afterEach(async () => {
 });
 
 describe("delegation CLI peer routing", () => {
+  it("forwards worktree preparation to the target Host without reading its cwd locally", async () => {
+    const env = await environment();
+    const worktree = { path: "/peer/repository.worktrees/task", branch: "task", base: "abc123" };
+    const { spawnImpl, inputs } = peerSpawn([
+      {
+        threadId: "child",
+        deepLink: "codex://threads/child",
+        harnessId: "pi",
+        status: "running",
+        cwd: worktree.path,
+        worktree,
+      },
+    ]);
+    const result = await run(
+      [
+        "delegate",
+        "start",
+        "--harness",
+        "pi",
+        "--task",
+        "review",
+        "--host",
+        "mac",
+        "--cwd",
+        "/peer/repository",
+        "--worktree",
+        "task",
+        "--base",
+        "main",
+        "--format",
+        "compact",
+      ],
+      { environment: env, spawnImpl },
+    );
+    expect(result.code).toBe(0);
+    expect(inputs).toEqual([
+      {
+        route: "/v1/delegate/start",
+        body: {
+          harnessId: "pi",
+          task: "review",
+          cwd: "/peer/repository",
+          worktree: "task",
+          base: "main",
+          origin: { kind: "peer", hostId: "remote-ssh-discovered:self" },
+        },
+      },
+    ]);
+    expect(JSON.parse(result.output)).toMatchObject({
+      thread: "thread://child?hostId=remote-ssh-discovered%3Amac",
+      worktree,
+    });
+  });
+
+  it.each([{ cwd: [] }, { cwd: ["--cwd", "relative/repository"] }])(
+    "requires an explicit absolute peer source cwd (%j)",
+    async ({ cwd }) => {
+      const env = await environment();
+      const { spawnImpl, inputs } = peerSpawn([]);
+      const result = await run(
+        [
+          "delegate",
+          "start",
+          "--harness",
+          "pi",
+          "--task",
+          "review",
+          "--host",
+          "mac",
+          "--worktree",
+          "task",
+          ...cwd,
+        ],
+        { environment: env, spawnImpl },
+      );
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.diagnostics).error.message).toContain("explicit absolute --cwd");
+      expect(inputs).toEqual([]);
+    },
+  );
+
   it("answers on the linked peer and preserves its Host in the compact receipt", async () => {
     const env = await environment();
     const file = path.join(env.CODEXHOST_USER_DIR ?? "", "reply.json");

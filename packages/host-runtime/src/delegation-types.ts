@@ -132,6 +132,8 @@ export interface DelegationConfigurationResult {
 }
 
 export interface DelegationStartResult {
+  /** Present when the Host prepared a dedicated checkout for this start. */
+  worktree?: { path: string; branch: string; base: string };
   delegationId: string;
   threadId: string;
   turnId: string;

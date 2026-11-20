@@ -23,6 +23,7 @@ import {
   type ThreadWatchCancelInput,
   type ThreadWatchInput,
 } from "./delegation-types.js";
+import { startWithDelegationWorktree } from "./delegation-worktree.js";
 import { matchesBearerToken } from "./bearer-token.js";
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -113,6 +114,41 @@ async function startWithWatch(
   return { ...result, watch };
 }
 
+/** Preparation runs on the target Host, including starts forwarded by peer-exec. */
+async function startWithWorktree(
+  api: DelegationControlApi,
+  watches: DelegationWatchApi | undefined,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const { worktree, base, ...start } = body;
+  if (
+    worktree !== undefined &&
+    (typeof start.harnessId !== "string" ||
+      !start.harnessId.trim() ||
+      typeof start.task !== "string" ||
+      !start.task.trim())
+  )
+    throw new DelegationControlError(
+      "INVALID_ARGUMENT",
+      "harnessId and task must be non-empty strings",
+    );
+  // Resolve the watch capability before creating any files.
+  const watcher = start.watchTimeoutMs === undefined ? undefined : watchApi(watches);
+  return startWithDelegationWorktree(
+    {
+      cwd: start.cwd as string | undefined,
+      branch: worktree as string | undefined,
+      base: base as string | undefined,
+    },
+    (cwd) => {
+      const input = { ...start, ...(cwd !== undefined ? { cwd } : {}) };
+      return watcher
+        ? startWithWatch(api, watcher, input)
+        : api.start(input as unknown as DelegationStartInput);
+    },
+  );
+}
+
 export interface DingTalkDwsPeerApi {
   /** Runs one dws command on the machine that owns the DingTalk login. */
   runDingTalkDws(args: readonly string[]): Promise<Record<string, unknown>>;
@@ -175,13 +211,7 @@ export async function startDelegationControlServer(input: {
           writeJson(response, 200, await input.api.inspect(body as unknown as HarnessInspectInput));
           return;
         case "/v1/delegate/start":
-          writeJson(
-            response,
-            200,
-            body.watchTimeoutMs === undefined
-              ? await input.api.start(body as unknown as DelegationStartInput)
-              : await startWithWatch(input.api, watchApi(input.watchApi), body),
-          );
+          writeJson(response, 200, await startWithWorktree(input.api, input.watchApi, body));
           return;
         case "/v1/thread/answer":
           writeJson(response, 200, await input.api.answer(body as unknown as ThreadAnswerInput));
