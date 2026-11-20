@@ -32,17 +32,26 @@ import {
 import type { ExternalThread, ExternalThreadRuntime } from "./external-thread-runtime.js";
 import { externalTurnInputText } from "./external-turn-input.js";
 import {
-  CLAUDE_HANDOFF_DIRECTORY,
+  HANDOFF_BUDGET_BYTES,
   claudeSessionJsonl,
   handoffBlock,
-  handoffMessagesFromTurns,
+  handoffBudgetBytes,
+  handoffItemsFromTurns,
   handoffSnapshotTurns,
-  type HandoffMessage,
-  type ThreadHandoffStore,
-} from "./thread-agent-switch.js";
+  type HandoffItem,
+} from "./thread-handoff-content.js";
+import type { ThreadHandoffRecord, ThreadHandoffStore } from "./thread-handoff-store.js";
+
+/** Where Codex's import accepts a session: under the Claude home's `projects`. */
+export const CLAUDE_HANDOFF_DIRECTORY = "codexhost-handoff";
 
 const IMPORT_TIMEOUT_MS = 60_000;
+/** Codex reports an import within milliseconds; after this, look for the Thread itself. */
+const IMPORT_POLL_AFTER_MS = 3_000;
+const IMPORT_POLL_INTERVAL_MS = 3_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
+/** A repeated request this soon after a switch is a retry of it, not a new switch. */
+const RETRY_WINDOW_MS = 15 * 60_000;
 
 /** A switch failure with a JSON-RPC code and a message the person can read. */
 export class ThreadAgentSwitchError extends Error {
@@ -76,6 +85,8 @@ export interface ThreadAgentSwitcherOptions {
   agentLabel(agent: string): string;
   /** Reads an idle source Thread; throws {@link ThreadAgentSwitchError} otherwise. */
   readSource(threadId: string): Promise<ThreadAgentSwitchSource>;
+  /** Whether a Thread a previous switch created still exists. */
+  threadExists(threadId: string, agent: string): Promise<boolean>;
   requestOfficial(method: string, params: JsonObject): Promise<JsonObject>;
   registerExternalThread(input: {
     record: StoredThreadRecordV1;
@@ -98,6 +109,8 @@ export interface ThreadAgentSwitcherOptions {
   archiveSource(source: ThreadAgentSwitchSource): Promise<void>;
   diagnose(error: unknown): void;
   importTimeoutMs?: number;
+  importPollAfterMs?: number;
+  now?: () => number;
 }
 
 interface ImportWaiter {
@@ -135,28 +148,65 @@ function sessionResults(params: JsonValue | undefined): {
   };
 }
 
+function imageCount(input: readonly JsonValue[]): number {
+  return input.filter(
+    (item) => isRecord(item) && (item.type === "image" || item.type === "localImage"),
+  ).length;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Moves a conversation to another Agent on this Host and archives the source. */
 export class ThreadAgentSwitcher {
   readonly #options: ThreadAgentSwitcherOptions;
   readonly #imports = new Set<ImportWaiter>();
+  /** One switch per source at a time; a concurrent duplicate shares its outcome. */
+  readonly #inFlight = new Map<string, { agent: string; result: Promise<{ threadId: string }> }>();
 
   constructor(options: ThreadAgentSwitcherOptions) {
     this.#options = options;
   }
 
-  async switch(params: ThreadAgentSwitchParams): Promise<{ threadId: string }> {
+  #now(): number {
+    return this.#options.now?.() ?? Date.now();
+  }
+
+  switch(params: ThreadAgentSwitchParams): Promise<{ threadId: string }> {
+    const running = this.#inFlight.get(params.threadId);
+    if (running) {
+      if (running.agent === params.agent) return running.result;
+      return Promise.reject(new ThreadAgentSwitchError(-32072, "这段对话正在切换，请稍候"));
+    }
+    const result = this.#switch(params).finally(() => this.#inFlight.delete(params.threadId));
+    this.#inFlight.set(params.threadId, { agent: params.agent, result });
+    return result;
+  }
+
+  async #switch(params: ThreadAgentSwitchParams): Promise<{ threadId: string }> {
+    const previous = await this.#options.handoffs.findBySource(params.threadId).catch(() => null);
+    if (
+      previous &&
+      previous.targetAgent === params.agent &&
+      this.#now() - Date.parse(previous.createdAt) < RETRY_WINDOW_MS &&
+      (await this.#options.threadExists(previous.hostThreadId, params.agent).catch(() => false))
+    ) {
+      // A retry after a lost reply: the conversation already moved.
+      return { threadId: previous.hostThreadId };
+    }
     const source = await this.#options.readSource(params.threadId);
     if (params.agent === source.agent) {
       throw new ThreadAgentSwitchError(-32602, "这段对话已经在使用这个 Agent");
     }
-    const messages = handoffMessagesFromTurns(source.turns);
-    if (messages.length === 0) {
+    const items = handoffItemsFromTurns(source.turns);
+    if (!items.some((item) => item.kind === "user")) {
       throw new ThreadAgentSwitchError(-32602, "这段对话还没有可以带过去的内容");
     }
     const threadId =
       params.agent === "codex"
-        ? await this.#toCodex(source, messages, params)
-        : await this.#toExternal(source, messages, params);
+        ? await this.#toCodex(source, items, params)
+        : await this.#toExternal(source, items, params);
     // The conversation already continues in the new Thread; a source that
     // could not be archived stays visible rather than failing the switch.
     await this.#options
@@ -202,9 +252,31 @@ export class ThreadAgentSwitcher {
     }
   }
 
+  #record(
+    source: ThreadAgentSwitchSource,
+    hostThreadId: string,
+    targetAgent: string,
+    items: HandoffItem[],
+    turns: JsonObject[],
+    deliveredItemIds: string[],
+  ): ThreadHandoffRecord {
+    return {
+      formatVersion: 2,
+      hostThreadId,
+      sourceThreadId: source.threadId,
+      sourceAgent: source.agent,
+      sourceTitle: source.title,
+      targetAgent,
+      createdAt: new Date(this.#now()).toISOString(),
+      items,
+      turns,
+      deliveredItemIds,
+    };
+  }
+
   async #toCodex(
     source: ThreadAgentSwitchSource,
-    messages: readonly HandoffMessage[],
+    items: HandoffItem[],
     params: ThreadAgentSwitchParams,
   ): Promise<string> {
     if (params.input) {
@@ -224,35 +296,79 @@ export class ThreadAgentSwitcher {
         sessionId,
         cwd: source.cwd,
         title: source.title,
-        messages,
-        nowMs: Date.now(),
+        items,
+        nowMs: this.#now(),
       }),
       { mode: 0o600 },
     );
+    let threadId: string;
     try {
       const paths = new Set([file, await realpath(file).catch(() => file)]);
-      const threadId = await this.#importSession(file, paths, source);
-      if (source.projectId) {
-        await this.#options
-          .requestOfficial("thread/metadata/update", { threadId, projectId: source.projectId })
-          .catch((error: unknown) => this.#options.diagnose(error));
-      }
-      const read = await this.#options
-        .requestOfficial("thread/read", { threadId, includeTurns: false })
-        .catch(() => null);
-      const thread = read && isRecord(read.result) ? read.result.thread : null;
-      if (isRecord(thread)) {
-        // Codex's import announces no new Thread; Desktop learns of it here.
-        await this.#options.notifyDesktop({
-          method: "thread/started",
-          emittedAtMs: Date.now(),
-          params: { thread: { ...thread, turns: [] } },
-        });
-      }
-      return threadId;
+      threadId = await this.#importSession(file, paths, source);
     } finally {
       await rm(file, { force: true }).catch(() => undefined);
     }
+    if (source.projectId) {
+      await this.#options
+        .requestOfficial("thread/metadata/update", { threadId, projectId: source.projectId })
+        .catch((error: unknown) => this.#options.diagnose(error));
+    }
+    const messageIds = items
+      .filter((item) => item.kind === "user" || item.kind === "assistant")
+      .map(({ id }) => id);
+    const activity = handoffBlock({
+      fromAgent: source.agent,
+      fromLabel: this.#options.agentLabel(source.agent),
+      threadId,
+      sourceThreadId: source.threadId,
+      items,
+      budgetBytes: HANDOFF_BUDGET_BYTES,
+      activityOnly: true,
+    });
+    await this.#options.handoffs
+      .save(
+        this.#record(
+          source,
+          threadId,
+          "codex",
+          items,
+          [],
+          [...messageIds, ...activity.deliveredItemIds],
+        ),
+      )
+      .catch((error: unknown) => this.#options.diagnose(error));
+    if (items.some((item) => item.kind !== "user" && item.kind !== "assistant")) {
+      await this.#injectActivity(threadId, activity.text).catch((error: unknown) =>
+        this.#options.diagnose(error),
+      );
+    }
+    const read = await this.#options
+      .requestOfficial("thread/read", { threadId, includeTurns: false })
+      .catch(() => null);
+    const thread = read && isRecord(read.result) ? read.result.thread : null;
+    if (isRecord(thread)) {
+      // Codex's import announces no new Thread; Desktop learns of it here.
+      await this.#options.notifyDesktop({
+        method: "thread/started",
+        emittedAtMs: this.#now(),
+        params: { thread: { ...thread, turns: [] } },
+      });
+    }
+    return threadId;
+  }
+
+  /**
+   * Codex shows the imported messages; the commands, file changes and errors
+   * around them reach its model as context, with how to read the rest.
+   */
+  async #injectActivity(threadId: string, block: string): Promise<void> {
+    const resumed = await this.#options.requestOfficial("thread/resume", { threadId });
+    if (isRecord(resumed.error)) throw new Error("Imported Codex Thread could not be resumed");
+    const injected = await this.#options.requestOfficial("thread/inject_items", {
+      threadId,
+      items: [{ type: "message", role: "user", content: [{ type: "input_text", text: block }] }],
+    });
+    if (isRecord(injected.error)) throw new Error("Handoff activity could not reach Codex");
   }
 
   async #importSession(
@@ -266,9 +382,15 @@ export class ThreadAgentSwitcher {
     });
     const pending = waiter as ImportWaiter;
     this.#imports.add(pending);
+    const startedAt = this.#now();
+    let settled = false;
     const timeout = setTimeout(
       () => pending.reject(new ThreadAgentSwitchError(-32076, "Codex 导入超时，请稍后重试")),
       this.#options.importTimeoutMs ?? IMPORT_TIMEOUT_MS,
+    );
+    void imported.then(
+      () => (settled = true),
+      () => (settled = true),
     );
     try {
       const response = await this.#options.requestOfficial("externalAgentConfig/import", {
@@ -288,16 +410,53 @@ export class ThreadAgentSwitcher {
       }
       const result = isRecord(response.result) ? response.result : {};
       if (typeof result.importId === "string") pending.importId = result.importId;
+      // A missed progress notification must not orphan the imported Thread.
+      void this.#pollImported(source, startedAt, () => settled).then((threadId) => {
+        if (threadId) pending.resolve(threadId);
+      });
       return await imported;
     } finally {
+      settled = true;
       clearTimeout(timeout);
       this.#imports.delete(pending);
     }
   }
 
+  async #pollImported(
+    source: ThreadAgentSwitchSource,
+    startedAt: number,
+    settled: () => boolean,
+  ): Promise<string | null> {
+    await delay(this.#options.importPollAfterMs ?? IMPORT_POLL_AFTER_MS);
+    while (!settled()) {
+      const listed = await this.#options
+        .requestOfficial("thread/list", {
+          limit: 20,
+          sortKey: "created_at",
+          sortDirection: "desc",
+        })
+        .catch(() => null);
+      const data = listed && isRecord(listed.result) ? listed.result.data : null;
+      const match = Array.isArray(data)
+        ? data.find(
+            (thread) =>
+              isRecord(thread) &&
+              typeof thread.id === "string" &&
+              thread.cwd === source.cwd &&
+              (!source.title || thread.name === source.title) &&
+              typeof thread.createdAt === "number" &&
+              thread.createdAt * 1000 >= startedAt - 5_000,
+          )
+        : undefined;
+      if (isRecord(match) && typeof match.id === "string") return match.id;
+      await delay(IMPORT_POLL_INTERVAL_MS);
+    }
+    return null;
+  }
+
   async #toExternal(
     source: ThreadAgentSwitchSource,
-    messages: readonly HandoffMessage[],
+    items: HandoffItem[],
     params: ThreadAgentSwitchParams,
   ): Promise<string> {
     const harnessId = params.agent as ExternalHarnessId;
@@ -313,14 +472,16 @@ export class ThreadAgentSwitcher {
     } catch {
       throw new ThreadAgentSwitchError(-32602, "这条消息的内容无法交给新的 Agent");
     }
-    const prefix = `${handoffBlock({
-      fromAgent: source.agent,
-      fromLabel: this.#options.agentLabel(source.agent),
-      threadId: source.threadId,
-      messages,
-    })}\n\n`;
     const hostThreadId = hostThreadIdSchema.parse(randomUUID());
     const turnId = hostTurnIdSchema.parse(randomUUID());
+    const block = handoffBlock({
+      fromAgent: source.agent,
+      fromLabel: this.#options.agentLabel(source.agent),
+      threadId: hostThreadId,
+      sourceThreadId: source.threadId,
+      items,
+      budgetBytes: handoffBudgetBytes(request, imageCount(params.input)),
+    });
     const { repository, externalRuntime, handoffs } = this.#options;
     let record = await repository.createProvisional(
       createExternalThreadRecordInput({
@@ -339,21 +500,24 @@ export class ThreadAgentSwitcher {
         if (source.projectId) {
           record = await repository.updateMetadata(hostThreadId, { projectId: source.projectId });
         }
-        await handoffs.save({
-          formatVersion: 1,
-          hostThreadId,
-          sourceThreadId: source.threadId,
-          sourceAgent: source.agent,
-          createdAt: new Date().toISOString(),
-          turns: handoffSnapshotTurns(messages, `handoff-${hostThreadId}`),
-        });
+        await handoffs.save(
+          this.#record(
+            source,
+            hostThreadId,
+            params.agent,
+            items,
+            handoffSnapshotTurns(source.turns, `handoff-${hostThreadId}`),
+            block.deliveredItemIds,
+          ),
+        );
         const opened = await adapter.open({
           kind: "create",
           cwd: record.cwd,
           environment: { ...this.#options.environment, [DELEGATION_THREAD_ID_ENV]: hostThreadId },
         });
-        if (!opened.ok)
+        if (!opened.ok) {
           throw new ThreadAgentSwitchError(-32070, `${label} 没能启动：${opened.error.message}`);
+        }
         session = opened.value;
         if (session.initialState.nativeRef) {
           record = await repository.commitNative(hostThreadId, session.initialState.nativeRef);
@@ -372,7 +536,7 @@ export class ThreadAgentSwitcher {
           ...(session.initialState.nativeRef ? {} : { restoredState: session.initialState }),
         });
         const beforeRevision = thread.stateObserver.revision;
-        await this.#options.startExternalTurn(thread, request, turnId, prefix);
+        await this.#options.startExternalTurn(thread, request, turnId, `${block.text}\n\n`);
         let revision = beforeRevision;
         const deadline = Date.now() + NATIVE_REF_TIMEOUT_MS;
         while (!thread.record.nativeSessionRef) {

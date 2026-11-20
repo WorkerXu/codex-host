@@ -33,7 +33,7 @@ import {
   materializeExternalSubagent,
   projectExternalSnapshot,
 } from "./external-subagent-threads.js";
-import { stripHandoffBlock } from "./thread-agent-switch.js";
+import { stripHandoffBlock } from "./thread-handoff-content.js";
 
 export interface ExternalThreadStore {
   initialize(): Promise<void>;
