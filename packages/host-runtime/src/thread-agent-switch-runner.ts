@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -38,6 +38,9 @@ import {
   handoffBudgetBytes,
   handoffItemsFromTurns,
   handoffSnapshotTurns,
+  handoffTurnsFromItems,
+  isHandoffActivity,
+  type HandoffBlock,
   type HandoffItem,
 } from "./thread-handoff-content.js";
 import type { ThreadHandoffRecord, ThreadHandoffStore } from "./thread-handoff-store.js";
@@ -52,6 +55,11 @@ const IMPORT_POLL_INTERVAL_MS = 3_000;
 const NATIVE_REF_TIMEOUT_MS = 10_000;
 /** A repeated request this soon after a switch is a retry of it, not a new switch. */
 const RETRY_WINDOW_MS = 15 * 60_000;
+/** Session files older than this were left behind by an interrupted switch. */
+const STALE_SESSION_MS = 10 * 60_000;
+const INJECT_RETRY_MS = 500;
+/** Turns Codex created from an imported session. */
+const CODEX_IMPORTED_TURN_PREFIX = "external-import-turn-";
 
 /** A switch failure with a JSON-RPC code and a message the person can read. */
 export class ThreadAgentSwitchError extends Error {
@@ -113,6 +121,13 @@ export interface ThreadAgentSwitcherOptions {
   now?: () => number;
 }
 
+/** The conversation so far, as the next Agent receives it. */
+interface HandoffHistory {
+  items: HandoffItem[];
+  /** Earlier snapshots, then the source's own Turns; shown above an external Thread. */
+  turns: JsonValue[];
+}
+
 interface ImportWaiter {
   paths: ReadonlySet<string>;
   importId: string | null;
@@ -158,6 +173,21 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function removeStaleSessions(directory: string): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map(async ({ name }) => {
+        const file = path.join(directory, name);
+        const info = await stat(file).catch(() => null);
+        if (info && Date.now() - info.mtimeMs > STALE_SESSION_MS) {
+          await rm(file, { force: true }).catch(() => undefined);
+        }
+      }),
+  );
+}
+
 /** Moves a conversation to another Agent on this Host and archives the source. */
 export class ThreadAgentSwitcher {
   readonly #options: ThreadAgentSwitcherOptions;
@@ -199,14 +229,14 @@ export class ThreadAgentSwitcher {
     if (params.agent === source.agent) {
       throw new ThreadAgentSwitchError(-32602, "这段对话已经在使用这个 Agent");
     }
-    const items = handoffItemsFromTurns(source.turns);
-    if (!items.some((item) => item.kind === "user")) {
+    const history = await this.#history(source);
+    if (!history.items.some((item) => item.kind === "user")) {
       throw new ThreadAgentSwitchError(-32602, "这段对话还没有可以带过去的内容");
     }
     const threadId =
       params.agent === "codex"
-        ? await this.#toCodex(source, items, params)
-        : await this.#toExternal(source, items, params);
+        ? await this.#toCodex(source, history, params)
+        : await this.#toExternal(source, history, params);
     // The conversation already continues in the new Thread; a source that
     // could not be archived stays visible rather than failing the switch.
     await this.#options
@@ -215,9 +245,61 @@ export class ThreadAgentSwitcher {
     return { threadId };
   }
 
-  /** Settles a pending import from Codex's progress and completion notifications. */
+  /**
+   * The whole conversation so far. A source that was itself switched to keeps
+   * its earlier history in its own handoff record, complete with the activity
+   * Codex only received as context; its own Turns follow.
+   */
+  async #history(source: ThreadAgentSwitchSource): Promise<HandoffHistory> {
+    const earlier = await this.#options.handoffs.load(source.threadId);
+    if (!earlier) {
+      return {
+        items: handoffItemsFromTurns(source.turns, { agent: source.agent }),
+        turns: [...source.turns],
+      };
+    }
+    // An external source shows the earlier snapshot above its own Turns; a
+    // Codex source holds the earlier messages as imported Turns.
+    const shown = new Set<JsonValue | undefined>(earlier.turns.map((turn) => turn.id));
+    const own = source.turns.filter(
+      (turn) =>
+        isRecord(turn) &&
+        !shown.has(turn.id) &&
+        !(
+          source.agent === "codex" &&
+          typeof turn.id === "string" &&
+          turn.id.startsWith(CODEX_IMPORTED_TURN_PREFIX)
+        ),
+    );
+    const lastTurn = earlier.items.reduce((last, item) => Math.max(last, item.turn), 0);
+    return {
+      items: [
+        ...earlier.items,
+        ...handoffItemsFromTurns(own, { agent: source.agent, firstTurn: lastTurn + 1 }),
+      ],
+      turns: [
+        ...(earlier.turns.length ? earlier.turns : handoffTurnsFromItems(earlier.items)),
+        ...own,
+      ],
+    };
+  }
+
+  /**
+   * Settles a pending import from Codex's progress and completion
+   * notifications, and forgets the handoff of a Codex Thread that was deleted.
+   */
   observe(message: JsonValue): void {
-    if (this.#imports.size === 0 || !isRecord(message)) return;
+    if (!isRecord(message)) return;
+    if (message.method === "thread/deleted") {
+      const threadId = isRecord(message.params) ? message.params.threadId : null;
+      if (typeof threadId === "string") {
+        void this.#options.handoffs
+          .remove(threadId)
+          .catch((error: unknown) => this.#options.diagnose(error));
+      }
+      return;
+    }
+    if (this.#imports.size === 0) return;
     const method = message.method;
     if (
       method !== "externalAgentConfig/import/progress" &&
@@ -256,8 +338,7 @@ export class ThreadAgentSwitcher {
     source: ThreadAgentSwitchSource,
     hostThreadId: string,
     targetAgent: string,
-    items: HandoffItem[],
-    turns: JsonObject[],
+    history: HandoffHistory,
     deliveredItemIds: string[],
   ): ThreadHandoffRecord {
     return {
@@ -268,15 +349,29 @@ export class ThreadAgentSwitcher {
       sourceTitle: source.title,
       targetAgent,
       createdAt: new Date(this.#now()).toISOString(),
-      items,
-      turns,
+      items: history.items,
+      turns: handoffSnapshotTurns(history.turns, `handoff-${hostThreadId}`),
       deliveredItemIds,
     };
   }
 
+  /** The activity Codex's model receives next to the imported messages. */
+  #activityBlock(record: ThreadHandoffRecord): HandoffBlock {
+    return handoffBlock({
+      fromAgent: record.sourceAgent,
+      fromLabel: this.#options.agentLabel(record.sourceAgent),
+      agentLabel: (agent) => this.#options.agentLabel(agent),
+      threadId: record.hostThreadId,
+      sourceThreadId: record.sourceThreadId,
+      items: record.items,
+      budgetBytes: HANDOFF_BUDGET_BYTES,
+      activityOnly: true,
+    });
+  }
+
   async #toCodex(
     source: ThreadAgentSwitchSource,
-    items: HandoffItem[],
+    history: HandoffHistory,
     params: ThreadAgentSwitchParams,
   ): Promise<string> {
     if (params.input) {
@@ -290,13 +385,14 @@ export class ThreadAgentSwitcher {
     );
     const file = path.join(directory, `${sessionId}.jsonl`);
     await mkdir(directory, { recursive: true, mode: 0o700 });
+    await removeStaleSessions(directory);
     await writeFile(
       file,
       claudeSessionJsonl({
         sessionId,
         cwd: source.cwd,
         title: source.title,
-        items,
+        items: history.items,
         nowMs: this.#now(),
       }),
       { mode: 0o600 },
@@ -313,34 +409,25 @@ export class ThreadAgentSwitcher {
         .requestOfficial("thread/metadata/update", { threadId, projectId: source.projectId })
         .catch((error: unknown) => this.#options.diagnose(error));
     }
-    const messageIds = items
-      .filter((item) => item.kind === "user" || item.kind === "assistant")
-      .map(({ id }) => id);
-    const activity = handoffBlock({
-      fromAgent: source.agent,
-      fromLabel: this.#options.agentLabel(source.agent),
+    const record = this.#record(
+      source,
       threadId,
-      sourceThreadId: source.threadId,
-      items,
-      budgetBytes: HANDOFF_BUDGET_BYTES,
-      activityOnly: true,
-    });
-    await this.#options.handoffs
-      .save(
-        this.#record(
-          source,
-          threadId,
-          "codex",
-          items,
-          [],
-          [...messageIds, ...activity.deliveredItemIds],
-        ),
-      )
-      .catch((error: unknown) => this.#options.diagnose(error));
-    if (items.some((item) => item.kind !== "user" && item.kind !== "assistant")) {
-      await this.#injectActivity(threadId, activity.text).catch((error: unknown) =>
-        this.#options.diagnose(error),
-      );
+      "codex",
+      history,
+      history.items.filter((item) => !isHandoffActivity(item)).map(({ id }) => id),
+    );
+    const hasActivity = record.items.some(isHandoffActivity);
+    if (hasActivity) record.activityPending = true;
+    // Persist before delivery: an interrupted injection can be retried without
+    // losing the source history or claiming the activity already reached Codex.
+    await this.#options.handoffs.save(record);
+    if (hasActivity) {
+      const activity = this.#activityBlock(record);
+      if (await this.#deliverActivity(threadId, activity.text, 2)) {
+        record.deliveredItemIds.push(...activity.deliveredItemIds);
+        delete record.activityPending;
+        await this.#options.handoffs.save(record);
+      }
     }
     const read = await this.#options
       .requestOfficial("thread/read", { threadId, includeTurns: false })
@@ -355,6 +442,40 @@ export class ThreadAgentSwitcher {
       });
     }
     return threadId;
+  }
+
+  /**
+   * Before the next Turn of a Codex Thread whose model has not received the
+   * handed-over activity yet. A failed injection leaves it pending and the
+   * person's request unsent, so retrying cannot silently lose the history.
+   */
+  async prepareCodexTurn(threadId: string): Promise<void> {
+    const record = await this.#options.handoffs.load(threadId);
+    if (!record?.activityPending || record.targetAgent !== "codex") return;
+    const activity = this.#activityBlock(record);
+    const injected = await this.#deliverActivity(threadId, activity.text, 1);
+    if (!injected) {
+      throw new ThreadAgentSwitchError(-32076, "交接记录暂时未能送达 Codex，请重试发送");
+    }
+    const delivered: ThreadHandoffRecord = {
+      ...record,
+      deliveredItemIds: [...new Set([...record.deliveredItemIds, ...activity.deliveredItemIds])],
+    };
+    delete delivered.activityPending;
+    await this.#options.handoffs.save(delivered);
+  }
+
+  async #deliverActivity(threadId: string, block: string, attempts: number): Promise<boolean> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.#injectActivity(threadId, block);
+        return true;
+      } catch (error) {
+        this.#options.diagnose(error);
+        if (attempt >= attempts) return false;
+        await delay(INJECT_RETRY_MS);
+      }
+    }
   }
 
   /**
@@ -456,7 +577,7 @@ export class ThreadAgentSwitcher {
 
   async #toExternal(
     source: ThreadAgentSwitchSource,
-    items: HandoffItem[],
+    history: HandoffHistory,
     params: ThreadAgentSwitchParams,
   ): Promise<string> {
     const harnessId = params.agent as ExternalHarnessId;
@@ -477,9 +598,10 @@ export class ThreadAgentSwitcher {
     const block = handoffBlock({
       fromAgent: source.agent,
       fromLabel: this.#options.agentLabel(source.agent),
+      agentLabel: (agent) => this.#options.agentLabel(agent),
       threadId: hostThreadId,
       sourceThreadId: source.threadId,
-      items,
+      items: history.items,
       budgetBytes: handoffBudgetBytes(request, imageCount(params.input)),
     });
     const { repository, externalRuntime, handoffs } = this.#options;
@@ -501,14 +623,7 @@ export class ThreadAgentSwitcher {
           record = await repository.updateMetadata(hostThreadId, { projectId: source.projectId });
         }
         await handoffs.save(
-          this.#record(
-            source,
-            hostThreadId,
-            params.agent,
-            items,
-            handoffSnapshotTurns(source.turns, `handoff-${hostThreadId}`),
-            block.deliveredItemIds,
-          ),
+          this.#record(source, hostThreadId, params.agent, history, block.deliveredItemIds),
         );
         const opened = await adapter.open({
           kind: "create",
