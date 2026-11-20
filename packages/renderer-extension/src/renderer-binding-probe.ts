@@ -1,3 +1,7 @@
+import { desktopDingTalkSettings } from "./renderer-desktop-dingtalk.js";
+import { forgetDingTalkComposer, openDingTalkWorkbench } from "./renderer-dingtalk-embed.js";
+import { installRendererDingTalkEntry } from "./renderer-dingtalk-entry.js";
+import { installRendererDingTalkLinks } from "./renderer-dingtalk-links.js";
 import { releaseRetiredSshConnectionHosts } from "./renderer-connection-catalog.js";
 import { readCachedModelCatalog, writeCachedModelCatalog } from "./renderer-model-catalog-cache.js";
 import {
@@ -890,6 +894,7 @@ export function installRendererBindingProbe(
     disposed: () => disposed,
   });
   const desktopJarvis = createDesktopJarvis(window, remoteConnections);
+  const dingTalkSettings = desktopDingTalkSettings(window, () => settingsLifecycle.locale);
   const settingsLifecycle = installRendererSettingsLifecycle(window, {
     desktopHubPages: createDesktopHubPages({
       routing: () => window.__codexhostHostRoutingV1,
@@ -898,7 +903,7 @@ export function installRendererBindingProbe(
         `${window.navigator?.userAgent ?? ""} ${window.navigator?.platform ?? ""}`,
       ),
     }),
-    workbench: desktopJarvis.settings,
+    workbench: { ...desktopJarvis.settings, ...dingTalkSettings },
     getRemoteConnections: () => remoteConnections,
     getUpdateClient: () => modelControl,
     getAccountClient: () =>
@@ -3567,6 +3572,23 @@ export function installRendererBindingProbe(
   window.addEventListener("codexhost:draft-workspace", onDraftWorkspace);
   window.addEventListener("codexhost:renderer-adapter-status", onAdapterStatus);
   window.addEventListener("focus", onWindowFocus);
+  const disposeDingTalkLinks = installRendererDingTalkLinks(document);
+  const dingTalkMention = installRendererDingTalkEntry(document, {
+    isComposerEditor: (editor) => {
+      const composer = composerForElement(editor);
+      return composer !== null && isMountedComposer(composer);
+    },
+    anchorForEditor: (editor) =>
+      editor.closest("[data-composer-body]") ?? composerForElement(editor),
+    open: (editor) => {
+      const composer = composerForElement(editor);
+      const mounted = composer ? mountedByComposer.get(composer) : undefined;
+      return openDingTalkWorkbench(
+        editor,
+        mounted ? (activeModelHostId(mounted.composer) ?? mounted.hostId) : null,
+      );
+    },
+  });
   const jarvisMention = installRendererJarvisMention(document, {
     ...desktopJarvis.search,
     isComposerEditor: (editor) => {
@@ -3832,6 +3854,9 @@ export function installRendererBindingProbe(
       delegationPeers.dispose();
       delegationMention?.dispose();
       jarvisMention.dispose();
+      dingTalkMention.dispose();
+      disposeDingTalkLinks();
+      forgetDingTalkComposer();
       skillLibrary.dispose();
       disposeSkillReferences();
       sidebarAgentIcons.dispose();

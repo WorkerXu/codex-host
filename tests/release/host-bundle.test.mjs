@@ -187,6 +187,7 @@ describe("release Host and independent plugin Bundles", () => {
         "pkce-challenge",
         "shebang-command",
         "shebang-regex",
+        "smol-toml",
         "which",
         "ws",
         "yaml",

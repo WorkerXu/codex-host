@@ -1,3 +1,5 @@
+import { ownsDesktopDingTalk } from "./desktop-dingtalk.js";
+import { createDingTalkService, type DingTalkService } from "./dingtalk-service.js";
 import { HubAdminService } from "./hub-admin-service.js";
 import { getSkillsHub } from "./skills-hub/service.js";
 import { desktopJarvisServices } from "./desktop-jarvis.js";
@@ -209,6 +211,7 @@ export async function prepareDelegationRuntime(input: {
     onDelegationApi: (api: DelegationControlRegistration) => (() => void) | undefined,
     registry: DelegationControlRegistry,
     hubAdmin: HubAdminService | undefined,
+    dingtalk: DingTalkService,
   ): Promise<number>;
 }): Promise<number> {
   const diagnoseWatch = (error: unknown) =>
@@ -253,6 +256,7 @@ export async function prepareDelegationRuntime(input: {
     watchApi: registry,
     inventory,
     skills: getSkillsHub(input.environment).local,
+    dingtalkEnvironment: input.environment,
   });
   const externalServer = await startExternalClients(
     input.environment,
@@ -298,14 +302,20 @@ export async function prepareDelegationRuntime(input: {
     return undefined;
   });
   const hubAdmin = process.platform === "darwin" ? new HubAdminService({ environment }) : undefined;
+  const dingtalk = createDingTalkService({
+    environment,
+    isLocalHost: ownsDesktopDingTalk(environment),
+  });
   try {
     return await input.createHost(
       environment,
       (value) => registry.register(value),
       registry,
       hubAdmin,
+      dingtalk,
     );
   } finally {
+    await dingtalk.dispose();
     registry.close();
     await peerControl?.close();
     await hubAdmin
@@ -454,7 +464,7 @@ export async function runHostRuntime(input: {
     return prepareDelegationRuntime({
       environment,
       ...(hostRuntimePath ? { hostRuntimePath } : {}),
-      createHost: async (delegationEnvironment, onDelegationApi, registry, hubAdmin) => {
+      createHost: async (delegationEnvironment, onDelegationApi, registry, hubAdmin, dingtalk) => {
         const official = await prepareLocalCodex({
           stockCodexPath,
           arguments: remoteControlPlan?.officialArguments ?? input.arguments,
@@ -475,6 +485,8 @@ export async function runHostRuntime(input: {
             const host = new AppServerHost({
               ...(hubAdmin ? { desktopHubs: { admin: hubAdmin } } : {}),
               ...desktopJarvisServices(delegationEnvironment, true),
+              dingtalk,
+              ownDingTalkDispatch: ownsDesktopDingTalk(delegationEnvironment),
               ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
               modelPrices,
               usageStatistics,
@@ -526,6 +538,7 @@ export async function runHostRuntime(input: {
           const host = new AppServerHost({
             ...(hubAdmin ? { desktopHubs: { admin: hubAdmin } } : {}),
             ...desktopJarvisServices(delegationEnvironment, true),
+            dingtalk,
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,
@@ -544,6 +557,9 @@ export async function runHostRuntime(input: {
                 modelPrices,
                 usageStatistics,
                 ...common,
+                ...(host.desktopDingTalkDispatch
+                  ? { dingTalkDispatch: host.desktopDingTalkDispatch }
+                  : {}),
                 arguments: [],
                 desktopInput,
                 desktopOutput,
@@ -582,7 +598,7 @@ export async function runHostRuntime(input: {
   return prepareDelegationRuntime({
     environment: input.environment,
     ...(hostRuntimePath ? { hostRuntimePath } : {}),
-    createHost: async (delegationEnvironment, _onDelegationApi, registry) => {
+    createHost: async (delegationEnvironment, _onDelegationApi, registry, _hubAdmin, dingtalk) => {
       const socketPath = remoteAppServerSocketPath(delegationEnvironment, listenUrl);
       const officialPlan = createRemoteOfficialAppServerPlan(input.arguments, socketPath);
       const officialRuntimeScope = new OfficialRuntimeScope({
@@ -615,6 +631,7 @@ export async function runHostRuntime(input: {
       let sharedDelegation: DelegationControlRegistration | undefined;
       const externalHost = new AppServerHost({
         ...desktopJarvisServices(delegationEnvironment, false),
+        dingtalk,
         ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
         modelPrices,
         usageStatistics,
@@ -653,6 +670,7 @@ export async function runHostRuntime(input: {
         createSession: ({ input: desktopInput, output: desktopOutput, diagnosticOutput }) => {
           return new AppServerHost({
             ...desktopJarvisServices(delegationEnvironment, false),
+            dingtalk,
             ...(runtimeMaintenance ? { runtimeMaintenance } : {}),
             modelPrices,
             usageStatistics,

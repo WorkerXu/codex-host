@@ -1,3 +1,8 @@
+import { handleCodexAgentsRequest, handleDingTalkDispatchRequest } from "./codex-agent-requests.js";
+import { createDesktopDingTalkDispatch, type DesktopDingTalkDispatch } from "./desktop-dingtalk.js";
+import { dingtalkChanged, handleDingTalkRequest } from "./dingtalk-requests.js";
+import { expandDingTalkTurnText, rewriteDingTalkTurnInput } from "./dingtalk-mention-rewrite.js";
+import type { DingTalkService } from "./dingtalk-service.js";
 import { handleJarvisRequest } from "./jarvis-requests.js";
 import { hasJarvisCarrier, rewriteJarvisTurnInput } from "./jarvis-mention-rewrite.js";
 import type { JarvisService } from "./jarvis-service.js";
@@ -448,6 +453,9 @@ export interface AppServerHostOptions {
   updateCoordinator?: HostUpdateCoordinator;
   runtimeMaintenance?: RuntimeMaintenance;
   jarvis?: JarvisService;
+  dingtalk?: DingTalkService;
+  ownDingTalkDispatch?: boolean;
+  dingTalkDispatch?: DesktopDingTalkDispatch;
   modelService?: ModelService;
   /** Present only on the local Host started by the Launcher. */
   consoleOpener?: HostConsoleOpener;
@@ -756,6 +764,8 @@ export class AppServerHost {
   #sessionImportRequests: SessionImportRequests | undefined;
   readonly #delegationApi: DelegationControlRegistration;
   #unregisterDelegationApi: (() => void) | undefined;
+  readonly #ownedDingTalkDispatch?: ReturnType<typeof createDesktopDingTalkDispatch>;
+  #unsubscribeDingTalk?: () => void;
   #unsubscribeAccountState: (() => void) | undefined;
   #activeOfficialTurns = new Map<string, string>();
   /** Active reply guards by request ID; each records whether its request was answered. */
@@ -995,6 +1005,13 @@ export class AppServerHost {
       options.mappingStore ??
         createProductionExternalThreadStore(this.#options.environment ?? process.env),
     );
+    if (options.ownDingTalkDispatch && options.dingtalk) {
+      this.#ownedDingTalkDispatch = createDesktopDingTalkDispatch(
+        options.environment ?? process.env,
+        options.dingtalk,
+        (method, params) => this.#requestOfficial(method, params),
+      );
+    }
     this.#threadPins = new ThreadPins(
       this.#repository,
       (method, params) => this.#requestOfficial(method, params),
@@ -1346,7 +1363,16 @@ export class AppServerHost {
     this.#appliedPreferenceRevision = snapshot.revision;
   }
 
+  get desktopDingTalkDispatch(): DesktopDingTalkDispatch | undefined {
+    return this.#ownedDingTalkDispatch?.service ?? this.#options.dingTalkDispatch;
+  }
+
   async run(): Promise<number> {
+    if (!this.#options.externalOnly && this.#options.dingtalk) {
+      this.#unsubscribeDingTalk = this.#options.dingtalk.addNotifier((event) => {
+        void this.#writer.json(dingtalkChanged(event)).catch(() => undefined);
+      });
+    }
     this.#skills?.start();
     try {
       await this.#repository.initialize();
@@ -1383,6 +1409,8 @@ export class AppServerHost {
     } catch (error) {
       this.#diagnose(`Host initialization failed: ${errorMessage(error)}`);
       this.#skills?.dispose();
+      this.#unsubscribeDingTalk?.();
+      this.#ownedDingTalkDispatch?.dispose();
       this.#pluginLoadAbort.abort();
       await this.#pluginLoading;
       await this.#closeAdapters();
@@ -1432,6 +1460,8 @@ export class AppServerHost {
       this.#externalSteering.close();
       await this.#desktopRequests.drain();
       this.#options.jarvis?.dispose();
+      this.#unsubscribeDingTalk?.();
+      this.#ownedDingTalkDispatch?.dispose();
       this.#externalRuntime.idleRelease.stop();
       await this.#externalRuntime.idleRelease.drain();
       await this.#pluginLoading;
@@ -1804,6 +1834,36 @@ export class AppServerHost {
       await this.#writer.json(reply);
       return;
     }
+    if (
+      request.method.startsWith("codexhost/dingtalk/") ||
+      request.method.startsWith("codexhost/dingtalk-dispatch/") ||
+      request.method.startsWith("codexhost/codex-agents/")
+    ) {
+      this.#dispatchDesktopReply(request, async () => {
+        const diagnose = (error: unknown) => this.#diagnose(error);
+        const service = this.#options.dingtalk;
+        const dispatch = this.desktopDingTalkDispatch;
+        let reply;
+        if (origin !== "desktop" || this.#options.externalOnly) {
+          reply = rpcError(request, -32601, "This operation requires a Desktop connection");
+        } else if (service && request.method.startsWith("codexhost/dingtalk/")) {
+          reply = await handleDingTalkRequest(request, service, diagnose);
+        } else if (dispatch && request.method.startsWith("codexhost/dingtalk-dispatch/")) {
+          reply = await handleDingTalkDispatchRequest(request, dispatch, diagnose);
+        } else if (dispatch && request.method.startsWith("codexhost/codex-agents/")) {
+          reply = await handleCodexAgentsRequest(
+            request,
+            dispatch.agents,
+            (method, params) => this.#requestOfficial(method, params),
+            diagnose,
+          );
+        } else {
+          reply = rpcError(request, -32601, "DingTalk or Codex agents unavailable on this Host");
+        }
+        await this.#writer.json(reply);
+      });
+      return;
+    }
     if (this.#options.externalOnly && request.method === SHARED_DELEGATION_METHOD) {
       const result = await dispatchSharedDelegation(this.#delegationApi, requestObject(request));
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
@@ -2059,11 +2119,23 @@ export class AppServerHost {
     const expanded = this.#options.jarvis
       ? await rewriteJarvisTurnInput(rewritten ?? input, (text) => this.#expandJarvisText(text))
       : null;
-    if (!rewritten && !expanded) return frame;
+    const dingtalk = this.#options.dingtalk;
+    const dingTalkInput = dingtalk
+      ? await rewriteDingTalkTurnInput(expanded ?? rewritten ?? input, (text) =>
+          expandDingTalkTurnText(dingtalk, text),
+        )
+      : null;
+    if (!rewritten && !expanded && !dingTalkInput) return frame;
     return encodeJsonFrame({
       ...(request as unknown as JsonObject),
-      params: { ...(request.params as JsonObject), input: expanded ?? rewritten },
+      params: { ...(request.params as JsonObject), input: dingTalkInput ?? expanded ?? rewritten },
     });
+  }
+
+  async #expandWorkbenchText(text: string): Promise<string> {
+    const expanded = await this.#expandJarvisText(text);
+    const dingtalk = this.#options.dingtalk;
+    return dingtalk ? expandDingTalkTurnText(dingtalk, expanded) : expanded;
   }
 
   async #expandJarvisText(text: string): Promise<string> {
@@ -2179,6 +2251,7 @@ export class AppServerHost {
     value: JsonValue;
   }): Promise<void> {
     await this.#threadFolders.observe(input.value).catch((error: unknown) => this.#diagnose(error));
+    this.#ownedDingTalkDispatch?.observe(input.value);
     for (const listener of this.#nativeSettingsNotifications) listener(input.value);
     if (this.#options.externalOnly) {
       this.#client.observeNativeMessage(input.value);
@@ -5877,7 +5950,7 @@ export class AppServerHost {
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
     await insertNativeSteer(thread, input, {
-      expandMentions: (text) => this.#expandJarvisText(text),
+      expandMentions: (text) => this.#expandWorkbenchText(text),
       project: async (turnId, item, clientUserMessageId) => {
         const projection = projectedTurn(thread, turnId);
         if (clientUserMessageId) {
@@ -6034,7 +6107,7 @@ export class AppServerHost {
         await this.#notifyExternalThreadStarted(thread.thread);
       }
       const stored = await this.#repository.find(thread.id);
-      const harnessText = await this.#expandJarvisText(rewriteDelegationMentionText(text));
+      const harnessText = await this.#expandWorkbenchText(rewriteDelegationMentionText(text));
       const injected = withInjectedText(stored, harnessText);
       const result = await thread.session.execute({
         type: "turn.start",

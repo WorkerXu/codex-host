@@ -1,3 +1,8 @@
+import {
+  createCodexAgentsSettingsPage,
+  type RendererCodexAgentsSettingsOptions,
+} from "./codex-agents-page.js";
+import { createDingTalkSettingsPage, type RendererDingTalkPageOptions } from "./dingtalk-page.js";
 import type { RendererModelServiceClient } from "../model-service-client.js";
 import { createJarvisSettingsPage, type RendererJarvisSettingsOptions } from "./jarvis-page.js";
 import {
@@ -689,6 +694,8 @@ function updatesPage(
 export interface DesktopWorkbenchSettings {
   jarvis: RendererJarvisSettingsOptions;
   modelService: RendererModelServiceClient;
+  codexAgents?: RendererCodexAgentsSettingsOptions;
+  dingtalk?: RendererDingTalkPageOptions;
 }
 
 export function createDefaultRendererSettingsPages(
@@ -726,6 +733,10 @@ export function createDefaultRendererSettingsPages(
             getDiagnostics,
           ),
         ]),
+    ...(workbench?.codexAgents
+      ? [createCodexAgentsSettingsPage(messages, workbench.codexAgents)]
+      : []),
+    ...(workbench?.dingtalk ? [createDingTalkSettingsPage(messages, workbench.dingtalk)] : []),
     createUsageStatisticsPage(
       consoleMessages(messages.locale),
       requestUsageStatistics,

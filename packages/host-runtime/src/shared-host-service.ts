@@ -1,3 +1,4 @@
+import { ownsDesktopDingTalk } from "./desktop-dingtalk.js";
 import { desktopJarvisServices } from "./desktop-jarvis.js";
 import { CodeRepositories } from "./code-repositories.js";
 import { writeFile, rename, rm } from "node:fs/promises";
@@ -115,7 +116,7 @@ export async function runSharedHostService(
   try {
     return await prepareDelegationRuntime({
       environment: env,
-      createHost: async (delegationEnvironment, _register, registry, hubAdmin) => {
+      createHost: async (delegationEnvironment, _register, registry, hubAdmin, dingtalk) => {
         const remote = createRemoteControlAppServerPlan({
           arguments: ["app-server"],
           environment: delegationEnvironment,
@@ -147,6 +148,8 @@ export async function runSharedHostService(
             : undefined;
         const host = new AppServerHost({
           ...desktopJarvisServices(hostEnvironment, false),
+          dingtalk,
+          ownDingTalkDispatch: ownsDesktopDingTalk(hostEnvironment),
           stockCodexPath: values["stock-codex"] ?? "",
           arguments: [],
           environment: hostEnvironment,
@@ -188,6 +191,10 @@ export async function runSharedHostService(
           owner,
           store,
           prices,
+          dingtalk,
+          ...(host.desktopDingTalkDispatch
+            ? { dingTalkDispatch: host.desktopDingTalkDispatch }
+            : {}),
           ...(process.platform === "darwin"
             ? { codeRepositories: new CodeRepositories({ environment: hostEnvironment }) }
             : {}),

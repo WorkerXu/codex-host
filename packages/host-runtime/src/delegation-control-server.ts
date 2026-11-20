@@ -1,3 +1,4 @@
+import { handleDingTalkPeerRoute, isDingTalkPeerRoute } from "./dingtalk-peer.js";
 import {
   SKILL_PEER_OPERATIONS,
   type LocalSkillsHub,
@@ -251,6 +252,7 @@ export async function startDelegationControlServer(input: {
   watchApi?: DelegationWatchApi;
   inventory?: HostInventory;
   skills?: LocalSkillsHub;
+  dingtalkEnvironment?: NodeJS.ProcessEnv;
 }): Promise<DelegationControlServer> {
   const server = createServer((request, response) => {
     void (async () => {
@@ -281,6 +283,14 @@ export async function startDelegationControlServer(input: {
           const code = skillsError(error);
           writeJson(response, 400, { error: { code, message: code } });
         }
+        return;
+      }
+      if (isDingTalkPeerRoute(request.url) && input.dingtalkEnvironment) {
+        writeJson(
+          response,
+          200,
+          await handleDingTalkPeerRoute(input.dingtalkEnvironment, request.url, body),
+        );
         return;
       }
       writeJson(response, 200, await routeDelegationRequest(input, request.url, body));

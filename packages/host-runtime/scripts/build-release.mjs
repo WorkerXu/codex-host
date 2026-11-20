@@ -29,6 +29,7 @@ const allowedRuntimePackages = new Set([
   "pkce-challenge",
   "shebang-command",
   "shebang-regex",
+  "smol-toml",
   "which",
   "ws",
   "yaml",
