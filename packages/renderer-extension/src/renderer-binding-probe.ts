@@ -1131,7 +1131,7 @@ export function installRendererBindingProbe(
       target: mounted.modelTarget,
       agent: controller.get(mounted.composer).agent,
     }));
-    mounted.workingFolders.refresh();
+    mounted.workingFolders?.refresh();
     restorePendingDraftPreference(mounted);
     const hostId = mounted.hostId;
     mounted.control.setPlugins(

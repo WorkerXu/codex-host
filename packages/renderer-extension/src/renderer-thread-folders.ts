@@ -45,6 +45,7 @@ export function directoryFolderPaths(value: unknown, path: string): string[] {
 
 export function mountRendererThreadFolders(composer: Element, context: () => FolderContext) {
   const d = composer.ownerDocument;
+  if (typeof d?.createElement !== "function") return;
   let generation = 0;
   let currentKey = "";
   let disposed = false;

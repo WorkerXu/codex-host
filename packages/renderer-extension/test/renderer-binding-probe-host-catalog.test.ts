@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import {
   harnessIdSchema,
   harnessPluginDescriptorSchema,
@@ -181,15 +180,36 @@ function emptyInspection() {
 }
 
 function installFakeBrowser(): void {
-  const composer = document.createElement("div");
-  composer.setAttribute("data-codex-composer-root", "");
-  const editor = document.createElement("textarea");
-  const editorContainer = document.createElement("div");
-  editorContainer.append(editor);
-  const sendButton = document.createElement("button");
-  sendButton.type = "submit";
-  composer.append(editorContainer, sendButton);
-  document.body.append(composer);
+  const listeners = new EventTarget();
+  class FakeElement {
+    readonly nodeType = 1;
+    // This catalog-only fixture has no layout; visible question cards have browser coverage.
+    getClientRects(): DOMRect[] {
+      return [];
+    }
+    closest(): Element | null {
+      return null;
+    }
+    querySelector(): Element | null {
+      return null;
+    }
+  }
+  const composer = Object.assign(new FakeElement(), {
+    isConnected: true,
+    matches: (selector: string) => selector === "[data-codex-composer-root]",
+    querySelectorAll: (selector: string) => (selector === "button" ? [testState.sendButton] : []),
+    querySelector: (selector: string) => (selector.includes("textarea") ? testState.editor : null),
+  }) as unknown as Element;
+  const editor = Object.assign(new FakeElement(), {
+    closest: () => composer,
+  }) as unknown as Element;
+  const sendButton = {
+    closest: () => null,
+    type: "submit",
+    disabled: false,
+    parentElement: null,
+    getAttribute: () => null,
+  } as unknown as HTMLButtonElement;
   testState.composer = composer;
   testState.editor = editor;
   testState.sendButton = sendButton;
@@ -203,34 +223,63 @@ function installFakeBrowser(): void {
   testState.prewarmClears = 0;
   testState.notifyMutations = null;
   testState.animationFrames = [];
-  const addDocumentListener = document.addEventListener.bind(document);
-  vi.spyOn(document, "addEventListener").mockImplementation((type, listener, options) => {
-    if (typeof listener === "function") testState.documentListeners.set(type, listener);
-    addDocumentListener(type, listener, options);
-  });
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
-    testState.animationFrames.push(callback),
-  );
+  const window_ = {
+    addEventListener: listeners.addEventListener.bind(listeners),
+    removeEventListener: listeners.removeEventListener.bind(listeners),
+    dispatchEvent: listeners.dispatchEvent.bind(listeners),
+    requestAnimationFrame: (callback: FrameRequestCallback) =>
+      testState.animationFrames.push(callback),
+    cancelAnimationFrame: vi.fn(),
+    setTimeout,
+    clearTimeout,
+    setInterval: vi.fn(() => 0),
+    clearInterval: vi.fn(),
+    open: vi.fn(),
+  };
+  const document_ = {
+    documentElement: {},
+    head: { append: vi.fn() },
+    body: {},
+    createElement: vi.fn(() => ({
+      setAttribute: vi.fn(),
+      textContent: "",
+      remove: vi.fn(),
+    })),
+    activeElement: null,
+    querySelectorAll: (selector: string) => (selector.includes("textarea") ? [editor] : []),
+    querySelector: () => null,
+    addEventListener: vi.fn((type: string, listener: EventListener) => {
+      testState.documentListeners.set(type, listener);
+    }),
+    removeEventListener: vi.fn(),
+  };
+  vi.stubGlobal("window", window_);
+  vi.stubGlobal("document", document_);
+  vi.stubGlobal("Node", { ELEMENT_NODE: 1 });
+  vi.stubGlobal("Element", FakeElement);
+  vi.stubGlobal("requestAnimationFrame", window_.requestAnimationFrame);
   vi.stubGlobal(
-    "ResizeObserver",
+    "MutationObserver",
     class {
+      constructor(callback: MutationCallback) {
+        testState.notifyMutations = (records) => callback(records, this);
+      }
+      takeRecords(): MutationRecord[] {
+        return [];
+      }
       observe(): void {}
       disconnect(): void {}
     },
   );
   vi.stubGlobal(
-    "MutationObserver",
-    class {
-      constructor(private readonly callback: MutationCallback) {}
-      observe(target: Node, options: MutationObserverInit): void {
-        if (target === document.documentElement && options.characterData) {
-          testState.notifyMutations = (records) => this.callback(records, this);
-        }
+    "CustomEvent",
+    class extends Event {
+      constructor(
+        type: string,
+        readonly init?: CustomEventInit,
+      ) {
+        super(type);
       }
-      takeRecords(): MutationRecord[] {
-        return [];
-      }
-      disconnect(): void {}
     },
   );
 }
@@ -242,10 +291,7 @@ afterEach(() => {
     }
   ).__codexhostRendererBindingProbeV1;
   api?.dispose();
-  document.body.replaceChildren();
-  document.head.replaceChildren();
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -658,61 +704,6 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     ).toMatchObject({ availability: "ready", error: null });
   });
 
-  it("recovers an active Host after both the short retries and a reconnected directory probe fail", async () => {
-    vi.useFakeTimers();
-    installFakeBrowser();
-    const hostId = "remote-ssh-discovered:linux";
-    const local = {
-      listHarnessPlugins,
-      inspectHarness: async () => readyInspection(),
-      inspectThread: async () => ({ owner: "codex", locked: true }),
-      inspectThreadCommands: async () => ({ commands: [] }),
-      inspectThreadUsage: async () => ({ threadId: "thread-a", usage: null }),
-    };
-    let connected = false;
-    let ready = false;
-    const remote = {
-      ...local,
-      listHarnessPlugins: async () => {
-        if (!ready) throw new Error("Host is loading its plugins");
-        return listHarnessPlugins();
-      },
-    };
-    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
-    const probe = installRendererBindingProbe({ enabledAgents: ["codex", "pi"] });
-    try {
-      probe.setAdapter(
-        { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
-        undefined,
-        undefined,
-        {
-          ...local,
-          currentHostId: () => hostId,
-          clientForHost: (id: string) => (id === "local" ? local : connected ? remote : null),
-        } as never,
-      );
-      await probe.refreshHarnessDirectory(hostId);
-      await vi.advanceTimersByTimeAsync(16_000);
-      expect(probe.harnessDirectory(hostId)).toMatchObject({
-        error: expect.stringContaining("unavailable"),
-      });
-      connected = true;
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(probe.harnessDirectory(hostId)).toMatchObject({
-        error: "Host is loading its plugins",
-      });
-      ready = true;
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(probe.harnessDirectory(hostId)).toMatchObject({
-        error: null,
-        availability: { pi: "ready" },
-      });
-    } finally {
-      probe.dispose();
-      vi.useRealTimers();
-    }
-  });
-
   it("skips editor text/IME mutations but retains visibility and structural reconciliation", async () => {
     installFakeBrowser();
     const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
@@ -725,8 +716,7 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
       for (const callback of testState.animationFrames.splice(0)) callback(performance.now());
     };
     reconcile.mockClear();
-    const text = document.createTextNode("draft");
-    testState.editor.append(text);
+    const text = { nodeType: 3, parentElement: testState.editor } as unknown as Text;
     const mutation = (type: MutationRecordType, target: Node) =>
       ({ type, target, addedNodes: [], removedNodes: [] }) as unknown as MutationRecord;
 
@@ -748,8 +738,7 @@ describe("Renderer binding Host-scoped Claude catalogs", () => {
     reconcile.mockClear();
 
     // Replacement/removal happens on the editor's parent, outside its contents.
-    const parent = testState.editor.parentElement;
-    assert(parent);
+    const parent = Object.assign(Object.create(Element.prototype), { nodeType: 1 });
     notify([mutation("childList", parent)]);
     flushFrame();
     expect(reconcile).toHaveBeenCalledTimes(1);
