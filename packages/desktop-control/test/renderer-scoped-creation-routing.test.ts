@@ -119,6 +119,66 @@ describe("draft-scoped native creation routing", () => {
     expect(f.creation.createConversation).toHaveBeenCalledTimes(0);
   });
 
+  it("keeps the draft's folders on a copied native mode independently of Harness selection", async () => {
+    const { control, manager } = fixture();
+    const source = mode("gpt-reserve");
+    const folders = ["/primary", "/extra"];
+    control.selectDraft(draft, "codexhost/pi-native", [source]);
+    control.selectWorkingFolders(draft, folders, [source]);
+
+    const input = { collaborationMode: { ...source }, cwd: "/home" };
+    const background = { clientThreadId: "client-new-thread:background" };
+    await expect(manager.startConversation(input, background)).resolves.toMatchObject({
+      collaborationMode: mode("codexhost/pi-native"),
+      cwd: "/primary",
+      workspaceRoots: folders,
+    });
+
+    control.selectDraft(draft, null);
+    await expect(manager.startConversation(input, background)).resolves.toMatchObject({
+      collaborationMode: mode("gpt-reserve"),
+      cwd: "/primary",
+      workspaceRoots: folders,
+    });
+  });
+
+  it("lets another draft reuse the same mode after switching to Codex", async () => {
+    const f = fixture();
+    const source = mode("native");
+    const other = "client-new-thread:other";
+    const background = { clientThreadId: "client-new-thread:background" };
+    f.control.selectDraft(draft, "codexhost/pi-native", [source]);
+    const retired = { collaborationMode: { ...source } };
+    f.control.selectDraft(draft, null);
+    f.control.selectDraft(other, "codexhost/claude-code-native", [source]);
+    await expect(
+      f.manager.startConversation({ collaborationMode: { ...source } }, background),
+    ).resolves.toMatchObject({ collaborationMode: mode("codexhost/claude-code-native") });
+    f.control.selectDraft(draft, "codexhost/pi-native");
+    await expect(f.manager.startConversation(retired, background)).resolves.toBe(retired);
+  });
+
+  it("rejects an unmarkable or already-owned mode without publishing a draft route", async () => {
+    const f = fixture();
+    const source = mode("native");
+    const frozen = Object.freeze(mode("native"));
+    expect(() => f.control.selectDraft(draft, "codexhost/pi-native", [source, frozen])).toThrow();
+    const input = { collaborationMode: source };
+    await expect(f.manager.startConversation(input, { clientThreadId: draft })).resolves.toBe(
+      input,
+    );
+    const other = "client-new-thread:other";
+    f.control.selectDraft(draft, "codexhost/pi-native", [source]);
+    expect(() => f.control.selectDraft(other, "codexhost/claude-code-native", [source])).toThrow();
+    const official = { collaborationMode: mode("native") };
+    await expect(f.manager.startConversation(official, { clientThreadId: other })).resolves.toBe(
+      official,
+    );
+    await expect(
+      f.manager.startConversation(input, { clientThreadId: "client-new-thread:background" }),
+    ).resolves.toMatchObject({ collaborationMode: mode("codexhost/pi-native") });
+  });
+
   it("clears all draft routes on adapter disposal and does not route through another Host", async () => {
     const local = fixture();
     const remote = fixture();

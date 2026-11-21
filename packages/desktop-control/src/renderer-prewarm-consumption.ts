@@ -39,9 +39,16 @@ export function isolateRendererPrewarmConsumption(
     return null;
   const consume = pool.consumePrewarmedThread;
   const hasPrewarm = pool.hasPrewarmedThread;
-  const draftModels = new Map<string, string>();
+  const draftRoutes = new Map<string, { draftId: string; model: string }>();
   const draftFolders = new Map<string, readonly string[]>();
   const draftIdentity = Symbol("codexhost draft creation");
+  const folderDraftIdentity = Symbol("codexhost draft folders");
+  // A marker (even on a native copy) expires with this particular selection's route.
+  const activeRoute = (marker: unknown) => {
+    if (!record(marker) || typeof marker.draftId !== "string") return undefined;
+    const route = draftRoutes.get(marker.draftId);
+    return route === marker ? route : undefined;
+  };
   const external = (model: unknown): model is string =>
     typeof model === "string" && model.startsWith("codexhost/");
   const routedStart = function (
@@ -53,23 +60,28 @@ export function isolateRendererPrewarmConsumption(
     const draftId = record(options) ? options.clientThreadId : null;
     const mode = record(input) && record(input.collaborationMode) ? input.collaborationMode : null;
     const origin = mode ? Reflect.get(mode, draftIdentity) : undefined;
-    const identity =
-      typeof draftId === "string" ? draftId : typeof origin === "string" ? origin : null;
-    const folders = identity ? draftFolders.get(identity) : undefined;
+    const folderOrigin = mode ? Reflect.get(mode, folderDraftIdentity) : undefined;
+    const folderDraftId =
+      typeof draftId === "string" && draftFolders.has(draftId)
+        ? draftId
+        : typeof folderOrigin === "string"
+          ? folderOrigin
+          : activeRoute(origin)?.draftId;
+    const folders = folderDraftId ? draftFolders.get(folderDraftId) : undefined;
     if (folders && record(input)) {
-      if (mode && identity)
-        Object.defineProperty(mode, draftIdentity, {
+      if (mode && folderDraftId !== folderOrigin)
+        Object.defineProperty(mode, folderDraftIdentity, {
           configurable: true,
           enumerable: true,
-          value: identity,
+          value: folderDraftId,
         });
       input = { ...input, cwd: folders[0], workspaceRoots: [...folders] };
     }
     if (mode && record(mode.settings) && external(mode.settings.model))
       return originalStart.call(this, input, options, ...args);
     const model =
-      (typeof draftId === "string" ? draftModels.get(draftId) : undefined) ??
-      (typeof origin === "string" ? draftModels.get(origin) : undefined);
+      (typeof draftId === "string" ? draftRoutes.get(draftId)?.model : undefined) ??
+      activeRoute(origin)?.model;
     if (!model) return originalStart.call(this, input, options, ...args);
     if (
       !record(input) ||
@@ -91,7 +103,7 @@ export function isolateRendererPrewarmConsumption(
   const wrapped = function (this: unknown, input: unknown, ...args: unknown[]) {
     const mode = record(input) && record(input.collaborationMode) ? input.collaborationMode : null;
     const expected = mode && record(mode.settings) ? mode.settings.model : null;
-    const identity = mode ? Reflect.get(mode, draftIdentity) : null;
+    const identity = mode ? Reflect.get(mode, folderDraftIdentity) : null;
     const folders = typeof identity === "string" ? draftFolders.get(identity) : undefined;
     const scopedPool = Object.create(pool) as Record<string, unknown>;
     scopedPool.hasPrewarmedThread = (...parameters: unknown[]) =>
@@ -155,7 +167,7 @@ export function isolateRendererPrewarmConsumption(
         throw new Error("工作文件夹缺少草稿标识");
       draftFolders.set(draftId, [...folders]);
       for (const mode of creationModes)
-        Object.defineProperty(mode, draftIdentity, {
+        Object.defineProperty(mode, folderDraftIdentity, {
           configurable: true,
           enumerable: true,
           value: draftId,
@@ -167,24 +179,35 @@ export function isolateRendererPrewarmConsumption(
       creationModes: readonly Record<string, unknown>[] = [],
     ): void {
       if (draftId === undefined) {
-        if (model === null) draftModels.clear();
-      } else if (model === null) draftModels.delete(draftId);
+        if (model === null) draftRoutes.clear();
+      } else if (model === null) draftRoutes.delete(draftId);
       else {
         if (!draftId.startsWith("client-new-thread:") || !external(model))
           throw new Error("External draft route is missing its client Thread identity");
-        draftModels.set(draftId, model);
+        const route = draftRoutes.get(draftId) ?? { draftId, model };
+        const toMark = creationModes.filter((mode) => {
+          const marker = Object.getOwnPropertyDescriptor(mode, draftIdentity);
+          if (marker?.value === route) return false;
+          if (
+            marker ? activeRoute(marker.value) || !marker.configurable : !Object.isExtensible(mode)
+          )
+            throw new Error("External creation mode cannot be marked for this draft");
+          return true;
+        });
         // Native preparation shallow-copies modes when it overrides effort.
         // Symbols survive those copies and are omitted from RPC JSON.
-        for (const mode of creationModes)
+        for (const mode of toMark)
           Object.defineProperty(mode, draftIdentity, {
             configurable: true,
             enumerable: true,
-            value: draftId,
+            value: route,
           });
+        route.model = model;
+        draftRoutes.set(draftId, route);
       }
     },
     dispose() {
-      draftModels.clear();
+      draftRoutes.clear();
       draftFolders.clear();
       if (manager.startConversation === routedStart) manager.startConversation = originalStart;
       if (creation.createConversation === wrapped) creation.createConversation = original;

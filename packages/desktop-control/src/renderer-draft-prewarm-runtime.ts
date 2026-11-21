@@ -671,6 +671,7 @@ export function createDraftPrewarmPolicyBridge(
     state: "ready" as const,
     hostId,
     scopedCreation: restoreConsumption !== null,
+    requiresCreationMode: true as const,
     owns(
       candidateManager: RendererHostRequestManager,
       candidate: RendererHostRequestBridge,
