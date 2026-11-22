@@ -10,6 +10,10 @@ import type {
 } from "./agent-selection-state.js";
 import type { CodexAccountSummary, HarnessPluginDescriptor } from "@codexhost/shared-contracts";
 import { createRendererAgentIcon, rendererAgentLabel } from "./renderer-agent-icon.js";
+import {
+  mountRendererModelSelectionNotice,
+  type RendererModelSelectionNotice,
+} from "./renderer-model-selection-notice.js";
 import { requestConnectionsPageFocus } from "./settings/connections-page.js";
 import {
   rendererSettingsMessages,
@@ -23,7 +27,7 @@ import type { RendererAdapterStatus } from "./versioned-renderer-adapter.js";
 // user already sees (translated) on the Connections settings page.
 function pickerGroupMessages(): Pick<
   ReturnType<typeof rendererSettingsMessages>,
-  "pickerMoreAgentsLabel" | "pickerManageLink" | "pickerHideUnusedAgentsCta"
+  "locale" | "pickerMoreAgentsLabel" | "pickerManageLink" | "pickerHideUnusedAgentsCta"
 > & {
   readonly ownershipErrorLabel: string;
 } {
@@ -90,6 +94,7 @@ export interface RendererAgentPickerControl {
   plugins: readonly HarnessPluginDescriptor[];
   options: Partial<Record<RendererAgent, AgentOptionControl>>;
   updateAvailability(availability: AgentAvailability): void;
+  showSwitchFailure(): void;
   close(): void;
   dispose(): void;
 }
@@ -287,6 +292,7 @@ export function mountRendererAgentPicker(
   const options: Partial<Record<RendererAgent, AgentOptionControl>> = {};
   const rowsByAgent = new Map<RendererAgent, HTMLDivElement>();
   const groupMessages = pickerGroupMessages();
+  let switchFailureNotice: RendererModelSelectionNotice | undefined;
 
   const close = (): void => {
     if (!popoverOpen(menu)) return;
@@ -304,6 +310,7 @@ export function mountRendererAgentPicker(
     target?.focus();
   };
   const open = (focus: "first" | "last" | "selected" = "selected"): void => {
+    switchFailureNotice?.hide();
     if (trigger.disabled || popoverOpen(menu)) return;
     setMenuPosition(control);
     if (typeof menu.showPopover === "function") menu.showPopover();
@@ -669,9 +676,21 @@ export function mountRendererAgentPicker(
       notInstalled = next;
       regroup();
     },
+    showSwitchFailure() {
+      switchFailureNotice ??= mountRendererModelSelectionNotice(trigger);
+      if (groupMessages.locale === "zh-CN") {
+        switchFailureNotice.show("无法切换 Agent", "当前草稿暂时无法使用所选 Agent。");
+      } else {
+        switchFailureNotice.show(
+          "Couldn’t switch Agent",
+          "The selected Agent isn’t available for this draft.",
+        );
+      }
+    },
     close,
     dispose() {
       close();
+      switchFailureNotice?.dispose();
       unsubscribeGroup();
       trigger.removeEventListener("click", onTriggerClick);
       trigger.removeEventListener("keydown", onTriggerKeyDown);

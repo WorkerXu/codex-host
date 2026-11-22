@@ -2420,6 +2420,7 @@ export function installRendererBindingProbe(
   const switchComposerAgent = async (
     mounted: MountedComposer,
     agent: RendererAgent,
+    showFailure = false,
   ): Promise<boolean> => {
     pendingDefaultPreferences.set(controller.get(mounted.composer).composerId, false);
     if (agent !== "codex" && composerAvailability(mounted)[agent] !== "ready") {
@@ -2444,7 +2445,13 @@ export function installRendererBindingProbe(
     }
     controller.invalidateModelRequests(mounted.composer);
     const switching = controller.switchAgent(mounted.composer, agent, {
-      applyAgent: (nextAgent) => applyDraftAgentCarrier(mounted.composer, nextAgent),
+      applyAgent: (nextAgent) => {
+        const applied = applyDraftAgentCarrier(mounted.composer, nextAgent);
+        if (!applied && showFailure && nextAgent === agent) {
+          mounted.control.picker.showSwitchFailure();
+        }
+        return applied;
+      },
       clearPrewarm: () => clearDraftPrewarm(mounted.composer),
     });
     renderMounted(mounted);
@@ -3106,7 +3113,7 @@ export function installRendererBindingProbe(
       (agent) => {
         const mounted = mountedByComposer.get(composer);
         if (!composer.isConnected || !mounted) return;
-        void switchComposerAgent(mounted, agent);
+        void switchComposerAgent(mounted, agent, true);
       },
       (agent) => openInstallPage(activeModelHostId(composer), agent),
       () => {
