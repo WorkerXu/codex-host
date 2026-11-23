@@ -135,11 +135,32 @@ describe("draft-scoped native creation routing", () => {
     });
 
     control.selectDraft(draft, null);
-    await expect(manager.startConversation(input, background)).resolves.toMatchObject({
+    await expect(
+      manager.startConversation(input, { clientThreadId: draft }),
+    ).resolves.toMatchObject({
       collaborationMode: mode("gpt-reserve"),
       cwd: "/primary",
       workspaceRoots: folders,
     });
+  });
+
+  it("keeps a new draft from inheriting folders when it reuses another draft's mode", async () => {
+    const { control, manager } = fixture();
+    const source = mode("native");
+    control.selectDraft(draft, "codexhost/pi-native", [source]);
+    control.selectWorkingFolders(draft, ["/primary", "/extra"], [source]);
+    control.selectDraft(draft, null);
+    control.selectDraft("client-new-thread:other", "codexhost/claude-code-native", [source]);
+
+    const created = await manager.startConversation(
+      { collaborationMode: { ...source }, cwd: "/other" },
+      { clientThreadId: "client-new-thread:background" },
+    );
+    expect(created).toMatchObject({
+      collaborationMode: mode("codexhost/claude-code-native"),
+      cwd: "/other",
+    });
+    expect(created).not.toHaveProperty("workspaceRoots");
   });
 
   it("lets another draft reuse the same mode after switching to Codex", async () => {

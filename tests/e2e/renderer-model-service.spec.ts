@@ -44,9 +44,12 @@ const { outputFiles } = await build({
   plugins: [tailwindEsbuildPlugin()],
   write: false,
 });
-async function setup(page: Page, failSave = false) {
+async function setup(page: Page, failSave = false, body = "") {
   await page.route("http://localhost/model-test", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<!doctype html><html><body></body></html>" }),
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><html><body>${body}</body></html>`,
+    }),
   );
   await page.goto("http://localhost/model-test");
   await page.addScriptTag({ content: outputFiles[0]?.text ?? "" });
@@ -130,4 +133,26 @@ test("save failures remain editable with Chinese copy and clear on cancel", asyn
   await gemini(page).getByRole("button", { name: "取消", exact: true }).click();
   await expect(gemini(page).getByRole("status")).toHaveText("未配置");
   await expect(gemini(page).locator("input")).toHaveValue("");
+});
+
+test("hides the native workspace outline only while Settings covers the workspace", async ({
+  page,
+}) => {
+  await setup(
+    page,
+    false,
+    `<style>[data-app-shell-surface-backing]::after {
+      content: ""; box-shadow: 1px 0 rgb(0, 0, 0);
+    }</style>
+    <nav data-app-navigation-rail style="width: 64px; height: 120px"></nav>
+    <main data-app-shell-frame data-app-shell-page-surface="true">
+      <div data-app-shell-surface-backing></div>
+    </main>`,
+  );
+  const backing = page.locator("[data-app-shell-surface-backing]");
+  const outline = () =>
+    backing.evaluate((element) => getComputedStyle(element, "::after").boxShadow);
+  await expect.poll(outline).toBe("none");
+  await page.evaluate(() => Reflect.get(globalThis, "modelFixture").shell.close());
+  await expect.poll(outline).not.toBe("none");
 });

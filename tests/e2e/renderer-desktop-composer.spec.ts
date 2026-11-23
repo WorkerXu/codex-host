@@ -64,7 +64,7 @@ const { outputFiles } = await build({
       binding.setAdapter(
         { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
         undefined,
-        () => true,
+        (agent) => agent === "codex" || !composer.hasAttribute("data-reject-agent-switch"),
         {
           currentHostId: (target) => target === composer ? hostId : "local",
           knownHostIds: () => Object.keys(clients),
@@ -156,6 +156,20 @@ for (const { draft, projectHost, own, other } of [
     );
   });
 }
+
+test("keeps Codex and shows a notice when the native draft writer rejects an Agent", async ({
+  page,
+}) => {
+  await openDesktopFixture(page);
+  await page.locator("[data-codex-composer-root]").evaluate((composer) => {
+    composer.setAttribute("data-reject-agent-switch", "");
+  });
+  const trigger = page.getByRole("button", { name: "Select Agent, current Codex" });
+  await trigger.click();
+  await page.getByRole("menuitemradio", { name: "Pi" }).click();
+  await expect(page.getByRole("alert")).toContainText("Couldn’t switch Agent");
+  await expect(trigger).toBeVisible();
+});
 
 test("the # menu can still insert a cross-machine mention", async ({ page }) => {
   await openDesktopFixture(page);

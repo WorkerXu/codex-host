@@ -57,31 +57,34 @@ export function isolateRendererPrewarmConsumption(
     options: unknown,
     ...args: unknown[]
   ) {
-    const draftId = record(options) ? options.clientThreadId : null;
+    const draftId =
+      record(options) && typeof options.clientThreadId === "string"
+        ? options.clientThreadId
+        : undefined;
     const mode = record(input) && record(input.collaborationMode) ? input.collaborationMode : null;
     const origin = mode ? Reflect.get(mode, draftIdentity) : undefined;
+    const route = (draftId ? draftRoutes.get(draftId) : undefined) ?? activeRoute(origin);
     const folderOrigin = mode ? Reflect.get(mode, folderDraftIdentity) : undefined;
     const folderDraftId =
-      typeof draftId === "string" && draftFolders.has(draftId)
-        ? draftId
-        : typeof folderOrigin === "string"
-          ? folderOrigin
-          : activeRoute(origin)?.draftId;
+      route?.draftId ?? draftId ?? (typeof folderOrigin === "string" ? folderOrigin : undefined);
     const folders = folderDraftId ? draftFolders.get(folderDraftId) : undefined;
-    if (folders && record(input)) {
-      if (mode && folderDraftId !== folderOrigin)
-        Object.defineProperty(mode, folderDraftIdentity, {
-          configurable: true,
-          enumerable: true,
-          value: folderDraftId,
-        });
-      input = { ...input, cwd: folders[0], workspaceRoots: [...folders] };
+    if (record(input) && (folders || typeof folderOrigin === "string")) {
+      input = {
+        ...input,
+        ...(mode
+          ? {
+              collaborationMode: {
+                ...mode,
+                [folderDraftIdentity]: folders ? folderDraftId : undefined,
+              },
+            }
+          : {}),
+        ...(folders ? { cwd: folders[0], workspaceRoots: [...folders] } : {}),
+      };
     }
     if (mode && record(mode.settings) && external(mode.settings.model))
       return originalStart.call(this, input, options, ...args);
-    const model =
-      (typeof draftId === "string" ? draftRoutes.get(draftId)?.model : undefined) ??
-      activeRoute(origin)?.model;
+    const model = route?.model;
     if (!model) return originalStart.call(this, input, options, ...args);
     if (
       !record(input) ||
