@@ -388,14 +388,7 @@ workspaces.register(rpc, streams);
 sessions.register(rpc, streams);
 sessions.registerCommands(rpc);
 sessions.registerImport(rpc);
-const remoteSessions = new RemoteSessions(
-  events,
-  async (operation) => {
-    if (operation.kind === "hosts") return [];
-    throw new Error("Remote sessions are not available on this Web server");
-  },
-  workspaces,
-);
+const remoteSessions = new RemoteSessions(events, undefined, workspaces);
 remoteSessions.install(rpc, streams);
 preferences.register(rpc);
 displaySettings.register(rpc);
