@@ -7,12 +7,16 @@ plugins {
 }
 
 val releaseVersion = (JsonSlurper().parse(rootProject.file("../../package.json")) as Map<*, *>)["version"] as String
+val forkSelfUpdate = (JsonSlurper().parse(
+    rootProject.file("../../packages/shared-contracts/src/fork-self-update.json"),
+) as Map<*, *>)["enabled"] as Boolean
 val (major, minor, patch) = releaseVersion.substringBefore('-').split('.').map(String::toInt)
 require(major in 0..2099 && minor in 0..999 && patch in 0..999)
 
 android {
     namespace = "ai.bytepioneer.codexhost.android"
     compileSdk = 35
+    buildFeatures { buildConfig = true }
 
     defaultConfig {
         applicationId = "ai.bytepioneer.codexhost.android"
@@ -20,6 +24,7 @@ android {
         targetSdk = 35
         versionCode = (major * 1_000_000 + minor * 1_000 + patch).coerceAtLeast(1)
         versionName = releaseVersion
+        buildConfigField("boolean", "FORK_SELF_UPDATE_ENABLED", forkSelfUpdate.toString())
     }
 
     val keystoreFilePath = System.getenv("ANDROID_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }

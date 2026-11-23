@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {

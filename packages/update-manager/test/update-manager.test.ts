@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { PathLike } from "node:fs";

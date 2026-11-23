@@ -1,3 +1,7 @@
+import {
+  FORK_SELF_UPDATE_ENABLED,
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+} from "@codexhost/shared-contracts/fork-self-update";
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
@@ -449,6 +453,10 @@ export function startConsoleServer(options: ConsoleServerOptions): Promise<Runni
       route === "GET /api/update/status" ||
       route === "POST /api/update/start"
     ) {
+      if (!FORK_SELF_UPDATE_ENABLED) {
+        sendJson(response, 403, { error: FORK_SELF_UPDATE_DISABLED_MESSAGE });
+        return;
+      }
       // The independent Host owns one update operation for all connected clients.
       if (await options.host.available()) {
         const method =
@@ -489,6 +497,12 @@ export function startConsoleServer(options: ConsoleServerOptions): Promise<Runni
       const method = body.method;
       if (typeof method !== "string" || !isConsoleHostMethod(method)) {
         sendJson(response, 400, { error: { code: -32601, message: "Method is not available" } });
+        return;
+      }
+      if (!FORK_SELF_UPDATE_ENABLED && method.startsWith("codexhost/update/")) {
+        sendJson(response, 403, {
+          error: { code: -32090, message: FORK_SELF_UPDATE_DISABLED_MESSAGE },
+        });
         return;
       }
       try {

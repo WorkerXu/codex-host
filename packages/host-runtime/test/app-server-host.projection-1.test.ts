@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

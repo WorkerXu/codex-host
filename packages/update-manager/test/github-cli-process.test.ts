@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import { execFile } from "node:child_process";
 import type * as ChildProcessModule from "node:child_process";
 import { describe, expect, it, vi } from "vitest";

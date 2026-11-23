@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import { harnessIdSchema } from "@codexhost/shared-contracts";
 import { hostThreadIdSchema, type UpdateCheckResult } from "@codexhost/shared-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";

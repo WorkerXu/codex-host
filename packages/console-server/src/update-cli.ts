@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import { inspectInstallation, resolveInstallation } from "./installation.js";
 import { createConsoleHostClient, createHostUpdates } from "./host-client.js";
 import { consolePaths } from "./paths.js";
@@ -9,6 +10,7 @@ export async function runUpdateCommand(
   updates: ConsoleUpdates,
   write: (message: string) => void = console.log,
 ): Promise<void> {
+  requireForkSelfUpdate();
   write("Checking for codexhost updates...");
   const checked = await updates.check(target);
   if (checked.error) throw new Error(checked.error);
@@ -31,6 +33,7 @@ export async function runUpdateCommand(
 }
 
 export async function updateFromCommand(appDirectory: string, arguments_: string[]): Promise<void> {
+  requireForkSelfUpdate();
   if (arguments_.length > 0) throw new Error("update accepts no arguments");
   const installation = await resolveInstallation(appDirectory);
   if (!installation.distribution) throw new Error("A source checkout cannot update itself");

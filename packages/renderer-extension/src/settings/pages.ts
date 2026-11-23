@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import {
   createUsageStatisticsPage,
   type RendererUsageStatisticsHostsProvider,
@@ -319,7 +320,9 @@ function updatesPage(
 ): RendererSettingsPageDefinition {
   return Object.freeze({
     id: "updates",
-    label: messages.pageLabels.updates,
+    label: FORK_SELF_UPDATE_ENABLED
+      ? messages.pageLabels.updates
+      : messages.releaseAnnouncement.title,
     icon: "updates",
     mount(context: RendererSettingsPageMountContext) {
       const document = context.content.ownerDocument;
@@ -328,7 +331,9 @@ function updatesPage(
       header.className = "settings-update-header";
       const heading = document.createElement("div");
       heading.className = "settings-section-label";
-      heading.textContent = messages.pageLabels.updates;
+      heading.textContent = FORK_SELF_UPDATE_ENABLED
+        ? messages.pageLabels.updates
+        : messages.releaseAnnouncement.title;
       const announcementButton = document.createElement("button");
       announcementButton.type = "button";
       announcementButton.className = "settings-command-button settings-command-button--secondary";
@@ -361,6 +366,27 @@ function updatesPage(
           },
         });
       });
+
+      const loadAnnouncement = (): void => {
+        const client = getClient();
+        if (!client?.getReleaseAnnouncement) return;
+        void client
+          .getReleaseAnnouncement({ manual: true })
+          .then((result) => {
+            if (context.signal.aborted || !result?.announcement) return;
+            currentAnnouncement = result.announcement;
+            announcementButton.hidden = false;
+          })
+          .catch(() => {
+            // Unimplemented RPC or missing release keeps the manual entry hidden.
+          });
+      };
+
+      if (!FORK_SELF_UPDATE_ENABLED) {
+        context.content.append(header);
+        loadAnnouncement();
+        return () => announcementDialog?.dispose();
+      }
 
       // Version summary: current, latest, and installation sit side by side so the
       // comparison is readable without scrolling.
@@ -735,21 +761,6 @@ function updatesPage(
             },
           },
         );
-      };
-
-      const loadAnnouncement = (): void => {
-        const client = getClient();
-        if (!client?.getReleaseAnnouncement) return;
-        void client
-          .getReleaseAnnouncement({ manual: true })
-          .then((result) => {
-            if (context.signal.aborted || !result?.announcement) return;
-            currentAnnouncement = result.announcement;
-            announcementButton.hidden = false;
-          })
-          .catch(() => {
-            // Unimplemented RPC or missing release keeps the manual entry hidden.
-          });
       };
 
       void load();

@@ -186,8 +186,16 @@ const USAGE: &str = "usage:
   codexhost client status|on|off|create|list|revoke ...
   codexhost events pull|ack ...";
 
+fn usage_text() -> std::borrow::Cow<'static, str> {
+    if codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        USAGE.into()
+    } else {
+        USAGE.replace("  codexhost update\n", "").into()
+    }
+}
+
 fn usage() {
-    eprintln!("{USAGE}");
+    eprintln!("{}", usage_text());
 }
 
 const LOOPBACK_URL_MAX_BYTES: u64 = 4096;
@@ -1763,7 +1771,7 @@ fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         }
         None => launch_default(false),
         Some("--help" | "-h" | "help") => {
-            println!("{USAGE}");
+            println!("{}", usage_text());
             Ok(())
         }
         // Matches the npm wrapper, which prints its plain package version.
@@ -1797,6 +1805,9 @@ fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         }
         Some("autostart") => autostart::run(&arguments[1..]),
         Some("console") if arguments.len() == 1 => run_console_command("open"),
+        Some("update") if !codexhost_platform::FORK_SELF_UPDATE_ENABLED => {
+            Err(codexhost_platform::FORK_SELF_UPDATE_DISABLED_MESSAGE.into())
+        }
         Some("update") if arguments.len() == 1 => run_console_command("update"),
         Some("update") => Err("update accepts no arguments".into()),
         Some("console") => Err("console accepts no arguments".into()),

@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import type * as ChildProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";

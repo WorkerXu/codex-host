@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import type { RuntimeStatus } from "@codexhost/shared-contracts";
 import type { CodexSshConnection } from "../codex-ssh-adapter.js";
 import { remoteUpdateTarget } from "../remote-connections-control.js";
@@ -61,7 +62,7 @@ export function remoteElement<K extends keyof HTMLElementTagNameMap>(
 /** Version the local Host can install on a remote that has no service yet. */
 export function remoteInstallVersion(local: RuntimeStatus | null): string | null {
   const version = local?.runningVersion;
-  return version && STABLE_VERSION.test(version) ? version : null;
+  return FORK_SELF_UPDATE_ENABLED && version && STABLE_VERSION.test(version) ? version : null;
 }
 
 /** Version an update or restart would bring the remote service to, if either applies. */
@@ -69,7 +70,7 @@ export function remoteMaintenanceTarget(
   local: RuntimeStatus | null,
   remote: RuntimeStatus,
 ): string | null {
-  if (!remote.updateSupported) return null;
+  if (!FORK_SELF_UPDATE_ENABLED || !remote.updateSupported) return null;
   return (
     newerLocalVersion(local, remote) ?? (remote.restartRequired ? remote.installedVersion : null)
   );
@@ -116,6 +117,9 @@ function serviceSummary(
   const hints: [RemoteTone, string][] = [];
   if (!remote) {
     if (row.probing) return { title: t("正在检测远程服务…", "Checking remote service…"), hints };
+    if (!FORK_SELF_UPDATE_ENABLED && row.installation === "not-installed") {
+      return { title: t("远程服务未安装", "Remote service not installed"), hints };
+    }
     if (row.installation === "not-installed") {
       const version = remoteInstallVersion(local);
       hints.push(
@@ -137,7 +141,7 @@ function serviceSummary(
       );
       return { title: t("需要安装远程服务", "Remote service needs installation"), hints };
     }
-    if (row.remoteIssue?.outdated) {
+    if (FORK_SELF_UPDATE_ENABLED && row.remoteIssue?.outdated) {
       const version = remoteInstallVersion(local);
       hints.push(
         version
@@ -190,6 +194,7 @@ function serviceSummary(
           `Remote service ${installed} · running ${remote.runningVersion}`,
         )
       : t(`远程服务 ${installed}`, `Remote service ${installed}`);
+  if (!FORK_SELF_UPDATE_ENABLED) return { title, hints };
   const phases: Record<RuntimeStatus["update"]["phase"], [RemoteTone, string] | null> = {
     idle: null,
     installing: ["progress", t("正在更新远程服务…", "Updating remote service…")],
@@ -339,7 +344,11 @@ export function renderRemoteCard(
     // Secondary actions first, so the one recommended action always sits at the edge.
     // Without an installed service the connection reaches stock Codex, which also rejects the
     // version query; that is a missing installation, not an outdated one.
-    const outdated = !remote && !!row.remoteIssue?.outdated && row.installation !== "not-installed";
+    const outdated =
+      FORK_SELF_UPDATE_ENABLED &&
+      !remote &&
+      !!row.remoteIssue?.outdated &&
+      row.installation !== "not-installed";
     if (outdated) {
       // Repairing or rechecking cannot help a service that predates version management.
       const upgrade = command("upgrade", t("更新远程服务", "Update remote service"), true);
@@ -357,7 +366,7 @@ export function renderRemoteCard(
       if (!remote) serviceActions.append(command("recheck", t("重新检测", "Check again")));
     }
     const target = remote ? remoteMaintenanceTarget(local, remote) : null;
-    if (row.installation === "not-installed") {
+    if (FORK_SELF_UPDATE_ENABLED && row.installation === "not-installed") {
       const install = command("install", t("安装并连接", "Install and connect"), true);
       install.disabled ||= !remoteInstallVersion(local);
       serviceActions.append(install);

@@ -310,3 +310,25 @@ fn unknown_commands_remain_errors() {
         assert!(output.stdout.is_empty(), "{arguments:?}");
     }
 }
+
+#[test]
+fn refuses_self_update_before_opening_the_console() {
+    if codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return;
+    }
+    let output = Command::new(launcher_path())
+        .arg("update")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains(codexhost_platform::FORK_SELF_UPDATE_DISABLED_MESSAGE)
+    );
+    let help = Command::new(launcher_path())
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("codexhost update"));
+}

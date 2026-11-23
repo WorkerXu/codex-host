@@ -1,3 +1,7 @@
+import {
+  FORK_SELF_UPDATE_ENABLED,
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+} from "@codexhost/shared-contracts/fork-self-update";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   clientChannelCursorSchema,
@@ -118,6 +122,10 @@ export async function serveChClientGateway(
       typeof input.params === "object" &&
       !Array.isArray(input.params)
     ) {
+      if (!FORK_SELF_UPDATE_ENABLED && input.method.startsWith("codexhost/update/")) {
+        reply(403, { error: { code: -32090, message: FORK_SELF_UPDATE_DISABLED_MESSAGE } });
+        return;
+      }
       if ((!authenticated || safeMode) && isHostExtensionManagementMethod(input.method)) {
         await reply(403, {
           error: {

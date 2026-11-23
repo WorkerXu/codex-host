@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import { hostRequestManager, consoleUpdateClient } from "./api.js";
 import { mountConsoleAnnouncement } from "./announcement.js";
 import { startAgentGroupSync } from "../agent-group-sync.js";
@@ -177,7 +178,7 @@ export function startConsoleApp(document: Document): void {
         createConnectDevicesPage(locale),
         createExtensionsPage(locale),
         hostPage(required(settingsPages, "usage-statistics"), messages, state),
-        required(settingsPages, "updates"),
+        ...(FORK_SELF_UPDATE_ENABLED ? [required(settingsPages, "updates")] : []),
       ],
     },
     { label: messages.otherSection, pages: [required(settingsPages, "about")] },

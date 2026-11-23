@@ -28,6 +28,9 @@ fn run_action(
 }
 
 fn update(app: &AppHandle) {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return;
+    }
     let shell = app.state::<Shell>();
     if shell.launcher.is_stopping() {
         return;
@@ -109,7 +112,6 @@ pub(crate) fn install(app: &AppHandle, locale: &str) -> tauri::Result<()> {
         &[&native_default, &official_default],
     )?;
     let console = item("console", label("诊断与日志", "Diagnostics & Logs"))?;
-    let update_item = item("update", label("检查更新", "Check for Updates"))?;
     let quit_item = item(
         "quit",
         label("完全退出 CodexHost", "Quit CodexHost & Stop Services"),
@@ -126,10 +128,12 @@ pub(crate) fn install(app: &AppHandle, locale: &str) -> tauri::Result<()> {
             &preferences,
             &second_separator,
             &console,
-            &update_item,
-            &quit_item,
         ],
     )?;
+    if codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        menu.append(&item("update", label("检查更新", "Check for Updates"))?)?;
+    }
+    menu.append(&quit_item)?;
     TrayIconBuilder::with_id("codexhost")
         .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
         .tooltip("CodexHost")

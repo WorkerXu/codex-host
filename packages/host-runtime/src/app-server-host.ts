@@ -1,4 +1,8 @@
 import {
+  FORK_SELF_UPDATE_ENABLED,
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+} from "@codexhost/shared-contracts/fork-self-update";
+import {
   SHARED_DELEGATION_METHOD,
   sharedDelegationRegistration,
   dispatchSharedDelegation,
@@ -3884,6 +3888,10 @@ export class AppServerHost {
   }
 
   async #handleUpdateRequest(request: JsonRpcRequest): Promise<void> {
+    if (!FORK_SELF_UPDATE_ENABLED) {
+      await this.#writer.json(rpcError(request, -32090, FORK_SELF_UPDATE_DISABLED_MESSAGE));
+      return;
+    }
     const params = updateEmptyParamsSchema.safeParse(
       request.params === undefined ? {} : request.params,
     );

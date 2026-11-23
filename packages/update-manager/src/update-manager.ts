@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -345,6 +346,7 @@ export function createBackgroundUpdateManager(
       options.runtimeDescriptorPath,
       "runtime descriptor path",
     );
+    requireForkSelfUpdate();
     const updaterExecutable = await requireRegularFile(
       options.updaterExecutable,
       "Updater executable",
@@ -546,6 +548,7 @@ export function createBackgroundUpdateManager(
       prepared: PreparedBackgroundUpdate,
       transferOwnership?: (updaterPid: number) => Promise<void>,
     ): Promise<StartedBackgroundUpdate> {
+      requireForkSelfUpdate();
       if (!preparedRequests.delete(prepared.requestPath)) {
         throw new Error(
           "background update was not prepared by this manager or was already started",

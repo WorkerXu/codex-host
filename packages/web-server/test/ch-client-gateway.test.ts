@@ -8,6 +8,10 @@ import { tmpdir } from "node:os";
 import { it } from "node:test";
 import { gunzipSync } from "node:zlib";
 import {
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+  FORK_SELF_UPDATE_ENABLED,
+} from "@codexhost/shared-contracts/fork-self-update";
+import {
   HOST_EXTENSIONS_RPC,
   HOST_EXTENSION_ASSETS_PREFIX,
   HOST_EXTENSION_UPLOAD_PATH,
@@ -65,6 +69,17 @@ it(
     );
     const origin = new URL(url).origin;
     const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    if (!FORK_SELF_UPDATE_ENABLED) {
+      const update = await fetch(`${origin}/api/ch/v1/rpc`, {
+        method: "POST",
+        headers: { ...headers, origin },
+        body: JSON.stringify({ method: "codexhost/update/start", params: {} }),
+      });
+      assert.equal(update.status, 403);
+      assert.deepEqual(await update.json(), {
+        error: { code: -32090, message: FORK_SELF_UPDATE_DISABLED_MESSAGE },
+      });
+    }
     assert.equal((await fetch(`${origin}/api/ch/v1/events`)).status, 401);
     const listBody = JSON.stringify({ method: HOST_EXTENSIONS_RPC.list, params: {} });
     for (const method of [HOST_EXTENSIONS_RPC.list, HOST_EXTENSIONS_RPC.snapshot]) {

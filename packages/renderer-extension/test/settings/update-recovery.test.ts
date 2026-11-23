@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "../../../../tests/fixtures/upstream-self-update.js";
 import type {
   UpdateCheckResult,
   UpdateStatus,

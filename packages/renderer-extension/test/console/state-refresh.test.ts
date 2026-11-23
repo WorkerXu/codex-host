@@ -1,3 +1,4 @@
+import "../../../../tests/fixtures/upstream-self-update.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { consoleGet, consolePost } from "../../src/console/api.js";
 import { ConsoleState, type ConsoleOverview } from "../../src/console/state.js";

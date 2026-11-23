@@ -1162,6 +1162,16 @@ setInterval(() => {{
             serde_json::to_vec(&serde_json::json!({"ownerPid":1,"statusPath":status})).unwrap(),
         )
         .unwrap();
+        if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+            // Let the running supervisor pass its update poll interval.
+            thread::sleep(Duration::from_secs(1));
+            assert!(!operation.join("observed.json").exists());
+            assert!(fixture.root.join("shared-host-ready.json").exists());
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(&status).unwrap()).unwrap();
+            assert_eq!(saved["phase"], "prepared");
+            return;
+        }
         let until = deadline();
         let observed = loop {
             if let Ok(bytes) = fs::read(operation.join("observed.json"))

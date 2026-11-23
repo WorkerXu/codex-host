@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./fork-self-update": {
+      "types": "./dist/fork-self-update.d.ts",
+      "import": "./dist/fork-self-update.js"
+    },
     "./version": {
       "types": "./dist/version.d.ts",
       "import": "./dist/version.js"

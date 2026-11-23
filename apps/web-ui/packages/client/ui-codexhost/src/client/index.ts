@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 /**
  * CodexHost client features, browser half: a sidebar entry that opens a page listing the native
  * sessions each installed Harness can hand over (Claude Code, Pi, ...). Importing maps the
@@ -132,7 +133,7 @@ const HOST_SETTINGS_PAGES = [
   ["delegation", "settings.delegation", 3.5],
   ["usage-statistics", "settings.usage", 4],
   ["resources", "settings.resources", 5],
-  ["updates", "settings.updates", 7],
+  ["updates", FORK_SELF_UPDATE_ENABLED ? "settings.updates" : "settings.releaseAnnouncement", 7],
   ["about", "settings.about", 8],
 ] as const;
 
