@@ -65,7 +65,7 @@ jobs:
           mount_dir=$(mktemp -d "$RUNNER_TEMP/codexhost-dmg.XXXXXX")
           cleanup() {
             hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
-            rmdir "$mount_dir"
+            if [[ -d "$mount_dir" ]]; then rmdir "$mount_dir"; fi
           }
           trap cleanup EXIT
           hdiutil verify "$dmg"
@@ -74,7 +74,7 @@ jobs:
           shell_path=Contents/Helpers/CodexHost.app
           shell_app="$app/$shell_path"
           test -x "$shell_app/Contents/MacOS/CodexHost"
-          lipo -verify_arch arm64 "$shell_app/Contents/MacOS/CodexHost"
+          lipo "$shell_app/Contents/MacOS/CodexHost" -verify_arch arm64
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --verify --deep --strict --verbose=2 "$shell_app"
           app_cdhash=$(codesign -dv --verbose=4 "$app" 2>&1 | sed -n 's/^CDHash=//p')
