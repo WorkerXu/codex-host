@@ -34,6 +34,15 @@
     transform 120ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+.action + .action {
+  border-left: 0.5px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0 9999px 9999px 0;
+}
+
+.action:has(+ .action) {
+  border-radius: 9999px 0 0 9999px;
+}
+
 .action svg {
   flex-shrink: 0;
   color: #ffffff;
@@ -46,6 +55,47 @@
 .action:active {
   transform: scale(0.96);
   background: rgba(255, 255, 255, 0.2);
+}
+
+.answer {
+  position: relative;
+}
+
+:global(::highlight(codexhost-response-annotation)) {
+  background-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent);
+  text-decoration: underline var(--dsw-alias-state-business-primary);
+}
+
+.annotationMark {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 100%;
+  user-select: none;
+}
+
+.annotationMark button {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+}
+
+.annotationNumber {
+  display: grid;
+  box-sizing: border-box;
+  min-width: 18px;
+  min-height: 18px;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-primary) 14%,
+    var(--dsw-alias-bg-base)
+  );
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 @keyframes selection-island-in {

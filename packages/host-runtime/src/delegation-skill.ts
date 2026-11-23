@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const SKILL_VERSION = 17;
+const SKILL_VERSION = 18;
 export const DELEGATION_SKILL_NAME = "codexhost-delegation";
 const SKILL_RELATIVE_PATH = path.join("skills", DELEGATION_SKILL_NAME, "SKILL.md");
 const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
@@ -43,18 +43,20 @@ const PREVIOUS_MANAGED_DIGESTS: readonly string[] = [
   "dca27d38f5cc09e24638756d7131cb5388ed72af96db5f1e474f8b2ef3308d61",
   "c54f0f11a66e7269aa0ca0a613a346a7650a6b16bb1a44b50eb514e46db6e0dd",
   "c25116f50717539fbf40f1c40a96bc45dbe767c19b4c8d0f2b477dcfd0bb620d",
+  "112f34807620f49b327f32d34345c100f9bea5515602acdc71592f7021c0ebf4",
+  "69a3eb41db5fb8ed989548b654cfc1290a400c36943c370181945032e57a426e",
 ];
 
 export const CODEXHOST_DELEGATION_SKILL = `---
 name: codexhost-delegation
 version: ${SKILL_VERSION}
 description: >
-  Delegate tasks to other coding agents, or read and follow up on existing
-  external agent sessions. Use when the user asks another agent (including
-  @agent) to independently perform a task, or asks to view a specified external
-  session's content, progress, or results, send follow-up messages, answer its
-  questions, wait, or cancel a task. Not for recapping the current conversation, discussing or
-  configuring agents, or role-playing.
+  Use in a CodexHost-managed session, or when the user explicitly requests
+  delegation or Thread operations through the codexhost CLI bridge. Delegate
+  tasks to other coding agents (including @agent), or view a CodexHost Thread's
+  content, progress, or results, send follow-up messages, answer questions,
+  wait, or cancel a task. Not for recapping the current conversation,
+  discussing or configuring agents, or role-playing.
 ---
 
 # Execute the task
@@ -101,7 +103,8 @@ watch and delivers its notice once the target stops or needs input. Use
 
 Keep Runtime control credentials private. Use the CLI for Runtime requests.
 
-Use the Harness native defaults unless a Model or Thinking selection is needed.
+Omit Model and Thinking to use the configured delegation defaults, or the
+Harness native defaults when unset.
 
 For a new delegation, create an independent child session and submit the
 requested task. Give it a short task name that tells it apart from sibling

@@ -36,7 +36,7 @@ import {
   type VoiceInputFace,
 } from "./VoiceInput.tsx";
 import { ImportIcon } from "./ImportIcon.tsx";
-import { DocumentDownload } from "./DocumentDownload.tsx";
+import { DocumentDownload, DocumentDownloadAction } from "./DocumentDownload.tsx";
 import { RemoteAccessAction, type RemoteAccessActionFace } from "./RemoteAccessAction.tsx";
 import type {} from "@deepseek-ai/dsh-api-session-controller/client";
 import { SessionHarnessIcon } from "./SessionHarnessIcon.tsx";
@@ -57,17 +57,23 @@ import {
 import type {} from "@deepseek-ai/dsh-client-ui-chat/client";
 import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import { ConnectDevicesSection } from "./ConnectDevicesSection.tsx";
-import { WebExtensionsSection, type WebExtensionsFace } from "./WebExtensionsSection.tsx";
+import { PluginsSection, type PluginsSectionFace } from "./PluginsSection.tsx";
+import { PluginsAction, type PluginsActionFace } from "./PluginsIcon.tsx";
+import { PluginsSettingsEntry } from "./PluginsSettingsEntry.tsx";
+import { createPluginsNavigation, PLUGINS_PANEL_ID } from "./plugins-navigation.ts";
+import { webExtensionAppearance } from "./native-extensions/surface.ts";
 import { watchAuthentication } from "./auth-watch.ts";
+import { watchReleaseAnnouncement } from "./release-announcement.ts";
 import { ensureServiceWorker, resubmitNotifications } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
 import type {} from "@deepseek-ai/dsh-client-web";
-import { PwaInstallRow, type PwaInstallFace } from "./PwaInstallRow.tsx";
+import { isDesktopShell, PwaInstallRow, type PwaInstallFace } from "./PwaInstallRow.tsx";
 import { WallpaperController } from "./wallpaper.ts";
 import { WallpaperRow, type WallpaperFace } from "./WallpaperRow.tsx";
 import { ImportPage, type ImportPageFace } from "./ImportPage.tsx";
 import { HostSettingsSection, type HostSettingsSectionFace } from "./HostSettingsSection.tsx";
 import { SettingsLauncher, type SettingsLauncherFace } from "./SettingsLauncher.tsx";
+import { AndroidHostSwitcherAction } from "./AndroidHostSwitcherAction.tsx";
 import type {} from "@deepseek-ai/dsh-client-ui-theme/client";
 import { en, zh, type ImportLocaleKey } from "./locales.ts";
 
@@ -103,6 +109,7 @@ export const inject = [
 const HOST_SETTINGS_PAGES = [
   ["accounts", "settings.accounts", 2],
   ["connections", "settings.connections", 3],
+  ["delegation", "settings.delegation", 3.5],
   ["usage-statistics", "settings.usage", 4],
   ["resources", "settings.resources", 5],
   ["updates", "settings.updates", 7],
@@ -124,6 +131,11 @@ export function apply(ctx: ClientContext): void {
         inject: (sessionId) => ({
           sessionId,
           label: t("file.download"),
+          downloadFailedLabel: t("file.download.failed"),
+          downloadReadyLabel: (name: string) => t("file.download.ready", { name }),
+          downloadSaveLabel: t("file.download.saveAction"),
+          downloadOpenLabel: t("file.download.openAction"),
+          downloadDismissLabel: t("file.download.dismiss"),
           openFolderLabel: t("file.openFolder"),
           openFolderFailedLabel: t("file.openFolder.failed"),
           revealFolder: (path: string) =>
@@ -133,8 +145,27 @@ export function apply(ctx: ClientContext): void {
       DocumentDownload,
     ),
   );
+  ctx.slots.inject("sidebar.right.tab.document.unpreviewable", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.right.tab.document.unpreviewable",
+        id: "codexhost-download-action",
+        inject: (sessionId) => ({
+          sessionId,
+          ctaLabel: t("file.download.cta"),
+          preparingLabel: t("file.download.preparing"),
+          downloadFailedLabel: t("file.download.failed"),
+          downloadReadyLabel: (name: string) => t("file.download.ready", { name }),
+          downloadSaveLabel: t("file.download.saveAction"),
+          downloadOpenLabel: t("file.download.openAction"),
+          downloadDismissLabel: t("file.download.dismiss"),
+        }),
+      },
+      DocumentDownloadAction,
+    ),
+  );
   const installation = ctx.get("pwaInstall");
-  if (installation !== undefined) {
+  if (installation !== undefined && !isDesktopShell()) {
     ctx.slots.inject("settings.general.item", () =>
       ctx.slots.register(
         {
@@ -340,6 +371,20 @@ export function apply(ctx: ClientContext): void {
       ImportIcon,
     ),
   );
+  ctx.slots.inject("sidebar.primary.action", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.primary.action",
+        id: PLUGINS_PANEL_ID,
+        order: 20,
+        locale: NS,
+        inject: (): PluginsActionFace => ({
+          openPlugins: () => ctx.layout.selectPanel(PLUGINS_PANEL_ID),
+        }),
+      },
+      PluginsAction,
+    ),
+  );
   ctx.inject(["settingsNavigation"], (scope) => {
     scope.slots.inject("settings.launcher", () =>
       scope.slots.register(
@@ -359,6 +404,7 @@ export function apply(ctx: ClientContext): void {
         {
           name: "sidebar.primary.action",
           id: "codexhost-remote-access",
+          order: 10,
           locale: NS,
           inject: (): RemoteAccessActionFace => ({
             openSection: (id) => scope.settingsNavigation.openSection(id),
@@ -379,16 +425,32 @@ export function apply(ctx: ClientContext): void {
       NotificationsRow,
     ),
   );
+  ctx.slots.inject("sidebar.footer.action", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.footer.action",
+        id: "codexhost-android-host-switcher",
+        order: 10,
+        locale: NS,
+      },
+      AndroidHostSwitcherAction,
+    ),
+  );
 
-  const locale: HostSettingsSectionFace["locale"] = {
-    get: () => ctx.locale.getLocale().active,
-    subscribe: (listener) => ctx.locale.subscribe(listener),
-  };
-  const colorScheme: HostSettingsSectionFace["colorScheme"] = {
-    get: () => ctx.theme.getTheme().active.colorScheme,
-    subscribe: (listener) => ctx.on("theme/change", listener),
-  };
-  // Local management entries stay visible to remote users with access guidance.
+  const { locale, colorScheme } = webExtensionAppearance(ctx);
+  const plugins = createPluginsNavigation(document, () => ctx.layout.selectPanel(PLUGINS_PANEL_ID));
+  ctx.effect(() => plugins.dispose, "ui-codexhost: plugin navigation snapshot");
+  ctx.slots.inject("main", () =>
+    ctx.slots.register(
+      {
+        name: "main",
+        key: PLUGINS_PANEL_ID,
+        locale: NS,
+        inject: (): PluginsSectionFace => ({ locale, colorScheme, navigation: plugins }),
+      },
+      PluginsSection,
+    ),
+  );
   ctx.slots.inject("settings.section", () =>
     ctx.slots.register(
       {
@@ -397,9 +459,9 @@ export function apply(ctx: ClientContext): void {
         order: 6,
         label: () => t("settings.extensions"),
         locale: NS,
-        inject: (): WebExtensionsFace => ({ resolveText: (text) => ctx.locale.resolveText(text) }),
+        inject: () => ({ openWorkspace: () => plugins.open() }),
       },
-      WebExtensionsSection,
+      PluginsSettingsEntry,
     ),
   );
   ctx.slots.inject("settings.section", () =>
@@ -515,6 +577,15 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(
     () => watchAuthentication((ctx.get("connection") as ConnectionHandle).state),
     "ui-codexhost: enter sign-in when the token is revoked",
+  );
+  ctx.effect(
+    () =>
+      watchReleaseAnnouncement({
+        connection: ctx.get("connection") as ConnectionHandle,
+        locale,
+        colorScheme,
+      }),
+    "ui-codexhost: release announcement",
   );
   const openFromUrl = (): void => {
     const url = new URL(window.location.href);

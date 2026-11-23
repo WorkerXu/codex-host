@@ -38,7 +38,7 @@ pub struct ConsoleCommand {
 /// How a launch shows the console once its outcome is known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presentation {
-    /// Installer launches (Finder, Start Menu) open the default browser.
+    /// Graphical launches open the default browser only for recovery.
     Browser,
     /// Terminal launches (`launch`, used by npm and `npm start`) print the address.
     Print,
@@ -81,45 +81,39 @@ fn node_command(command: &ConsoleCommand) -> Result<Command, Box<dyn Error>> {
     Ok(process)
 }
 
-/// Starts the recovery console before Desktop resources are validated. Installer
-/// launches open the overview immediately; terminal launches announce it at readiness
-/// or failure. Missing console resources do not replace the original launch error.
+/// Starts the Console in the background without presenting it. Missing Console
+/// resources do not replace the original launch error.
 pub fn start_for_launch(command: ConsoleCommand) {
-    start_for_launch_with(command, open_browser);
-}
-
-fn open_browser(url: &str) -> bool {
-    codexhost_platform::open_external_url(url).is_ok()
-}
-
-fn start_for_launch_with(command: ConsoleCommand, open: impl FnOnce(&str) -> bool) {
     if !console_enabled(env::var_os(CONSOLE_ENV)) || !command.console_server.is_file() {
         return;
     }
     let Some(presentation) = PRESENTATION.lock().ok().and_then(|slot| *slot) else {
         return;
     };
+    // Spawn before returning so even a launch that only activates an existing
+    // window cannot exit before the background ensure process starts.
+    let ensure = node_command(&command)
+        .ok()
+        .and_then(|mut process| {
+            process
+                .arg("ensure")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()
+        })
+        .map(|mut child| {
+            thread::spawn(move || {
+                let _ = child.wait();
+            })
+        });
     if let Ok(mut slot) = LAUNCH_CONSOLE.lock() {
         *slot = Some(LaunchConsole {
-            command: command.clone(),
+            command,
             presentation,
-            ensure: None,
+            ensure,
             shown: false,
         });
-    }
-    let ensure = thread::spawn(move || {
-        let Ok(mut process) = node_command(&command) else {
-            return;
-        };
-        let _ = process.arg("ensure").stderr(Stdio::null()).output();
-    });
-    if let Ok(mut slot) = LAUNCH_CONSOLE.lock()
-        && let Some(console) = slot.as_mut()
-    {
-        console.ensure = Some(ensure);
-    }
-    if presentation == Presentation::Browser {
-        show_with(None, open);
     }
 }
 
@@ -147,12 +141,16 @@ fn console_url(command: &ConsoleCommand) -> Result<String, Box<dyn Error>> {
     parse_console_url(&output.stdout).ok_or_else(|| "codexhost console returned no address".into())
 }
 
-/// Presents launch addresses without changing the launch result. Installer failures
-/// reopen the overview; ordinary calls and terminal address output are deduplicated.
+/// Presents terminal addresses or opens the overview for graphical launch failures.
 pub fn show_for_launch(reason: Option<&str>) -> bool {
     let shown = show(reason);
     crate::services::finish_launch(presentation() == Some(Presentation::Print));
-    if shown && reason.is_none() && presentation() == Some(Presentation::Browser) {
+    if reason.is_none()
+        && LAUNCH_CONSOLE.lock().is_ok_and(|slot| {
+            slot.as_ref()
+                .is_some_and(|console| console.presentation == Presentation::Browser)
+        })
+    {
         watch_integration();
     }
     shown
@@ -250,7 +248,9 @@ fn integration_failing(document: &Value, launch_started_ms: u64, now_ms: u64) ->
 }
 
 fn show(reason: Option<&str>) -> bool {
-    show_with(reason, open_browser)
+    show_with(reason, |url| {
+        codexhost_platform::open_external_url(url).is_ok()
+    })
 }
 
 fn show_with(reason: Option<&str>, open: impl FnOnce(&str) -> bool) -> bool {
@@ -261,7 +261,10 @@ fn show_with(reason: Option<&str>, open: impl FnOnce(&str) -> bool) -> bool {
         let Some(console) = slot.as_mut() else {
             return false;
         };
-        if console.shown && (reason.is_none() || console.presentation == Presentation::Print) {
+        if console.presentation == Presentation::Browser && reason.is_none() {
+            return false;
+        }
+        if console.shown && console.presentation == Presentation::Print {
             return true;
         }
         (
@@ -321,10 +324,19 @@ fn desktop_json(installation: &DesktopInstallation, process_ids: &[u32]) -> Valu
         DesktopIdentity::WindowsPackage {
             package_name,
             package_family_name,
-            ..
+            appx_activation,
         } => (
             "windows",
-            json!({ "packageName": package_name, "packageFamilyName": package_family_name }),
+            json!({
+                "packageName": package_name,
+                "packageFamilyName": package_family_name,
+                "appxActivation": appx_activation.as_ref().map(|identity| {
+                    json!({
+                        "packageFullName": identity.package_full_name,
+                        "appUserModelId": identity.app_user_model_id,
+                    })
+                }),
+            }),
         ),
         DesktopIdentity::MacOsBundle { bundle_identifier } => {
             ("macos", json!({ "bundleIdentifier": bundle_identifier }))
@@ -425,7 +437,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn successful_terminal_launch_prints_the_console_once() {
+    fn launch_prints_once_in_terminal_and_only_opens_the_browser_for_failures() {
         use std::os::unix::fs::PermissionsExt;
 
         let _gate = LAUNCH_TEST_GATE.lock().expect("launch test gate");
@@ -468,29 +480,21 @@ mod tests {
         assert!(shown_at_ready);
         assert_eq!(std::fs::read_to_string(&calls).unwrap(), "ensure\nopen\n");
 
+        std::fs::remove_file(&calls).unwrap();
         set_presentation(Presentation::Browser);
-        let mut opened = 0;
-        start_for_launch_with(command, |url| {
-            assert_eq!(url, "http://127.0.0.1:4399/");
-            opened += 1;
-            true
-        });
-        assert_eq!(
-            opened, 1,
-            "installer opens the overview before Desktop startup"
-        );
-        assert!(show_with(None, |_| panic!(
-            "ordinary calls must not reopen"
+        start_for_launch(command);
+        assert!(!show_with(None, |_| panic!(
+            "normal launch must not open a browser"
         )));
         for reason in ["startup-failure", "integration-failure"] {
-            assert!(show_with(Some(reason), |_| {
-                opened += 1;
+            assert!(show_with(Some(reason), |url| {
+                assert_eq!(url, "http://127.0.0.1:4399/");
                 true
             }));
         }
         assert_eq!(
-            opened, 3,
-            "failures reopen the overview even if it was already shown"
+            std::fs::read_to_string(&calls).unwrap(),
+            "ensure\nopen\nopen\n"
         );
         assert!(
             !show_with(Some("startup-failure"), |_| false),
@@ -696,5 +700,87 @@ mod tests {
         assert_eq!(document["schemaVersion"], 1);
         assert!(document["desktop"].is_null());
         assert_eq!(document["desktopError"], "Codex Desktop was not found");
+    }
+
+    #[test]
+    fn desktop_json_serializes_windows_package_with_and_without_appx_activation() {
+        use codexhost_platform::WindowsAppxActivationIdentity;
+
+        let msix_installation = DesktopInstallation {
+            identity: DesktopIdentity::WindowsPackage {
+                package_name: "OpenAI.Codex".into(),
+                package_family_name: "OpenAI.Codex_2p2nqsd0c76g0".into(),
+                appx_activation: Some(WindowsAppxActivationIdentity {
+                    package_full_name: "OpenAI.Codex_26.1021.2667.0_x64__2p2nqsd0c76g0".into(),
+                    app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".into(),
+                }),
+            },
+            version: "26.1021.2667.0".into(),
+            build: "26.1021.2667.0".into(),
+            asar_integrity: "sha256:abc".into(),
+            install_root: PathBuf::from("C:\\Program Files\\WindowsApps\\OpenAI.Codex"),
+            desktop_launcher: PathBuf::from(
+                "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\ChatGPT.exe",
+            ),
+            desktop_executable: PathBuf::from(
+                "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\ChatGPT.exe",
+            ),
+            packaged_codex_cli: PathBuf::from(
+                "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\resources\\codex.exe",
+            ),
+            executable_codex_cli: PathBuf::from(
+                "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\app\\resources\\codex.exe",
+            ),
+        };
+        let msix_json = desktop_json(&msix_installation, &[1234]);
+        assert_eq!(msix_json["platform"], "windows");
+        assert_eq!(msix_json["identity"]["packageName"], "OpenAI.Codex");
+        assert_eq!(
+            msix_json["identity"]["packageFamilyName"],
+            "OpenAI.Codex_2p2nqsd0c76g0"
+        );
+        assert_eq!(
+            msix_json["identity"]["appxActivation"]["packageFullName"],
+            "OpenAI.Codex_26.1021.2667.0_x64__2p2nqsd0c76g0"
+        );
+        assert_eq!(
+            msix_json["identity"]["appxActivation"]["appUserModelId"],
+            "OpenAI.Codex_2p2nqsd0c76g0!App"
+        );
+
+        let portable_installation = DesktopInstallation {
+            identity: DesktopIdentity::WindowsPackage {
+                package_name: "OpenAI.Codex".into(),
+                package_family_name: "OpenAI.Codex_portable".into(),
+                appx_activation: None,
+            },
+            version: "26.1021.3705.0".into(),
+            build: "26.1021.3705.0".into(),
+            asar_integrity: "sha256:def".into(),
+            install_root: PathBuf::from("E:\\Develop\\codex\\versions\\current"),
+            desktop_launcher: PathBuf::from(
+                "E:\\Develop\\codex\\versions\\current\\app\\ChatGPT.exe",
+            ),
+            desktop_executable: PathBuf::from(
+                "E:\\Develop\\codex\\versions\\current\\app\\ChatGPT.exe",
+            ),
+            packaged_codex_cli: PathBuf::from(
+                "E:\\Develop\\codex\\versions\\current\\app\\resources\\codex.exe",
+            ),
+            executable_codex_cli: PathBuf::from(
+                "E:\\Develop\\codex\\versions\\current\\app\\resources\\codex.exe",
+            ),
+        };
+        let portable_json = desktop_json(&portable_installation, &[]);
+        assert_eq!(portable_json["platform"], "windows");
+        assert_eq!(portable_json["identity"]["packageName"], "OpenAI.Codex");
+        assert_eq!(
+            portable_json["identity"]["packageFamilyName"],
+            "OpenAI.Codex_portable"
+        );
+        assert_eq!(
+            portable_json["identity"].get("appxActivation"),
+            Some(&Value::Null)
+        );
     }
 }

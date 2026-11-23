@@ -15,6 +15,10 @@ import { createRemoteConnectionsPage } from "./remote-connections-page.js";
 import { createMobileWebPage } from "./mobile-web-page.js";
 import type { RemoteConnectionsControl } from "../remote-connections-control.js";
 import type {
+  ReleaseAnnouncement,
+  ReleaseAnnouncementAcknowledgeParams,
+  ReleaseAnnouncementGetParams,
+  ReleaseAnnouncementGetResult,
   UpdateCheckResult,
   UpdateInstallation,
   UpdateStartResult,
@@ -43,9 +47,19 @@ import {
   type RendererImportedThreadOpener,
 } from "./session-import-page.js";
 import { createAppearanceSettingsPage } from "./appearance-page.js";
+import {
+  createDesktopExtensionsSettingsPage,
+  type RendererDesktopExtensionsClient,
+} from "./desktop-extensions-page.js";
+import type { RendererSettingsPluginPagesSource } from "./desktop-extension-settings-pages.js";
 import type { LoadedSessionsClient } from "./loaded-sessions-table.js";
 import { createReleaseNotesElement } from "./release-notes.js";
+import {
+  openReleaseAnnouncementDialog,
+  type ReleaseAnnouncementDialogHandle,
+} from "./release-announcement-dialog.js";
 import { createAccountsSettingsPage, type RendererCodexAccountClient } from "./accounts-page.js";
+import { createDelegationSettingsPage, type RendererDelegationClient } from "./delegation-page.js";
 import {
   createHarnessSchedulesPage,
   type HarnessSchedulesPageOptions,
@@ -96,9 +110,11 @@ function windowsInstallerDownloadUrl(window: Window | null | undefined, version:
 
 export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "connections",
+  "desktop-extensions",
   "mobile-web",
   "remote-connections",
   "accounts",
+  "delegation",
   "session-import",
   "usage-statistics",
   "appearance",
@@ -112,6 +128,10 @@ export interface RendererUpdateClient {
   checkUpdate(): Promise<UpdateCheckResult | null>;
   startUpdate(): Promise<UpdateStartResult>;
   readUpdateStatus(): Promise<UpdateStatusResult>;
+  getReleaseAnnouncement?(
+    params?: ReleaseAnnouncementGetParams,
+  ): Promise<ReleaseAnnouncementGetResult | null>;
+  acknowledgeReleaseAnnouncement?(params: ReleaseAnnouncementAcknowledgeParams): Promise<void>;
   /** Opens the local codexhost console; absent on Hosts that cannot. */
   openConsole?(): Promise<unknown>;
   openWeb?(): Promise<unknown>;
@@ -309,9 +329,43 @@ function updatesPage(
     mount(context: RendererSettingsPageMountContext) {
       const document = context.content.ownerDocument;
       const windows = isWindowsRenderer(document.defaultView);
+      const header = document.createElement("div");
+      header.className = "settings-update-header";
       const heading = document.createElement("div");
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.updates;
+      const announcementButton = document.createElement("button");
+      announcementButton.type = "button";
+      announcementButton.className = "settings-command-button settings-command-button--secondary";
+      announcementButton.hidden = true;
+      announcementButton.append(
+        createRendererSettingsIcon("sparkles", 14),
+        messages.updateViewAnnouncement,
+      );
+      header.append(heading, announcementButton);
+
+      let currentAnnouncement: ReleaseAnnouncement | null = null;
+      let announcementDialog: ReleaseAnnouncementDialogHandle | null = null;
+      announcementButton.addEventListener("click", () => {
+        if (!currentAnnouncement || context.signal.aborted) return;
+        const rootNode = context.content.getRootNode();
+        const hostScheme =
+          rootNode instanceof ShadowRoot && rootNode.host instanceof HTMLElement
+            ? rootNode.host.style.colorScheme
+            : "";
+        const colorScheme =
+          hostScheme === "light" || hostScheme === "dark" ? hostScheme : "inherit";
+        announcementDialog?.dispose();
+        announcementDialog = openReleaseAnnouncementDialog({
+          announcement: currentAnnouncement,
+          locale: messages.locale,
+          ownerDocument: document,
+          colorScheme,
+          onClose() {
+            announcementDialog = null;
+          },
+        });
+      });
 
       // Version summary: current, latest, and installation sit side by side so the
       // comparison is readable without scrolling.
@@ -421,7 +475,7 @@ function updatesPage(
       notes.className = "settings-update-notes-section";
       const starBanner = updateStarBanner(document, messages);
 
-      context.content.append(heading, metadata, panel, controls, starBanner, notes);
+      context.content.append(header, metadata, panel, controls, starBanner, notes);
 
       // Presentation-only: emphasise the manual path once the automatic one has
       // visibly failed.
@@ -685,8 +739,28 @@ function updatesPage(
         );
       };
 
+      const loadAnnouncement = (): void => {
+        const client = getClient();
+        if (!client?.getReleaseAnnouncement) return;
+        void client
+          .getReleaseAnnouncement({ manual: true })
+          .then((result) => {
+            if (context.signal.aborted || !result?.announcement) return;
+            currentAnnouncement = result.announcement;
+            announcementButton.hidden = false;
+          })
+          .catch(() => {
+            // Unimplemented RPC or missing release keeps the manual entry hidden.
+          });
+      };
+
       void load();
-      return () => statusPoll.dispose();
+      loadAnnouncement();
+      return () => {
+        announcementDialog?.dispose();
+        announcementDialog = null;
+        statusPoll.dispose();
+      };
     },
   });
 }
@@ -712,16 +786,21 @@ export function createDefaultRendererSettingsPages(
     Promise.reject(new Error("Local Host connection is unavailable")),
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
   harnessSchedules?: HarnessSchedulesPageOptions,
+  getDesktopExtensionsClient: () => RendererDesktopExtensionsClient | null = () => null,
+  pluginPages?: RendererSettingsPluginPagesSource,
+  getDelegationClient: () => RendererDelegationClient | null = () => null,
   workbench?: DesktopWorkbenchSettings,
 ): readonly RendererSettingsPageDefinition[] {
   return Object.freeze([
     createConnectionsSettingsPage(messages, getDiagnostics, undefined, getRemoteConnections),
+    createDesktopExtensionsSettingsPage(messages, getDesktopExtensionsClient, pluginPages),
     createMobileWebPage(messages, () => {
       const client = getUpdateClient();
       return client?.openWeb?.bind(client);
     }),
     createRemoteConnectionsPage(messages, getRemoteConnections),
     createAccountsSettingsPage(messages, getAccountClient),
+    createDelegationSettingsPage(messages, getDiagnostics, getDelegationClient),
     ...(workbench
       ? [createJarvisSettingsPage(messages, workbench.jarvis)]
       : [
@@ -758,6 +837,8 @@ export function createDefaultRendererSettingsRegistry(
   openImportedThread?: RendererImportedThreadOpener,
   requestUsageStatistics?: RendererUsageStatisticsRequest,
   usageStatisticsHosts?: RendererUsageStatisticsHostsProvider,
+  getDesktopExtensionsClient?: () => RendererDesktopExtensionsClient | null,
+  getDelegationClient?: () => RendererDelegationClient | null,
 ): RendererSettingsPageRegistry {
   return createRendererSettingsPageRegistry(
     createDefaultRendererSettingsPages(
@@ -771,8 +852,14 @@ export function createDefaultRendererSettingsRegistry(
       undefined,
       requestUsageStatistics,
       usageStatisticsHosts,
+      undefined,
+      getDesktopExtensionsClient,
+      undefined,
+      getDelegationClient,
     ),
   );
 }
 
 export type { RendererCodexAccountClient } from "./accounts-page.js";
+export type { RendererDelegationClient } from "./delegation-page.js";
+export type { RendererDesktopExtensionsClient } from "./desktop-extensions-page.js";

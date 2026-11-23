@@ -1,7 +1,12 @@
 import { THREAD_FOLDERS_GET_METHOD, THREAD_FOLDERS_SET_METHOD } from "./thread-folders.js";
+import { jsonObjectSchema } from "./json-value.js";
 import { z } from "zod";
 import { harnessModelRefSchema, harnessThinkingOptionIdSchema } from "./harness-models.js";
 import { harnessPermissionModeIdSchema } from "./harness-permission-modes.js";
+import {
+  HOST_EXTENSION_MANAGEMENT_METHODS,
+  hostExtensionRevisionSchema,
+} from "./host-extension-management.js";
 import { THREAD_ARCHIVE_CONFIRM_METHOD } from "./thread-archive-confirm.js";
 import { WEB_DELEGATION_PEERS_METHOD } from "./delegation-peer.js";
 
@@ -10,6 +15,8 @@ import { WEB_DELEGATION_PEERS_METHOD } from "./delegation-peer.js";
 export const CLIENT_CHANNEL_VERSION = 1;
 /** Request-body ceiling of the channel's POST routes; large enough for an inline image prompt. */
 export const CLIENT_REQUEST_LIMIT_BYTES = 128 * 1024 * 1024;
+/** Permit an external Host to start an input admitted to its empty, idle queue. */
+export const THREAD_QUEUE_START_IF_EMPTY_PARAM = "codexhostQueueStartIfEmpty";
 export const CLIENT_CHANNEL_METHODS = [
   WEB_DELEGATION_PEERS_METHOD,
   "codexhost/skills/list",
@@ -47,6 +54,8 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/workspace/read",
   "codexhost/thread/tree/read",
   "codexhost/thread/pins/list",
+  "codexhost/thread/sections/list",
+  "codexhost/thread/sections/move",
   "codexhost/thread/pins/set",
   "codexhost/harness/plugins/list",
   "codexhost/harness/inspect",
@@ -57,12 +66,14 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/thread/thinking/select",
   "codexhost/thread/permission-mode/select",
   "codexhost/thread/commands/inspect",
+  "codexhost/harness/commands/inspect",
   "codexhost/thread/command/execute",
   "codexhost/thread/fork",
   "codexhost/harness/session-import/sources",
   "codexhost/harness/session-import/list",
   "codexhost/harness/session-import/import",
-  // Settings pages shared with the console and GUI (connections, accounts, usage, updates, idle release).
+  // Host settings shared across Desktop and Web.
+  ...HOST_EXTENSION_MANAGEMENT_METHODS,
   "codexhost/harness/installation",
   "codexhost/harness/installation/start",
   "codexhost/harness/installation/status",
@@ -83,10 +94,34 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/update/check",
   "codexhost/update/start",
   "codexhost/update/status",
+  "codexhost/announcement/get",
+  "codexhost/announcement/acknowledge",
   "codexhost/sessions/loaded/list",
   THREAD_FOLDERS_GET_METHOD,
   THREAD_FOLDERS_SET_METHOD,
 ] as const;
+/** Native custom sections in the order returned by the official app-server. */
+export const clientThreadSectionsSchema = z
+  .object({
+    sections: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          name: z.string().min(1),
+          threads: z.array(jsonObjectSchema),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ClientThreadSections = z.infer<typeof clientThreadSectionsSchema>;
+export const clientThreadSectionMoveSchema = z
+  .object({
+    threadId: z.string().min(1).max(1_024),
+    sectionId: z.string().min(1).max(1_024).nullable(),
+  })
+  .strict();
+
 /** Canonical external pin membership, shared with native Thread sections. */
 export const clientThreadPinsSchema = z.object({ threadIds: z.array(z.string().min(1)) }).strict();
 export const clientThreadPinParamsSchema = z
@@ -139,6 +174,11 @@ export const clientChannelEventSchema = z.discriminatedUnion("type", [
     type: z.literal("preferences-changed"),
     cursor: clientChannelCursorSchema,
     revision: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal("extensions-changed"),
+    cursor: clientChannelCursorSchema,
+    revision: hostExtensionRevisionSchema,
   }),
   z.object({
     type: z.literal("hello"),

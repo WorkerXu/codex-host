@@ -8,6 +8,7 @@ import {
   type HarnessVersionSession,
 } from "./harness-version-panel.js";
 import type { RendererSettingsMessages } from "./localization.js";
+import { confirmHarnessUpdate } from "./harness-update-confirmation.js";
 
 const sessionStores = new WeakMap<
   RendererConnectionDiagnostics,
@@ -30,13 +31,13 @@ function getSessionStore(
  * in-flight update keeps reporting its progress when Settings is reopened.
  */
 export function createConnectionVersions(
-  document: Document,
+  container: HTMLElement,
   messages: RendererSettingsMessages,
   signal: AbortSignal,
   diagnostics: RendererConnectionDiagnostics | null,
   onChange: () => void,
 ): {
-  get(hostId: string, agent: ExternalRendererAgent): HarnessVersionPanel | undefined;
+  get(hostId: string, agent: ExternalRendererAgent, name: string): HarnessVersionPanel | undefined;
   isUpdating(hostId: string, agent: ExternalRendererAgent): boolean;
 } {
   const panels = new Map<string, HarnessVersionPanel>();
@@ -49,13 +50,16 @@ export function createConnectionVersions(
     isUpdating(hostId, agent) {
       return Boolean(sessions?.get(sessionKey(hostId, agent))?.updating);
     },
-    get(hostId, agent) {
+    get(hostId, agent, name) {
       if (!installation || signal.aborted) return undefined;
       const key = sessionKey(hostId, agent);
       let panel = panels.get(key);
       if (!panel) {
-        const run = async (action: "check" | "update") => {
-          const result = await installation(hostId, agent, action);
+        const run = async (action: "check" | "update", confirmedVersion?: string) => {
+          const result =
+            confirmedVersion === undefined
+              ? await installation(hostId, agent, action)
+              : await installation(hostId, agent, action, confirmedVersion);
           writeCachedHarnessVersion(hostId, agent, result);
           return result;
         };
@@ -66,13 +70,15 @@ export function createConnectionVersions(
           sessions?.set(key, session);
         }
         panel = createHarnessVersionPanel(
-          document,
+          container.ownerDocument,
           messages,
           signal,
           agent,
           { run },
           onChange,
           session,
+          (target, verified) =>
+            confirmHarnessUpdate(container, messages, signal, name, target, verified),
         );
         panels.set(key, panel);
       }

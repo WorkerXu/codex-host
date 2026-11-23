@@ -26,6 +26,11 @@ export const EXTERNAL_CLIENT_PORT_ENV = "CODEXHOST_EXTERNAL_CLIENT_PORT";
 export const NATIVE_CODEX_THREAD_ID_ENV = "CODEX_THREAD_ID";
 /** Default watch expiry; callers adjust it with --timeout-ms. */
 export const DEFAULT_WATCH_TIMEOUT_MS = 29 * 60_000;
+/** Default `thread wait` budget; callers adjust it with --timeout-ms. */
+export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+/** Default `thread list` page size and ordering. */
+export const DEFAULT_LIST_LIMIT = 25;
+export const DEFAULT_LIST_SORT = "created-desc";
 
 export type DelegationThreadStatus =
   "creating" | "running" | "completed" | "failed" | "interrupted";
@@ -103,7 +108,8 @@ export interface DelegationStartInput {
   /** Desktop project override. Omission inherits the parent project. */
   projectId?: string | null;
   requestId?: string;
-  model?: HarnessModelRef;
+  model?: HarnessModelRef | string;
+  officialModelArgument?: string;
   thinkingOptionId?: HarnessThinkingOptionId;
   /** Absolute URIs of where the work came from; children inherit them. */
   refs?: string[];
@@ -113,6 +119,7 @@ export interface HarnessInspectInput {
   harnessId: RoutedHarnessId;
   cwd?: string;
   refresh?: boolean;
+  credentialAccess?: "allow" | "retry";
   /** Calling Thread; an official parent cannot inspect a Harness Desktop must not present. */
   parentThreadId?: string;
 }
@@ -353,6 +360,7 @@ export interface DelegationControlApi {
 
 export interface DelegationControlRegistration extends DelegationControlApi {
   executionHostId?(threadId: string): string | undefined;
+  onThreadIdle?(listener: (threadId: string) => void): () => void;
   canHandleStart(input: DelegationStartInput): boolean | Promise<boolean>;
   ownsThread(threadId: string): boolean | Promise<boolean>;
 }
@@ -366,7 +374,7 @@ export type DelegationControlErrorCode =
   | "RESPONSE_TOO_LARGE"
   | "RUNTIME_UNREACHABLE"
   | "DELEGATION_FAILED"
-  /** A result file is outside the Thread's exportable files. */
+  /** The client lacks the scope, or a result file is outside the Thread's exportable files. */
   | "FORBIDDEN"
   /** The operation requires a known local execution workspace. */
   | "UNSUPPORTED"

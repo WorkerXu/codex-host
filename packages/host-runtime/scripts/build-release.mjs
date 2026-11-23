@@ -34,6 +34,11 @@ const allowedRuntimePackages = new Set([
   "ws",
   "yaml",
   "zod",
+  // Cross-process writes to the shared Desktop extension selection.
+  "proper-lockfile",
+  "graceful-fs",
+  "retry",
+  "signal-exit",
 ]);
 
 function normalizedInputPath(value) {

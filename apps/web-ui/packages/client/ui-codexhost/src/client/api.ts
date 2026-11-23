@@ -6,6 +6,11 @@ import {
   WEB_DELEGATION_PEERS_METHOD,
   webDelegationPeersSchema,
   harnessSessionImportResultSchema,
+  RELEASE_ANNOUNCEMENT_ACKNOWLEDGE_METHOD,
+  RELEASE_ANNOUNCEMENT_GET_METHOD,
+  releaseAnnouncementAcknowledgeParamsSchema,
+  releaseAnnouncementGetParamsSchema,
+  releaseAnnouncementGetResultSchema,
   updateCheckResultSchema,
   voiceStatusResultSchema,
   voiceTranscribeResultSchema,
@@ -18,6 +23,7 @@ import {
   webTurnDiffsResultSchema,
   skillsListResultSchema,
   type HarnessCommandCatalog,
+  type ReleaseAnnouncementGetParams,
   type ThreadCommandExecuteResult,
   type HarnessSessionImportCandidate,
   type HarnessSessionImportSourcesResult,
@@ -111,6 +117,47 @@ export async function checkHostUpdate(signal: AbortSignal) {
 
 export async function listDelegationPeers() {
   return webDelegationPeersSchema.parse(await callClientChannel(WEB_DELEGATION_PEERS_METHOD));
+}
+
+export async function getReleaseAnnouncement(
+  signal: AbortSignal,
+  params: ReleaseAnnouncementGetParams = {},
+) {
+  const response = await fetch("api/ch/v1/rpc", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method: RELEASE_ANNOUNCEMENT_GET_METHOD,
+      params: releaseAnnouncementGetParamsSchema.parse(params),
+    }),
+    signal,
+  });
+  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+  const reply = (await response.json()) as {
+    result?: unknown;
+    error?: { message?: string };
+  };
+  if (reply.error) throw new Error(reply.error.message ?? "Release announcement check failed");
+  return releaseAnnouncementGetResultSchema.parse(reply.result);
+}
+
+export async function acknowledgeReleaseAnnouncement(version: string) {
+  const response = await fetch("api/ch/v1/rpc", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method: RELEASE_ANNOUNCEMENT_ACKNOWLEDGE_METHOD,
+      params: releaseAnnouncementAcknowledgeParamsSchema.parse({ version }),
+    }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+  const reply = (await response.json()) as {
+    error?: { message?: string };
+  };
+  if (reply.error)
+    throw new Error(reply.error.message ?? "Release announcement acknowledge failed");
 }
 
 export const voiceApi = {
@@ -364,7 +411,7 @@ export const skillLibraryApi = {
     skillsListResultSchema.parse(await call<unknown>("codexhost/skills/list", { sessionId })),
 };
 
-/** Thread-only discovery; never falls back to a draft Harness query. */
+/** A Thread's native catalog; a draft only gets official Codex Skills from its workspace. */
 export const harnessCommandApi = {
   inspect: (sessionId: string) =>
     call<HarnessCommandCatalog>("codexhost/threadCommands", {

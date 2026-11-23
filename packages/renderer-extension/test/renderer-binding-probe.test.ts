@@ -29,6 +29,7 @@ import {
   resolveCurrentCodexAccountId,
   shouldRefreshCodexAccountsForAdapterState,
   rendererUsageRefreshDelay,
+  canScheduleExternalThreadUsageRefresh,
   shouldPersistNewThreadConfigurationSelection,
   shouldReloadExternalCatalogAfterAvailabilityRefresh,
   shouldRetryExternalThreadUsage,
@@ -425,6 +426,12 @@ describe("Renderer Composer DOM behavior", () => {
       ),
     ).toBe(false);
     expect(shouldRetryExternalThreadUsage(false, { totalCostUsd: 0.168 })).toBe(false);
+    expect(
+      shouldRetryExternalThreadUsage(true, { totalCostUsd: 0.168 }, null, {
+        amount: 12.34,
+        currency: "CNY",
+      }),
+    ).toBe(false);
     expect(shouldRetryExternalThreadUsage(true, { totalCostUsd: 0.168 })).toBe(true);
     expect(
       shouldRetryExternalThreadUsage(
@@ -448,6 +455,14 @@ describe("Renderer Composer DOM behavior", () => {
     expect(rendererUsageRefreshDelay(0)).toBe(250);
     expect(rendererUsageRefreshDelay(1)).toBe(500);
     expect(rendererUsageRefreshDelay(99)).toBe(8000);
+  });
+
+  it("stops polling for a quota or balance that never arrives once usage is shown", () => {
+    expect(canScheduleExternalThreadUsageRefresh(null, 99)).toBe(true);
+    const usage = { totalCostUsd: 0.168 };
+    expect(canScheduleExternalThreadUsageRefresh(usage, 0)).toBe(true);
+    expect(canScheduleExternalThreadUsageRefresh(usage, 5)).toBe(true);
+    expect(canScheduleExternalThreadUsageRefresh(usage, 6)).toBe(false);
   });
 
   it("replaces only the owning native Model menu or retry button and restores stale controls", () => {

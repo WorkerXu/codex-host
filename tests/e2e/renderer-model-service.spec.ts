@@ -26,7 +26,13 @@ const { outputFiles } = await build({
         };
         const messages = rendererSettingsMessages("zh-CN");
         const workbench = { modelService: client, jarvis: { createClient: () => null } };
-        const pages = createDefaultRendererSettingsPages(messages, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, workbench);
+        const pages = createDefaultRendererSettingsPages(
+          messages,
+          undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined,
+          workbench,
+        );
         const shell = installRendererSettingsShell(pages, messages);
         shell.openSettings(undefined,"appearance");
         globalThis.modelFixture = {calls,shell};

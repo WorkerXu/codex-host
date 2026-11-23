@@ -1,4 +1,17 @@
-# v0.22.0 fork 两机升级方案
+# fork 两机升级方案
+
+## 从 v0.22.0 fork 升级到 v0.25.1
+
+在维护窗口为 Mac 和 oracle-main 同时准备同一提交的产物。首次启动新版之前，各机冷备份实际 Host 数据根（通常为 `~/.codexhost`）、原生 Codex 和各 Harness 的会话／配置目录、fork 的 `~/.config/codexhost` 凭据目录，以及两处托管委派 Skill。备份与旧包单独保存，保持原有权限。以数据副本验收 Thread 历史、工作文件夹、peer、钉钉、Skills 和 MCP 后再安排切换。
+
+- 已使用共享 Host 的机器直接读取现有 Mapping Store、peer、工作文件夹和 fork 配置。较早的 SSH 数据根迁移仍用[专用工具](../../project/fork-data-migration.md)。
+- 检测到旧 Desktop 插件且新插件目录尚未创建时，Host 将插件本体、启用清单、设置和数据复制到 `host-extensions/` 与 `host-extension-data/`。旧目录保留。Web 与 Desktop 使用新目录。
+- Harness 收藏和默认 Model 的引用可在目录就绪后规范化。首次改写已有偏好前，Host 将原文件保存到 `harness-preferences-v1.json.before-model-ref-migration-v1`。升级托管委派 Skill 时只替换可识别的副本。
+- 回滚前，保存新版期间产生的 Thread 和配置。恢复两机配套的旧包和切换前备份。旧插件从原目录加载。若只恢复模型偏好，使用相应的冷备份或上述原文件副本。使用旧包启动前恢复对应版本的两处托管 Skill。
+
+macOS 安装包与 npm 平台包包含 Tauri 原生壳和托盘，原生壳的运行资源需随 Launcher 一起打包。Linux 平台包用于共享 Host 和 Web。Android 伴侣应用有独立构建流程。macOS 和 Windows 常规启动通过选择页进入 CodexHost 窗口、官方 Codex Desktop 或系统浏览器。
+
+## v0.17.4 到 v0.22.0 的数据根迁移
 
 Mac Desktop 和 oracle-main 使用同一提交的产物。在数据副本完成 T1 的迁移预演，并完成两个平台的
 验收后，进入同一次切换窗口。

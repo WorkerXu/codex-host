@@ -12,31 +12,36 @@ Read this Host's environment, tools and workspace defaults. Cached observations 
 Discover projects under this Host's configured roots. Returns live project metadata and pagination; no static project registry is required.`,
   "thread file": `codexhost thread file <thread> --path <file> [--offset <n>] [--limit <bytes>] [--revision <revision>] [--format json|compact|text]
 Read a file explicitly linked in the latest final report, inside the Thread workspace. Returns a base64 chunk, revision, nextOffset and eof. Continue with the returned revision; restart if it changes. Maximum chunk size is 1 MiB. Read through the execution Host.`,
-  "client add": `codexhost client add <name>
+  "client add": `codexhost client add <name> [--scope read|dispatch]
 Register a named external client for HTTP/MCP or a separate CLI identity. Normal same-user CLI calls authenticate automatically and do not need registration. Prints the client token once; it is not stored in a readable form and cannot be shown again.
 The client sets CODEXHOST_CLIENT_TOKEN (or CODEXHOST_CLIENT_TOKEN_FILE) and then uses the same delegate, thread and harness commands, or the MCP endpoint, against the external client listener (127.0.0.1:4398 unless CODEXHOST_EXTERNAL_CLIENT_PORT says otherwise).
-Names use lowercase letters, digits and hyphens; local-cli is reserved.`,
+Names use lowercase letters, digits and hyphens; local-cli is reserved.
+--scope read allows host info, project list, harness list and inspect, thread read, file, wait, list and watches, and events only. dispatch (default) also allows delegate start and thread send, answer, export, cancel and watch; a read client gets FORBIDDEN for those.`,
+  "client set": `codexhost client set <name> --scope read|dispatch
+Change a client's scope. Takes effect on its next request; the token stays the same.`,
   events: `codexhost events [--after <id>] [--limit <n>] [--follow true|false]
 For external clients: read the client's event log. Without --after, every retained event is returned, oldest first; keep the cursor to read only new ones. An event reports that a Thread the client watches stopped (outcome, Thread, Turn, Harness, deep link, references); it never carries Thread content, so read the Thread for results.
 Without --follow, prints {events, cursor} once; pass cursor back as --after. With --follow true, prints one JSON line per event until interrupted.
 Events are kept for 7 days (CODEXHOST_CLIENT_EVENT_RETENTION_DAYS). CURSOR_EXPIRED means older events were removed: reconcile with thread list --client <name>.
 The listener also serves GET /v1/events as server-sent events (resume with Last-Event-ID) and POST /v1/events/poll for long-polling.`,
   "client list": `codexhost client list
-List registered external clients with their registration time. Tokens are never shown.`,
+List registered external clients with their registration time and scope. Tokens are never shown.`,
   "client remove": `codexhost client remove <name>
 Revoke a client immediately. Its later requests are rejected with UNAUTHORIZED and its open event streams are closed. Threads it started remain.`,
   "harness list": `codexhost harness list [--availability true|false] [--refresh true|false] [--host <peer-or-host-id>] [--format json|compact|text]
 List Harnesses available in the active Runtime.`,
   "harness inspect": `codexhost harness inspect <harness> [--cwd <path>] [--refresh true|false] [--host <peer-or-host-id>] [--format json|compact|text]
 Read available Models, native defaults, Thinking options, and configuration capabilities.
-Use the returned Model and Thinking IDs for explicit selections.`,
-  "delegate start": `codexhost delegate start --harness <id> (--task <text> | --task-file <path|->) [--task-name <name>] [--cwd <path>] [--worktree <branch>] [--base <ref>] [--model <opaque-ref>] [--thinking <option-id>] [--parent-thread <thread>] [--project <projectId>|none] [--request-id <id>] [--ref <uri>]... [--watch true|false] [--watch-timeout-ms <n>] [--host <peer-or-host-id>] [--format json|compact|text]
+Use the returned Model and Thinking IDs for explicit selections.
+Copy the displayed ID into --model. Advertised tiers use ~fast for Fast or ~ultrafast for Ultrafast. In JSON, a Fast variant is listed under fastModel.id.`,
+  "delegate start": `codexhost delegate start --harness <id> (--task <text> | --task-file <path|->) [--task-name <name>] [--cwd <path>] [--worktree <branch>] [--base <ref>] [--model <id>] [--thinking <option-id>] [--parent-thread <thread>] [--project <projectId>|none] [--request-id <id>] [--ref <uri>]... [--watch true|false] [--watch-timeout-ms <n>] [--host <peer-or-host-id>] [--format json|compact|text]
 Create an independent child Thread, submit the task, and return immediately.
 --task and --task-file are mutually exclusive. --task-file reads UTF-8 from a file, or stdin for -; maximum 262144 bytes (256 KiB) before removing one final LF or CRLF. Other whitespace and special characters are preserved; empty/whitespace-only input is rejected. Terminal stdin is rejected: use a quoted heredoc (<<'EOF') or a pipe. --task is unchanged.
 --task-name supplies a short subtask name (1-120 characters); otherwise the first task line is used.
 --project selects a Desktop project or opts out with none. Omit it to inherit the parent Thread’s project.
 The child title is the subtask name only, fixed at creation; parent titles are not appended. Existing Threads are not renamed.
-Omit --model and --thinking to use the Harness native defaults.
+Use a Model ID from harness inspect. Suffixes such as gpt-6.2-sol~fast and gpt-6.2-sol~ultrafast select advertised tiers; otherwise the suffix is literal.
+Omit --model and --thinking to use the configured delegation defaults, or the Harness native defaults when unset.
 --cwd overrides the child workspace; a relative path resolves against the caller process cwd. Otherwise use the resolved parent Thread workspace, then the Host Runtime process cwd.
 --worktree creates a new branch and workspace at <main-repository>.worktrees/<sanitized-branch>, then uses it as the child cwd. The source is --cwd, or the caller process cwd when omitted (not the parent Thread workspace).
 --base requires --worktree and defaults to that source checkout's HEAD commit, including detached HEAD. JSON and compact responses add worktree {path, branch, base}, where base is the resolved commit SHA. Existing branches/directories, merges, rebases, unmerged indexes, non-Git cwd and unresolved bases are rejected. Uncommitted source changes are not copied.
@@ -166,7 +171,7 @@ export const DELEGATION_HELP = `usage:
   codexhost thread watch <thread>
   codexhost thread watches
   codexhost thread list
-  codexhost client add|list|remove
+  codexhost client add|list|set|remove
   codexhost events
   codexhost peer list|add|remove|test|self
 

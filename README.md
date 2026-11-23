@@ -80,6 +80,8 @@ winget install --id BytePioneer-AI.CodexHost --exact
 
 **Upgrade and stop:** run `codexhost update` to upgrade, and `codexhost stop` to stop all background services. Before installing over an existing npm installation, run `codexhost stop` first.
 
+**Keep Web access private:** access tokens, login links and QR codes let anyone who has them operate your computer. Do not share them.
+
 <details>
 <summary>Installation troubleshooting</summary>
 
@@ -101,7 +103,9 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
    [Environment]::SetEnvironmentVariable("CODEXHOST_INSTALL_ROOT", "D:\CodexPortable", "User")
    ```
 
-2. Quit Codex Desktop completely, open a new terminal, and run `codexhost`.
+2. Completely quit any running Codex Desktop and `codexhost` processes (check notification area or Task Manager if necessary), open a fresh terminal, and run `codexhost`.
+
+   > CodexHost discovers version metadata from `AppxManifest.xml`, `resources/app.asar`, or `package.json`. The Console Overview displays the detected Desktop version, source (`Portable / Unpacked` vs `Windows AppX/MSIX`), and installation path.
 
 </details>
 

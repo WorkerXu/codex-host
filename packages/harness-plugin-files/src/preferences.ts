@@ -1,8 +1,9 @@
 /** Durable preferences. The runtime owner serializes mutations; browsers never write this file. */
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   harnessPreferencePatchSchema,
   harnessPreferenceScopeSchema,
@@ -10,9 +11,14 @@ import {
   type HarnessPreferencePatch,
   type HarnessPreferenceScope,
   type HarnessPreferenceSnapshot,
+  type HarnessPreferenceValues,
 } from "@codexhost/shared-contracts";
 
 type Document = ReturnType<typeof harnessPreferencesDocumentSchema.parse>;
+type MigrateModels = (values: HarnessPreferenceValues, migrated: Set<string>) => Promise<void>;
+// Older stores already carry unowned scopes through writes verbatim.
+const MODEL_REF_MIGRATION = "model-ref-migration-v1";
+const MODEL_REF_BACKUP_SUFFIX = `.before-${MODEL_REF_MIGRATION}`;
 export class HarnessPreferenceConflict extends Error {}
 
 export class HarnessPreferencesStore {
@@ -28,15 +34,14 @@ export class HarnessPreferencesStore {
     this.file = join(directory, "harness-preferences-v1.json");
   }
 
-  /**
-   * Scopes this version does not own (such as retired `web-codex:*` entries) are neither
-   * validated nor dropped: they are carried through every write unchanged.
-   */
-  private retained: Record<string, unknown> = {};
-
-  private async read(): Promise<Document> {
+  private async read(): Promise<{
+    document: Document;
+    retained: Record<string, unknown>;
+    source?: string;
+  }> {
     try {
-      const raw: unknown = JSON.parse(await readFile(this.file, "utf8"));
+      const source = await readFile(this.file, "utf8");
+      const raw: unknown = JSON.parse(source);
       const scopes =
         typeof raw === "object" && raw !== null && "scopes" in raw ? raw.scopes : undefined;
       const owned: Record<string, unknown> = {};
@@ -49,70 +54,124 @@ export class HarnessPreferencesStore {
         ...(raw as object),
         ...(scopes === undefined ? {} : { scopes: owned }),
       });
-      this.retained = retained;
-      return document;
+      return { document, retained, source };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        this.retained = {};
-        return { version: 1, revision: 0, scopes: {} };
-      }
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { document: { version: 1, revision: 0, scopes: {} }, retained: {} };
       throw new Error("Could not read Harness preferences");
     }
   }
-  async get(scope: HarnessPreferenceScope = "external"): Promise<HarnessPreferenceSnapshot> {
+  async get(
+    scope: HarnessPreferenceScope = "external",
+    migrateModels?: MigrateModels,
+  ): Promise<HarnessPreferenceSnapshot> {
     harnessPreferenceScopeSchema.parse(scope);
-    const document = await this.read();
+    if (migrateModels) return this.update(scope, migrateModels);
+    const { document } = await this.read();
     return {
       scope,
       revision: document.revision,
       values: structuredClone(document.scopes[scope] ?? { favorites: {} }),
     };
   }
-  patch(input: HarnessPreferencePatch): Promise<HarnessPreferenceSnapshot> {
+  patch(
+    input: HarnessPreferencePatch,
+    migrateModels?: MigrateModels,
+  ): Promise<HarnessPreferenceSnapshot> {
     const request = harnessPreferencePatchSchema.parse(input);
+    return this.update(
+      request.scope,
+      async (values, migrated) => {
+        // Edit canonical favorites; legacy initialize-only imports are migrated after insertion.
+        if (!request.initializeOnly) await migrateModels?.(values, migrated);
+        const importModel = (id: string) => {
+          if (request.initializeOnly) migrated.delete(id);
+        };
+        for (const operation of request.operations) {
+          if (operation.kind === "idleRelease") {
+            if (!request.initializeOnly || values.idleRelease === undefined)
+              values.idleRelease = operation.value;
+          } else if (operation.kind === "favorites") {
+            if (!request.initializeOnly || values.favorites[operation.harnessId] === undefined) {
+              values.favorites[operation.harnessId] = [...new Set(operation.modelIds)];
+              if (operation.modelIds.length) importModel(operation.harnessId);
+            }
+          } else if (operation.kind === "favorite") {
+            const favorites = new Set(values.favorites[operation.harnessId] ?? []);
+            if (operation.enabled) favorites.add(operation.modelId);
+            else favorites.delete(operation.modelId);
+            values.favorites[operation.harnessId] = [...favorites];
+          } else if (operation.kind === "delegation") {
+            const { harnessId, configuration } = operation;
+            const byHarness = values.delegation?.byHarness ?? {};
+            const exists = Object.hasOwn(byHarness, harnessId);
+            if (request.initializeOnly && exists) continue;
+            if (configuration === null) {
+              if (!exists) continue;
+              const remaining = Object.fromEntries(
+                Object.entries(byHarness).filter(([id]) => id !== harnessId),
+              );
+              if (Object.keys(remaining).length === 0) delete values.delegation;
+              else values.delegation = { byHarness: remaining };
+            } else {
+              values.delegation = { byHarness: { ...byHarness, [harnessId]: configuration } };
+              if (configuration.model) importModel(harnessId);
+            }
+          } else {
+            const defaults = values.newThread ?? { byHarness: {} };
+            if (
+              operation.lastHarness &&
+              (!request.initializeOnly || defaults.lastHarness === undefined)
+            )
+              defaults.lastHarness = operation.lastHarness;
+            if (
+              operation.harnessId &&
+              operation.configuration &&
+              (!request.initializeOnly || defaults.byHarness[operation.harnessId] === undefined)
+            ) {
+              defaults.byHarness[operation.harnessId] = operation.configuration;
+              if (operation.configuration.model) importModel(operation.harnessId);
+            }
+            values.newThread = defaults;
+          }
+        }
+        if (request.initializeOnly) await migrateModels?.(values, migrated);
+      },
+      request.expectedRevision,
+    );
+  }
+  private update(
+    scope: HarnessPreferenceScope,
+    mutate: MigrateModels,
+    expectedRevision?: number,
+  ): Promise<HarnessPreferenceSnapshot> {
     const work = this.tail.then(async () => {
       if (this.closed) throw new Error("Harness preferences store is closed");
-      const document = await this.read();
-      if (request.expectedRevision !== undefined && request.expectedRevision !== document.revision)
+      const { document, retained, source } = await this.read();
+      if (expectedRevision !== undefined && expectedRevision !== document.revision)
         throw new HarnessPreferenceConflict("Harness preferences changed; refresh before editing");
-      const before = JSON.stringify(document.scopes);
-      const values = document.scopes[request.scope] ?? { favorites: {} };
-      for (const operation of request.operations) {
-        if (operation.kind === "idleRelease") {
-          if (!request.initializeOnly || values.idleRelease === undefined)
-            values.idleRelease = operation.value;
-        } else if (operation.kind === "favorites") {
-          if (!request.initializeOnly || values.favorites[operation.harnessId] === undefined)
-            values.favorites[operation.harnessId] = [...new Set(operation.modelIds)];
-        } else if (operation.kind === "favorite") {
-          const favorites = new Set(values.favorites[operation.harnessId] ?? []);
-          if (operation.enabled) favorites.add(operation.modelId);
-          else favorites.delete(operation.modelId);
-          values.favorites[operation.harnessId] = [...favorites];
-        } else {
-          const defaults = values.newThread ?? { byHarness: {} };
-          if (
-            operation.lastHarness &&
-            (!request.initializeOnly || defaults.lastHarness === undefined)
-          )
-            defaults.lastHarness = operation.lastHarness;
-          if (
-            operation.harnessId &&
-            operation.configuration &&
-            (!request.initializeOnly || defaults.byHarness[operation.harnessId] === undefined)
-          )
-            defaults.byHarness[operation.harnessId] = operation.configuration;
-          values.newThread = defaults;
-        }
-      }
-      document.scopes[request.scope] = values;
-      if (before !== JSON.stringify(document.scopes)) {
+      const values = document.scopes[scope] ?? { favorites: {} };
+      const before = structuredClone(values);
+      const marker = retained[MODEL_REF_MIGRATION];
+      const previous = new Set<string>(
+        Array.isArray(marker) ? marker.filter((id): id is string => typeof id === "string") : [],
+      );
+      const migrated = new Set(previous);
+      await mutate(values, migrated);
+      const changed = !isDeepStrictEqual(before, values);
+      const markerChanged = !isDeepStrictEqual(previous, migrated);
+      if (changed) {
+        document.scopes[scope] = values;
         document.revision++;
         harnessPreferencesDocumentSchema.parse(document);
+      }
+      if (markerChanged) retained[MODEL_REF_MIGRATION] = [...migrated];
+      if (changed || markerChanged) {
         await mkdir(this.directory, { recursive: true, mode: 0o700 });
+        if (markerChanged && source !== undefined) await this.backupBeforeModelMigration(source);
         const temporary = `${this.file}.${randomUUID()}.tmp`;
         try {
-          const persisted = { ...document, scopes: { ...this.retained, ...document.scopes } };
+          const persisted = { ...document, scopes: { ...retained, ...document.scopes } };
           await writeFile(temporary, JSON.stringify(persisted) + "\n", {
             flag: "wx",
             mode: 0o600,
@@ -121,12 +180,25 @@ export class HarnessPreferencesStore {
         } finally {
           await rm(temporary, { force: true });
         }
-        this.publish(document);
+        if (changed) this.publish(document);
       }
-      return { scope: request.scope, revision: document.revision, values: structuredClone(values) };
+      return { scope, revision: document.revision, values: structuredClone(values) };
     });
     this.tail = work.catch(() => {});
     return work;
+  }
+  private async backupBeforeModelMigration(source: string) {
+    const backup = this.file + MODEL_REF_BACKUP_SUFFIX;
+    const temporary = `${backup}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, source, { flag: "wx", mode: 0o600 });
+      await link(temporary, backup);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || !(await lstat(backup)).isFile())
+        throw error;
+    } finally {
+      await rm(temporary, { force: true });
+    }
   }
   private publish(document: Document) {
     const fingerprint = JSON.stringify(document);
@@ -147,11 +219,11 @@ export class HarnessPreferencesStore {
       this.watching = (async () => {
         await mkdir(this.directory, { recursive: true, mode: 0o700 });
         if (this.closed) return;
-        this.fingerprint = JSON.stringify(await this.read());
+        this.fingerprint = JSON.stringify((await this.read()).document);
         if (this.closed) return;
         const refresh = () => {
           void this.read()
-            .then((document) => this.publish(document))
+            .then(({ document }) => this.publish(document))
             .catch(() => {});
         };
         this.watcher = watch(this.directory, { persistent: false }, (_event, name) => {

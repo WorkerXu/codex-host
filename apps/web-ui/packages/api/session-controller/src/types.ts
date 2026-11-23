@@ -149,6 +149,8 @@ export interface ModelCatalogModel {
   readonly description?: string;
   /** Model id of this Model's Fast variant; absent when the Harness offers none. */
   readonly fastModel?: string;
+  /** Model id of this Model's Ultrafast variant when the Host advertises it. */
+  readonly ultrafastModel?: string;
   readonly reasoning?: ModelReasoning;
 }
 
@@ -164,6 +166,7 @@ export interface ModelCatalogFailure {
   readonly id: string;
   readonly name: string;
   readonly message: string;
+  readonly credentialAccessRequired?: true;
 }
 
 /** Host-generation model catalog and the default used by unconfigured Sessions. */
@@ -174,7 +177,7 @@ export interface ModelCatalog {
   readonly preferencesAvailable?: boolean;
   /** Presentation only, shared with Desktop; includes unavailable Harness rows. */
   readonly harnessOrder?: readonly string[];
-  readonly default: ModelSelection;
+  readonly default?: ModelSelection;
   /** Provider routes with at least one currently available catalog model. */
   readonly routableProviders: readonly string[];
   readonly groups: readonly ModelProviderGroup[];
@@ -249,6 +252,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "session/tool-output-stale": Record<string, never>;
     "session/queue-item-not-found": { readonly itemId: MessageId };
     "session/steer-unavailable": { readonly itemId: MessageId };
+    "remote/turn-changed": Record<string, never>;
     "session/title-invalid": { readonly sessionId: SessionId };
     "session/fork-unavailable": { readonly sessionId: SessionId };
     "subagent/not-found": {
@@ -370,6 +374,10 @@ export interface SessionPromptRequest {
   readonly requestId: SessionRequestId;
   readonly sessionId: SessionId;
   readonly mode: "queue" | "steer";
+  /** A normal remote send made while idle can use the legacy idle entry point. */
+  readonly sendWhenIdle?: true;
+  /** Host Turn observed at the send gesture. Null means no target was observed. */
+  readonly expectedTurnId?: string | null;
   /** At least one non-whitespace text part or attachment. */
   readonly content: readonly PromptContentPart[];
   readonly clientTimeZone?: string;
@@ -378,6 +386,8 @@ export interface SessionPromptRequest {
 /** Receipt after one prompt enters the target Agent inbox. */
 export interface SessionPromptValue {
   readonly accepted: true;
+  /** Queue admission is confirmed. The subsequent automatic start was not confirmed. */
+  readonly queueStartUnconfirmed?: true;
 }
 
 /** Durable image read request. */

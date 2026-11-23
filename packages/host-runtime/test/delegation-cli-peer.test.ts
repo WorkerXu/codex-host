@@ -47,12 +47,16 @@ async function cli(args: string[]) {
       const { route, body } = JSON.parse(chunks.join(""));
       requests.push({ transport: "ssh", route, body });
       stdout.end(
-        JSON.stringify({
-          threadId: "child",
-          status: "running",
-          timedOut: false,
-          next: { read: "codexhost thread read child" },
-        }),
+        JSON.stringify(
+          route === "/v1/harness/inspect"
+            ? { harnessId: body.harnessId, inspection: { status: "notInstalled" } }
+            : {
+                threadId: "child",
+                status: "running",
+                timedOut: false,
+                next: { read: "codexhost thread read child" },
+              },
+        ),
       );
       child.emit("close", 0, null);
     });

@@ -1,5 +1,8 @@
 import { routeDelegationRequest } from "./delegation-control-server.js";
 import {
+  DEFAULT_LIST_LIMIT,
+  DEFAULT_LIST_SORT,
+  DEFAULT_WAIT_TIMEOUT_MS,
   DEFAULT_WATCH_TIMEOUT_MS,
   DelegationControlError,
   type DelegationControlApi,
@@ -31,6 +34,23 @@ function ownOrigin(client: string, value: unknown, field: string): string {
   return value as string;
 }
 
+/**
+ * Routes a `read` client may use: they observe Threads, the Host and the client's
+ * own events. Every other route, including any added later, needs `dispatch`.
+ */
+const READ_ROUTES = new Set([
+  "/v1/host/info",
+  "/v1/project/list",
+  "/v1/harness/list",
+  "/v1/harness/inspect",
+  "/v1/thread/read",
+  "/v1/thread/file",
+  "/v1/thread/wait",
+  "/v1/thread/watches",
+  "/v1/thread/list",
+  "/v1/events/poll",
+]);
+
 /** External watch=true is shorthand for the timeout-based control protocol used by the CLI. */
 function withWatch(body: Record<string, unknown>): Record<string, unknown> {
   const { watch, ...rest } = body;
@@ -52,12 +72,52 @@ function withWatch(body: Record<string, unknown>): Record<string, unknown> {
   return { ...rest, ...(timeout !== undefined ? { watchTimeoutMs: timeout } : {}) };
 }
 
+/**
+ * Fills the optional fields the CLI and MCP tools default on their side, so a
+ * plain HTTP request behaves the same. Only absent fields are filled; a field
+ * the caller sent is left for the Runtime to validate.
+ */
+function withHttpDefaults(route: string, body: Record<string, unknown>): Record<string, unknown> {
+  switch (route) {
+    case "/v1/delegate/start": {
+      // The CLI flag and the documented field are `harness`; the Runtime reads `harnessId`.
+      const { harness, ...rest } = body;
+      if (harness !== undefined && rest.harnessId !== undefined && harness !== rest.harnessId)
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "harness and harnessId must name the same Harness",
+        );
+      const harnessId = rest.harnessId === undefined ? harness : rest.harnessId;
+      if (harnessId === undefined)
+        throw new DelegationControlError("INVALID_ARGUMENT", "harnessId is required");
+      // A worktree is created before the Runtime resolves the Harness, so a malformed id must not get that far.
+      if (typeof harnessId !== "string" || harnessId === "")
+        throw new DelegationControlError(
+          "INVALID_ARGUMENT",
+          "harnessId must be a non-empty string",
+        );
+      return { ...rest, harnessId };
+    }
+    case "/v1/thread/read":
+      return { view: "result", ...body };
+    case "/v1/thread/wait":
+      return { view: "result", timeoutMs: DEFAULT_WAIT_TIMEOUT_MS, ...body };
+    case "/v1/thread/watch":
+      return { timeoutMs: DEFAULT_WATCH_TIMEOUT_MS, ...body };
+    case "/v1/thread/list":
+      return { limit: DEFAULT_LIST_LIMIT, sort: DEFAULT_LIST_SORT, ...body };
+    default:
+      return body;
+  }
+}
+
 /** Applies the caller's identity: work and watches without a parent or target belong to the client. */
 function forClient(
   client: string,
   route: string,
-  body: Record<string, unknown>,
+  rawBody: Record<string, unknown>,
 ): Record<string, unknown> {
+  let body = withHttpDefaults(route, rawBody);
   if (route === "/v1/delegate/start" || route === "/v1/thread/send") body = withWatch(body);
   if (route === "/v1/delegate/start")
     return { ...body, parentThreadId: ownOrigin(client, body.parentThreadId, "parentThreadId") };
@@ -110,6 +170,11 @@ export function externalClientRouter(handlers: {
   inventory?: HostInventory;
 }): ExternalClientRouter {
   return async (call, route, body) => {
+    if (call.scope !== "dispatch" && !READ_ROUTES.has(route))
+      throw new DelegationControlError(
+        "FORBIDDEN",
+        `Client '${call.client}' has read scope and cannot use ${route}`,
+      );
     if (route === "/v1/events/poll") {
       if (!handlers.events)
         throw new DelegationControlError("INVALID_ARGUMENT", "This Runtime keeps no client events");

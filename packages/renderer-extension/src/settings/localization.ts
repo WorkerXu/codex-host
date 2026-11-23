@@ -8,6 +8,16 @@ import {
   credentialImportChinese,
   type CredentialImportMessages,
 } from "./credential-import-messages.js";
+import {
+  delegationEnglish,
+  delegationChinese,
+  type DelegationMessages,
+} from "./delegation-messages.js";
+import {
+  desktopExtensionsEnglish,
+  desktopExtensionsChinese,
+  type DesktopExtensionsMessages,
+} from "./desktop-extensions-messages.js";
 import type { DefaultRendererSettingsPageId } from "./pages.js";
 import {
   harnessVersionEnglish,
@@ -34,12 +44,15 @@ export interface RendererSettingsLanguageControl {
 
 export interface RendererSettingsMessages {
   readonly credentialImports: CredentialImportMessages;
+  readonly delegation: DelegationMessages;
+  readonly desktopExtensions: DesktopExtensionsMessages;
   readonly locale: RendererSettingsLocale;
   readonly title: string;
   readonly close: string;
   readonly starOnGitHub: string;
   readonly sectionsLabel: string;
   readonly generalSection: string;
+  readonly pluginsSection: string;
   readonly otherSection: string;
   readonly appearanceDescription: string;
   readonly appearanceGroup: string;
@@ -214,6 +227,13 @@ export interface RendererSettingsMessages {
   readonly harnessUpdateAllProgress: string;
   readonly harnessUpdateAllDescription: string;
   readonly harnessUpdateAllResult: string;
+  readonly harnessUpdateAllSkipped: string;
+  readonly harnessUpdateUnverifiedTitle: string;
+  readonly harnessUpdateUnverifiedDetail: string;
+  readonly harnessUpdateTargetChangedTitle: string;
+  readonly harnessUpdateTargetChangedDetail: string;
+  readonly harnessUpdateSkip: string;
+  readonly harnessUpdateAnyway: string;
   readonly harnessVersionUpdating: string;
   readonly harnessVersionUpToDate: string;
   readonly harnessVersionUpdated: string;
@@ -237,6 +257,8 @@ export interface RendererSettingsMessages {
   readonly connectionGroupLoading: string;
   readonly connectionGroupSaving: string;
   readonly connectionGroupSyncFailed: string;
+  readonly connectionGroupUnavailable: string;
+  readonly connectionLocalHarnessUnsupported: string;
   readonly pickerMoreAgentsLabel: string;
   readonly pickerManageLink: string;
   readonly pickerHideUnusedAgentsCta: string;
@@ -278,6 +300,12 @@ export interface RendererSettingsMessages {
   readonly updateCopyFailed: string;
   readonly updateDownloadFromReleases: string;
   readonly updateDownloadWindowsInstaller: string;
+  readonly updateViewAnnouncement: string;
+  readonly releaseAnnouncement: {
+    readonly title: string;
+    readonly acknowledge: string;
+    readonly fullNotes: string;
+  };
   readonly updateStarCallout: string;
   readonly updateStarLink: string;
   readonly aboutTagline: string;
@@ -316,12 +344,15 @@ export interface RendererSettingsMessages {
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportEnglish,
+  delegation: delegationEnglish,
+  desktopExtensions: desktopExtensionsEnglish,
   locale: "en",
   title: "Settings",
   close: "Close settings",
   starOnGitHub: "Star to support",
   sectionsLabel: "Settings sections",
   generalSection: "General",
+  pluginsSection: "Plugin Pages",
   otherSection: "Other",
   appearanceDescription: "Conversation display and local resource management.",
   appearanceGroup: "Appearance",
@@ -526,9 +557,18 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessUpdateAllProgress: "Updating",
   harnessUpdateAllDescription: "Update all eligible Harnesses on the selected Host.",
   harnessUpdateAllResult: "Updated {succeeded}; failed {failed}.",
+  harnessUpdateAllSkipped: "Skipped {skipped}.",
+  harnessUpdateUnverifiedTitle: "Update to an unverified version?",
+  harnessUpdateUnverifiedDetail:
+    "{name} {target} has not been verified with this adapter. The latest verified version is {verified}.",
+  harnessUpdateTargetChangedTitle: "Confirm the new update target",
+  harnessUpdateTargetChangedDetail: "The update target changed to {name} {target}.",
+  harnessUpdateSkip: "Skip this update",
+  harnessUpdateAnyway: "Update anyway",
   harnessVersionUpdating: "Updating…",
   harnessVersionUpToDate: "Up to date",
-  harnessVersionUpdated: "Update verified. New sessions will use the new version.",
+  harnessVersionUpdated:
+    "Update verified. New sessions that reuse a running Harness process may still use the old version until that process restarts.",
   harnessVersionFailed:
     "Could not complete the operation. Check the network connection or native installation.",
   harnessVersionUnsupported: "This Host or plugin does not support CLI version management.",
@@ -554,6 +594,10 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   connectionGroupSaving: "Saving shared Harness order…",
   connectionGroupSyncFailed:
     "Could not sync Harness order. The last confirmed order is shown; check codexhost and retry your change.",
+  connectionGroupUnavailable:
+    "Harness order is read-only because the local connection does not support it. The last confirmed order is kept.",
+  connectionLocalHarnessUnsupported:
+    "This local connection does not support codexhost Harnesses. You can still use Codex. On Windows, if Agent environment is set to WSL, switch it to Windows in Codex Settings → General, then restart Desktop through codexhost. To use Harnesses installed in WSL, connect to WSL through Remote SSH instead.",
   pickerMoreAgentsLabel: "More agents",
   pickerManageLink: "Manage",
   pickerHideUnusedAgentsCta: "Hide unused agents",
@@ -600,6 +644,12 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "Copy failed",
   updateDownloadFromReleases: "Download from GitHub Releases",
   updateDownloadWindowsInstaller: "Download Windows installer",
+  updateViewAnnouncement: "View release announcement",
+  releaseAnnouncement: Object.freeze({
+    title: "Release announcement",
+    acknowledge: "Got it",
+    fullNotes: "View full release notes",
+  }),
   updateStarCallout:
     "If CodexHost has helped you, please Star it on GitHub. It means a lot to us 👉",
   updateStarLink: "GitHub",
@@ -645,7 +695,9 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
     jarvis: "Jarvis",
     "codex-agents": "Agents",
     dingtalk: "DingTalk",
+    "desktop-extensions": "Plugins",
     accounts: "Accounts",
+    delegation: "Multi-Agent",
     "session-import": "Session Import",
     "usage-statistics": "Usage statistics",
     updates: "Updates",
@@ -655,12 +707,15 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
 
 const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportChinese,
+  delegation: delegationChinese,
+  desktopExtensions: desktopExtensionsChinese,
   locale: "zh-CN",
   title: "设置",
   close: "关闭设置",
   starOnGitHub: "Star 支持",
   sectionsLabel: "设置分类",
   generalSection: "通用",
+  pluginsSection: "插件页面",
   otherSection: "其他",
   appearanceDescription: "会话显示与本地资源管理。",
   appearanceGroup: "外观",
@@ -853,9 +908,18 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessUpdateAllProgress: "更新中",
   harnessUpdateAllDescription: "更新当前 Host 上支持自动更新且有新版本的 Harness。",
   harnessUpdateAllResult: "已更新 {succeeded} 项，{failed} 项失败。",
+  harnessUpdateAllSkipped: "已跳过 {skipped} 项。",
+  harnessUpdateUnverifiedTitle: "更新到未经验证的版本？",
+  harnessUpdateUnverifiedDetail:
+    "当前适配器尚未验证 {name} {target}，最新已验证版本为 {verified}。",
+  harnessUpdateTargetChangedTitle: "确认新的更新目标",
+  harnessUpdateTargetChangedDetail: "更新目标已变更为 {name} {target}。",
+  harnessUpdateSkip: "跳过此项",
+  harnessUpdateAnyway: "继续更新",
   harnessVersionUpdating: "正在更新…",
   harnessVersionUpToDate: "已是最新",
-  harnessVersionUpdated: "已确认更新成功，新会话将使用新版本。",
+  harnessVersionUpdated:
+    "已确认更新成功。若新会话复用运行中的 Harness 进程，可能要等该进程重启后才能使用新版本。",
   harnessVersionFailed: "操作未完成，请检查网络连接或原生安装。",
   harnessVersionUnsupported: "当前 Host 或插件不支持 CLI 版本管理。",
   harnessVersionManual: "请使用原安装方式更新此 Harness。",
@@ -878,6 +942,9 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   connectionGroupSaving: "正在保存共享 Harness 排序…",
   connectionGroupSyncFailed:
     "Harness 排序同步失败，当前显示上次确认的顺序。请确认 codexhost 正常运行后重试修改。",
+  connectionGroupUnavailable: "本地连接不支持修改 Harness 排序，已保留上次确认的顺序。",
+  connectionLocalHarnessUnsupported:
+    "此本地连接不支持 codexhost Harness，仍可使用原生 Codex。在 Windows 上，如果 Agent environment 设为 WSL，请在 Codex「设置 → 常规」中切换到 Windows，再通过 codexhost 重启 Desktop。若要使用安装在 WSL 内的 Harness，请改用 Remote SSH 连接 WSL。",
   pickerMoreAgentsLabel: "更多 Agent",
   pickerManageLink: "管理",
   pickerHideUnusedAgentsCta: "收起不常用的 Agent",
@@ -921,6 +988,12 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateCopyFailed: "复制失败",
   updateDownloadFromReleases: "前往 GitHub Releases 下载",
   updateDownloadWindowsInstaller: "下载 Windows 安装包",
+  updateViewAnnouncement: "查看本版公告",
+  releaseAnnouncement: Object.freeze({
+    title: "更新公告",
+    acknowledge: "我知道了",
+    fullNotes: "查看完整更新说明",
+  }),
   updateStarCallout: "如果 CodexHost 帮到了你，请在 GitHub 点个 Star，这对我们意义重大 👉",
   updateStarLink: "GitHub",
   aboutTagline: "在 Codex Desktop 中运行 Pi 和其他 Harness",
@@ -965,7 +1038,9 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
     jarvis: "Jarvis",
     "codex-agents": "智能体",
     dingtalk: "钉钉",
+    "desktop-extensions": "插件",
     accounts: "账号",
+    delegation: "多 Agent 协作",
     "session-import": "会话导入",
     "usage-statistics": "用量统计",
     updates: "更新",

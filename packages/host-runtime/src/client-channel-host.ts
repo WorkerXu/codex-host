@@ -35,7 +35,7 @@ import {
 } from "./native-client-channel.js";
 import { classifyCreateRequestRoute } from "./route-observation.js";
 import { allocateProjectlessWorkspace } from "./projectless-workspace.js";
-import { decodeOfficialCodexModelSelection } from "./official-codex-model-ref.js";
+import { officialCodexModelSelection } from "./official-codex-model-ref.js";
 import { nativeThreadSkillInput } from "./codex-runtime/native-thread-controls.js";
 
 const OFFICIAL_METHODS: Readonly<Record<string, "native" | "host">> = {
@@ -65,6 +65,7 @@ const OFFICIAL_METHODS: Readonly<Record<string, "native" | "host">> = {
   "codexhost/thread/commands/inspect": "host",
   "codexhost/thread/command/execute": "host",
   "codexhost/thread/pins/set": "host",
+  "codexhost/thread/sections/move": "host",
   "codexhost/thread/usage/inspect": "host",
   "codexhost/thread/inspect": "native",
 };
@@ -192,6 +193,13 @@ export class ClientChannelHost {
     if (!parsed.success || !isRecord(parsed.data.params))
       return { error: { code: -32602, message: "Invalid client parameters" } };
     const params = parsed.data.params as JsonObject;
+    if (method === "codexhost/harness/commands/inspect" && params.harnessId !== "codex")
+      return {
+        error: {
+          code: -32602,
+          message: 'Client draft command inspection requires harnessId "codex"',
+        },
+      };
     if (method === THREAD_ARCHIVE_CONFIRM_METHOD) {
       const confirm = threadArchiveConfirmParamsSchema.safeParse(params);
       if (!confirm.success)
@@ -362,7 +370,7 @@ export class ClientChannelHost {
           try {
             Object.assign(
               nativeParams,
-              decodeOfficialCodexModelSelection(harnessModelRefSchema.parse(params.model)),
+              officialCodexModelSelection(harnessModelRefSchema.parse(params.model)),
             );
           } catch {
             return { error: { code: -32602, message: "Invalid official Model Ref" } };

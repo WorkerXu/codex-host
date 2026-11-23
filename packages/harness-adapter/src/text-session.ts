@@ -1,11 +1,13 @@
 import type { HarnessUsageStatisticsCapability } from "./usage-statistics.js";
 import type {
   HarnessAccountSnapshot,
+  AccountBalanceSnapshot,
   AccountCreditsSnapshot,
   HarnessInstallationState,
   HarnessCommandCatalog,
   HarnessId,
   HarnessInspection,
+  HarnessModelCatalog,
   HarnessModelRef,
   HarnessPermissionModeId,
   HarnessSessionCapabilities,
@@ -22,7 +24,7 @@ import type {
   NativeTurnRef,
 } from "@codexhost/shared-contracts";
 
-import type { HostUsage, HostUsageRequest } from "./usage.js";
+import type { HostUsage, HostUsageRequest, HostUsageRequestTiming } from "./usage.js";
 import type { HarnessSessionUsageCapability } from "./session-usage.js";
 import type { HarnessCredentialExport, HarnessCredentialImports } from "./credential-imports.js";
 
@@ -45,6 +47,7 @@ export type HarnessErrorCode =
   | "unavailable"
   | "authenticationRequired"
   | "configurationRequired"
+  | "credentialAccessRequired"
   | "sessionNotFound"
   | "sessionBusy"
   | "checkpointNotFound"
@@ -78,6 +81,8 @@ export interface InspectHarnessInput {
    * not stand in for a full inspection.
    */
   purpose?: "availability";
+  /** Interactive credential access: `allow` permits a first prompt, `retry` also permits retrying a failed read. */
+  credentialAccess?: "allow" | "retry";
 }
 
 export type HarnessExecutionPolicy = "default" | "unattended-full-access";
@@ -88,6 +93,8 @@ export interface CreateSessionInput {
   cwd: string;
   environment?: Record<string, string | undefined>;
   executionPolicy?: HarnessExecutionPolicy;
+  /** Speculative draft creation, without an explicit request to run this Harness. */
+  prewarm?: true;
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;
   permissionModeId?: HarnessPermissionModeId;
@@ -500,16 +507,33 @@ export interface SessionStateChangedEvent {
   state: HarnessSessionState;
 }
 
+/** A display title from the native Session, available to an unnamed Host Thread. */
+export interface SessionTitleChangedEvent {
+  type: "session.title.changed";
+  title: string;
+}
+
 export interface SessionUsageChangedEvent {
   type: "session.usage.changed";
   usage: HostUsage | null;
   observedForTurnId?: HostTurnId;
 }
 
+/** Invalidate an account quota projection without changing token usage. */
+export interface SessionAccountCreditsChangedEvent {
+  type: "session.accountCredits.changed";
+}
+
 /** One native model request's usage; Host derives cost, cache and speed metrics from these. */
 export interface UsageRequestEvent {
   type: "usage.request";
   request: HostUsageRequest;
+}
+
+export interface UsageRequestTimingEvent {
+  type: "usage.request.timing";
+  turnId: HostTurnId;
+  timing: HostUsageRequestTiming;
 }
 
 /**
@@ -544,6 +568,13 @@ export interface AutonomousTurnStartedEvent {
   input: HostTextInput[];
 }
 
+/** A native autonomous Turn observed only after it commits. It does not acquire
+ * the foreground execution slot and its snapshot must also appear in history. */
+export interface AutonomousTurnCompletedEvent {
+  type: "turn.autonomous.completed";
+  snapshot: HostTurnSnapshot;
+}
+
 export interface ItemStartedEvent {
   type: "item.started";
   turnId: HostTurnId;
@@ -573,6 +604,19 @@ export interface ItemDetachedEvent {
   itemId: HostItemId;
 }
 
+/**
+ * The Harness produced new output after its Turn completed (idle-time
+ * background work). The Item starts and stays detached on the completed
+ * Turn; it settles later with `item.updated` / `item.completed` on the
+ * same Turn, exactly like an `item.detached` Item. Adapters must emit it
+ * only while no successor Turn has started, and only for text Items.
+ */
+export interface ItemBackgroundStartedEvent {
+  type: "item.background.started";
+  turnId: HostTurnId;
+  item: HostItem;
+}
+
 export interface TurnCompletedEvent {
   type: "turn.completed";
   turnId: HostTurnId;
@@ -596,17 +640,22 @@ export interface SessionFaultedEvent {
 
 export type HostEvent =
   | SessionStateChangedEvent
+  | SessionTitleChangedEvent
   | SessionUsageChangedEvent
+  | SessionAccountCreditsChangedEvent
   | UsageRequestEvent
+  | UsageRequestTimingEvent
   | UsageHistoryEvent
   | SubagentStateChangedEvent
   | SubagentTranscriptChangedEvent
   | TurnStartedEvent
   | AutonomousTurnStartedEvent
+  | AutonomousTurnCompletedEvent
   | ItemStartedEvent
   | ItemUpdatedEvent
   | ItemCompletedEvent
   | ItemDetachedEvent
+  | ItemBackgroundStartedEvent
   | InteractionClosedEvent
   | TurnCompletedEvent
   | SessionFaultedEvent;
@@ -635,7 +684,14 @@ export interface HarnessSession {
    * A read is advisory: turn.steer must recheck admission before handing input to the Harness.
    */
   readCapabilities?(): Promise<HarnessSessionCapabilities>;
+  /**
+   * Catalog that contains this Session's effective Model. Thread inspection uses it
+   * when that Model is more specific than the Adapter's separate inspection catalog.
+   */
+  modelCatalog?(): HarnessModelCatalog;
   refreshUsage?(): Promise<void>;
+  /** Account quota attributed to this Session, rather than shared across the Adapter. */
+  readAccountCredits?(): Promise<AccountCreditsSnapshot | null>;
   /** Native background work (e.g. a background command) is still running; the Session must not be released. */
   hasBackgroundWork?(): boolean;
   /** Stops every running detached Item; each still settles through its own events. */
@@ -697,7 +753,10 @@ export interface HarnessAdapter {
   /** Native CLI version checks and explicit updates. Never updates the Host plugin,
    * starts a model Turn, or restarts existing Sessions. Commands are Adapter-owned.
    */
-  installation?(action: "check" | "update"): Promise<HarnessInstallationState>;
+  installation?(
+    action: "check" | "update",
+    confirmedVersion?: string,
+  ): Promise<HarnessInstallationState>;
   /** Explicit first-time CLI installation using an Adapter-owned official source. */
   install?(): Promise<void>;
   readonly credentialExport?: HarnessCredentialExport;
@@ -734,6 +793,14 @@ export interface HarnessAdapter {
    * observes a later read, does not await this call, and isolates rejection.
    */
   refreshCredits?(): Promise<AccountCreditsSnapshot | null>;
+  /** Optional cached prepaid balance for Harnesses whose Billing Source reports funds, not a
+   * percentage quota. Same contract as `credits()`: synchronous, no I/O, null when unknown.
+   */
+  balance?(): AccountBalanceSnapshot | null;
+  /** Best-effort refresh of the `balance()` cache. Must not start a model Turn; Host does
+   * not await it and isolates rejection.
+   */
+  refreshBalance?(): Promise<AccountBalanceSnapshot | null>;
   /**
    * The same read when one Harness exposes several Billing Sources. Host prefers
    * this method and retains the first snapshot as the compatibility `account`.
@@ -741,6 +808,16 @@ export interface HarnessAdapter {
   inspectAccounts?(): Promise<readonly HarnessAccountSnapshot[]>;
 
   inspect(input?: InspectHarnessInput): Promise<HarnessInspection>;
+  /**
+   * Maps a Model Ref saved by an earlier release to the matching entry of `catalog`.
+   * Host calls it only for a saved Ref that the catalog does not contain. Return
+   * undefined when the saved value matches no single current Model. Local implementations
+   * are pure; a Broker proxy may return a Promise.
+   */
+  normalizeStoredModelRef?(
+    ref: HarnessModelRef,
+    catalog: HarnessModelCatalog,
+  ): HarnessModelRef | undefined | Promise<HarnessModelRef | undefined>;
   open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>>;
   close(): Promise<void>;
 }

@@ -46,6 +46,9 @@ import {
   accountCreditsSnapshotSchema,
   type AccountCreditsSnapshot,
   harnessInspectionSchema,
+  harnessModelRefSchema,
+  type HarnessModelCatalog,
+  type HarnessModelRef,
   harnessSessionCapabilitiesSchema,
   type HarnessCommandCatalog,
 } from "@codexhost/shared-contracts";
@@ -59,6 +62,7 @@ import {
 } from "./paths.js";
 import {
   HARNESS_BROKER_MAX_PENDING_REQUESTS,
+  HARNESS_BROKER_MAX_RESPONSE_BYTES,
   HARNESS_BROKER_RETIRING_ERROR_CODE,
   HARNESS_BROKER_PROTOCOL_VERSION,
   HARNESS_BROKER_REQUEST_TIMEOUT_MS,
@@ -285,6 +289,7 @@ class BrokerConnection {
       socket,
       (raw) => this.#frame(raw),
       (error) => this.#fail(error),
+      HARNESS_BROKER_MAX_RESPONSE_BYTES,
     );
     socket.once("close", () => this.#fail(new Error("Aqua Harness broker connection closed")));
     socket.once("error", (error) => this.#fail(error));
@@ -327,6 +332,7 @@ class BrokerConnection {
       sequence: 1,
       kind: "hello",
       token: descriptor.token,
+      maxResponseBytes: HARNESS_BROKER_MAX_RESPONSE_BYTES,
     });
     await hello;
     return connection;
@@ -852,6 +858,11 @@ export class BrokeredHarnessAdapter implements HarnessAdapter {
         return { status: "notInstalled", error: this.#error(error) };
       return failedInspection(describeBrokerFailure(error, this.harnessId));
     }
+  }
+
+  async normalizeStoredModelRef(ref: HarnessModelRef, catalog: HarnessModelCatalog) {
+    const result = await this.#request("adapter.normalizeStoredModelRef", { ref, catalog }, true);
+    return harnessModelRefSchema.nullable().parse(result) ?? undefined;
   }
 
   async open(input: OpenSessionInput): Promise<HarnessResult<HarnessSession>> {

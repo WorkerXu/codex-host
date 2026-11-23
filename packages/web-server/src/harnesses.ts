@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   HARNESS_PLUGIN_API_VERSION,
+  harnessModelRefKey,
+  sameHarnessModelRef,
   harnessPluginManifestSchema,
   isHarnessPluginInScope,
   type HarnessPluginScope,
@@ -25,6 +27,7 @@ export interface ModelGroup {
     description?: string;
     /** Native Fast variant of this Model; selected through the same Model RPC. */
     fastModel?: string;
+    ultrafastModel?: string;
     reasoning?: { efforts: Array<{ id: string; name: string }>; defaultEffort?: string };
   }>;
 }
@@ -102,10 +105,15 @@ export function groupOf(
 ): ModelGroup {
   const { catalog } = inspection;
   const options = new Map(catalog.thinkingOptions.map((option) => [option.id, option]));
+  const refs = catalog.models.map(({ ref }) => ref);
   return {
     id,
     name,
     models: catalog.models.map((model) => {
+      const ultrafastModel =
+        model.ref.serviceTier === undefined
+          ? refs.find((ref) => sameHarnessModelRef(ref, { ...model.ref, serviceTier: "ultrafast" }))
+          : undefined;
       const supported =
         model.supportedThinkingOptionIds ?? catalog.thinkingOptions.map((option) => option.id);
       const efforts = supported.flatMap((optionId) => {
@@ -113,12 +121,13 @@ export function groupOf(
         return option === undefined ? [] : [{ id: option.id, name: option.label }];
       });
       return {
-        id: model.ref.id,
+        id: harnessModelRefKey(model.ref),
         name: model.label,
         ...(model.resolvedModelLabel !== undefined && model.resolvedModelLabel !== model.label
           ? { description: model.resolvedModelLabel }
           : {}),
-        ...(model.fastModel ? { fastModel: model.fastModel.id } : {}),
+        ...(model.fastModel ? { fastModel: harnessModelRefKey(model.fastModel) } : {}),
+        ...(ultrafastModel ? { ultrafastModel: harnessModelRefKey(ultrafastModel) } : {}),
         ...(efforts.length > 0
           ? {
               reasoning: {

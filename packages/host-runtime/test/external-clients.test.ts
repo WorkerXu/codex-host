@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -13,7 +13,26 @@ import {
   startExternalClientServer,
   type ExternalClientServer,
 } from "../src/external-client-server.js";
+import { externalClientRouter } from "../src/external-client-routes.js";
 import { ExternalClientRegistry, defaultExternalClientsPath } from "../src/external-clients.js";
+
+/** Every Runtime API method as a spy, so a test can tell whether any of them ran. */
+function spyApi(): { api: DelegationControlApi; calls: () => string[] } {
+  const called: string[] = [];
+  const api = new Proxy(
+    {},
+    {
+      get: (_target, method) =>
+        typeof method === "string" && method !== "then"
+          ? async () => {
+              called.push(method);
+              return {};
+            }
+          : undefined,
+    },
+  );
+  return { api: api as DelegationControlApi, calls: () => [...called] };
+}
 
 function outputText(stream: PassThrough): string {
   return (stream.read() as Buffer | null)?.toString("utf8") ?? "";
@@ -64,9 +83,20 @@ describe("external clients", () => {
 
     const listed = await cli(["client", "list"], environment);
     expect(listed.body).toEqual({
-      clients: [{ name: "grok-bot", createdAt: expect.any(String) }],
+      clients: [{ name: "grok-bot", createdAt: expect.any(String), scope: "dispatch" }],
     });
     expect(JSON.stringify(listed.body)).not.toContain(token);
+  });
+
+  it("preserves both independent registrations when writers share the registry", async () => {
+    const filePath = defaultExternalClientsPath(environment);
+    const first = new ExternalClientRegistry(filePath);
+    const second = new ExternalClientRegistry(filePath);
+
+    await Promise.all([first.add("first", "read"), second.add("second", "read")]);
+
+    const names = (await first.list()).map(({ name }) => name).sort();
+    expect(names).toEqual(["first", "second"]);
   });
 
   it("rejects invalid and duplicate names without replacing the token", async () => {
@@ -77,7 +107,10 @@ describe("external clients", () => {
     const again = await cli(["client", "add", "bot"], environment);
     expect(again.body).toMatchObject({ error: { code: "INVALID_ARGUMENT" } });
     const registry = new ExternalClientRegistry(defaultExternalClientsPath(environment));
-    await expect(registry.authenticate(first.body?.token as string)).resolves.toBe("bot");
+    await expect(registry.authenticate(first.body?.token as string)).resolves.toEqual({
+      name: "bot",
+      scope: "dispatch",
+    });
   });
 
   it("authenticates tokens and sees a removal made by another process", async () => {
@@ -85,7 +118,10 @@ describe("external clients", () => {
     const cliRegistry = new ExternalClientRegistry(filePath);
     const runtimeRegistry = new ExternalClientRegistry(filePath);
     const { token } = await cliRegistry.add("script");
-    await expect(runtimeRegistry.authenticate(token)).resolves.toBe("script");
+    await expect(runtimeRegistry.authenticate(token)).resolves.toEqual({
+      name: "script",
+      scope: "dispatch",
+    });
     await expect(runtimeRegistry.authenticate(`${token}x`)).resolves.toBeUndefined();
     await expect(runtimeRegistry.authenticate(undefined)).resolves.toBeUndefined();
 
@@ -137,6 +173,56 @@ describe("external clients", () => {
     expect(await ok.json()).toEqual({ harnesses: [] });
     expect(callers).toEqual(["script"]);
     expect(listHarnesses).toHaveBeenCalledOnce();
+  });
+
+  it("gives plain HTTP requests the same defaults as the CLI and accepts harness for harnessId", async () => {
+    const api = {
+      start: vi.fn<DelegationControlApi["start"]>(async () => ({}) as never),
+      read: vi.fn(async () => ({})),
+      wait: vi.fn(async () => ({})),
+      list: vi.fn(async () => ({})),
+    };
+    const watch = vi.fn(async () => ({}));
+    const route = externalClientRouter({
+      api: api as unknown as DelegationControlApi,
+      watchApi: { watch, watches: vi.fn() } as never,
+    });
+    const call = { client: "script", scope: "dispatch" } as Parameters<typeof route>[0];
+
+    await route(call, "/v1/delegate/start", { harness: "pi", cwd: "/work", task: "go" });
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ harnessId: "pi" }));
+    expect(api.start.mock.calls[0]?.[0]).not.toHaveProperty("harness");
+    await expect(
+      route(call, "/v1/delegate/start", { cwd: "/work", task: "go" }),
+    ).rejects.toMatchObject({
+      code: "INVALID_ARGUMENT",
+      message: "harnessId is required",
+    });
+    await expect(
+      route(call, "/v1/delegate/start", { harness: "pi", harnessId: "codex", task: "go" }),
+    ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+    // A malformed id is refused before any worktree could be created for it.
+    await expect(
+      route(call, "/v1/delegate/start", { harnessId: null, task: "go", worktree: "fix/x" }),
+    ).rejects.toMatchObject({
+      code: "INVALID_ARGUMENT",
+      message: "harnessId must be a non-empty string",
+    });
+    expect(api.start).toHaveBeenCalledTimes(1);
+
+    await route(call, "/v1/thread/read", { threadId: "t" });
+    expect(api.read).toHaveBeenCalledWith({ threadId: "t", view: "result" });
+    await route(call, "/v1/thread/wait", { threadId: "t" });
+    expect(api.wait).toHaveBeenCalledWith({ threadId: "t", view: "result", timeoutMs: 30_000 });
+    await route(call, "/v1/thread/watch", { threadId: "t" });
+    expect(watch).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "t", timeoutMs: 29 * 60_000 }),
+    );
+    // A missing sort used to reach the Runtime as undefined and surface as INTERNAL_ERROR.
+    await route(call, "/v1/thread/list", {});
+    expect(api.list).toHaveBeenCalledWith({ limit: 25, sort: "created-desc" });
+    await route(call, "/v1/thread/list", { limit: 3, sort: "updated-asc" });
+    expect(api.list).toHaveBeenLastCalledWith({ limit: 3, sort: "updated-asc" });
   });
 
   it("publishes a private descriptor without the token and removes it on close", async () => {
@@ -207,6 +293,84 @@ describe("external clients", () => {
       CODEXHOST_CLIENT_TOKEN: "chc_revoked",
     });
     expect(revoked.body).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+  });
+
+  it("registers, lists and changes a client's scope; older entries count as dispatch", async () => {
+    const added = await cli(["client", "add", "reader", "--scope", "read"], environment);
+    expect(added.body).toMatchObject({ name: "reader", scope: "read" });
+    const token = added.body?.token as string;
+    const registry = new ExternalClientRegistry(defaultExternalClientsPath(environment));
+    await expect(registry.authenticate(token)).resolves.toEqual({ name: "reader", scope: "read" });
+
+    expect(
+      (await cli(["client", "add", "writer", "--scope", "admin"], environment)).body,
+    ).toMatchObject({
+      error: { code: "INVALID_ARGUMENT", message: expect.stringContaining("--scope") },
+    });
+    expect((await cli(["client", "set", "reader"], environment)).body).toMatchObject({
+      error: { code: "INVALID_ARGUMENT", message: "client set requires --scope" },
+    });
+    expect(
+      (await cli(["client", "set", "missing", "--scope", "read"], environment)).body,
+    ).toMatchObject({ error: { code: "INVALID_ARGUMENT" } });
+    expect(
+      (await cli(["client", "remove", "reader", "--scope", "read"], environment)).body,
+    ).toMatchObject({ error: { code: "INVALID_ARGUMENT" } });
+
+    const set = await cli(["client", "set", "reader", "--scope", "dispatch"], environment);
+    expect(set.body).toEqual({ name: "reader", createdAt: expect.any(String), scope: "dispatch" });
+    // Same token, new scope.
+    await expect(registry.authenticate(token)).resolves.toEqual({
+      name: "reader",
+      scope: "dispatch",
+    });
+
+    // An entry written before scopes existed has no scope field.
+    const filePath = defaultExternalClientsPath(environment);
+    const file = JSON.parse(await readFile(filePath, "utf8")) as {
+      clients: Record<string, unknown>[];
+    };
+    for (const client of file.clients) delete client.scope;
+    await writeFile(filePath, JSON.stringify(file));
+    expect((await cli(["client", "list"], environment)).body).toEqual({
+      clients: [{ name: "reader", createdAt: expect.any(String), scope: "dispatch" }],
+    });
+    await expect(new ExternalClientRegistry(filePath).authenticate(token)).resolves.toEqual({
+      name: "reader",
+      scope: "dispatch",
+    });
+  });
+
+  it("refuses a read client every route that changes something, before it runs", async () => {
+    const { api, calls } = spyApi();
+    const watchApi = { watch: vi.fn(async () => ({})), watches: async () => ({}) };
+    const route = externalClientRouter({ api, watchApi: watchApi as never });
+    const reader = { client: "reader", scope: "read" } as Parameters<typeof route>[0];
+    for (const [path_, body] of [
+      ["/v1/delegate/start", { harnessId: "pi", cwd: "/work", task: "go" }],
+      ["/v1/thread/send", { threadId: "t", input: [{ type: "text", text: "more" }] }],
+      ["/v1/thread/answer", { threadId: "t", interactionId: "i", answers: {} }],
+      ["/v1/thread/export", { threadId: "t" }],
+      ["/v1/thread/cancel", { threadId: "t" }],
+      ["/v1/thread/watch", { threadId: "t" }],
+      ["/v1/thread/not-yet-invented", {}],
+    ] as const)
+      await expect(route(reader, path_, { ...body })).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: `Client 'reader' has read scope and cannot use ${path_}`,
+      });
+    expect(calls()).toEqual([]);
+    expect(watchApi.watch).not.toHaveBeenCalled();
+
+    for (const [path_, body] of [
+      ["/v1/harness/list", {}],
+      ["/v1/harness/inspect", { harnessId: "pi" }],
+      ["/v1/thread/read", { threadId: "t" }],
+      ["/v1/thread/wait", { threadId: "t", timeoutMs: 1 }],
+      ["/v1/thread/list", {}],
+      ["/v1/thread/watches", {}],
+    ] as const)
+      await expect(route(reader, path_, { ...body })).resolves.toEqual({});
   });
 
   it("prefers the Host parameters when both are present", async () => {

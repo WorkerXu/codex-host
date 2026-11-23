@@ -5,6 +5,7 @@ import { writeFile, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { discoverHostClientChannel, isHostClientChannelOnline } from "@codexhost/desktop-control";
 import { AppServerHost } from "./app-server-host.js";
@@ -12,6 +13,7 @@ import { createProductionExternalThreadStore } from "./external-thread-repositor
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import { hasLauncherManagedUpdateRuntime, prepareDelegationRuntime } from "./run-host-runtime.js";
 import { createHostUpdateCoordinator } from "./update-coordinator.js";
+import { HostReleaseAnnouncement } from "./release-announcement.js";
 import { prepareLocalCodex } from "./native-account-host.js";
 import { startClientChannelServer } from "./client-channel-server.js";
 import { startConsoleControlServer } from "./console-control-server.js";
@@ -146,6 +148,10 @@ export async function runSharedHostService(
                 environment: hostEnvironment,
               })
             : undefined;
+        const releaseAnnouncement = new HostReleaseAnnouncement(
+          fileURLToPath(runtimeUrl),
+          hostEnvironment,
+        );
         const host = new AppServerHost({
           ...desktopJarvisServices(hostEnvironment, false),
           dingtalk,
@@ -164,6 +170,7 @@ export async function runSharedHostService(
           accountControl: official.accountControl,
           modelPrices: prices,
           usageStatistics,
+          releaseAnnouncement,
           ...(updateCoordinator ? { updateCoordinator } : {}),
           ...installed,
           ...(values.plugins
@@ -189,6 +196,7 @@ export async function runSharedHostService(
           stockCodex: values["stock-codex"] ?? "",
           official,
           owner,
+          hostExtensions: host.hostExtensions,
           store,
           prices,
           dingtalk,
@@ -198,6 +206,7 @@ export async function runSharedHostService(
           ...(process.platform === "darwin"
             ? { codeRepositories: new CodeRepositories({ environment: hostEnvironment }) }
             : {}),
+          releaseAnnouncement,
           ...(updateCoordinator ? { updateCoordinator } : {}),
           delegation: () => delegation,
           register: (api: DelegationControlRegistration) => registry.register(api),
@@ -243,7 +252,8 @@ export async function runSharedHostService(
             target: {
               clientEvents: host.clientEvents,
               handleConsoleRequest: (method, params) =>
-                (method.startsWith("codexhost/update/")
+                (method.startsWith("codexhost/update/") ||
+                method.startsWith("codexhost/extensions/")
                   ? host
                   : ([...desktops].at(-1) ?? host)
                 ).handleConsoleRequest(method, params),

@@ -22,7 +22,8 @@ When `AntigravityToolTracker` observes `invoke_subagent` or `send_message` with 
 ## Boundaries
 
 - Child Threads are read-only; follow-up instructions go through the parent Session.
-- `agy acp` is request-driven (`session/prompt`) and does not initiate unsolicited Autonomous Turns while idle; background child updates flow through `subagent.*` events, and `Session.hasBackgroundWork()` reports running children while they remain active. Note: the `codexhost_background` (`wait_for_background_task`) in-turn MCP server and `systemPrompt.append` wait guidance were removed so Turns can stop/finish and accept follow-up user input without blocking on background tasks.
+- Background child updates flow through `subagent.*` events and do not hold the parent's foreground prompt open. `Session.hasBackgroundWork()` tracks running children and pending native wake observation.
+- Idle ACP output prompts a bounded read of committed SQLite history. A distinct, settled native wake is an input-free Turn with a `wake-<step>` identity and the same checkpoint in live observation, history, and derivation. Output associated with the same execution does not open a new Turn. Native `plan_mode_handoff` and `plan_mode_handback` can change execution ID within a user or autonomous Turn; neither creates a new Turn or checkpoint.
 - Permission modes, `session/request_permission` approvals, and `elicitation/create` questions operate on the parent ACP Session.
 - Missing, mismatched (`parent_conversation_id !== parentId`), or oversized (> 8 MiB) child logs return typed errors rather than empty fabricated transcripts.
 
