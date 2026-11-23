@@ -194,6 +194,9 @@ pub fn apply() -> Result<(), Box<dyn Error>> {
     let mut bytes = Vec::new();
     io::stdin().take(16 * 1024).read_to_end(&mut bytes)?;
     let request: Request = serde_json::from_slice(&bytes)?;
+    if matches!(request.action.as_str(), "install" | "update") {
+        crate::require_self_update()?;
+    }
     let script = script(&request)?;
     let mut child = Command::new("ssh")
         .args(arguments(&request, &script))

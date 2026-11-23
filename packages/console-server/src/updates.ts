@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import path from "node:path";
 import { dataDirectory } from "./paths.js";
 
@@ -217,6 +218,7 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
 
   return Object.freeze({
     async check(target: ConsoleUpdateTarget, signal?: AbortSignal): Promise<UpdateCheckResult> {
+      requireForkSelfUpdate();
       const metadata = target.distribution;
       const runtime = metadata
         ? null
@@ -265,6 +267,7 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
     },
 
     async start(target: ConsoleUpdateTarget): Promise<UpdateStartResult> {
+      requireForkSelfUpdate();
       if (target.codexhostRunning) {
         throw new ConsoleUpdateError(
           "codex-running",
@@ -340,6 +343,7 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
     },
 
     async status(): Promise<UpdateStatusResult> {
+      requireForkSelfUpdate();
       try {
         await recoverUpdateOperationLock(stateDirectory());
         return { status: await latestStatus() };

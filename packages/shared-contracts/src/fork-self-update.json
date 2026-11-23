@@ -1,0 +1,4 @@
+{
+  "enabled": false,
+  "disabledMessage": "fork 版本由维护者同步上游，请勿安装官方包。"
+}

@@ -5,6 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::{Path, PathBuf};
 
+include!(concat!(env!("OUT_DIR"), "/fork_self_update.rs"));
+
 mod autostart;
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]

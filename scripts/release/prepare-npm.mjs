@@ -359,6 +359,12 @@ export function createNpmPackageManifest({ version, target }) {
 }
 
 export function createNpmBinLauncherSource({ version }) {
+  const updatePolicy = JSON.parse(
+    readFileSync(
+      new URL("../../packages/shared-contracts/src/fork-self-update.json", import.meta.url),
+      "utf8",
+    ),
+  );
   return `#!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -371,6 +377,9 @@ const version = ${JSON.stringify(version)};
 const minimumNodeVersion = ${JSON.stringify(NPM_MINIMUM_NODE_VERSION)};
 const excludedNodeRange = ${JSON.stringify(NPM_NODE_EXCLUDED_RANGE)};
 const userArguments = process.argv.slice(2);
+if (userArguments[0] === "update" && !${JSON.stringify(updatePolicy.enabled)}) {
+  fail(${JSON.stringify(updatePolicy.disabledMessage)});
+}
 {
   const compare = (left, right) => {
     const a = left.split(".").map(Number);
@@ -655,7 +664,7 @@ if (userArguments.length === 0) {
       "  codexhost status",
       "  codexhost autostart on|off|status",
       "  codexhost console",
-      "  codexhost update",
+      ...(${JSON.stringify(updatePolicy.enabled)} ? ["  codexhost update"] : []),
       "  codexhost launch [launcher options]",
       "  codexhost remote install|start|stop|status|uninstall",
       "  codexhost broker install|status|stop|uninstall",

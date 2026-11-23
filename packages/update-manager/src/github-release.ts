@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import {
   releaseAnnouncementSchema,
   updateSemanticVersionSchema,
@@ -110,6 +111,7 @@ export function parseLatestGitHubRelease(value: unknown): CodexhostLatestRelease
 export async function fetchLatestGitHubRelease(
   options: GitHubReleaseFetchOptions = {},
 ): Promise<CodexhostLatestRelease> {
+  requireForkSelfUpdate();
   const response = await requestGitHubRelease(CODEXHOST_LATEST_RELEASE_URL, options);
   if (!response.ok)
     throw new Error(`GitHub latest Release request failed with HTTP ${response.status}`);

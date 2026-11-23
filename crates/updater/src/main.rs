@@ -110,6 +110,13 @@ fn usage() {
     );
 }
 
+fn require_self_update() -> Result<(), Box<dyn Error>> {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return Err(codexhost_platform::FORK_SELF_UPDATE_DISABLED_MESSAGE.into());
+    }
+    Ok(())
+}
+
 fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     if arguments.len() == 3 && arguments[0] == "prepare-install" && arguments[1] == "--install-root"
     {
@@ -119,12 +126,14 @@ fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         return ssh::apply();
     }
     if arguments.len() == 3 && arguments[0] == "remote" && arguments[1] == "--request" {
+        require_self_update()?;
         return remote::apply(Path::new(&arguments[2]));
     }
     if arguments.len() != 3 || arguments[0] != "apply" || arguments[1] != "--request" {
         usage();
         return Err("invalid updater arguments".into());
     }
+    require_self_update()?;
     apply(Path::new(&arguments[2]))
 }
 

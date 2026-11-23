@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
@@ -28,7 +29,7 @@ export function SettingsLauncher({
     if (settingsOpen) preloadHostSettings();
   }, [settingsOpen]);
   useEffect(() => {
-    if (!connected || settingsOpen) return;
+    if (!FORK_SELF_UPDATE_ENABLED || !connected || settingsOpen) return;
     const controller = new AbortController();
     // Closing settings refreshes the badge after checks or installation on the update page.
     void checkHostUpdate(AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]))

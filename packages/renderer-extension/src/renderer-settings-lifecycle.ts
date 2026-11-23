@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import type { RendererSettingsPageDefinition } from "./settings/core.js";
 import type { RendererUsageStatisticsRequest } from "./console/pages/usage-statistics.js";
 import type { RendererUsageStatisticsHostsProvider } from "./console/usage/usage-hosts.js";
@@ -330,6 +331,7 @@ export function installRendererSettingsLifecycle(
     });
 
   const refreshUpdateIndicator = (): void => {
+    if (!FORK_SELF_UPDATE_ENABLED) return;
     const client = options.getUpdateClient?.() ?? null;
     if (!client || checkedUpdateClient === client) return;
     if (retryUpdateClient !== client) {

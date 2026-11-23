@@ -1,3 +1,7 @@
+import {
+  FORK_SELF_UPDATE_ENABLED,
+  requireForkSelfUpdate,
+} from "@codexhost/shared-contracts/fork-self-update";
 import { REMOTE_THREAD_READ_TIMEOUT_MS } from "@codexhost/shared-contracts";
 import type {
   DelegationReadParams,
@@ -35,6 +39,7 @@ export function remoteUpdateTarget(
   remote: RuntimeStatus,
 ): string | null {
   if (
+    !FORK_SELF_UPDATE_ENABLED ||
     !remote.updateSupported ||
     !remote.remote ||
     !remote.installedVersion ||
@@ -83,6 +88,7 @@ export function createRemoteConnectionsControl(
       return bounded(client.readDelegationThread(input), REMOTE_THREAD_READ_TIMEOUT_MS);
     },
     async setup(connection, action, version, uninstallPackage) {
+      if (action === "install" || action === "update") requireForkSelfUpdate();
       const client = getClient("local");
       if (!client?.setupSsh)
         throw new Error("SSH installation is unavailable; update local codexhost and restart");
@@ -104,6 +110,7 @@ export function createRemoteConnectionsControl(
       return bounded(client.runtimeStatus());
     },
     async update(hostId, version) {
+      requireForkSelfUpdate();
       if (hostId === "local") throw new Error("Choose a remote SSH connection");
       const client = getClient(hostId);
       if (!client?.updateRemote)

@@ -208,6 +208,9 @@ pub(super) fn update_state_directory() -> io::Result<PathBuf> {
 }
 
 pub(crate) fn update_waiting_for_launcher_exit() -> io::Result<bool> {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return Ok(false);
+    }
     waiting_for_launcher_exit_at(
         &update_state_directory()?,
         std::process::id(),
@@ -324,7 +327,9 @@ fn start_pending_update_for(
     started_request: &mut Option<PathBuf>,
     service_data: Option<&Path>,
 ) -> io::Result<()> {
-    if started_request.is_some() && service_data.is_none() {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED
+        || (started_request.is_some() && service_data.is_none())
+    {
         return Ok(());
     }
     let Some(pending) = pending_startable_update_at(

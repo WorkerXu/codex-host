@@ -1,3 +1,4 @@
+import "../../../tests/fixtures/upstream-self-update.js";
 import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

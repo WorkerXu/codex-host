@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import forkUpdatePolicy from "../../packages/shared-contracts/src/fork-self-update.json" with { type: "json" };
 import {
   NPM_MINIMUM_NODE_VERSION,
   NPM_NODE_ENGINE,
@@ -1048,11 +1049,18 @@ describe("npm package release", () => {
         expect(reported.packageRoot).toBe(realPackageRoot);
         expect(spawnCodexhost(cellarNode, userBin, ["console", "extra"]).status).toBe(1);
         const update = spawnCodexhost(cellarNode, userBin, ["update"]);
-        expect(update.status).toBe(0);
-        expect(JSON.parse(update.stdout)).toEqual({ ...reported, args: ["update"] });
+        if (forkUpdatePolicy.enabled) {
+          expect(update.status).toBe(0);
+          expect(JSON.parse(update.stdout)).toEqual({ ...reported, args: ["update"] });
+        } else {
+          expect(update.status).toBe(1);
+          expect(update.stderr).toContain(forkUpdatePolicy.disabledMessage);
+        }
         expect(spawnCodexhost(cellarNode, userBin, ["update", "extra"]).status).toBe(1);
         await writeFile(path.join(packageRoot, "app", "console-server.mjs"), "process.exit(7);\n");
-        expect(spawnCodexhost(cellarNode, userBin, ["update"]).status).toBe(7);
+        expect(spawnCodexhost(cellarNode, userBin, ["update"]).status).toBe(
+          forkUpdatePolicy.enabled ? 7 : 1,
+        );
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -1075,6 +1083,22 @@ describe("npm package release", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.runIf(!forkUpdatePolicy.enabled)(
+    "rejects self-update before resolving a platform installation",
+    async () => {
+      const root = await temporaryDirectory();
+      const launcher = path.join(root, "codexhost.mjs");
+      try {
+        await writeFile(launcher, createNpmBinLauncherSource({ version: "1.2.3" }));
+        const result = spawnCodexhost(process.execPath, launcher, ["update"]);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(forkUpdatePolicy.disabledMessage);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("validates the npm package allowlist without an embedded Node runtime", async () => {
     const root = await temporaryDirectory();

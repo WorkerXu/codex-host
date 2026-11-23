@@ -1,3 +1,4 @@
+import { FORK_SELF_UPDATE_ENABLED } from "@codexhost/shared-contracts/fork-self-update";
 import { consoleGet, consolePost } from "./api.js";
 
 export interface StartupStage {
@@ -132,6 +133,7 @@ export class ConsoleState {
   }
 
   async checkUpdate(): Promise<void> {
+    if (!FORK_SELF_UPDATE_ENABLED) return;
     const generation = this.#generation;
     try {
       const update = await consolePost<UpdateSummary | null>("/api/update/check");

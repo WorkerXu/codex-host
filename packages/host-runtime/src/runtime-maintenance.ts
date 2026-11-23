@@ -1,3 +1,7 @@
+import {
+  FORK_SELF_UPDATE_ENABLED,
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+} from "@codexhost/shared-contracts/fork-self-update";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
@@ -119,6 +123,8 @@ export class RuntimeMaintenance {
   }
   #sshPending = new Set<string>();
   async setupSsh(input: RemoteSshSetupParams): Promise<RemoteSshSetupResult> {
+    if (!FORK_SELF_UPDATE_ENABLED && (input.action === "install" || input.action === "update"))
+      throw new Error(FORK_SELF_UPDATE_DISABLED_MESSAGE);
     if (this.options.remote) throw new Error("SSH installation must run from the local computer");
     const key = JSON.stringify([input.hostname, input.port, input.identity]);
     if (this.#sshPending.has(key))
@@ -186,11 +192,14 @@ export class RuntimeMaintenance {
     const [running, installed, resources] = await Promise.all([
       this.#running,
       installation(this.options.runtimePath, this.options.environment),
-      this.#resources(),
+      FORK_SELF_UPDATE_ENABLED ? this.#resources() : null,
     ]);
     // Also re-read after a recorded failure: a late helper may still be alive, or a kill may
     // have left installing/restarting on disk that should surface instead of a stale failed.
-    if (this.#update.phase === "idle" || this.#blocked || this.#update.phase === "failed") {
+    if (
+      FORK_SELF_UPDATE_ENABLED &&
+      (this.#update.phase === "idle" || this.#blocked || this.#update.phase === "failed")
+    ) {
       try {
         const value: unknown = JSON.parse(await readFile(this.#statusPath, "utf8"));
         const parsed = runtimeStatusSchema.shape.update.parse(value);
@@ -253,6 +262,8 @@ export class RuntimeMaintenance {
     };
   }
   start(version: string): Promise<RuntimeStatus> {
+    if (!FORK_SELF_UPDATE_ENABLED)
+      return Promise.reject(new Error(FORK_SELF_UPDATE_DISABLED_MESSAGE));
     if (this.#starting) {
       if (this.#startingVersion !== version)
         return Promise.reject(new Error("Another remote update is already pending"));

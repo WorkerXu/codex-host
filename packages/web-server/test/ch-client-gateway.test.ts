@@ -7,6 +7,10 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { it } from "node:test";
 import {
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+  FORK_SELF_UPDATE_ENABLED,
+} from "@codexhost/shared-contracts/fork-self-update";
+import {
   HOST_EXTENSIONS_RPC,
   HOST_EXTENSION_ASSETS_PREFIX,
   HOST_EXTENSION_UPLOAD_PATH,
@@ -71,6 +75,17 @@ it(
     );
     const origin = new URL(url).origin;
     const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    if (!FORK_SELF_UPDATE_ENABLED) {
+      const update = await fetch(`${origin}/api/ch/v1/rpc`, {
+        method: "POST",
+        headers: { ...headers, origin },
+        body: JSON.stringify({ method: "codexhost/update/start", params: {} }),
+      });
+      assert.equal(update.status, 403);
+      assert.deepEqual(await update.json(), {
+        error: { code: -32090, message: FORK_SELF_UPDATE_DISABLED_MESSAGE },
+      });
+    }
     const peers = (headers: Record<string, string>) =>
       fetch(`${origin}/api/ch/v1/rpc`, {
         method: "POST",

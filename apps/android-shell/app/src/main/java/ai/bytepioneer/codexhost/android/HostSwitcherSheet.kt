@@ -79,8 +79,9 @@ internal class HostSwitcherSheet(
                 return true
             }
         })
-        contentView.findViewById<MaterialButton>(R.id.sheetCheckUpdateButton).setOnClickListener {
-            onCheckUpdates()
+        contentView.findViewById<MaterialButton>(R.id.sheetCheckUpdateButton).apply {
+            isVisible = BuildConfig.FORK_SELF_UPDATE_ENABLED
+            setOnClickListener { onCheckUpdates() }
         }
         contentView.findViewById<MaterialButton>(R.id.sheetAddHostButton).setOnClickListener {
             dismiss()

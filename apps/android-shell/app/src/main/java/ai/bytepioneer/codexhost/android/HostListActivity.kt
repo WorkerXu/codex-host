@@ -68,8 +68,11 @@ internal class HostListActivity : NativeActivity() {
         val openPair = { if (!deleting) startActivity(Intent(this, PairHostActivity::class.java)) }
         findViewById<MaterialButton>(R.id.emptyAddButton).setOnClickListener { openPair() }
         findViewById<MaterialButton>(R.id.addHostButton).setOnClickListener { openPair() }
-        findViewById<MaterialButton>(R.id.checkUpdateButton).setOnClickListener {
-            HostActions.checkForUpdates(this, { checking }, { checking = it }, ::openInBrowser)
+        findViewById<MaterialButton>(R.id.checkUpdateButton).apply {
+            isVisible = BuildConfig.FORK_SELF_UPDATE_ENABLED
+            setOnClickListener {
+                HostActions.checkForUpdates(this@HostListActivity, { checking }, { checking = it }, ::openInBrowser)
+            }
         }
         ApkUpdater.checkOnStartup(this, ::openInBrowser)
     }

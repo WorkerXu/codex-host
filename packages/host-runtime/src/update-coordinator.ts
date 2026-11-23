@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import type {
   UpdateCheckResult,
   UpdateStartResult,
@@ -121,6 +122,7 @@ export function createHostUpdateCoordinator(
 
   return Object.freeze({
     async check(signal?: AbortSignal): Promise<UpdateCheckResult> {
+      requireForkSelfUpdate();
       let context: InstalledUpdateContext;
       try {
         context = await installedContext();
@@ -184,6 +186,7 @@ export function createHostUpdateCoordinator(
     },
 
     async start(): Promise<UpdateStartResult> {
+      requireForkSelfUpdate();
       const context = await installedContext();
       await recoverUpdateOperationLock(context.common.stateDirectory);
       const lock = await acquireUpdateOperationLock(context.common.stateDirectory);
@@ -278,6 +281,7 @@ export function createHostUpdateCoordinator(
     },
 
     async status(): Promise<UpdateStatusResult> {
+      requireForkSelfUpdate();
       try {
         const context = await installedContext();
         await recoverUpdateOperationLock(context.common.stateDirectory);

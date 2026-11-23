@@ -1,3 +1,4 @@
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 import { execFile } from "node:child_process";
 import path from "node:path";
 
@@ -81,6 +82,7 @@ function runGitHubCli(
 export async function fetchLatestGitHubReleaseWithGitHubCli(
   options: GitHubCliReleaseFetchOptions = {},
 ): Promise<CodexhostLatestRelease | null> {
+  requireForkSelfUpdate();
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
   const candidates =

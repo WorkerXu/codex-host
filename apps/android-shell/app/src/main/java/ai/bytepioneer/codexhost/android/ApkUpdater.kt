@@ -29,7 +29,7 @@ internal object ApkUpdater {
     private var pendingInstallVersion: String? = null
 
     fun checkOnStartup(activity: NativeActivity, openUrl: (String) -> Unit) {
-        if (!startupChecked.compareAndSet(false, true)) return
+        if (!BuildConfig.FORK_SELF_UPDATE_ENABLED || !startupChecked.compareAndSet(false, true)) return
         val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         activity.lifecycleScope.launch {
             val update = runCatching {
@@ -49,7 +49,7 @@ internal object ApkUpdater {
         setBusy: (Boolean) -> Unit,
         openUrl: (String) -> Unit,
     ) {
-        if (isBusy()) return
+        if (!BuildConfig.FORK_SELF_UPDATE_ENABLED || isBusy()) return
         setBusy(true)
         activity.tell(R.string.update_checking)
         activity.lifecycleScope.launch {
@@ -73,6 +73,7 @@ internal object ApkUpdater {
     }
 
     fun resumePendingInstall(activity: NativeActivity) {
+        if (!BuildConfig.FORK_SELF_UPDATE_ENABLED) return
         val file = pendingInstallFile ?: return
         if (!file.isFile) {
             pendingInstallFile = null

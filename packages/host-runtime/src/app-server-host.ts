@@ -1,3 +1,7 @@
+import {
+  FORK_SELF_UPDATE_ENABLED,
+  FORK_SELF_UPDATE_DISABLED_MESSAGE,
+} from "@codexhost/shared-contracts/fork-self-update";
 import { handleCodexAgentsRequest, handleDingTalkDispatchRequest } from "./codex-agent-requests.js";
 import { createDesktopDingTalkDispatch, type DesktopDingTalkDispatch } from "./desktop-dingtalk.js";
 import { dingtalkChanged, handleDingTalkRequest } from "./dingtalk-requests.js";
@@ -4184,6 +4188,10 @@ export class AppServerHost {
   }
 
   async #handleUpdateRequest(request: JsonRpcRequest): Promise<void> {
+    if (!FORK_SELF_UPDATE_ENABLED) {
+      await this.#writer.json(rpcError(request, -32090, FORK_SELF_UPDATE_DISABLED_MESSAGE));
+      return;
+    }
     const params = updateEmptyParamsSchema.safeParse(
       request.params === undefined ? {} : request.params,
     );

@@ -76,6 +76,9 @@ fn failed_pre_update_shutdown_does_not_install_and_preserves_the_gui_error() {
 }
 
 fn assert_managed_update_failure(stop_fails: bool) {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return;
+    }
     let mut fixture = Fixture::new(true);
     let launcher = fixture.root.join("package/bin/codexhost");
     let script = fs::read_to_string(&launcher).unwrap().replace(
@@ -191,6 +194,9 @@ fn assert_managed_update_failure(stop_fails: bool) {
 
 #[test]
 fn rejected_lock_handoff_does_not_stop_or_recover_services() {
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return;
+    }
     let fixture = Fixture::new(false);
     let status_path = fixture.root.join("update-fixture/status-v1.json");
     fs::create_dir_all(status_path.parent().unwrap()).unwrap();

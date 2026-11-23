@@ -72,6 +72,9 @@ fn read_state(path: &Path) -> io::Result<Option<Value>> {
 // The Updater restores its own services. Other clients must wait until installation ends.
 pub(super) fn ensure_start_allowed(data: &Path) -> io::Result<()> {
     let directory = crate::active_update::update_state_directory()?;
+    if !codexhost_platform::FORK_SELF_UPDATE_ENABLED {
+        return Ok(());
+    }
     let Some(lock) = read_state(&directory.join("active-update-v1.lock"))? else {
         return Ok(());
     };
