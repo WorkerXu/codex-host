@@ -9,8 +9,6 @@ import type { JarvisService } from "./jarvis-service.js";
 import type { ModelService } from "./model-service.js";
 import {
   DESKTOP_PROJECTS_CATALOG_METHOD,
-  PROJECT_MIRROR_LIST_METHOD,
-  PROJECT_MIRROR_UPSERT_METHOD,
   DELEGATION_PEER_LIST_METHOD,
   DELEGATION_PROJECTS_METHOD,
   DELEGATION_PROJECTS_CHANGED_METHOD,
@@ -18,7 +16,6 @@ import {
   WEB_DELEGATION_PEERS_METHOD,
 } from "@codexhost/shared-contracts";
 import { delegationDesktopProject, delegationProjectAssignments } from "./delegation-projects.js";
-import { defaultProjectMirrorDirectory, ProjectMirrorService } from "./project-mirror-service.js";
 import { DesktopProjectCatalogReader } from "./desktop-project-catalog.js";
 import { DelegationPeerCatalogService } from "./peer-catalog.js";
 import { HarnessAvailability } from "./harness-availability.js";
@@ -820,7 +817,6 @@ export class AppServerHost {
   #drainActiveWorkOnInputEnd = false;
   #desktopInputEnded = false;
 
-  #projectMirror?: ProjectMirrorService;
   #desktopProjects: DesktopProjectCatalogReader | undefined;
   #delegationPeers: DelegationPeerCatalogService | undefined;
   readonly #harnessAvailability: HarnessAvailability;
@@ -1909,30 +1905,6 @@ export class AppServerHost {
       this.#dispatchDesktopReply(request, async () => {
         const result = delegationProjectAssignments(await this.#repository.listDelegations());
         await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-      });
-      return;
-    }
-    if (
-      request.method === PROJECT_MIRROR_LIST_METHOD ||
-      request.method === PROJECT_MIRROR_UPSERT_METHOD
-    ) {
-      const environment = this.#options.environment ?? process.env;
-      if (
-        origin !== "desktop" ||
-        this.#options.externalOnly ||
-        environment.CODEXHOST_REMOTE_SSH_MANAGED === "1"
-      ) {
-        await this.#writer.json(
-          rpcError(request, -32601, "Project mirror requires the local Desktop Host"),
-        );
-        return;
-      }
-      this.#projectMirror ??= new ProjectMirrorService({
-        directory: defaultProjectMirrorDirectory(environment),
-      });
-      const mirror = this.#projectMirror;
-      this.#dispatchDesktopReply(request, async () => {
-        await this.#writer.json(await mirror.reply(request));
       });
       return;
     }

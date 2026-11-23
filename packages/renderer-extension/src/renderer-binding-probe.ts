@@ -14,7 +14,6 @@ import {
 } from "./renderer-startup-trace.js";
 import { rendererPageTimings } from "./renderer-page-timings.js";
 import type { CrossHostHarnessDirectory } from "./renderer-cross-host-harness-catalog.js";
-import { installRendererProjectMirror } from "./renderer-project-mirror.js";
 import type { DelegationPeerCatalogSource } from "./renderer-delegation-peer-catalog-source.js";
 import {
   readCachedHarnessDirectory,
@@ -128,10 +127,7 @@ import {
   writeNewThreadAgentPreference,
   writeNewThreadExternalConfigurationPreference,
 } from "./renderer-new-thread-preference.js";
-import {
-  installRendererSidebarAgentIcons,
-  SIDEBAR_THREAD_ROW_SELECTOR,
-} from "./renderer-sidebar-agent-icons.js";
+import { SIDEBAR_THREAD_ROW_SELECTOR } from "./renderer-sidebar-agent-icons.js";
 import {
   rendererHarnessCommandExecutesDirectly,
   routeRendererHarnessCommandSelection,
@@ -841,54 +837,7 @@ export function installRendererBindingProbe(
     for (const subscription of usageSubscriptions.values()) subscription.dispose();
     usageSubscriptions.clear();
   };
-  const localAgentForSidebarThread = (input: {
-    hostId: string;
-    threadId: string | null;
-    draftId: string | null;
-  }): RendererAgent | null => {
-    for (const mounted of mountedByComposer.values()) {
-      const target = mounted.modelTarget;
-      const matchesDraft =
-        target?.[0] === "default" && input.draftId !== null && target[1] === input.draftId;
-      const matchesConversation =
-        target?.[0] === "conversation" &&
-        input.threadId !== null &&
-        target[1] === input.threadId &&
-        mounted.ownershipStatus === "ready";
-      if (!matchesDraft && !matchesConversation) continue;
-      // Route validation walks the committed React tree. Only a row matching a
-      // mounted Composer needs it; unrelated sidebar rows cannot use local state.
-      const mountedHostId = activeModelHostId(mounted.composer);
-      if (input.hostId !== mountedHostId) return null;
-      return controller.get(mounted.composer).agent;
-    }
-    return null;
-  };
   const sidebarThreadState = installRendererSidebarThreadState();
-  const sidebarAgentIcons = installRendererSidebarAgentIcons({
-    getClient: (hostId) => modelClientForHost(hostId),
-    getPlugins: (hostId) => {
-      if (hostId === "durable") return undefined;
-      const state = hostHarnessAvailabilityState(hostId);
-      const client = modelClientForHost(hostId);
-      // Sidebar ownership is enough to discover this Host's artwork; opening a Composer
-      // must not be required. Keep directory requests deduplicated and client-scoped.
-      if (
-        client &&
-        (state.directoryClient !== client || (!state.plugins && !state.directoryError))
-      ) {
-        void refreshHarnessAvailabilityForHost(hostId);
-      }
-      return state.directoryClient === client
-        ? state.plugins?.map((plugin) => pluginForHost(hostId, plugin.id) ?? plugin)
-        : undefined;
-    },
-    getLocalAgent: localAgentForSidebarThread,
-    observeRows: (rendered, total) => {
-      startupTrace.firstRows(total);
-      startupTrace.iconsRendered(rendered, total);
-    },
-  });
   let connectionDiagnostics: RendererConnectionDiagnostics | null = null;
   const remoteConnections = createRemoteConnectionsControl(window, modelClientForHost);
   const usageStatistics = createRendererUsageStatisticsSource({
@@ -1142,22 +1091,7 @@ export function installRendererBindingProbe(
       agent: controller.get(mounted.composer).agent,
     }));
     mounted.workingFolders?.refresh();
-    if (
-      mounted.modelTarget?.[0] !== "default" ||
-      !mounted.hostId ||
-      !projectMirror.consumePending({
-        composer: mounted.composer,
-        hostId: mounted.hostId,
-        applyHarness: async (composer, agent) => {
-          const state = controller.get(composer);
-          if (!isMountedComposer(composer) || state.phase !== "draft") return false;
-          pendingDefaultPreferences.set(state.composerId, false);
-          return state.agent === agent || switchComposerAgent(mounted, agent);
-        },
-      })
-    ) {
-      restorePendingDraftPreference(mounted);
-    }
+    restorePendingDraftPreference(mounted);
     const hostId = mounted.hostId;
     mounted.control.setPlugins(
       hostId
@@ -1195,7 +1129,6 @@ export function installRendererBindingProbe(
     }
   };
 
-  const projectMirror = installRendererProjectMirror();
   let delegationMention: RendererDelegationMentionControl | null = null;
   const delegationPeers = createDelegationPeerCatalogSource({
     load: async (hostId, input) => {
@@ -1625,7 +1558,6 @@ export function installRendererBindingProbe(
       if (isCurrentOwnershipRequest(mounted, generation)) {
         renderMounted(mounted);
         if (mounted.ownershipStatus !== "error") void refreshCommands(mounted);
-        sidebarAgentIcons.refresh();
         // Ownership can already contain Usage, but only usage inspection tells
         // us whether this (possibly unknown) plugin also supplies account quota.
         if (mounted.ownershipStatus !== "error") void refreshThreadUsage(mounted);
@@ -1683,7 +1615,6 @@ export function installRendererBindingProbe(
       if (previousTarget?.[0] === "conversation") renderMounted(mounted);
       void loadThreadOwnership(mounted);
     }
-    sidebarAgentIcons.refresh();
     return true;
   };
 
@@ -2473,7 +2404,6 @@ export function installRendererBindingProbe(
         mounted.permissionModeView = { status: "idle" };
         void refreshCommands(mounted);
       }
-      sidebarAgentIcons.refresh();
       return switched;
     } catch {
       adapterStatus = {
@@ -2715,7 +2645,6 @@ export function installRendererBindingProbe(
             ),
           );
           controller.setEnabledAgents(enabledAgents);
-          sidebarAgentIcons.refresh();
           for (const mounted of mountedByComposer.values()) {
             if (mounted.hostId === hostId || hostId === "local") renderMounted(mounted);
           }
@@ -2845,11 +2774,9 @@ export function installRendererBindingProbe(
   }
 
   const reloadMountedOwnershipForHost = (): void => {
-    let changed = false;
     for (const mounted of mountedByComposer.values()) {
       const hostId = activeModelHostId(mounted.composer);
       if (!hostId || mounted.hostId === hostId) continue;
-      changed = true;
       if (!threadIdFromComposerModelTarget(mounted.modelTarget)) {
         controller.clearPendingSubmission(mounted.composer);
         controller.beginModelRequest(mounted.composer);
@@ -2893,7 +2820,6 @@ export function installRendererBindingProbe(
       renderMounted(mounted);
       void loadThreadOwnership(mounted);
     }
-    if (changed) sidebarAgentIcons.refresh();
   };
 
   function reconcileHarnessAvailabilityHost(retryDraftUsage = false): void {
@@ -2922,13 +2848,11 @@ export function installRendererBindingProbe(
         else void refreshDraftUsage(mounted);
       }
     }
-    let connectionsChanged = false;
     for (const target of new Set([...mountedByComposer.values()].map((m) => m.hostId))) {
       if (!target) continue;
       const client = modelClientForHost(target);
       const previous = usageSubscriptions.get(target);
       if (previous?.client === client) continue;
-      connectionsChanged ||= previous !== undefined;
       previous?.dispose();
       usageSubscriptions.delete(target);
       if (!client?.subscribeThreadUsage) continue;
@@ -2939,13 +2863,10 @@ export function installRendererBindingProbe(
           applyThreadUsageUpdate(target, update);
         });
         usageSubscriptions.set(target, { client, dispose });
-        connectionsChanged = true;
       } catch {
         // A missing notification channel must not block request-based usage reads.
       }
     }
-    // A reconnect can replace the client without changing the Composer's Host ID.
-    if (connectionsChanged) sidebarAgentIcons.refresh();
     const hostId = activeModelHostId();
     if (
       !hostId ||
@@ -3151,11 +3072,6 @@ export function installRendererBindingProbe(
         const editor = composer.querySelector<HTMLElement>(EDITOR_SELECTOR);
         if (editor) delegationMention?.openFor(editor);
       },
-      (picker) => {
-        const mounted = mountedByComposer.get(composer);
-        if (mounted?.modelTarget?.[0] === "default" && mounted.hostId)
-          projectMirror.openForAgentPicker({ composer, hostId: mounted.hostId, picker });
-      },
     );
     if (!pendingDefaultPreferences.has(state.composerId)) {
       pendingDefaultPreferences.set(
@@ -3192,7 +3108,6 @@ export function installRendererBindingProbe(
       applyDraftAgentCarrier(composer, state.agent);
     }
     renderMounted(mounted);
-    sidebarAgentIcons.refresh();
     if (threadIdFromComposerModelTarget(modelTarget) && !inherited) {
       void loadThreadOwnership(mounted);
     } else if (
@@ -3498,7 +3413,6 @@ export function installRendererBindingProbe(
         applyComposerAgent(mounted.composer);
       }
     }
-    sidebarAgentIcons.refresh();
     reconcileHarnessAvailabilityHost();
     void loadCodexAccounts();
     void refreshHarnessAvailability();
@@ -3518,7 +3432,6 @@ export function installRendererBindingProbe(
     if (shouldRefreshCodexAccountsForAdapterState(adapterStatus.state)) {
       reconcileHarnessAvailabilityHost();
       void loadCodexAccounts();
-      sidebarAgentIcons.refresh();
       void refreshHarnessAvailabilityForHost("local");
       void refreshHarnessAvailability();
     }
@@ -3885,7 +3798,6 @@ export function installRendererBindingProbe(
       }
       harnessAvailabilityByHost.clear();
       activeAvailabilityHostId = "local";
-      sidebarAgentIcons.refresh();
       void refreshHarnessAvailabilityForHost("local");
       reconcileHarnessAvailabilityHost();
       void loadCodexAccounts();
@@ -3929,7 +3841,6 @@ export function installRendererBindingProbe(
       mutationObserver.disconnect();
       disposeReasoningSoftWrap();
       delegationPeers.dispose();
-      projectMirror.dispose();
       delegationMention?.dispose();
       jarvisMention.dispose();
       dingTalkMention.dispose();
@@ -3937,7 +3848,6 @@ export function installRendererBindingProbe(
       forgetDingTalkComposer();
       skillLibrary.dispose();
       disposeSkillReferences();
-      sidebarAgentIcons.dispose();
       sidebarThreadState.dispose();
       nativeScheduleControls.dispose();
       settingsLifecycle.dispose();

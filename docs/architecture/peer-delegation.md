@@ -35,7 +35,7 @@ Harness 可用性缓存。
 
 Desktop 通过 `codexhost/desktop-projects/catalog` 读取项目视图，通过 Renderer 的
 `harnessDirectory` 和 `delegationPeerCatalog` 读取各 Host 的 Harness 可用性和 peer。
-同名项目的创建和分区归属见 [跨机器项目镜像](cross-host-project-mirror.md)。
+新对话的 Composer Agent 菜单使用本机草稿或所选项目所属 Host 的 Agent 目录。Desktop 的原生分区按项目分组，可同时容纳本地项目和远程项目。
 
 ## Web 跨机器派发
 

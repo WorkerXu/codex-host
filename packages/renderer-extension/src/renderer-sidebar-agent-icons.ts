@@ -1,4 +1,3 @@
-import { createSidebarOwnershipStore } from "./renderer-sidebar-ownership-cache.js";
 import {
   NATIVE_SCHEDULE_SIDEBAR_ROW_SELECTOR,
   readNativeScheduleSidebarThread,
@@ -24,7 +23,6 @@ export const SIDEBAR_AGENT_ICON_ROW_SELECTOR = `${SIDEBAR_THREAD_ROW_SELECTOR}, 
 
 export interface RendererSidebarContractInspection {
   rowCount: number;
-  titleOwnerCount: number;
   resolvedThreadCount: number;
   ambiguousThreadCount: number;
 }
@@ -95,21 +93,15 @@ export function inspectRendererSidebarContract(
   root: ParentNode = document,
 ): RendererSidebarContractInspection {
   const rows = [...root.querySelectorAll<HTMLElement>(SIDEBAR_THREAD_ROW_SELECTOR)];
-  let titleOwnerCount = 0;
   let resolvedThreadCount = 0;
   let ambiguousThreadCount = 0;
   for (const row of rows) {
-    const titleTrigger = row.querySelector<HTMLElement>("[data-thread-title-trigger]");
-    const title = titleTrigger?.querySelector<HTMLElement>("[data-thread-title]");
-    if (titleTrigger && title) titleOwnerCount += 1;
-    const attributes = sidebarThreadAttributes(row);
-    if (!attributes || attributes.taskKey.startsWith("client-new-thread:")) continue;
+    if (draftIdFromSidebarRowElement(row) !== null) continue;
     if (threadIdFromSidebarRowElement(row) === null) ambiguousThreadCount += 1;
     else resolvedThreadCount += 1;
   }
   return {
     rowCount: rows.length,
-    titleOwnerCount,
     resolvedThreadCount,
     ambiguousThreadCount,
   };
@@ -313,7 +305,6 @@ class BrowserSidebarAgentIconDom implements SidebarAgentIconDom {
 }
 
 export function installRendererSidebarAgentIcons(options: {
-  observeRows?(rendered: number, total: number): void;
   getClient(hostId: string): RendererModelClient | null;
   getPlugins?(hostId: string): readonly HarnessPluginDescriptor[] | undefined;
   getLocalAgent?(input: {
@@ -324,8 +315,6 @@ export function installRendererSidebarAgentIcons(options: {
   dom?: SidebarAgentIconDom;
 }): RendererSidebarAgentIcons {
   const dom = options.dom ?? new BrowserSidebarAgentIconDom(document);
-  const store = createSidebarOwnershipStore();
-  const hydratedHosts = new Set<string>();
   const ownershipByThread = new Map<string, { agent: RendererAgent; stale: boolean }>();
   const pending = new Set<string>();
   const failed = new Set<string>();
@@ -428,13 +417,6 @@ export function installRendererSidebarAgentIcons(options: {
             clearOwnershipRetry(key);
           }
         }
-        store.write(
-          hostId,
-          threads.map((ownership) => [
-            ownership.threadId,
-            rendererAgentForThreadOwnership(ownership),
-          ]),
-        );
         succeeded = true;
       })
       .catch((error) => {
@@ -458,7 +440,6 @@ export function installRendererSidebarAgentIcons(options: {
     scanScheduled = false;
     if (disposed) return;
     const rows = [...dirtyRows];
-    let rendered = 0;
     dirtyRows.clear();
     const unresolvedByHost = new Map<string, Set<ReturnType<typeof hostThreadIdSchema.parse>>>();
     // Host discovery walks the native React tree. Read artwork once per Host in
@@ -494,7 +475,6 @@ export function installRendererSidebarAgentIcons(options: {
           ownershipByThread.set(key, { agent: localAgent, stale: false });
           clearOwnershipRetry(key);
         }
-        rendered += 1;
         row.render(localAgent, getPlugin(hostId, localAgent));
         continue;
       }
@@ -503,18 +483,9 @@ export function installRendererSidebarAgentIcons(options: {
         continue;
       }
       const key = ownershipKey(hostId, threadId.data);
-      if (!hydratedHosts.has(hostId)) {
-        for (const [savedThread, agent] of store.read(hostId)) {
-          const savedKey = ownershipKey(hostId, savedThread);
-          if (!ownershipByThread.has(savedKey))
-            ownershipByThread.set(savedKey, { agent, stale: true });
-        }
-        hydratedHosts.add(hostId);
-      }
       const cached = ownershipByThread.get(key);
       if (cached) {
         // Revalidation must not remove a known icon while its reply is pending.
-        rendered += 1;
         row.render(cached.agent, getPlugin(hostId, cached.agent));
         if (!cached.stale) continue;
       } else row.clear();
@@ -527,7 +498,6 @@ export function installRendererSidebarAgentIcons(options: {
         unresolved.add(threadId.data);
       }
     }
-    options.observeRows?.(rendered, rows.length);
     for (const [hostId, unresolved] of unresolvedByHost) {
       const client = options.getClient(hostId);
       if (!client) {

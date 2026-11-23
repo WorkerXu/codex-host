@@ -176,7 +176,7 @@ The settings shell and page framework MUST NOT import Node.js built-ins, Electro
 - **THEN** settings pages, owned CSS, and selected icons SHALL be included without a Node.js, Electron, Harness, Model Gateway, or Credential Manager Runtime dependency
 
 ### Requirement: Settings lifecycle preserves existing Renderer behavior
-Installing, opening, navigating, closing, or disposing settings SHALL NOT modify Agent selection, Model selection, Thread ownership, prewarm policy, title policy, slash-command ownership, sidebar decoration, native Fork behavior, or Composer submission routing. Renderer disposal SHALL remove the owned application-header settings trigger and shell DOM and abort pending page work.
+Installing, opening, navigating, closing, or disposing settings SHALL NOT modify Agent selection, Model selection, Thread ownership, prewarm policy, title policy, slash-command ownership, native sidebar behavior, native Fork behavior, or Composer submission routing. Renderer disposal SHALL remove the owned application-header settings trigger and shell DOM and abort pending page work.
 
 #### Scenario: Settings is opened during a draft
 - **WHEN** a draft Composer has a selected Agent and Model before settings opens and closes

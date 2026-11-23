@@ -61,7 +61,6 @@ describe("Renderer contract audit inspectors", () => {
     });
     expect(inspectRendererSidebarContract(root)).toEqual({
       rowCount: 0,
-      titleOwnerCount: 0,
       resolvedThreadCount: 0,
       ambiguousThreadCount: 0,
     });

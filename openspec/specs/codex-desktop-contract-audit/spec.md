@@ -32,7 +32,7 @@ The audit command SHALL default to read-only inspection of caller-provided loopb
 - **THEN** the command SHALL reject the request before opening a connection
 
 ### Requirement: Audit SHALL inventory every codexhost-consumed GUI surface
-The MVP audit SHALL classify semantic contracts for Composer identity and actions, Model target, Permission control, request/prewarm ownership, title policy, Settings insertion, Sidebar decoration, Usage/Credits placement, and Fork discovery. Each surface result SHALL include stable contract identifiers, observed state, bounded cardinality or ownership evidence, checks that ran, and a stable reason code.
+The MVP audit SHALL classify semantic contracts for Composer identity and actions, Model target, Permission control, request/prewarm ownership, title policy, Settings insertion, native sidebar Thread identity, Usage/Credits placement, and Fork discovery. Each surface result SHALL include stable contract identifiers, observed state, bounded cardinality or ownership evidence, checks that ran, and a stable reason code.
 
 #### Scenario: Active Composer exposes all core routing contracts
 - **WHEN** the primary Renderer contains one active supported Composer and the required request and title ownership objects are observable

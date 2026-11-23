@@ -33,7 +33,7 @@
 | MCPHub / MemHub | Mac `~/.config/codexhost/hub-remote.json`（可选）、`mcphub-admin-key`；服务端数据与设置归 India | T4 沿用 Mac 配置及 SSH 转发，服务数据留在原服务器 | 直接复用 |
 | Codex 智能体 | Mac 的 `CODEX_HOME/agents/*.toml` 与原生配置 | T2 沿用原生 home 和文件身份；钉钉派发继续引用原 Agent | 直接复用 |
 | 代码仓库 | Mac `~/.config/codexhost/gitlab-token`（0600），已克隆 Git 仓库留在各自项目目录 | T6 沿用 Mac 凭据和项目路径 | 直接复用 |
-| 项目镜像、旧项目分组和分区显示 | Mac `~/.codexhost/project-mirrors/mirrors.json`、`project-groups/groups.json`；Desktop localStorage 的 `codexhost.sidebarSectionDisplay.v1` | T5 沿用镜像文件和 Desktop profile；旧项目分组文件保留供旧版使用 | 直接复用 |
+| 旧项目镜像、项目分组与分区显示偏好 | Mac 上旧版镜像记录、`project-groups/groups.json` 及 Desktop profile 中的旧分区显示偏好 | 数据留在原位供旧版使用；当前版本使用 Desktop 原生分区和项目 | 不需要 |
 | Web 本地状态 | Mac `~/.codexhost/web/`，包含 workspace JSON、附件、服务设置及认证/推送材料。oracle-main 盘点未见 Web 根 | 默认 `<共享根>/web`，Web 数据与 Mapping Store 分开；oracle-main 初始化自己的入口 | 不需要 |
 | Web 旧独立置顶及会话 | 旧 `web/workspaces.json` 的独立置顶和 `web-codex/` 隔离来源 | 共享模式从 Host 取置顶和历史，旧文件原地保留 | 不需要 |
 | 旧交接记录、更新和运行状态 | SSH `thread-handoffs/`、`remote-update.json`、更新暂存、日志、锁；用户目录的 `runtime/` 等 | 旧数据留在原目录，服务建立自己的运行记录。Pi 的内置扩展由 Adapter 生成 | 不需要 |

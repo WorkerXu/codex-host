@@ -30,18 +30,12 @@ export interface RendererStartupStatus {
   startedAtMs: number;
   /** First time each Host's routing object answered. */
   routingReadyMs: Record<string, number>;
-  /** First time sidebar rows existed. */
-  firstRowsMs?: number;
-  /** First time every live sidebar row displayed its Agent icon. */
-  allIconsMs?: number;
   composers: Record<string, RendererStartupComposerSample>;
   requests: RendererStartupRequestSample[];
 }
 
 export interface RendererStartupTrace {
   routingReady(hostId: string): void;
-  firstRows(count: number): void;
-  iconsRendered(rendered: number, live: number): void;
   modelControl(composerId: string, agent: string, source: "cache" | "inspect"): void;
   measureRequest<T>(
     input: {
@@ -63,8 +57,6 @@ export function createRendererStartupTrace(
   const routingReadyMs: Record<string, number> = {};
   const composers: Record<string, RendererStartupComposerSample> = {};
   const requests: RendererStartupRequestSample[] = [];
-  let firstRowsMs: number | undefined;
-  let allIconsMs: number | undefined;
   let composerCount = 0;
   let hostCount = 0;
 
@@ -73,14 +65,6 @@ export function createRendererStartupTrace(
       if (routingReadyMs[hostId] !== undefined || hostCount >= MAX_HOSTS) return;
       routingReadyMs[hostId] = roundMs(now());
       hostCount += 1;
-    },
-    firstRows(count) {
-      if (firstRowsMs !== undefined || count === 0) return;
-      firstRowsMs = roundMs(now());
-    },
-    iconsRendered(rendered, live) {
-      if (allIconsMs !== undefined || live === 0 || rendered < live) return;
-      allIconsMs = roundMs(now());
     },
     modelControl(composerId, agent, source) {
       let sample = composers[composerId];
@@ -124,8 +108,6 @@ export function createRendererStartupTrace(
       return {
         startedAtMs,
         routingReadyMs: { ...routingReadyMs },
-        ...(firstRowsMs !== undefined ? { firstRowsMs } : {}),
-        ...(allIconsMs !== undefined ? { allIconsMs } : {}),
         composers: Object.fromEntries(
           Object.entries(composers).map(([composerId, sample]) => [composerId, { ...sample }]),
         ),

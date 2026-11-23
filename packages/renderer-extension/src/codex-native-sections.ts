@@ -7,20 +7,9 @@ export interface NativeSectionScope {
   get(atom: unknown): unknown;
 }
 
-/**
- * The bundled sidebar module that owns custom-section commands. `QV` is the derived
- * `sidebar-custom-sections-v3` sections atom; `Jn` and `f2` are the exact commands behind the
- * native "New section…" and "Move to section" menu actions.
- */
+/** The derived sidebar-custom-sections-v3 atom in the native sidebar module. */
 export interface NativeSectionApi {
   QV: unknown;
-  Jn(scope: NativeSectionScope, name: string, itemKeys: string[], afterSectionId?: string): unknown;
-  f2(
-    scope: NativeSectionScope,
-    sectionId: string,
-    itemKey: string,
-    beforeItemKey?: string | null,
-  ): unknown;
 }
 
 const SECTION_COMMANDS = ["Jn", "f2", "qF", "HW"] as const;

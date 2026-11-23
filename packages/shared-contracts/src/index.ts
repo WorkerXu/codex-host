@@ -494,8 +494,6 @@ export {
   desktopRemoteProjectSchema,
   desktopRemoteConnectionSchema,
   threadProjectAssignmentSchema,
-  desktopSelectedProjectSchema,
-  type DesktopSelectedProject,
   desktopProjectsCatalogSchema,
   type DesktopLocalProject,
   type DesktopRemoteProject,
@@ -595,5 +593,4 @@ export {
 export * from "./model-service.js";
 export * from "./thread-folders.js";
 export * from "./code-repositories.js";
-export * from "./project-mirror.js";
 export * from "./delegation-projects.js";

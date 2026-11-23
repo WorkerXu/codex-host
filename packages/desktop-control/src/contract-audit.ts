@@ -38,7 +38,6 @@ export interface RendererContractAuditInspection {
   };
   sidebar: {
     rowCount: number;
-    titleOwnerCount: number;
     resolvedThreadCount: number;
     ambiguousThreadCount: number;
   };
@@ -198,7 +197,7 @@ export function validateRendererContractAuditInspection(
     ),
     sidebar: integerRecord(
       value.sidebar,
-      ["rowCount", "titleOwnerCount", "resolvedThreadCount", "ambiguousThreadCount"] as const,
+      ["rowCount", "resolvedThreadCount", "ambiguousThreadCount"] as const,
       "Renderer sidebar contract",
     ),
     transcript: integerRecord(

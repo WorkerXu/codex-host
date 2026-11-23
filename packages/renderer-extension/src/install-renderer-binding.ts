@@ -4,14 +4,12 @@ import {
   type RendererBindingProbeApi,
 } from "./renderer-binding-probe.js";
 import { installRendererDelegationProjects } from "./renderer-delegation-projects.js";
-import { installRendererSidebarSections } from "./renderer-sidebar-sections.js";
 import { installCurrentRendererAdapter } from "./versioned-renderer-adapter.js";
 
 export function installRendererBinding(
   enabledAgents?: readonly RendererAgent[],
 ): RendererBindingProbeApi {
   window.__codexhostRendererBindingProbeV1?.dispose();
-  window.__codexhostSidebarSectionsV1?.dispose();
   const binding = installRendererBindingProbe({ ...(enabledAgents ? { enabledAgents } : {}) });
   try {
     const adapter = installCurrentRendererAdapter();
@@ -28,14 +26,12 @@ export function installRendererBinding(
       hook: null,
     });
   }
-  const sections = installRendererSidebarSections();
   const delegationProjects = installRendererDelegationProjects();
   const refreshProjects = () => delegationProjects.refresh();
   window.addEventListener("codexhost:draft-prewarm-policy-changed", refreshProjects);
   refreshProjects();
   const disposeBinding = binding.dispose.bind(binding);
   binding.dispose = () => {
-    sections.dispose();
     window.removeEventListener("codexhost:draft-prewarm-policy-changed", refreshProjects);
     delegationProjects.dispose();
     disposeBinding();

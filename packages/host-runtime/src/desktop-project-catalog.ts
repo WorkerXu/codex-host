@@ -110,12 +110,6 @@ function normalize(raw: unknown, readAt: string, localScope: string): DesktopPro
 
   const remoteProjects = value("remote-projects");
   const remoteConnections = value("codex-managed-remote-connections");
-  const selected = record(value("selected-project"));
-  const selectedProjectId = selected ? string(selected.projectId) : null;
-  const selectedProject =
-    selected && selectedProjectId && (selected.type === "local" || selected.type === "remote")
-      ? { type: selected.type, projectId: selectedProjectId }
-      : null;
   const migration = record(value("app-server-project-id-by-legacy-project-id-by-host"));
   const mapped = record(migration?.[localScope]);
   const appServerProjectIds = Object.fromEntries(
@@ -123,7 +117,6 @@ function normalize(raw: unknown, readAt: string, localScope: string): DesktopPro
       (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
     ),
   );
-  const homeDirectory = os.homedir();
   return desktopProjectsCatalogSchema.parse({
     localProjects,
     remoteProjects: (Array.isArray(remoteProjects) ? remoteProjects : [])
@@ -135,9 +128,6 @@ function normalize(raw: unknown, readAt: string, localScope: string): DesktopPro
       .map(connection)
       .filter((entry): entry is DesktopRemoteConnection => entry !== null),
     projectOrder: strings(value("project-order")),
-    selectedProject,
-    homeDirectory,
-    defaultProjectParent: path.join(homeDirectory, "Documents", "ChatGPT"),
     readAt,
   });
 }

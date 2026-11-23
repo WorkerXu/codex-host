@@ -37,4 +37,3 @@ export const packageMetadata = {
   contractVersion: WORKSPACE_CONTRACT_VERSION,
 } as const;
 export * from "./thread-folders.js";
-export * from "./project-mirrors.js";

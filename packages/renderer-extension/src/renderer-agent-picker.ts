@@ -201,7 +201,6 @@ export function mountRendererAgentPicker(
   onOpen?: () => void,
   groupPreference: AgentGroupPreferenceStore = getSharedAgentGroupPreferenceStore(),
   plugins: readonly HarnessPluginDescriptor[] = [],
-  hideMoreAgents = false,
 ): RendererAgentPickerControl {
   const root = document.createElement("div");
   root.setAttribute(CONTROL_ATTRIBUTE, composerId);
@@ -273,11 +272,9 @@ export function mountRendererAgentPicker(
   menu.style.inset = "auto";
   menu.style.width = `${AGENT_MENU_WIDTH}px`;
   menu.style.padding = "4px";
-  menu.style.border = hideMoreAgents ? "1px solid var(--color-border)" : "0";
+  menu.style.border = "0";
   menu.style.borderRadius = "6px";
-  menu.style.background = hideMoreAgents
-    ? "var(--color-surface-elevated-secondary, Canvas)"
-    : "Canvas";
+  menu.style.background = "Canvas";
   menu.style.color = "CanvasText";
   menu.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.28)";
   menu.style.boxSizing = "border-box";
@@ -555,7 +552,7 @@ export function mountRendererAgentPicker(
       if (!enabledSet.has(agent) || seen.has(agent)) continue;
       seen.add(agent);
       const section = groupPreference.sectionOf(entry.agent, notInstalled.has(agent));
-      (!hideMoreAgents && section === "more" ? nextMore : nextMain).push(agent);
+      (section === "more" ? nextMore : nextMain).push(agent);
     }
 
     // Defensive: an enabled Agent the preference store hasn't recorded yet
@@ -570,9 +567,7 @@ export function mountRendererAgentPicker(
     // Only confirmed missing installations move back, not checking/error states.
     const installationOrder = (a: RendererAgent, b: RendererAgent): number =>
       Number(notInstalled.has(a)) - Number(notInstalled.has(b));
-    mainAgents = hideMoreAgents
-      ? nextMain.filter((agent) => !notInstalled.has(agent))
-      : nextMain.sort(installationOrder);
+    mainAgents = nextMain.sort(installationOrder);
     moreAgents = nextMore.sort(installationOrder);
     const mainChildren: HTMLElement[] = [];
     for (const agent of mainAgents) {
@@ -586,8 +581,7 @@ export function mountRendererAgentPicker(
         .filter((el): el is HTMLDivElement => !!el),
     );
     const showMoreGroup = moreAgents.length > 0;
-    const showCta =
-      !hideMoreAgents && !showMoreGroup && enabledAgents.length > AGENT_GROUP_CTA_THRESHOLD;
+    const showCta = !showMoreGroup && enabledAgents.length > AGENT_GROUP_CTA_THRESHOLD;
     moreToggle.style.display = showMoreGroup ? "flex" : "none";
     morePanel.style.display = showMoreGroup && moreOpen ? "flex" : "none";
     cta.style.display = showCta ? "flex" : "none";
@@ -666,10 +660,7 @@ export function mountRendererAgentPicker(
     updateAvailability(availability) {
       const next = new Set(
         enabledAgents.filter(
-          (agent) =>
-            agent !== "codex" &&
-            (availability[agent] === "notInstalled" ||
-              (hideMoreAgents && availability[agent] === "unavailable")),
+          (agent) => agent !== "codex" && availability[agent] === "notInstalled",
         ),
       );
       if (next.size === notInstalled.size && [...next].every((agent) => notInstalled.has(agent))) {
