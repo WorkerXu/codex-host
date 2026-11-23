@@ -204,7 +204,8 @@ function compareObserved(baseline, id, observed) {
   const previous = baselineSurface(baseline, id);
   if (previous === null) return false;
   const previousObserved = { ...previous.observed };
-  if (id === "sidebar") delete previousObserved.titleOwnerCount;
+  if (id === "sidebar" && observed.titleOwnerCount === undefined)
+    delete previousObserved.titleOwnerCount;
   return JSON.stringify(previousObserved) !== JSON.stringify(observed);
 }
 
@@ -364,13 +365,16 @@ export function buildSurfaceResults(contracts, baseline = null, controlled = nul
     id: "sidebar",
     observed: contracts.sidebar,
     live:
-      sidebarActive && contracts.sidebar.ambiguousThreadCount === 0
+      sidebarActive &&
+      contracts.sidebar.ambiguousThreadCount === 0 &&
+      (contracts.sidebar.titleOwnerCount === undefined ||
+        contracts.sidebar.titleOwnerCount === contracts.sidebar.rowCount)
         ? "pass"
         : sidebarActive
           ? "fail"
           : "inactive",
     active: sidebarActive,
-    reason: sidebarActive ? "sidebar-thread-identity" : "sidebar-thread-state-inactive",
+    reason: sidebarActive ? "sidebar-row-ownership" : "sidebar-thread-state-inactive",
     baseline,
   });
   // Codex retains transcript text for the Command Execution lane only, and that

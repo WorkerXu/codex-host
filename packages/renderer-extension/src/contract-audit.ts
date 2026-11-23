@@ -1,3 +1,4 @@
+import { FORK_DESKTOP_FEATURES } from "./fork-desktop-features.js";
 import {
   CODEX_COMPOSER_SELECTOR,
   inspectRendererComposerContract,
@@ -113,7 +114,10 @@ export function inspectRendererContracts(
     composer: inspectRendererComposerContract(ownerWindow.document),
     model: modelCounts(composers.map(inspectComposerModelContract)),
     settings: inspectRendererSettingsContract(ownerWindow.document),
-    sidebar: inspectRendererSidebarContract(ownerWindow.document),
+    sidebar: inspectRendererSidebarContract(
+      ownerWindow.document,
+      FORK_DESKTOP_FEATURES.sidebarAgentIcons,
+    ),
     transcript: inspectRendererTranscriptContract(ownerWindow.document),
     codexUsageGate: codexUsageGateCounts(composers),
     fork: inspectRendererForkContract(ownerWindow.document),

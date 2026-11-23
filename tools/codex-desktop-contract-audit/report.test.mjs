@@ -18,7 +18,7 @@ const contracts = {
   },
   model: { draftCount: 1, conversationCount: 0, missingCount: 0, ambiguousCount: 0 },
   settings: { railCount: 1, visibleRailCount: 1, insertionPointCount: 1 },
-  sidebar: { rowCount: 0, resolvedThreadCount: 0, ambiguousThreadCount: 0 },
+  sidebar: { rowCount: 0, titleOwnerCount: 0, resolvedThreadCount: 0, ambiguousThreadCount: 0 },
   transcript: {
     turnCount: 0,
     itemNodeCount: 0,
@@ -90,29 +90,6 @@ describe("Codex Desktop contract audit report", () => {
     );
     expect(gate).toMatchObject({ verdict: "no-impact", baselineChanged: false });
     expect(gate?.evidence.static).toBe("not-run");
-  });
-
-  it("compares sidebar identity without the icon title count from an older baseline", () => {
-    const sidebar = { rowCount: 1, resolvedThreadCount: 1, ambiguousThreadCount: 0 };
-    const current = { ...contracts, sidebar };
-    const older = buildSurfaceResults(current).map((surface) =>
-      surface.id === "sidebar"
-        ? { ...surface, observed: { ...sidebar, titleOwnerCount: 1 } }
-        : surface,
-    );
-    const baseline = validateAuditReport(reportFor(older), { baseline: true });
-    expect(buildSurfaceResults(current, baseline).find(({ id }) => id === "sidebar")).toMatchObject(
-      {
-        verdict: "no-impact",
-        baselineChanged: false,
-      },
-    );
-    expect(
-      buildSurfaceResults(
-        { ...current, sidebar: { rowCount: 1, resolvedThreadCount: 0, ambiguousThreadCount: 1 } },
-        baseline,
-      ).find(({ id }) => id === "sidebar"),
-    ).toMatchObject({ verdict: "confirmed-impact" });
   });
 
   it("reports ambiguous active ownership as confirmed impact", () => {

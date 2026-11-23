@@ -23,6 +23,7 @@ export const SIDEBAR_AGENT_ICON_ROW_SELECTOR = `${SIDEBAR_THREAD_ROW_SELECTOR}, 
 
 export interface RendererSidebarContractInspection {
   rowCount: number;
+  titleOwnerCount?: number;
   resolvedThreadCount: number;
   ambiguousThreadCount: number;
 }
@@ -91,17 +92,26 @@ export function threadIdFromSidebarRowElement(element: HTMLElement): string | nu
 
 export function inspectRendererSidebarContract(
   root: ParentNode = document,
+  inspectTitles = true,
 ): RendererSidebarContractInspection {
   const rows = [...root.querySelectorAll<HTMLElement>(SIDEBAR_THREAD_ROW_SELECTOR)];
+  let titleOwnerCount = 0;
   let resolvedThreadCount = 0;
   let ambiguousThreadCount = 0;
   for (const row of rows) {
-    if (draftIdFromSidebarRowElement(row) !== null) continue;
+    const titleTrigger = inspectTitles
+      ? row.querySelector<HTMLElement>("[data-thread-title-trigger]")
+      : null;
+    const title = titleTrigger?.querySelector<HTMLElement>("[data-thread-title]");
+    if (titleTrigger && title) titleOwnerCount += 1;
+    const attributes = sidebarThreadAttributes(row);
+    if (!attributes || attributes.taskKey.startsWith("client-new-thread:")) continue;
     if (threadIdFromSidebarRowElement(row) === null) ambiguousThreadCount += 1;
     else resolvedThreadCount += 1;
   }
   return {
     rowCount: rows.length,
+    ...(inspectTitles ? { titleOwnerCount } : {}),
     resolvedThreadCount,
     ambiguousThreadCount,
   };

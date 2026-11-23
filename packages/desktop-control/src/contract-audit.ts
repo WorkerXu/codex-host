@@ -38,6 +38,7 @@ export interface RendererContractAuditInspection {
   };
   sidebar: {
     rowCount: number;
+    titleOwnerCount?: number;
     resolvedThreadCount: number;
     ambiguousThreadCount: number;
   };
@@ -143,6 +144,7 @@ export function validateRendererContractAuditInspection(
     "Renderer contract audit",
   );
   if (value.schemaVersion !== 1) throw new Error("Renderer contract audit schema is unsupported");
+  const sidebar = value.sidebar;
   const production = value.production;
   if (!isRecord(production)) throw new Error("Renderer contract audit production state is invalid");
   strictKeys(
@@ -196,8 +198,10 @@ export function validateRendererContractAuditInspection(
       "Renderer settings contract",
     ),
     sidebar: integerRecord(
-      value.sidebar,
-      ["rowCount", "resolvedThreadCount", "ambiguousThreadCount"] as const,
+      sidebar,
+      isRecord(sidebar) && Object.hasOwn(sidebar, "titleOwnerCount")
+        ? (["rowCount", "titleOwnerCount", "resolvedThreadCount", "ambiguousThreadCount"] as const)
+        : (["rowCount", "resolvedThreadCount", "ambiguousThreadCount"] as const),
       "Renderer sidebar contract",
     ),
     transcript: integerRecord(

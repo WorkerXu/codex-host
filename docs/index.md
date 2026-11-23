@@ -10,6 +10,7 @@
 | [`project/README.zh-CN.md`](project/README.zh-CN.md) | 中文项目介绍、安装方式和功能概览；维护中文用户入口时阅读。根目录 `README.md` 为英文默认入口。 |
 | [`project/README.ko.md`](project/README.ko.md) | 韩文项目介绍、安装方式和功能概览；维护韩文用户入口时阅读。 |
 | [`project/fork-data-migration.md`](project/fork-data-migration.md) | fork 迁移到 v0.22.0 的数据对照、oracle-main 和 Mac 的切换与回滚步骤、副本验收记录。 |
+| [`project/fork-upstream-differences.md`](project/fork-upstream-differences.md) | Desktop 侧栏 Agent 图标开关和相应的兼容审计规则。 |
 | [`project/领域术语表.md`](project/领域术语表.md) | Harness、Model、Provider、Account、Thread 等领域术语；命名产品和代码概念前阅读。 |
 
 ## Harness 架构与公共能力
@@ -162,7 +163,7 @@
 | [`architecture/dingtalk.md`](architecture/dingtalk.md) | Desktop 钉钉工作台、Mac peer 路由、实时会话和手动派发。 |
 | [`architecture/codex-agents.md`](architecture/codex-agents.md) | Mac 本机 Codex 智能体文件、设置页和钉钉派发配置。 |
 | [`architecture/jarvis-mention.md`](architecture/jarvis-mention.md) | Desktop Composer 的 Jarvis Bug 引用、搜索条件解析、CLI 管理和本机 Gemini 密钥。 |
-| [`product/harness-schedules.md`](product/harness-schedules.md) | 官方任务页的原生弹窗选择 Harness 与可选本地工作区；复用 Desktop 本地固定聊天调度。 |
+| [`product/harness-schedules.md`](product/harness-schedules.md) | 官方任务页的原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |
 | [`product/usage-metering.md`](product/usage-metering.md) | 外部 Harness 与官方 Codex 的会话用量、插件可选能力、实时刷新、费用、缓存命中、首字延迟及速度限制；修改计量、价格表或 `pricing.json` 时阅读。 |
 | [`product/usage-statistics.md`](product/usage-statistics.md) | 控制台与 Desktop 内置设置的全局用量统计：独立 Codex 统计插件、各 Harness 原生会话去重、按模型 ID 读时计价与缓存；新增读取器或修改统计口径时阅读。 |

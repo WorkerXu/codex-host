@@ -1,4 +1,5 @@
 import { type RendererAgent } from "./agent-selection-state.js";
+import { FORK_DESKTOP_FEATURES } from "./fork-desktop-features.js";
 import {
   installRendererBindingProbe,
   type RendererBindingProbeApi,
@@ -10,7 +11,8 @@ export function installRendererBinding(
   enabledAgents?: readonly RendererAgent[],
 ): RendererBindingProbeApi {
   window.__codexhostRendererBindingProbeV1?.dispose();
-  const binding = installRendererBindingProbe({ ...(enabledAgents ? { enabledAgents } : {}) });
+  const options = { ...FORK_DESKTOP_FEATURES, ...(enabledAgents && { enabledAgents }) };
+  const binding = installRendererBindingProbe(options);
   try {
     const adapter = installCurrentRendererAdapter();
     binding.setAdapter(adapter.status, adapter.dispose, adapter.applyAgent, adapter.modelControl);
