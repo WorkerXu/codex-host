@@ -55,6 +55,38 @@ jobs:
       - name: Build installer package
         run: npm run release:package -- --target macos-arm64
 
+      - name: Verify signatures in the packaged DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          cd "build/release/$version/macos-arm64"
+          dmg="codexhost-$version-macos-arm64.dmg"
+          mount_dir=$(mktemp -d "$RUNNER_TEMP/codexhost-dmg.XXXXXX")
+          cleanup() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+            rmdir "$mount_dir"
+          }
+          trap cleanup EXIT
+          hdiutil verify "$dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg"
+          app="$mount_dir/codexhost.app"
+          shell_path=Contents/Helpers/CodexHost.app
+          shell_app="$app/$shell_path"
+          test -x "$shell_app/Contents/MacOS/CodexHost"
+          lipo -verify_arch arm64 "$shell_app/Contents/MacOS/CodexHost"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --verify --deep --strict --verbose=2 "$shell_app"
+          app_cdhash=$(codesign -dv --verbose=4 "$app" 2>&1 | sed -n 's/^CDHash=//p')
+          shell_cdhash=$(codesign -dv --verbose=4 "$shell_app" 2>&1 | sed -n 's/^CDHash=//p')
+          [[ "$app_cdhash" =~ ^[0-9a-f]{40}$ && "$shell_cdhash" =~ ^[0-9a-f]{40}$ ]]
+          {
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'appCDHash=%s\n' "$app_cdhash"
+            printf 'shellPath=%s\n' "$shell_path"
+            printf 'shellCDHash=%s\n' "$shell_cdhash"
+          } | tee macos-signatures.txt
+
       - name: Checksums
         shell: bash
         run: |
@@ -69,5 +101,6 @@ jobs:
           path: |
             build/release/*/macos-arm64/codexhost-*.dmg
             build/release/*/macos-arm64/SHA256SUMS
+            build/release/*/macos-arm64/macos-signatures.txt
           if-no-files-found: error
           retention-days: 14
