@@ -18,6 +18,7 @@ mod native_harness_broker;
 mod runtime_instance;
 #[cfg(unix)]
 mod secure_storage;
+mod service_log;
 mod service_update;
 mod services;
 mod startup_record;

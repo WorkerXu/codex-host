@@ -286,6 +286,9 @@ pub(crate) struct ObservedProcessTree {
     process_group_id: Option<u32>,
     process_group_started_at_micros: u64,
     root_executable_policy: RootExecutablePolicy,
+    /// Unattributed group members already reported, so each is logged once.
+    #[cfg(target_os = "linux")]
+    excluded: Vec<ProcessSnapshot>,
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -333,6 +336,8 @@ impl ObservedProcessTree {
             known,
             root,
             root_executable_policy: RootExecutablePolicy::Fixed,
+            #[cfg(target_os = "linux")]
+            excluded: Vec::new(),
         }
     }
 
@@ -422,30 +427,22 @@ impl ObservedProcessTree {
                     .cloned()
                     .collect::<Vec<_>>()
             });
-        // The Linux managed-launch group is private when it is created, but a
-        // later foreign member still must not silently become owned. The root
-        // itself (exec path) and known descendants prove lineage; a same-PGID
-        // process that cannot be traced from either is rejected before any
-        // lifecycle signal can reach it.
+        let descendants = descendant_snapshots(&known_ids, snapshots);
+        // Group membership alone does not establish ownership. An orphan whose
+        // parent exited before observation can still be in the managed group.
         #[cfg(target_os = "linux")]
-        if self.process_group_id.is_some() {
-            let permitted = descendant_snapshots(&known_ids, snapshots);
-            if let Some(foreign) = observed.iter().find(|process| {
-                !self
-                    .known
-                    .iter()
-                    .any(|known| same_process_instance(known, process))
-                    && !permitted
+        if let Some(process_group_id) = self.process_group_id {
+            let (attributed, foreign): (Vec<_>, Vec<_>) =
+                observed.into_iter().partition(|process| {
+                    self.known
                         .iter()
-                        .any(|descendant| same_process_instance(descendant, process))
-            }) {
-                return Err(PlatformError::Invalid(format!(
-                    "unattributed PID {} joined the managed Desktop process group",
-                    foreign.id
-                )));
-            }
+                        .chain(&descendants)
+                        .any(|known| same_process_instance(known, process))
+                });
+            observed = attributed;
+            self.report_excluded(process_group_id, foreign);
         }
-        observed.extend(descendant_snapshots(&known_ids, snapshots));
+        observed.extend(descendants);
         for process in observed {
             if !self.known.iter().any(|known| known.id == process.id) {
                 self.known.push(process);
@@ -461,6 +458,30 @@ impl ObservedProcessTree {
                     .cloned()
             })
             .collect())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn report_excluded(&mut self, process_group_id: u32, foreign: Vec<ProcessSnapshot>) {
+        use std::io::Write;
+
+        for process in &foreign {
+            if !self
+                .excluded
+                .iter()
+                .any(|reported| same_process_instance(reported, process))
+            {
+                // Diagnostics must never fail supervision, even on a closed stderr.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "codexhost supervision: excluded unattributed PID {} (parent PID {}, {}) from managed process group {process_group_id}; it is not owned, waited for or signaled",
+                    process.id,
+                    process.parent_id,
+                    process.executable.display()
+                );
+            }
+        }
+        // Keep only current members so the ledger stays bounded.
+        self.excluded = foreign;
     }
 
     pub(crate) fn root_is_current(&self) -> Result<bool, PlatformError> {

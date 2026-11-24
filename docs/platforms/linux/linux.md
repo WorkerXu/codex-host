@@ -44,6 +44,10 @@ Renderer integration failures are recovered in the background and do not display
 
 codexhost refuses to take over an independently running ChatGPT App. Quit ChatGPT completely before launching codexhost. A managed launch starts the verified Desktop executable directly and supervises it through `/proc`; stock ChatGPT launches still use the official launcher. Shutdown signals are sent only after PID, start time, and executable identity are revalidated.
 
+Native supervision tracks the Linux process root and descendants whose lineage it can verify. A process in the same group that cannot be attributed to the tree is excluded, for example a ProxyJump `ssh` whose parent exited before the supervisor observed it. The supervisor continues tracking owned processes and logs the excluded PID once while it remains visible in the group. Shutdown revalidates process identity and signals each owned process through its `pidfd`. Excluded processes can outlive shutdown. Linux handles orphan reparenting, and the receiving parent collects the exit status after the orphan exits.
+
+The shared Host and Web supervisors append stderr to `logs/host-service.log` and `logs/web-service.log` in the data directory. Start and stop lines use UTC. A file over 1 MiB is moved to `.log.1` when the next supervisor starts.
+
 When an active Wayland session is detected (such as when `WAYLAND_DISPLAY` is present), managed launches automatically append `--ozone-platform=wayland`, `--enable-wayland-ime`, and `--wayland-text-input-version=3` so IME candidate windows (such as Fcitx5) render with native Wayland transparency instead of opaque black borders under XWayland. To opt out, set `CODEXHOST_DISABLE_WAYLAND=1` (for example, `CODEXHOST_DISABLE_WAYLAND=1 codexhost`).
 
 ## Diagnosis

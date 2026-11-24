@@ -156,6 +156,7 @@ pub(super) fn ensure(
     let ready = launches.join(format!("web-{}-{nonce}.ready", std::process::id()));
     let mut command = Command::new(env::current_exe()?);
     clean(&mut command);
+    crate::service_log::capture_stderr(&mut command, &options.data, "web-service.log");
     command
         .current_dir(&options.data)
         .arg("web-service")
@@ -570,7 +571,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     };
     match action {
         "ensure" => ensure(&options, None),
-        "serve" => serve(&options),
+        "serve" => {
+            crate::service_log::record("Web supervisor started");
+            let result = serve(&options);
+            crate::service_log::record(if result.is_ok() {
+                "Web supervisor stopped"
+            } else {
+                "Web supervisor stopped after an error"
+            });
+            result
+        }
         "stop" => stop(&options, None).map(|_| ()),
         _ => Err("usage: codexhost web-service <ensure|stop> --node <file> --host-node <file> --web-runtime <file> --host-runtime <file> --data <directory>".into()),
     }

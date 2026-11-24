@@ -205,6 +205,7 @@ fn ensure(arguments: &[String], options: Options) -> Result<(), Box<dyn Error>> 
     if let Some(root) = env::var_os(desktop_root_env).filter(|root| Path::new(root).is_absolute()) {
         command.env(desktop_root_env, root);
     }
+    crate::service_log::capture_stderr(&mut command, &options.data, "host-service.log");
     configure_detached_service_command(&mut command)?;
     let mut supervisor = command.spawn()?;
     let started = Instant::now();
@@ -441,7 +442,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     };
     match action {
         "ensure" => ensure(&arguments[1..], options),
-        "serve" => serve(options),
+        "serve" => {
+            crate::service_log::record("shared Host supervisor started");
+            let result = serve(options);
+            crate::service_log::record(if result.is_ok() {
+                "shared Host supervisor stopped"
+            } else {
+                "shared Host supervisor stopped after an error"
+            });
+            result
+        }
         "stop" => stop(&options),
         "restart" => {
             crate::service_update::ensure_start_allowed(&options.data)?;

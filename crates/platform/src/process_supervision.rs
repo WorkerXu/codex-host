@@ -410,6 +410,10 @@ mod tests {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "process_supervision_linux_tests.rs"]
+mod linux_tests;
+
 #[cfg(all(test, target_os = "windows"))]
 mod windows_tests {
     use super::spawn_supervised;

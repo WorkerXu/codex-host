@@ -94,8 +94,11 @@ Windows 卸载程序在删除安装文件前调用安装内的 `codexhost stop`�
 | `diagnostics/launcher-startup-v1.json`   | Launcher           | 最近 10 次启动的阶段时间线、Codex 版本、结果与错误                                                    |
 | `diagnostics/desktop-controller-v1.json` | Desktop Controller | Renderer 注入状态：注入中 / 正常 / 失败、当前失败原因、失败次数，以及恢复后仍保留的上次失败原因与时间 |
 | `logs/host-runtime-*.log`                | Host Runtime       | 见 [`host-runtime-log.md`](host-runtime-log.md)                                                       |
+| `logs/host-service.log`、`logs/web-service.log` | 共享 Host / Web 的原生监管进程 | 监管进程的 stderr：启动、退出（UTC 时间）、致命错误与进程归属诊断；跨次追加，超过 1 MiB 时下次启动轮转为 `.log.1`。控制台日志列表暂不显示 |
 
 目录权限 `0700`，文件 `0600`（权限位按平台支持生效）。写入失败不影响启动。
+
+Linux 监管进程发现同组 PID 无法归属时，会记录 `excluded unattributed PID` 并继续监管已确认的进程。被排除的进程可在停服后继续运行。Linux 负责重新指定孤儿进程的父进程，由接管它的父进程在其退出后回收。
 
 Desktop Controller 在注入失败时仍会让 Codex 正常运行并在后台重试，所以“Codex 打开了但没有 codexhost 功能”时，Launcher 的启动记录显示成功，原因在注入状态文件中。
 
