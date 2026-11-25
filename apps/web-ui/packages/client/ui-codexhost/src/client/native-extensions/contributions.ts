@@ -6,19 +6,37 @@
  */
 import { createElement, useEffect, useRef, type ReactNode } from "react";
 import type { Context as ClientContext } from "@deepseek-ai/cordis";
+import { createSnapshotStore, type SnapshotStore } from "@deepseek-ai/dsh-client-store";
 import type { MainPanelId } from "@deepseek-ai/dsh-client-ui-layout/client";
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client";
-import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
-import type { WebExtensionContribution, WebExtensionDispose } from "@codexhost/shared-contracts";
+import type { SidebarPanelGroupContribution } from "@deepseek-ai/dsh-client-ui-sidebar/client";
+import {
+  webExtensionPanelBadgeCountSchema,
+  webExtensionPanelGroupSchema,
+  type WebExtensionContribution,
+  type WebExtensionDispose,
+  type WebExtensionPanel,
+  type WebExtensionPanelGroup,
+} from "@codexhost/shared-contracts";
 
 /** Default navigation order placing extension contributions after built-in entries. */
 const EXTENSION_CONTRIBUTION_ORDER = 100;
 
 interface RegisteredContributionRecord {
   dispose: () => void;
+}
+
+interface RegisteredPanel extends RegisteredContributionRecord {
+  badgeCount?: SnapshotStore<number | undefined>;
+}
+
+interface RegisteredPanelGroup extends RegisteredContributionRecord {
+  slotId: string;
+  label: () => string;
+  children: Set<() => void>;
 }
 
 /** Resolve localized extension text (`string` or `{ en, "zh-CN" }`) against the active locale. */
@@ -218,7 +236,8 @@ function createContributionComponent({
 /** Manages all slot-backed contributions owned by one extension activation generation. */
 export class ExtensionContributionRegistry {
   private readonly settingsPages = new Map<string, RegisteredContributionRecord>();
-  private readonly panels = new Map<string, RegisteredContributionRecord>();
+  private readonly panels = new Map<string, RegisteredPanel>();
+  private readonly panelGroups = new Map<string, RegisteredPanelGroup>();
   private readonly activeControllers = new Set<AbortController>();
   private disposed = false;
 
@@ -284,7 +303,37 @@ export class ExtensionContributionRegistry {
     return record.dispose;
   }
 
-  registerPanel(panel: WebExtensionContribution & { placement: "main" | "sidebar" }): () => void {
+  registerPanelGroup(group: WebExtensionPanelGroup): () => void {
+    this.guard();
+    const { id, title } = webExtensionPanelGroupSchema.parse(group);
+
+    const record: RegisteredPanelGroup = {
+      slotId: `cx-ext-panel-group:${this.extensionId}:${id}`,
+      label: () => resolveContributionTitle(this.ctx, title),
+      children: new Set(),
+      dispose: () => {
+        if (this.panelGroups.get(id) === record) this.panelGroups.delete(id);
+        if (replaced) return;
+        replaced = true;
+        for (const dispose of record.children) dispose();
+      },
+    };
+    let replaced = false;
+    this.panelGroups.get(id)?.dispose();
+    this.panelGroups.set(id, record);
+    return record.dispose;
+  }
+
+  setPanelBadgeCount(panelId: string, count?: number): void {
+    this.guard();
+    const badgeCount = this.panels.get(`main:${panelId.trim()}`)?.badgeCount;
+    if (!badgeCount) {
+      throw new Error(`Web extension panel "${panelId}" is not a registered group member`);
+    }
+    badgeCount.set(webExtensionPanelBadgeCountSchema.optional().parse(count));
+  }
+
+  registerPanel(panel: WebExtensionPanel): () => void {
     this.guard();
     validateContribution(panel, "panel");
     if (panel.placement !== "main" && panel.placement !== "sidebar") {
@@ -292,6 +341,20 @@ export class ExtensionContributionRegistry {
         `Web extension panel "${panel.id}" has unsupported placement "${String(panel.placement)}"`,
       );
     }
+
+    const groupId = panel.groupId;
+    const group = typeof groupId === "string" ? this.panelGroups.get(groupId.trim()) : undefined;
+    if (groupId !== undefined && (panel.placement !== "main" || !group)) {
+      throw new Error(`Web extension panel "${panel.id}" requires a registered main panel group`);
+    }
+    if (panel.badgeCount !== undefined && !group) {
+      throw new Error(`Web extension panel "${panel.id}" cannot use a badge count without a group`);
+    }
+    const badgeCount = group
+      ? createSnapshotStore(webExtensionPanelBadgeCountSchema.optional().parse(panel.badgeCount))
+      : undefined;
+    const groupContribution: SidebarPanelGroupContribution | undefined =
+      group && badgeCount ? { id: group.slotId, label: group.label, badgeCount } : undefined;
 
     const contributionId = panel.id.trim();
     const key = `${panel.placement}:${contributionId}`;
@@ -335,6 +398,7 @@ export class ExtensionContributionRegistry {
               id: panelId,
               order: EXTENSION_CONTRIBUTION_ORDER,
               label,
+              inject: () => ({ panelGroup: groupContribution }),
             },
             DefaultExtensionPanelIcon,
           ),
@@ -382,10 +446,12 @@ export class ExtensionContributionRegistry {
     }
 
     let released = false;
-    const record: RegisteredContributionRecord = {
+    const record: RegisteredPanel = {
+      ...(badgeCount ? { badgeCount } : {}),
       dispose: () => {
         if (released) return;
         released = true;
+        group?.children.delete(record.dispose);
         if (this.panels.get(key) === record) {
           this.panels.delete(key);
         }
@@ -402,6 +468,7 @@ export class ExtensionContributionRegistry {
       },
     };
     this.panels.set(key, record);
+    group?.children.add(record.dispose);
     return record.dispose;
   }
 
@@ -419,6 +486,7 @@ export class ExtensionContributionRegistry {
     this.settingsPages.clear();
     for (const record of [...this.panels.values()]) record.dispose();
     this.panels.clear();
+    this.panelGroups.clear();
   }
 
   private guard(): void {

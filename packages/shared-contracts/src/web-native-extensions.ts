@@ -1,7 +1,7 @@
-import type { z } from "zod";
-import type {
+import { z } from "zod";
+import {
   desktopExtensionLocalizedTextSchema,
-  DesktopExtensionDispose,
+  type DesktopExtensionDispose,
 } from "./desktop-extensions.js";
 import type { JsonObject, JsonValue } from "./json-value.js";
 
@@ -19,9 +19,21 @@ export type WebExtensionRender = (
 ) => void | WebExtensionDispose | Promise<void | WebExtensionDispose>;
 export type WebExtensionContribution = {
   id: string;
-  title: z.infer<typeof desktopExtensionLocalizedTextSchema>;
+  title: string | z.infer<typeof desktopExtensionLocalizedTextSchema>;
   render: WebExtensionRender;
 };
+
+export const webExtensionPanelGroupSchema = z.strictObject({
+  id: z.string().trim().min(1),
+  title: z.union([z.string().trim().min(1), desktopExtensionLocalizedTextSchema]),
+});
+export type WebExtensionPanelGroup = z.infer<typeof webExtensionPanelGroupSchema>;
+export const webExtensionPanelBadgeCountSchema = z.number().int().nonnegative();
+export type WebExtensionPanel = WebExtensionContribution &
+  (
+    | { placement: "main" | "sidebar"; groupId?: never; badgeCount?: never }
+    | { placement: "main"; groupId: string; badgeCount?: number }
+  );
 
 export interface WebExtensionApi {
   readonly id: string;
@@ -46,7 +58,9 @@ export interface WebExtensionApi {
   backend: { invoke(method: string, params?: JsonValue): Promise<JsonValue> };
   settings: { registerPage(page: WebExtensionContribution): () => void };
   panels: {
-    register(panel: WebExtensionContribution & { placement: "main" | "sidebar" }): () => void;
+    registerGroup(group: WebExtensionPanelGroup): () => void;
+    register(panel: WebExtensionPanel): () => void;
+    setBadgeCount(panelId: string, count?: number): void;
   };
 }
 export interface WebExtensionModule {

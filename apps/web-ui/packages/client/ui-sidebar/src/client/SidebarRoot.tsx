@@ -29,6 +29,7 @@ import {
   usePhoneSidebar,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
+import { PanelGroupRow } from "./PanelGroupRow.tsx";
 import type {
   SidebarPanelMetadata,
   SidebarRootComponentProps,
@@ -129,6 +130,13 @@ export function SidebarRoot({
   renderSlot,
 }: SidebarRootComponentProps) {
   const panels = usePanels((snapshot) => snapshot);
+  const groups = new Map<string, SidebarPanelMetadata[]>();
+  for (const panel of panels) {
+    if (!panel.group) continue;
+    const members = groups.get(panel.group.id);
+    if (members) members.push(panel);
+    else groups.set(panel.group.id, [panel]);
+  }
   const phoneSidebar = usePhoneSidebar();
   const shortcut = useShortcuts((rows) => rows.find((row) => row.id === "sidebar.left.toggle"));
   const newShortcut = useShortcuts((rows) => rows.find((row) => row.id === "session.new"));
@@ -369,17 +377,37 @@ export function SidebarRoot({
       </Tooltip>
 
       <nav className={css.panelList} aria-label={t("panels.label")}>
-        {panels.map(({ id, label }) => (
-          <PanelRow
-            key={id}
-            id={id}
-            label={label}
-            wide={wide}
-            usePanelInfo={usePanelInfo}
-            selectPanel={selectPanel}
-            renderSlot={renderSlot}
-          />
-        ))}
+        {panels.map(({ id, label, group }) => {
+          if (group) {
+            const members = groups.get(group.id);
+            if (members?.[0]?.id !== id) return null;
+            return (
+              <PanelGroupRow
+                key={group.id}
+                groupId={group.id}
+                label={group.label}
+                panels={members}
+                wide={wide}
+                usePanelInfo={usePanelInfo}
+                selectPanel={selectPanel}
+                renderIcon={(active) =>
+                  renderSlot("sidebar.panellist", { size: wide ? 16 : 18, active }, { only: id })
+                }
+              />
+            );
+          }
+          return (
+            <PanelRow
+              key={id}
+              id={id}
+              label={label}
+              wide={wide}
+              usePanelInfo={usePanelInfo}
+              selectPanel={selectPanel}
+              renderSlot={renderSlot}
+            />
+          );
+        })}
         {renderSlot("sidebar.primary.action", {
           size: wide ? 16 : 18,
           renderAction: ({ label, icon, onClick, active }) => (

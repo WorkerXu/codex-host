@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 2,
+  "id": "panel-group-demo",
+  "version": "1.0.0",
+  "name": { "en": "Panel group demo", "zh-CN": "面板分组示例" },
+  "description": {
+    "en": "A group with three panels and one live badge",
+    "zh-CN": "一个包含三个子项和实时计数的面板分组"
+  },
+  "web": { "apiVersion": 1, "entry": "index.mjs" }
+}

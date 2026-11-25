@@ -99,7 +99,13 @@ export interface SidebarPrimaryActionOwnerProps {
   }) => ReactNode;
 }
 
-/** Serializable metadata for one active global panel list registration. */
+export interface SidebarPanelGroupContribution {
+  id: string;
+  label: () => string;
+  badgeCount: ObservableSnapshot<number | undefined>;
+}
+
+/** Metadata for one active global panel list registration. */
 export interface SidebarPanelMetadata {
   /** List id and matching main panel key. */
   id: MainPanelId;
@@ -107,6 +113,7 @@ export interface SidebarPanelMetadata {
   order: number;
   /** Row title and accessible name: resolved label, or the id when omitted. */
   label: string;
+  group?: Omit<SidebarPanelGroupContribution, "label"> & { label: string };
 }
 
 /**

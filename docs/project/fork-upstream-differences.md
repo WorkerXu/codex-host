@@ -1,6 +1,6 @@
 # fork 与上游 v0.26.0-rc.1 的差异
 
-当前迁移底座直接基于上游 `v0.26.0-rc.1`，保留关闭自更新与启动器进程树修复，并新增一项通用的 Web 扩展提及接口。除这些差异外，不迁移旧 fork 的插件、业务入口或特定 `@` 提及实现。
+当前迁移底座直接基于上游 `v0.26.0-rc.1`，保留关闭自更新与启动器进程树修复，并提供通用的 Web 扩展提及和侧栏面板分组接口。除这些差异外，不迁移旧 fork 的插件、业务入口或特定 `@` 提及实现。
 
 ## codexhost 自身更新
 
@@ -17,3 +17,7 @@ rc.1 新增的 Linux `.tar.gz` 更新同样经过 Host／Console 的更新协调
 Host 扩展清单可声明 `mentions` 来源，后端提供 `mentions/search`、`mentions/cancel` 和 `mentions/expand`。Web 的 `@` 菜单按来源分组展示候选，插入带扩展、来源、条目和显示名的 Markdown 提及记号；原生 Codex 与外部 Harness 的发送都由 Host 在提交前调用对应后端，将记号整体替换为文字。
 
 该能力只注册在 Web 输入框，Desktop 渲染层保持上游原样。扩展停用、卸载、后端不可用、展开失败或超过大小上限时整轮发送失败并保留草稿，不会发送原始记号或部分内容。Peer Hub 远程 Thread 不使用此能力。契约、token 格式和限制见 [`desktop-ui-extensions.md`](../architecture/desktop-ui-extensions.md#web-扩展提及mentions)。
+
+## Web 扩展面板分组
+
+Web 扩展可为自己的 `main` 面板声明侧栏分组，并实时更新子项的计数徽标。宽栏支持持久化折叠状态，窄栏以弹出菜单提供相同入口。平铺面板保持原样；Desktop 渲染层和 Host 不参与。接口见 [Web 侧栏面板分组](../architecture/desktop-ui-extensions.md#web-侧栏面板分组)。

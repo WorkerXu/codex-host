@@ -312,9 +312,17 @@ export function createWebExtensionApi(
       },
     },
     panels: {
+      registerGroup(group) {
+        guard();
+        return contributions.registerPanelGroup(group);
+      },
       register(panel) {
         guard();
         return contributions.registerPanel(panel);
+      },
+      setBadgeCount(panelId, count) {
+        guard();
+        contributions.setPanelBadgeCount(panelId, count);
       },
     },
   };

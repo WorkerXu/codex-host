@@ -10,7 +10,11 @@ import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 // Type-only: pulls the Session root standard-props merge.
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
-import type { SidebarPanelMetadata, SidebarRootInjected } from "./contract/slots.ts";
+import type {
+  SidebarPanelGroupContribution,
+  SidebarPanelMetadata,
+  SidebarRootInjected,
+} from "./contract/slots.ts";
 import { HeaderLeadingControls } from "./HeaderLeadingControls.tsx";
 import { SidebarRoot } from "./SidebarRoot.tsx";
 import { en, zh, type SidebarKey } from "./locales.ts";
@@ -19,6 +23,7 @@ export type {
   SidebarBrandMarkOwnerProps,
   SidebarBrandNameOwnerProps,
   SidebarFooterActionOwnerProps,
+  SidebarPanelGroupContribution,
   SidebarPanelIconOwnerProps,
   SidebarPanelMetadata,
   SidebarPrimaryActionOwnerProps,
@@ -56,10 +61,16 @@ export function apply(ctx: ClientContext): void {
   const syncPanels = (): void => {
     const next = ctx.slots
       .entriesOfSlot("sidebar.panellist")
-      .map(({ options }) => {
+      .map(({ options, inject }): SidebarPanelMetadata => {
         // The list registration requires an id; StoredEntry erases the slot kind.
         const id = options.id as MainPanelId;
-        return { id, order: options.order ?? 0, label: resolveSlotLabel(options.label) ?? id };
+        const group = inject?.().panelGroup as SidebarPanelGroupContribution | undefined;
+        return {
+          id,
+          order: options.order ?? 0,
+          label: resolveSlotLabel(options.label) ?? id,
+          ...(group && { group: { ...group, label: group.label() } }),
+        };
       })
       .sort((a, b) => a.order - b.order);
     const previous = panels.getSnapshot();
@@ -70,7 +81,10 @@ export function apply(ctx: ClientContext): void {
         return (
           panel.id === candidate.id &&
           panel.order === candidate.order &&
-          panel.label === candidate.label
+          panel.label === candidate.label &&
+          panel.group?.id === candidate.group?.id &&
+          panel.group?.label === candidate.group?.label &&
+          panel.group?.badgeCount === candidate.group?.badgeCount
         );
       })
     )

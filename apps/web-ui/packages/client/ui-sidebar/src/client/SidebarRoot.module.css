@@ -554,6 +554,50 @@
   display: none;
 }
 
+.root:not(.collapsed) .panelList:has(.panelGroup) {
+  max-height: max(80px, calc(100% - 160px));
+  overflow-y: auto;
+}
+
+.panelGroup,
+.panelGroupMembers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panelGroupMembers {
+  padding-inline-start: 24px;
+}
+
+.panelGroupChevron {
+  display: flex;
+  margin-inline-start: auto;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.panelGroupLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+.panelBadge {
+  flex: none;
+  min-width: 12px;
+  padding-inline: 4px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Panel entries share the New Session bar's 12px radius and 2px inset, the
    session rows' hover/selected surface, and the primary ink. */
 .panelRow {

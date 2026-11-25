@@ -143,6 +143,14 @@ Web 与 `web` 入口共用 `extensions-changed` 订阅和快照对账；Desktop 
 - 浏览器宿主通过 `codexhost/extensions/snapshot` 获取当前已启用快照，并订阅 `GET /api/ch/v1/events` 的 `extensions-changed` 事件驱动对账（单标签页引用计数复用，且在支持 Web Locks + `BroadcastChannel` 的同源多标签页间共享 1 条事件流，避免耗尽 HTTP/1.1 连接池），仅激活含 `manifest.web` 的条目；同代次仅设置修订变化时原地通知 `storage.onChange` 而不重建 DOM。
 - 传统 DSH Web 插件的独立管理/恢复入口（`WebUiExtensions` / `/extensions`）与之隔离并保持独立可用。
 
+#### Web 侧栏面板分组
+
+`api.panels.registerGroup({ id, title })` 声明一个只用于导航的分组。先声明分组，再通过 `api.panels.register({ id, title, render, placement: "main", groupId, badgeCount? })` 注册子面板；`groupId` 只能引用本次扩展激活注册的分组，同一分组 ID 不可重复注册。分组与子面板的标题可用字符串或 `{ en, "zh-CN" }`，后者跟随 Web 界面语言。未设置 `groupId` 的面板保留原有平铺行为；`placement: "sidebar"` 不支持分组。
+
+- 分组在第一个子项的导航位置出现，子项按注册顺序排列。宽栏点击分组只展开或收起，不跳转；手动展开状态记在当前浏览器的 `localStorage`。切换到子项时自动展开并高亮子项。窄栏点击分组图标弹出完整子项列表，不改变宽栏的折叠偏好。
+- 分组使用默认扩展图标，子项无图标。`badgeCount` 是可选的初始计数；`api.panels.setBadgeCount(panelId, count)` 可更新本扩展已注册的子项，不会重挂主面板。计数须为非负安全整数，`0` 也显示；省略 `count` 则隐藏徽标。
+- 两个注册方法均返回注销函数。注销分组时连同子面板一起注销；子面板全部注销时不显示空分组。扩展停用或卸载时自动回收分组和子面板。
+
 ## Web 扩展提及（`mentions`）
 
 `mentions` 让已启用的 Host 扩展把条目放进 Web 输入框的 `@` 菜单。它只由 Web 注册输入源，Desktop 不注入任何提及 UI；Host 负责搜索路由与发送前展开。后端可以只提供提及能力，不必同时声明 `web` 或 `page`。
