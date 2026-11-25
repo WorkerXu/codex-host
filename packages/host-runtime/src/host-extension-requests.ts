@@ -63,6 +63,10 @@ async function dispatch(
       return manager.settingsSet(params(method, input));
     case RPC.backendInvoke:
       return { result: await manager.invoke(params(method, input)) };
+    case RPC.mentionsSearch:
+      return manager.searchMentions(params(method, input));
+    case RPC.mentionsCancel:
+      return manager.cancelMentionSearch(params(method, input));
   }
 }
 

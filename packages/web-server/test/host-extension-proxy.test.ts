@@ -324,6 +324,24 @@ test("the client RPC gateway gates all Host extension management methods and oth
   }
 });
 
+test("forwards extension mention search and cancellation through the client RPC gateway", async (t) => {
+  const requestId = "00000000-0000-4000-8000-000000000000";
+  for (const [method, params, result] of [
+    [HOST_EXTENSIONS_RPC.mentionsSearch, { requestId, query: "alpha" }, { groups: [] }],
+    [HOST_EXTENSIONS_RPC.mentionsCancel, { requestId }, { cancelled: true }],
+  ] as const) {
+    const { origin, auth, calls } = await fixture(t, { result });
+    const reply = await fetch(`${origin}/api/ch/v1/rpc`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ method, params }),
+    });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(await reply.json(), { result });
+    assert.deepEqual(calls(), [[method, params]]);
+  }
+});
+
 test("forwards extensions-changed events as NDJSON without special handling", async (t) => {
   const { origin, auth } = await fixture(t);
   const reply = await fetch(`${origin}/api/ch/v1/events`, { headers: auth });

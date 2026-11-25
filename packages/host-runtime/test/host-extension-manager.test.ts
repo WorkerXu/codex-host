@@ -17,6 +17,7 @@ import {
   HOST_EXTENSION_CATALOG_URL,
   HOST_EXTENSIONS_RPC as RPC,
   HOST_EXTENSION_MANAGEMENT_METHODS,
+  formatHostExtensionMentionToken,
   hostExtensionsRpcSchemas as schemas,
   type HostExtensionManifestV2,
 } from "@codexhost/shared-contracts";
@@ -96,6 +97,36 @@ async function backendSource(version: string, broken = false) {
       "desktop.js": "define({activate(){}})",
       "page.mjs": "export function mount() {}",
       "icon.png": Buffer.from("89504e470d0a1a0a", "hex"),
+    },
+  );
+}
+
+async function mentionSource() {
+  return source(
+    "mention-sample",
+    {
+      backend: { apiVersion: 1, entry: "worker.mjs" },
+      mentions: {
+        apiVersion: 1,
+        sources: [{ id: "demo", label: { en: "Demo", "zh-CN": "示例" } }],
+      },
+    },
+    {
+      "worker.mjs": `
+export async function activate(ctx) {
+  ctx.handle('mentions/search', async ({ sourceId, query }) => {
+    if (sourceId !== 'demo') throw new Error('Unknown source');
+    return { items: query === 'alp' ? [{ itemId: 'alpha', label: 'Alpha' }] : [] };
+  });
+  ctx.handle('mentions/cancel', () => ({ cancelled: true }));
+  ctx.handle('mentions/expand', async ({ mentions }) => ({
+    expansions: mentions.map(({ sourceId, itemId }) => ({
+      sourceId,
+      itemId,
+      text: 'expanded ' + itemId,
+    })),
+  }));
+}`,
     },
   );
 }
@@ -274,6 +305,40 @@ it("starts once before any clients connect and shares the process and settings a
   await close();
   expect(await journal()).toBe(`start 1 ${pid}\nstop 1 ${pid}\n`);
   reaped(pid);
+});
+
+it("searches and expands enabled extension mentions through the shared Host", async () => {
+  const { host } = startHost();
+  const web = await connectWeb(host);
+  const installed = schemas[RPC.install].result.parse(
+    await web.request(RPC.install, { source: await mentionSource() }),
+  );
+  await web.request(RPC.enable, { id: installed.id, expectedRevision: 0 });
+  const requestId = "00000000-0000-4000-8000-000000000000";
+  expect(await web.request(RPC.mentionsSearch, { requestId, query: "alp" })).toEqual({
+    groups: [
+      {
+        extensionId: "mention-sample",
+        sourceId: "demo",
+        label: { en: "Demo", "zh-CN": "示例" },
+        items: [{ itemId: "alpha", label: "Alpha" }],
+      },
+    ],
+  });
+  const carrier = formatHostExtensionMentionToken({
+    extensionId: "mention-sample",
+    sourceId: "demo",
+    itemId: "alpha",
+    label: "Alpha",
+  });
+  assert(host.hostExtensions, "Expected a local Host extension manager");
+  await expect(host.hostExtensions.expandMentionTexts([`before ${carrier}`])).resolves.toEqual([
+    "before expanded alpha",
+  ]);
+  await web.request(RPC.disable, { id: installed.id, expectedRevision: 1 });
+  await expect(host.hostExtensions.expandMentionTexts([carrier])).rejects.toThrow(
+    /is disabled.*message was not sent/u,
+  );
 });
 
 it("installs and enables web-, desktop-, and page-only plugins without spawning a child", async () => {

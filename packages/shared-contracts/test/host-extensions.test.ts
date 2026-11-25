@@ -4,17 +4,23 @@ import {
   clientChannelEventSchema,
   DESKTOP_EXTENSION_ICON_MAX_BYTES,
   HOST_EXTENSION_MANAGEMENT_METHODS,
+  HOST_EXTENSION_MENTION_MAX_EXPANDED_CHARS,
+  HOST_EXTENSION_MENTIONS_API_VERSION,
   HOST_EXTENSION_PAGE_API_VERSION,
   HOST_EXTENSION_PAGE_CSS_VARIABLES,
   HOST_EXTENSIONS_RPC,
+  formatHostExtensionMentionToken,
+  hasHostExtensionMentionToken,
   hostExtensionAssetUrl,
   hostExtensionCapabilities,
   hostExtensionCatalogEntrySchema,
   hostExtensionListItemSchema,
   hostExtensionManifestV2Schema,
+  hostExtensionMentionSearchParamsSchema,
   hostExtensionTargets,
   hostExtensionsRpcSchemas,
   isHostExtensionManagementMethod,
+  parseHostExtensionMentions,
   parseHostExtensionManifest,
 } from "../src/index.js";
 
@@ -31,6 +37,10 @@ const web = { apiVersion: 1, style: "web.css" };
 const page = { apiVersion: 1, entry: "ui/page.mjs", style: "page.css", title: localized };
 const backend = { apiVersion: 1, entry: "backend.mjs" };
 const widget = { apiVersion: 1, entry: "widget/index.mjs", style: "widget/style.css" };
+const mentions = {
+  apiVersion: HOST_EXTENSION_MENTIONS_API_VERSION,
+  sources: [{ id: "demo", label: localized }],
+};
 
 it.each([
   ["data:image/png;base64,YQ==", true, true],
@@ -98,9 +108,51 @@ it.each([
   { widget: { ...widget, apiVersion: 2 } },
   { widget: { ...widget, title: localized } },
   { backend: { ...backend, targets: ["web"] } },
+  { mentions },
+  { mentions: { ...mentions, apiVersion: 2 }, backend },
+  { mentions: { ...mentions, sources: [] }, backend },
+  { mentions: { ...mentions, sources: [{ id: "Demo", label: localized }] }, backend },
+  {
+    mentions: {
+      ...mentions,
+      sources: [
+        { id: "demo", label: localized },
+        { id: "demo", label: localized },
+      ],
+    },
+    backend,
+  },
   { id: "con", desktop },
 ])("rejects invalid v2 input %j", (fields) => {
   expect(parseHostExtensionManifest({ ...header, ...fields }).state).toBe("invalid");
+});
+
+it("validates mention source declarations and their readable tokens", () => {
+  const manifest = hostExtensionManifestV2Schema.parse({ ...header, backend, mentions });
+  expect(manifest.mentions).toEqual(mentions);
+  const token = formatHostExtensionMentionToken({
+    extensionId: "sample",
+    sourceId: "demo",
+    itemId: "message/with+symbols=",
+    label: "中文 [Alpha]",
+  });
+  expect(hasHostExtensionMentionToken(token)).toBe(true);
+  expect(token).toContain("[@中文 Alpha]");
+  expect(parseHostExtensionMentions(`before ${token} after`)).toMatchObject({
+    invalid: false,
+    mentions: [
+      {
+        extensionId: "sample",
+        sourceId: "demo",
+        itemId: "message/with+symbols=",
+        label: "中文 Alpha",
+      },
+    ],
+  });
+  expect(
+    parseHostExtensionMentions("[@Broken](codexhost-extension://mention/v1/not-json)"),
+  ).toMatchObject({ mentions: [], invalid: true });
+  expect(HOST_EXTENSION_MENTION_MAX_EXPANDED_CHARS).toBe(32_768);
 });
 
 it("validates widget catalog targets", () => {
@@ -148,7 +200,7 @@ it("normalizes an existing v1 Desktop manifest and reports future versions", () 
 });
 
 it("registers the entire RPC namespace and its invalidation event on the client channel", () => {
-  expect(HOST_EXTENSION_MANAGEMENT_METHODS).toHaveLength(13);
+  expect(HOST_EXTENSION_MANAGEMENT_METHODS).toHaveLength(15);
   for (const method of HOST_EXTENSION_MANAGEMENT_METHODS) {
     expect(isHostExtensionManagementMethod(method)).toBe(true);
     expect(CLIENT_CHANNEL_METHODS).toContain(method);
@@ -217,6 +269,33 @@ it("validates install sources, asset refs, settings revisions, and backend JSON"
   expect(
     hostExtensionsRpcSchemas[HOST_EXTENSIONS_RPC.backendInvoke].result.safeParse({
       result: { ok: true },
+    }).success,
+  ).toBe(true);
+  const requestId = "00000000-0000-4000-8000-000000000000";
+  expect(
+    hostExtensionMentionSearchParamsSchema.parse({
+      requestId,
+      sourceId: "demo",
+      query: "alpha",
+      limit: 20,
+    }),
+  ).toMatchObject({ sourceId: "demo", limit: 20 });
+  expect(
+    hostExtensionsRpcSchemas[HOST_EXTENSIONS_RPC.mentionsSearch].params.safeParse({
+      requestId,
+      query: "alpha",
+    }).success,
+  ).toBe(true);
+  expect(
+    hostExtensionsRpcSchemas[HOST_EXTENSIONS_RPC.mentionsSearch].result.safeParse({
+      groups: [
+        {
+          extensionId: "sample",
+          sourceId: "demo",
+          label: localized,
+          items: [{ itemId: "alpha", label: "Alpha" }],
+        },
+      ],
     }).success,
   ).toBe(true);
   expect(HOST_EXTENSION_PAGE_API_VERSION).toBe(1);

@@ -14,8 +14,13 @@ import {
   hostExtensionBackendMethodSchema,
   hostExtensionDigestSchema,
   hostExtensionIdSchema,
+  hostExtensionMentionCandidateSchema,
+  hostExtensionMentionCancelParamsSchema,
+  hostExtensionMentionCancelResultSchema,
   hostExtensionManifestV2Schema,
   hostExtensionResourcePathSchema,
+  hostExtensionMentionSearchParamsSchema,
+  hostExtensionMentionSourceIdSchema,
   hostExtensionTargetSchema,
   targetsForCapabilities,
 } from "./host-extensions.js";
@@ -224,6 +229,21 @@ export type HostExtensionsListResult = z.infer<typeof hostExtensionsListResultSc
 export type HostExtensionRuntimeEntry = z.infer<typeof hostExtensionRuntimeEntrySchema>;
 export type HostExtensionsSnapshotResult = z.infer<typeof hostExtensionsSnapshotResultSchema>;
 
+export const hostExtensionMentionGroupSchema = z.strictObject({
+  extensionId: hostExtensionIdSchema,
+  sourceId: hostExtensionMentionSourceIdSchema,
+  label: z.strictObject({
+    en: z.string().trim().min(1).max(128),
+    "zh-CN": z.string().trim().min(1).max(128),
+  }),
+  items: z.array(hostExtensionMentionCandidateSchema),
+  error: z.string().trim().max(2048).optional(),
+});
+export type HostExtensionMentionGroup = z.infer<typeof hostExtensionMentionGroupSchema>;
+export const hostExtensionsMentionSearchResultSchema = z.strictObject({
+  groups: z.array(hostExtensionMentionGroupSchema),
+});
+
 export const HOST_EXTENSIONS_RPC = {
   list: "codexhost/extensions/list",
   snapshot: "codexhost/extensions/snapshot",
@@ -238,6 +258,8 @@ export const HOST_EXTENSIONS_RPC = {
   settingsGet: "codexhost/extensions/settings/get",
   settingsSet: "codexhost/extensions/settings/set",
   backendInvoke: "codexhost/extensions/backend/invoke",
+  mentionsSearch: "codexhost/extensions/mentions/search",
+  mentionsCancel: "codexhost/extensions/mentions/cancel",
 } as const;
 export const HOST_EXTENSION_MANAGEMENT_METHODS = Object.freeze(Object.values(HOST_EXTENSIONS_RPC));
 export type HostExtensionManagementMethod = (typeof HOST_EXTENSION_MANAGEMENT_METHODS)[number];
@@ -329,6 +351,18 @@ export const hostExtensionsRpcSchemas = {
       params: jsonValueSchema.optional(),
     }),
     result: z.strictObject({ result: jsonValueSchema }),
+  },
+  [HOST_EXTENSIONS_RPC.mentionsSearch]: {
+    params: z.strictObject({
+      requestId: hostExtensionMentionSearchParamsSchema.shape.requestId,
+      query: hostExtensionMentionSearchParamsSchema.shape.query,
+      limit: hostExtensionMentionSearchParamsSchema.shape.limit.optional(),
+    }),
+    result: hostExtensionsMentionSearchResultSchema,
+  },
+  [HOST_EXTENSIONS_RPC.mentionsCancel]: {
+    params: hostExtensionMentionCancelParamsSchema,
+    result: hostExtensionMentionCancelResultSchema,
   },
 } as const satisfies Record<
   HostExtensionManagementMethod,

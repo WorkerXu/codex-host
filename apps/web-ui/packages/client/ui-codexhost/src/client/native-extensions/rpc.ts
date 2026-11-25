@@ -26,7 +26,7 @@ export class WebExtensionRpcError extends Error {
   }
 }
 
-async function callHostExtensionsRpc<M extends HostExtensionManagementMethod>(
+export async function callHostExtensionsRpc<M extends HostExtensionManagementMethod>(
   method: M,
   params: HostExtensionsRpcParams<M>,
   signal?: AbortSignal,

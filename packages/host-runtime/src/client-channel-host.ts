@@ -9,6 +9,7 @@ import {
   threadTitleInputSchema,
   clientProjectlessWorkspaceSchema,
   harnessModelRefSchema,
+  hasHostExtensionMentionToken,
   restoreHarnessCommandMentions,
   harnessInstallationRequestTimeoutMs,
   jsonValueSchema,
@@ -110,6 +111,8 @@ export interface ClientChannelHostDependencies {
     params: JsonObject,
     timeoutMs: number | undefined,
   ): Promise<ConsoleHostReply>;
+  /** Expands Web extension mention carriers before a native Codex Turn is forwarded. */
+  expandMentionTexts?(texts: readonly string[]): Promise<string[]>;
 }
 
 /**
@@ -290,10 +293,54 @@ export class ClientChannelHost {
         };
       let nativeParams = params;
       let skillName: string | undefined;
-      if (Array.isArray(params.input))
+      if (
+        ["turn/start", "turn/steer", "thread/queue/add", "thread/queue/update"].includes(method) &&
+        Array.isArray(params.input)
+      ) {
+        const input = params.input;
+        const textIndexes = input.flatMap((part, index) =>
+          isRecord(part) && part.type === "text" && typeof part.text === "string" ? [index] : [],
+        );
+        const texts = textIndexes.map((index) => {
+          const part = input[index];
+          return isRecord(part) && typeof part.text === "string" ? part.text : "";
+        });
+        if (texts.some(hasHostExtensionMentionToken)) {
+          if (!this.#host.expandMentionTexts)
+            return {
+              error: {
+                code: -32074,
+                message:
+                  "Host extension mentions are unavailable on this Host. The message was not sent.",
+              },
+            };
+          try {
+            const expanded = await this.#host.expandMentionTexts(texts);
+            if (expanded.some((text, index) => text !== texts[index])) {
+              const next = [...input];
+              for (const [position, index] of textIndexes.entries()) {
+                const part = input[index];
+                const text = expanded[position];
+                if (text === undefined)
+                  throw new Error("Host extension mention expansion is incomplete");
+                if (isRecord(part)) next[index] = { ...part, text };
+              }
+              nativeParams = { ...params, input: next };
+            }
+          } catch (error) {
+            return {
+              error: {
+                code: -32074,
+                message: error instanceof Error ? error.message : String(error),
+              },
+            };
+          }
+        }
+      }
+      if (Array.isArray(nativeParams.input))
         nativeParams = {
-          ...params,
-          input: params.input.map((part) => {
+          ...nativeParams,
+          input: nativeParams.input.map((part) => {
             if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string")
               return part;
             const text = restoreHarnessCommandMentions(part.text);

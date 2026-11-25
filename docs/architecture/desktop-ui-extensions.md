@@ -70,6 +70,15 @@ TypeScript 类型与 Zod 校验以 [`packages/shared-contracts/src/host-extensio
   "backend": {
     "apiVersion": 1,
     "entry": "backend/index.mjs"
+  },
+  "mentions": {
+    "apiVersion": 1,
+    "sources": [
+      {
+        "id": "prompts",
+        "label": { "en": "Prompt mentions", "zh-CN": "提示词提及" }
+      }
+    ]
   }
 }
 ```
@@ -82,6 +91,7 @@ TypeScript 类型与 Zod 校验以 [`packages/shared-contracts/src/host-extensio
   - `desktop`：`{ apiVersion: 1, script: "*.js", style?: "*.css" }`；可配合可选 `slots`（`sidebar.thread-badge`、`sidebar.thread-layout`、`appearance.theme`）声明 Desktop 独占槽位。
   - `web`：`{ apiVersion: 1, entry?: "*.mjs", style?: "*.css" }`（至少声明 `entry` 或 `style` 之一）。
   - `backend`：`{ apiVersion: 1, entry: "*.mjs" }`。
+- **提及来源**（可选）：`mentions: { apiVersion: 1, sources: [{ id, label }] }`，最多 16 个来源；`id` 为小写 `[a-z][a-z0-9._-]*`，`label` 为双语文本。声明 `mentions` 时必须同时声明 `backend`。
 - **能力与目标推导**：`hostExtensionCapabilities(manifest)` 推导 `{ hasPage, hasWidget, hasDesktop, hasWeb, hasBackend }`；`hostExtensionTargets(manifest)` 推导适用端（含 `page`、`widget` 或仅 `backend` 时为 `["desktop", "web"]`，否则按声明的 `desktop` / `web` 推导）。
 - **展示元数据**：`author`、`repository`（HTTP(S)）、`categories`（`appearance` / `interface` / `workflow` / `analytics` / `integrations` / `tools`）、`icon`（≤ 128 KiB PNG/JPEG/WebP）、`screenshots`（最多 4 张，单张 ≤ 512 KiB，合计 ≤ 2 MiB）。
 - **兼容解析**：`parseHostExtensionManifest` 同时支持将 `manifestVersion: 1` 清单规范化解析为 v2 形态；高于 v2 的清单标记为 `incompatible`。
@@ -132,6 +142,74 @@ Web 与 `web` 入口共用 `extensions-changed` 订阅和快照对账；Desktop 
 - ESM 模块（导出 `activate(api)`）与可选样式表，运行在 Web/PWA 宿主（`apps/web-ui/packages/client/ui-codexhost/src/client/native-extensions/`）。
 - 浏览器宿主通过 `codexhost/extensions/snapshot` 获取当前已启用快照，并订阅 `GET /api/ch/v1/events` 的 `extensions-changed` 事件驱动对账（单标签页引用计数复用，且在支持 Web Locks + `BroadcastChannel` 的同源多标签页间共享 1 条事件流，避免耗尽 HTTP/1.1 连接池），仅激活含 `manifest.web` 的条目；同代次仅设置修订变化时原地通知 `storage.onChange` 而不重建 DOM。
 - 传统 DSH Web 插件的独立管理/恢复入口（`WebUiExtensions` / `/extensions`）与之隔离并保持独立可用。
+
+## Web 扩展提及（`mentions`）
+
+`mentions` 让已启用的 Host 扩展把条目放进 Web 输入框的 `@` 菜单。它只由 Web 注册输入源，Desktop 不注入任何提及 UI；Host 负责搜索路由与发送前展开。后端可以只提供提及能力，不必同时声明 `web` 或 `page`。
+
+### 清单
+
+```json
+{
+  "mentions": {
+    "apiVersion": 1,
+    "sources": [
+      {
+        "id": "bugs",
+        "label": { "en": "Jarvis bugs", "zh-CN": "Jarvis Bug" }
+      }
+    ]
+  }
+}
+```
+
+- `sources` 是搜索与分组的边界；Web 菜单按 `label` 显示分组。
+- 同一扩展的 `id` 不得重复；扩展停用、卸载、清单无效或后端未运行时，其来源不会出现在菜单中。
+- 声明 `mentions` 时 `backend` 必须存在，否则清单无效。
+
+### 后端方法
+
+扩展后端用 `ctx.handle` 注册三个固定方法：
+
+| 方法 | 参数 | 返回 |
+| --- | --- | --- |
+| `mentions/search` | `{ requestId, sourceId, query, limit }` | `{ items: [{ itemId, label, description? }] }`，最多 `limit` 条（Host 上限 50，Web 传 20）。 |
+| `mentions/cancel` | `{ requestId }` | `{ cancelled: boolean }`。取消进行中的搜索，可忽略已完成的请求。 |
+| `mentions/expand` | `{ mentions: [{ sourceId, itemId, label }] }` | `{ expansions: [{ sourceId, itemId, text }] }`，必须覆盖每个唯一 `(sourceId, itemId)`，不能返回额外项。 |
+
+- `requestId` 为 UUID；Web 在查询变化或菜单关闭时先防抖 250 ms，再调用 `codexhost/extensions/mentions/search`，中止旧请求并尽力调用 `mentions/cancel`。
+- `itemId` 在来源内稳定，最多 512 字符；`label` 最多 256 字符。搜索失败会显示为不可选错误行；超过 Host 搜索截止时间（3 秒）的后端会被视为无响应并从菜单隐藏。
+- 搜索只读取扩展数据，不要求启动新的后端实例。
+
+### 提及记号
+
+选中条目后，Web 输入框插入一个自定义引用 chip，提交时码为 Markdown 链接：
+
+```text
+[@Display Name](codexhost-extension://mention/v1/<base64url-json>)
+```
+
+payload 为 `{ extensionId, sourceId, itemId, label }`。可见文本始终是可读的 `@Display Name`，因此复制、历史记录和消息显示不会暴露 base64。发送时 Host 解析所有该前缀的记号；只要出现无法解析的记号就拒绝整轮发送。
+
+### 搜索与展开 RPC
+
+Web 通过现有 Host client channel 调用：
+
+- `codexhost/extensions/mentions/search`：`{ requestId, query, limit? }` → `{ groups: [{ extensionId, sourceId, label, items, error? }] }`。Host 只查询已启用、清单有 `mentions` 且后端处于 `running` 的扩展。
+- `codexhost/extensions/mentions/cancel`：`{ requestId }` → `{ cancelled: true }`，尽力通知所有提及后端取消。
+
+这两个方法和其他扩展管理方法一样经过鉴权与同源门禁，并由 Web server 透传；SSH 远程托管的共享 Host 不提供扩展提及。
+
+### 发送时展开
+
+- 原生 Codex 的 `turn/start` / `turn/steer` 在转发给官方 app-server 前展开。
+- 外部 Harness 的起始 Turn、steering、队列写入与队列启动都在 Host 内展开；原始记号不会进入 Harness。
+- 一个文本中的同一 `(sourceId, itemId)` 只向后端请求一次，但每个出现位置都替换。
+- 单项展开最多 32,768 字符，一轮内所有展开内容合计最多 131,072 字符；后端未返回、返回额外项或返回重复项都会失败。
+- 任一提及无法展开（扩展停用/卸载、来源不再声明、后端未运行或报错、超限）时，整轮 `turn/start` 失败并返回明确错误，不回退为原始记号，也不发送部分内容。Web 现有的提交失败路径会恢复草稿与附件。
+- 诊断只记录扩展数、提及数和展开字符数，不记录正文。
+
+Peer Hub 的远程 Thread 不参与本期实现：Web 的提及源只为本地 Thread 注册；远程会话不会显示扩展提及菜单，而且远程 Host 若没有同一补丁，也不会展开已插入的记号。
 
 ## 单实例 Node 后端（`backend`）
 

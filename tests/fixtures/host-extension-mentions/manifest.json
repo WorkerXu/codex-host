@@ -1,0 +1,29 @@
+{
+  "manifestVersion": 2,
+  "id": "mention-sample",
+  "name": {
+    "en": "Mention Sample",
+    "zh-CN": "提及示例"
+  },
+  "version": "1.0.0",
+  "description": {
+    "en": "Minimal Host extension with Web @ mention sources.",
+    "zh-CN": "带 Web @ 提及来源的最小 Host 扩展。"
+  },
+  "backend": {
+    "apiVersion": 1,
+    "entry": "backend/index.mjs"
+  },
+  "mentions": {
+    "apiVersion": 1,
+    "sources": [
+      {
+        "id": "demo",
+        "label": {
+          "en": "Demo mentions",
+          "zh-CN": "示例提及"
+        }
+      }
+    ]
+  }
+}

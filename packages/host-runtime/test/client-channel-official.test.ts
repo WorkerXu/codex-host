@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { JsonObject } from "@codexhost/protocol-core";
-import { hostThreadIdSchema } from "@codexhost/shared-contracts";
+import { formatHostExtensionMentionToken, hostThreadIdSchema } from "@codexhost/shared-contracts";
 import { ClientChannelHost } from "../src/client-channel-host.js";
 import { ClientChannelEvents } from "../src/client-channel-events.js";
 import { officialCodexModelRef } from "../src/official-codex-model-ref.js";
@@ -23,6 +23,67 @@ import { OfficialAdmissionError } from "../src/codex-runtime/official-work-gate.
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+});
+
+it("expands Web extension mention carriers before forwarding a native Turn", async () => {
+  const events = new ClientChannelEvents();
+  const carrier = formatHostExtensionMentionToken({
+    extensionId: "mention-sample",
+    sourceId: "demo",
+    itemId: "alpha",
+    label: "Alpha",
+  });
+  const request = vi.fn(async (): Promise<NativeClientReply> => ({
+    result: { turn: { id: "turn-1" } },
+  }));
+  const expandMentionTexts = vi.fn(async (texts: readonly string[]) =>
+    texts.map((text) => text.replace(carrier, "expanded alpha")),
+  );
+  const host = new ClientChannelHost({
+    events,
+    environment: () => ({}),
+    waitForPlugins: async () => {},
+    listRecords: async () => [],
+    listSectionPlacements: async () => [],
+    locateExternalThread: async () => ({ kind: "official" }),
+    loadedThread: () => undefined,
+    clientHistoryTurns: () => [],
+    queueSnapshot: () => ({ items: [], pausedReason: null }),
+    interactions: {
+      approvals: new Map(),
+      questions: () => new Map(),
+      isApprovalRequestId: (value): value is number => typeof value === "number",
+      isQuestionRequestId: (value): value is number => typeof value === "number",
+      respondApproval: async () => false,
+      respondQuestion: async () => false,
+    },
+    native: { events, request, respond: async () => {} },
+    submit: async () => {
+      throw new Error("Web native Turns must use the official channel");
+    },
+    expandMentionTexts,
+  });
+  expect(
+    await host.handleClientRequest("turn/start", {
+      threadId: "official",
+      input: [{ type: "text", text: `before ${carrier} after` }],
+    }),
+  ).toHaveProperty("result");
+  expect(expandMentionTexts).toHaveBeenCalledWith([`before ${carrier} after`]);
+  expect(request).toHaveBeenCalledWith("turn/start", {
+    threadId: "official",
+    input: [{ type: "text", text: "before expanded alpha after" }],
+  });
+
+  request.mockClear();
+  expandMentionTexts.mockRejectedValueOnce(new Error("extension disabled"));
+  expect(
+    await host.handleClientRequest("turn/start", {
+      threadId: "official",
+      input: [{ type: "text", text: carrier }],
+    }),
+  ).toMatchObject({ error: { code: -32074, message: "extension disabled" } });
+  expect(request).not.toHaveBeenCalled();
 });
 
 it("routes official and external fork, queue, configuration, command, pin and usage methods by owner", async () => {

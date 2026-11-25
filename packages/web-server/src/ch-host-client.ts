@@ -104,6 +104,8 @@ const METHODS = new Set([
   "codexhost/harness/session-import/sources",
   "codexhost/harness/session-import/list",
   "codexhost/harness/session-import/import",
+  "codexhost/extensions/mentions/search",
+  "codexhost/extensions/mentions/cancel",
 ]);
 
 async function requestPins(

@@ -16,6 +16,7 @@ import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client";
 import { registerHarnessDiscovery } from "./harness-discovery.tsx";
 import { registerSkillLibrary } from "./skill-library.tsx";
+import { registerExtensionMentions } from "./extension-mentions.ts";
 import { registerThreadReferenceDiscovery } from "./thread-reference-discovery.ts";
 import { registerThreadReferenceAction } from "./thread-reference-action.ts";
 import {
@@ -317,6 +318,7 @@ export function apply(ctx: ClientContext): void {
   ctx.inject(["connection", "modelDirectories", "commandUi"], (scope) => {
     registerHarnessDiscovery(scope);
     registerSkillLibrary(scope);
+    registerExtensionMentions(scope);
   });
   const localTarget = (href: string) => {
     const threadId = localThreadId(href);

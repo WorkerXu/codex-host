@@ -31,6 +31,10 @@ export const en = {
   "discovery.empty": "No native commands advertised.",
   "discovery.retry": "Retry native commands",
   "discovery.failed": "Native command catalog unavailable:",
+  "mentions.title": "Extension mentions",
+  "mentions.failed": "Extension mention search failed",
+  "mentions.retry": "Retry extension mentions",
+  "mentions.unavailable": "Extension mentions unavailable:",
 
   remoteAccess: "Remote access",
   "android.switchHost": "Switch computer",
@@ -863,6 +867,10 @@ export const zh: Record<ImportLocaleKey, string> = {
   "discovery.empty": "未提供原生命令。",
   "discovery.retry": "重试原生命令目录",
   "discovery.failed": "原生命令目录不可用：",
+  "mentions.title": "扩展提及",
+  "mentions.failed": "扩展提及搜索失败",
+  "mentions.retry": "重试扩展提及",
+  "mentions.unavailable": "扩展提及不可用：",
 
   remoteAccess: "远程访问",
   "android.switchHost": "切换电脑",

@@ -301,6 +301,7 @@ export function createFixture(
     onCreateRequestRoute?: AppServerHostOptions["onCreateRequestRoute"];
     modelPrices?: AppServerHostOptions["modelPrices"];
     usageStatistics?: AppServerHostOptions["usageStatistics"];
+    hostExtensions?: AppServerHostOptions["hostExtensions"];
   } = {},
 ) {
   const adapter =
@@ -383,6 +384,7 @@ export function createFixture(
     ...(options.webOpener ? { webOpener: options.webOpener } : {}),
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.usageStatistics ? { usageStatistics: options.usageStatistics } : {}),
+    ...(options.hostExtensions ? { hostExtensions: options.hostExtensions } : {}),
     ...(options.accountControl ? { accountControl: options.accountControl } : {}),
     ...(options.officialRuntimeScope ? { officialRuntimeScope: options.officialRuntimeScope } : {}),
     ...(options.onDelegationApi ? { onDelegationApi: options.onDelegationApi } : {}),

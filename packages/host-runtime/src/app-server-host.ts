@@ -61,6 +61,7 @@ import {
 } from "@codexhost/shared-contracts";
 import {
   DELEGATION_MENTION_PATH_PREFIX,
+  hasHostExtensionMentionToken,
   IDLE_RELEASE_SETTINGS_METHOD,
   restoreHarnessCommandMentions,
   LOADED_SESSIONS_METHOD,
@@ -1013,6 +1014,7 @@ export class AppServerHost {
       loadedThread: (threadId) => this.#externalRuntime?.get(threadId),
       clientHistoryTurns: (thread) => this.#externalHistoryTurns(thread, true),
       queueSnapshot: (threadId) => this.#externalQueue.snapshot(threadId),
+      expandMentionTexts: (texts) => this.#expandHostExtensionMentionTexts(texts),
       ...(this.#options.externalOnly
         ? {
             native: {
@@ -2256,10 +2258,80 @@ export class AppServerHost {
       return;
     }
     if (await this.#threadRouting.handle(request, frame, origin)) return;
-    await this.#forwardOfficialRequest(
-      request,
-      await this.#rewriteOfficialDelegationMentions(request, frame),
+    const rewritten = await this.#rewriteOfficialInputMentions(request, frame);
+    if ("error" in rewritten) {
+      await this.#writer.json(rpcError(request, -32074, rewritten.error));
+      return;
+    }
+    await this.#forwardOfficialRequest(request, rewritten.frame);
+  }
+
+  /** Expand extension carriers before native Codex sees the Turn. */
+  async #rewriteOfficialInputMentions(
+    request: JsonRpcRequest,
+    frame: Buffer<ArrayBufferLike>,
+  ): Promise<{ frame: Buffer<ArrayBufferLike> } | { error: string }> {
+    if (request.method !== "turn/start" && request.method !== "turn/steer") return { frame };
+    if (!isRecord(request.params) || !Array.isArray(request.params.input)) return { frame };
+    try {
+      const input = request.params.input as JsonValue[];
+      const textIndexes = input.flatMap((item, index) =>
+        isRecord(item) && item.type === "text" && typeof item.text === "string" ? [index] : [],
+      );
+      const texts = textIndexes.map((index) => {
+        const item = input[index];
+        return isRecord(item) && typeof item.text === "string" ? item.text : "";
+      });
+      const expanded = await this.#expandHostExtensionMentionTexts(texts);
+      let nextInput = input;
+      if (expanded.some((text, index) => text !== texts[index])) {
+        nextInput = [...input];
+        for (const [position, index] of textIndexes.entries()) {
+          const item = input[index];
+          if (isRecord(item))
+            nextInput[index] = { ...item, text: expanded[position] } as JsonObject;
+        }
+      }
+      const rewrittenRequest =
+        nextInput === input
+          ? request
+          : ({
+              ...request,
+              params: { ...request.params, input: nextInput },
+            } as unknown as JsonRpcRequest);
+      const rewrittenFrame =
+        nextInput === input ? frame : encodeJsonFrame(rewrittenRequest as unknown as JsonObject);
+      return {
+        frame: await this.#rewriteOfficialDelegationMentions(rewrittenRequest, rewrittenFrame),
+      };
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  async #expandHostExtensionMentionTexts(texts: readonly string[]): Promise<string[]> {
+    if (!texts.some(hasHostExtensionMentionToken)) return [...texts];
+    if (!this.hostExtensions)
+      throw new Error(
+        "Host extension mentions are unavailable on this Host. The message was not sent.",
+      );
+    return this.hostExtensions.expandMentionTexts(texts);
+  }
+
+  async #expandHostExtensionInput(input: JsonObject[]): Promise<JsonObject[]> {
+    const textIndexes = input.flatMap((item, index) =>
+      item.type === "text" && typeof item.text === "string" ? [index] : [],
     );
+    const texts = textIndexes.map((index) => {
+      const item = input[index];
+      return item?.type === "text" && typeof item.text === "string" ? item.text : "";
+    });
+    const expanded = await this.#expandHostExtensionMentionTexts(texts);
+    if (!expanded.some((text, index) => text !== texts[index])) return input;
+    const output = [...input];
+    for (const [position, index] of textIndexes.entries())
+      output[index] = { ...input[index], text: expanded[position] } as JsonObject;
+    return output;
   }
 
   /** Native Codex Turns: turn `#` delegation chips into an explicit Skill-backed request. */
@@ -5872,9 +5944,11 @@ export class AppServerHost {
     }
     let text: string;
     try {
-      params.input = await materializeExternalImages(
-        requestInput(params),
-        this.#options.environment ?? process.env,
+      params.input = await this.#expandHostExtensionInput(
+        await materializeExternalImages(
+          requestInput(params),
+          this.#options.environment ?? process.env,
+        ),
       );
       text = requestText(params);
     } catch (error) {
@@ -5992,9 +6066,11 @@ export class AppServerHost {
         return;
       }
       if (request.method === "thread/queue/add") {
-        params.input = await materializeExternalImages(
-          requestInput(params),
-          this.#options.environment ?? process.env,
+        params.input = await this.#expandHostExtensionInput(
+          await materializeExternalImages(
+            requestInput(params),
+            this.#options.environment ?? process.env,
+          ),
         );
         requestText(params);
         const startIfEmpty =
@@ -6041,9 +6117,11 @@ export class AppServerHost {
       }
       if (!itemId) throw new ExternalSteerError(-32602, "Queued submission identity is required");
       if (request.method === "thread/queue/update") {
-        params.input = await materializeExternalImages(
-          requestInput(params),
-          this.#options.environment ?? process.env,
+        params.input = await this.#expandHostExtensionInput(
+          await materializeExternalImages(
+            requestInput(params),
+            this.#options.environment ?? process.env,
+          ),
         );
         requestText(params);
         this.#assertQueuedExternalItemUnclaimed(thread.id, itemId);
@@ -6219,9 +6297,11 @@ export class AppServerHost {
       throw new DelegationControlError("THREAD_BUSY", "Thread is not ready for steering");
     }
     try {
+      const expanded = (await this.#expandHostExtensionMentionTexts([text]))[0];
+      if (expanded === undefined) throw new Error("Host extension mention expansion is missing");
       const started = await this.#externalSteering.run(
         thread,
-        { expectedTurnId: thread.activeTurnId, input: [{ type: "text", text }] },
+        { expectedTurnId: thread.activeTurnId, input: [{ type: "text", text: expanded }] },
         (replacementText, assertActive) =>
           this.#beginExternalInputTurn(thread, replacementText, assertActive, undefined, true),
         (input) => this.#insertExternalInput(thread, input),
@@ -6289,9 +6369,11 @@ export class AppServerHost {
         };
       }
       try {
-        params.input = await materializeExternalImages(
-          requestInput(params),
-          this.#options.environment ?? process.env,
+        params.input = await this.#expandHostExtensionInput(
+          await materializeExternalImages(
+            requestInput(params),
+            this.#options.environment ?? process.env,
+          ),
         );
       } catch (error) {
         throw new ExternalSteerError(-32602, errorMessage(error));
@@ -6407,7 +6489,9 @@ export class AppServerHost {
     publishInput = false,
     sourceHostId?: unknown,
   ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
-    const text = restoreHarnessCommandMentions(inputText);
+    const expanded = (await this.#expandHostExtensionMentionTexts([inputText]))[0];
+    if (expanded === undefined) throw new Error("Host extension mention expansion is missing");
+    const text = restoreHarnessCommandMentions(expanded);
     const commands = thread.session.commands;
     if (!commands || !isExternalCommandCandidate(text)) {
       assertActive?.();

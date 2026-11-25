@@ -30,6 +30,11 @@ import {
   type HOST_EXTENSIONS_RPC as RPC,
 } from "@codexhost/shared-contracts";
 import { errorMessage } from "./desktop-rpc.js";
+import {
+  HostExtensionMentions,
+  type HostExtensionMentionBackend,
+  type HostExtensionMentionBackendResolution,
+} from "./host-extension-mentions.js";
 
 type Valid = Extract<HostExtensionListItem, { state: "valid" }>;
 type Instance = {
@@ -49,12 +54,19 @@ export class HostExtensionManager {
   #startup: Promise<void> | undefined;
   #closing: Promise<void> | undefined;
   #revision = 0;
+  readonly #mentions: HostExtensionMentions;
 
   constructor(
     private readonly dataDir: string,
     private readonly changed: (revision: number) => void,
     private readonly diagnose: (message: string) => void = () => undefined,
-  ) {}
+  ) {
+    this.#mentions = new HostExtensionMentions({
+      listBackends: () => this.#listMentionBackends(),
+      resolveBackend: (id) => this.#resolveMentionBackend(id),
+      diagnose: (message) => this.diagnose(message),
+    });
+  }
 
   start(): Promise<void> {
     if (this.#closing) return this.#closing;
@@ -320,6 +332,18 @@ export class HostExtensionManager {
     return pending;
   }
 
+  searchMentions(input: HostExtensionsRpcParams<typeof RPC.mentionsSearch>) {
+    return this.#mentions.search(input);
+  }
+
+  cancelMentionSearch(input: HostExtensionsRpcParams<typeof RPC.mentionsCancel>) {
+    return this.#mentions.cancel(input);
+  }
+
+  expandMentionTexts(texts: readonly string[]): Promise<string[]> {
+    return this.#mentions.expandTexts(texts);
+  }
+
   async #location({ id, activationId }: HostExtensionsRpcParams<typeof RPC.settingsGet>) {
     const location = { dataDir: this.dataDir, id };
     const entry = await readHostExtension(location);
@@ -327,6 +351,74 @@ export class HostExtensionManager {
     if (activationId !== undefined && activationId !== entry.activationId)
       throw new HostExtensionInstallConflict("Extension activation changed");
     return { ...location, activationId: entry.activationId };
+  }
+
+  async #listMentionBackends(): Promise<HostExtensionMentionBackend[]> {
+    return this.#run(async () => {
+      const { installations, configuration } = await discoverHostExtensions(this.dataDir);
+      return installations.flatMap((entry) => {
+        if (
+          !configuration.enabled.includes(entry.id) ||
+          !entry.manifest.backend ||
+          !entry.manifest.mentions
+        )
+          return [];
+        const instance = this.#instances.get(entry.id);
+        if (
+          instance?.activationId !== entry.activationId ||
+          instance.state !== "running" ||
+          !instance.process
+        )
+          return [];
+        return [this.#mentionBackend(entry.id, entry.manifest.mentions.sources, instance)];
+      });
+    });
+  }
+
+  async #resolveMentionBackend(id: string): Promise<HostExtensionMentionBackendResolution> {
+    return this.#run(async () => {
+      const { installations, extensions, configuration } = await discoverHostExtensions(
+        this.dataDir,
+      );
+      const entry = installations.find((installation) => installation.id === id);
+      if (!entry) {
+        const invalid = extensions.find(
+          (extension) => extension.id === id && extension.state !== "valid",
+        );
+        return {
+          error: invalid ? `extension "${id}" is invalid` : `extension "${id}" is not installed`,
+        };
+      }
+      if (!configuration.enabled.includes(id)) return { error: `extension "${id}" is disabled` };
+      if (!entry.manifest.mentions)
+        return { error: `extension "${id}" does not declare mention sources` };
+      const instance = this.#instances.get(id);
+      if (
+        instance?.activationId !== entry.activationId ||
+        instance.state !== "running" ||
+        !instance.process
+      )
+        return { error: `extension "${id}" backend is not running` };
+      return {
+        backend: this.#mentionBackend(id, entry.manifest.mentions.sources, instance),
+      };
+    });
+  }
+
+  #mentionBackend(
+    id: string,
+    sources: NonNullable<HostExtensionDiskInstallation["manifest"]["mentions"]>["sources"],
+    instance: Instance,
+  ): HostExtensionMentionBackend {
+    return {
+      id,
+      sources,
+      invoke: (method, params) => {
+        if (instance.state !== "running" || !instance.process)
+          throw new Error(`extension "${id}" backend is not running`);
+        return instance.process.invoke(method, params);
+      },
+    };
   }
 
   async #startBackend({
