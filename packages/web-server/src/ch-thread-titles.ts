@@ -34,20 +34,18 @@ export async function tryGenerateThreadTitle(
   if (!input || !isCurrent() || (external && expectedName)) return false;
   let generated: string | null;
   try {
-    // Mention titles preserve exactly the user-facing first message. This also gives native
-    // Codex a title when its optional title model is unavailable in an isolated/offline Host.
-    generated = hasMentions
-      ? firstPromptTitle(input)
-      : threadTitleResultSchema.parse(
-          await host.request("codexhost/thread/title/generate", {
-            prompt: input,
-            cwd: row.cwd || null,
-          }),
-        );
+    generated = threadTitleResultSchema.parse(
+      await host.request("codexhost/thread/title/generate", {
+        prompt: input,
+        cwd: row.cwd || null,
+      }),
+    );
   } catch {
     generated = null;
   }
-  const title = generated ?? (external ? firstPromptTitle(input) : null);
+  // A native thread's own preview is the expanded mention context, so a message with mentions
+  // falls back to its user-facing text (labels plus the user's words) when no title is generated.
+  const title = generated ?? (external || hasMentions ? firstPromptTitle(input) : null);
   if (!title || !isCurrent()) return false;
   try {
     const { thread } = await host.request<{ thread: ChThread }>("thread/read", {
