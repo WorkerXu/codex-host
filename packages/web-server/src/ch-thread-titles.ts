@@ -1,6 +1,7 @@
 import {
   THREAD_NAME_AUTO_SOURCE_PARAM,
   threadTitleResultSchema,
+  parseHostExtensionMentions,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 import type { ChThread } from "./ch-thread-view.ts";
@@ -19,16 +20,30 @@ export async function tryGenerateThreadTitle(
   isCurrent: () => boolean,
 ): Promise<boolean> {
   const expectedName = row.name ?? "";
-  const input = prompt.trim().slice(0, 2000);
+  const parsed = parseHostExtensionMentions(prompt);
+  // Keep the whole carrier until parsing completes; a bounded title input may cut its payload.
+  let cursor = 0;
+  let display = "";
+  for (const mention of parsed.mentions) {
+    display += prompt.slice(cursor, mention.start) + `@${mention.label}`;
+    cursor = mention.end;
+  }
+  display += prompt.slice(cursor);
+  const input = display.trim().slice(0, 2000);
+  const hasMentions = parsed.mentions.length > 0 && !parsed.invalid;
   if (!input || !isCurrent() || (external && expectedName)) return false;
   let generated: string | null;
   try {
-    generated = threadTitleResultSchema.parse(
-      await host.request("codexhost/thread/title/generate", {
-        prompt: input,
-        cwd: row.cwd || null,
-      }),
-    );
+    // Mention titles preserve exactly the user-facing first message. This also gives native
+    // Codex a title when its optional title model is unavailable in an isolated/offline Host.
+    generated = hasMentions
+      ? firstPromptTitle(input)
+      : threadTitleResultSchema.parse(
+          await host.request("codexhost/thread/title/generate", {
+            prompt: input,
+            cwd: row.cwd || null,
+          }),
+        );
   } catch {
     generated = null;
   }
