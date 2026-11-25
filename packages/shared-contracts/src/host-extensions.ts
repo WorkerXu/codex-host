@@ -78,6 +78,7 @@ export const hostExtensionMentionLabelSchema = mentionText(256);
 export const hostExtensionMentionSourceSchema = z.strictObject({
   id: hostExtensionMentionSourceIdSchema,
   label: localized(128, 1),
+  picker: z.boolean().optional(),
 });
 export type HostExtensionMentionSource = z.infer<typeof hostExtensionMentionSourceSchema>;
 export const hostExtensionMentionManifestSchema = z
@@ -99,6 +100,7 @@ export const hostExtensionMentionSearchParamsSchema = z.strictObject({
   sourceId: hostExtensionMentionSourceIdSchema,
   query: z.string().max(HOST_EXTENSION_MENTION_MAX_QUERY_CHARS),
   limit: z.int().min(1).max(HOST_EXTENSION_MENTION_MAX_RESULTS),
+  cursor: mentionText(2048).optional(),
 });
 export const hostExtensionMentionCandidateSchema = z.strictObject({
   itemId: hostExtensionMentionItemIdSchema,
@@ -106,9 +108,17 @@ export const hostExtensionMentionCandidateSchema = z.strictObject({
   description: z.string().trim().max(1024).optional(),
 });
 export type HostExtensionMentionCandidate = z.infer<typeof hostExtensionMentionCandidateSchema>;
-export const hostExtensionMentionSearchResultSchema = z.strictObject({
-  items: z.array(hostExtensionMentionCandidateSchema).max(HOST_EXTENSION_MENTION_MAX_RESULTS),
-});
+export const hostExtensionMentionSearchResultSchema = z.union([
+  z.strictObject({
+    items: z.array(hostExtensionMentionCandidateSchema).max(HOST_EXTENSION_MENTION_MAX_RESULTS),
+  }),
+  z.strictObject({
+    pending: z.strictObject({
+      cursor: mentionText(2048),
+      retryAfterMs: z.int().min(100).max(5000).optional(),
+    }),
+  }),
+]);
 export const hostExtensionMentionCancelParamsSchema = z.strictObject({ requestId: z.uuid() });
 export const hostExtensionMentionCancelResultSchema = z.strictObject({ cancelled: z.boolean() });
 const mentionExpansionRequestSchema = z.strictObject({
@@ -301,6 +311,14 @@ export const hostExtensionManifestV2Schema = z
     path: ["mentions"],
     message: "Mention sources require a backend entry",
   })
+  .refine(
+    ({ web, mentions }) =>
+      !mentions?.sources.some((source) => source.picker) || Boolean(web?.entry),
+    {
+      path: ["mentions"],
+      message: "Mention pickers require a Web entry",
+    },
+  )
   .refine(
     ({ page, widget, web, backend }) =>
       !backend ||

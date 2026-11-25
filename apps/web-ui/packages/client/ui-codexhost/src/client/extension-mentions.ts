@@ -81,12 +81,15 @@ export function registerExtensionMentions(ctx: Context): void {
           let sent = false;
           try {
             sent = true;
-            const result = await searchHostExtensionMentions(
-              { requestId, query: req.query.trim(), limit: 20 },
-              req.signal,
-            );
+            const input = { requestId, query: req.query.trim(), limit: 20 };
+            let result = await searchHostExtensionMentions(input, req.signal);
+            while (result.pending && !req.signal.aborted) {
+              await debounceAbortable(req.signal, SEARCH_DEBOUNCE_MS);
+              result = await searchHostExtensionMentions(input, req.signal);
+            }
             if (req.signal.aborted) return [];
-            const locale = ctx.locale.getLocale().active;
+            const activeLocale = ctx.locale.getLocale().active;
+            const locale = activeLocale.toLowerCase().startsWith("zh") ? "zh-CN" : activeLocale;
             const rows: InputTriggerCandidate[] = [];
             for (const group of result.groups) {
               const section = resolveLocalizedExtensionText(group.label, locale);

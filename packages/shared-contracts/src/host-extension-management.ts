@@ -242,6 +242,7 @@ export const hostExtensionMentionGroupSchema = z.strictObject({
 export type HostExtensionMentionGroup = z.infer<typeof hostExtensionMentionGroupSchema>;
 export const hostExtensionsMentionSearchResultSchema = z.strictObject({
   groups: z.array(hostExtensionMentionGroupSchema),
+  pending: z.literal(true).optional(),
 });
 
 export const HOST_EXTENSIONS_RPC = {

@@ -17,6 +17,7 @@ import {
   hostExtensionListItemSchema,
   hostExtensionManifestV2Schema,
   hostExtensionMentionSearchParamsSchema,
+  hostExtensionMentionSearchResultSchema,
   hostExtensionTargets,
   hostExtensionsRpcSchemas,
   isHostExtensionManagementMethod,
@@ -300,4 +301,39 @@ it("validates install sources, asset refs, settings revisions, and backend JSON"
   ).toBe(true);
   expect(HOST_EXTENSION_PAGE_API_VERSION).toBe(1);
   expect(Object.values(HOST_EXTENSION_PAGE_CSS_VARIABLES)).toHaveLength(8);
+});
+
+it("validates picker declarations and bounded continuation envelopes", () => {
+  const picker = { ...mentions, sources: [{ id: "demo", label: localized, picker: true }] };
+  expect(parseHostExtensionManifest({ ...header, backend, mentions: picker }).state).toBe(
+    "invalid",
+  );
+  expect(
+    parseHostExtensionManifest({
+      ...header,
+      backend,
+      web: { apiVersion: 1, entry: "web.mjs" },
+      mentions: picker,
+    }).state,
+  ).toBe("valid");
+  expect(
+    hostExtensionMentionSearchResultSchema.parse({
+      pending: { cursor: "job-1", retryAfterMs: 250 },
+    }),
+  ).toEqual({ pending: { cursor: "job-1", retryAfterMs: 250 } });
+  for (const result of [
+    { pending: { cursor: "" } },
+    { pending: { cursor: "job", retryAfterMs: 0 } },
+    { pending: { cursor: "job" }, items: [] },
+  ])
+    expect(hostExtensionMentionSearchResultSchema.safeParse(result).success).toBe(false);
+  expect(
+    hostExtensionMentionSearchParamsSchema.parse({
+      requestId: "00000000-0000-4000-8000-000000000000",
+      sourceId: "demo",
+      query: "",
+      limit: 20,
+      cursor: "job-1",
+    }).cursor,
+  ).toBe("job-1");
 });

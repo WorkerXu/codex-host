@@ -5,7 +5,6 @@ import {
   HOST_EXTENSION_MENTION_MAX_TOTAL_EXPANDED_CHARS,
   HOST_EXTENSION_MENTION_SEARCH_METHOD,
   HOST_EXTENSIONS_RPC as RPC,
-  hostExtensionMentionCancelResultSchema,
   hostExtensionMentionExpandResultSchema,
   hostExtensionMentionSearchResultSchema,
   parseHostExtensionMentions,
@@ -15,8 +14,6 @@ import {
   type HostExtensionsRpcResult,
 } from "@codexhost/shared-contracts";
 import { errorMessage } from "./desktop-rpc.js";
-
-const DEFAULT_SEARCH_TIMEOUT_MS = 3_000;
 
 export interface HostExtensionMentionBackend {
   readonly id: string;
@@ -31,10 +28,8 @@ export interface HostExtensionMentionsOptions {
   listBackends(): Promise<readonly HostExtensionMentionBackend[]>;
   resolveBackend(id: string): Promise<HostExtensionMentionBackendResolution>;
   diagnose(message: string): void;
-  searchTimeoutMs?: number;
 }
 
-class MentionSearchTimeoutError extends Error {}
 class MentionExpansionError extends Error {}
 
 function mentionKey(mention: Pick<HostExtensionMentionToken, "sourceId" | "itemId">): string {
@@ -51,60 +46,112 @@ function describeMention(mention: Pick<HostExtensionMentionToken, "label">): str
  */
 export class HostExtensionMentions {
   readonly #options: HostExtensionMentionsOptions;
-  readonly #searchTimeoutMs: number;
+  readonly #searches = new Map<
+    string,
+    {
+      controller: AbortController;
+      query: string;
+      limit: number;
+      result?: HostExtensionsRpcResult<typeof RPC.mentionsSearch>;
+      failure?: { error: unknown };
+    }
+  >();
 
   constructor(options: HostExtensionMentionsOptions) {
     this.#options = options;
-    this.#searchTimeoutMs = options.searchTimeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS;
   }
 
   async search(
     input: HostExtensionsRpcParams<typeof RPC.mentionsSearch>,
   ): Promise<HostExtensionsRpcResult<typeof RPC.mentionsSearch>> {
+    let reply = this.#searches.get(input.requestId);
+    if (reply) {
+      if (reply.query !== input.query || reply.limit !== (input.limit ?? 20))
+        throw new Error("A mention requestId cannot be reused for a different search");
+      if (reply.failure) {
+        this.#searches.delete(input.requestId);
+        throw reply.failure.error;
+      }
+      if (reply.result) {
+        this.#searches.delete(input.requestId);
+        return reply.result;
+      }
+    } else {
+      reply = { controller: new AbortController(), query: input.query, limit: input.limit ?? 20 };
+      this.#searches.set(input.requestId, reply);
+      const current = reply;
+      void this.#runSearch(input, reply.controller.signal).then(
+        (result) => {
+          current.result = result;
+        },
+        (error: unknown) => {
+          current.failure = { error };
+        },
+      );
+    }
+    // Each HTTP/RPC call returns promptly, including searches longer than the channel deadline.
+    return { groups: [], pending: true };
+  }
+
+  async #runSearch(
+    input: HostExtensionsRpcParams<typeof RPC.mentionsSearch>,
+    signal: AbortSignal,
+  ): Promise<HostExtensionsRpcResult<typeof RPC.mentionsSearch>> {
     const backends = await this.#options.listBackends();
+    if (signal.aborted) return { groups: [] };
     const groups = await Promise.all(
       backends.flatMap((backend) =>
-        backend.sources.map(async (source) => {
-          try {
-            const result = hostExtensionMentionSearchResultSchema.parse(
-              await this.#withTimeout(
-                backend.invoke(HOST_EXTENSION_MENTION_SEARCH_METHOD, {
-                  requestId: input.requestId,
-                  sourceId: source.id,
-                  query: input.query,
-                  limit: input.limit ?? 20,
-                }),
-                this.#searchTimeoutMs,
-              ),
-            );
-            return {
-              extensionId: backend.id,
-              sourceId: source.id,
-              label: source.label,
-              items: result.items.slice(0, input.limit ?? 20),
-            };
-          } catch (error) {
-            if (error instanceof MentionSearchTimeoutError) {
-              this.#cancelSearch(backend, input.requestId);
-              return undefined;
+        backend.sources
+          .filter((source) => !source.picker)
+          .map(async (source) => {
+            try {
+              let cursor: string | undefined;
+              while (!signal.aborted) {
+                const result = hostExtensionMentionSearchResultSchema.parse(
+                  await this.#untilCancelled(
+                    backend.invoke(HOST_EXTENSION_MENTION_SEARCH_METHOD, {
+                      requestId: input.requestId,
+                      sourceId: source.id,
+                      query: input.query,
+                      limit: input.limit ?? 20,
+                      ...(cursor === undefined ? {} : { cursor }),
+                    }),
+                    signal,
+                  ),
+                );
+                if (signal.aborted) return undefined;
+                if ("items" in result)
+                  return {
+                    extensionId: backend.id,
+                    sourceId: source.id,
+                    label: source.label,
+                    items: result.items.slice(0, input.limit ?? 20),
+                  };
+                cursor = result.pending.cursor;
+                await this.#pause(result.pending.retryAfterMs ?? 250, signal);
+              }
+            } catch (error) {
+              if (signal.aborted) return undefined;
+              return {
+                extensionId: backend.id,
+                sourceId: source.id,
+                label: source.label,
+                items: [],
+                error: errorMessage(error).slice(0, 2048),
+              };
             }
-            return {
-              extensionId: backend.id,
-              sourceId: source.id,
-              label: source.label,
-              items: [],
-              error: errorMessage(error).slice(0, 2048),
-            };
-          }
-        }),
+            return undefined;
+          }),
       ),
     );
-    return { groups: groups.filter((group) => group !== undefined) };
+    return { groups: signal.aborted ? [] : groups.filter((group) => group !== undefined) };
   }
 
   async cancel(
     input: HostExtensionsRpcParams<typeof RPC.mentionsCancel>,
   ): Promise<HostExtensionsRpcResult<typeof RPC.mentionsCancel>> {
+    this.#searches.get(input.requestId)?.controller.abort();
+    this.#searches.delete(input.requestId);
     const backends = await this.#options.listBackends();
     await Promise.allSettled(
       backends.map((backend) =>
@@ -215,34 +262,33 @@ export class HostExtensionMentions {
     return output;
   }
 
-  #cancelSearch(backend: HostExtensionMentionBackend, requestId: string): void {
-    try {
-      void backend
-        .invoke(HOST_EXTENSION_MENTION_CANCEL_METHOD, { requestId })
-        .then((value) => hostExtensionMentionCancelResultSchema.parse(value))
-        .catch((error: unknown) =>
-          this.#options.diagnose(
-            `Host extension mention search cancel (${backend.id}): ${errorMessage(error)}`,
-          ),
-        );
-    } catch (error) {
-      this.#options.diagnose(
-        `Host extension mention search cancel (${backend.id}): ${errorMessage(error)}`,
-      );
-    }
-  }
-
-  async #withTimeout<T>(pending: Promise<T>, timeoutMs: number): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  async #untilCancelled<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+    signal.throwIfAborted();
+    let abort: () => void = () => undefined;
     try {
       return await Promise.race([
         pending,
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new MentionSearchTimeoutError()), timeoutMs);
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
         }),
       ]);
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    }
+  }
+
+  async #pause(milliseconds: number, signal: AbortSignal): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await this.#untilCancelled(
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, milliseconds);
+        }),
+        signal,
+      );
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

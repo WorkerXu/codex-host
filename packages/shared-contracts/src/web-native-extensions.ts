@@ -3,6 +3,7 @@ import {
   desktopExtensionLocalizedTextSchema,
   type DesktopExtensionDispose,
 } from "./desktop-extensions.js";
+import type { HostExtensionMentionCandidate } from "./host-extensions.js";
 import type { JsonObject, JsonValue } from "./json-value.js";
 
 export const WEB_EXTENSION_REGIONS = ["app", "topbar", "sidebar", "conversation"] as const;
@@ -35,6 +36,22 @@ export type WebExtensionPanel = WebExtensionContribution &
     | { placement: "main"; groupId: string; badgeCount?: number }
   );
 
+export interface WebExtensionMentionPickerApi {
+  readonly sourceId: string;
+  /** Include this UUID in background jobs; the Host sends mentions/cancel on close. */
+  readonly requestId: string;
+  readonly initialQuery: string;
+  readonly signal: AbortSignal;
+  /** Atomically insert one or more mentions from this source; false if the draft is stale. */
+  insert(items: readonly HostExtensionMentionCandidate[]): boolean;
+  close(): void;
+}
+export type WebExtensionMentionPickerRender = (
+  container: HTMLElement,
+  api: WebExtensionMentionPickerApi,
+  /* eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- A picker may not need a disposer. */
+) => void | WebExtensionDispose | Promise<void | WebExtensionDispose>;
+
 export interface WebExtensionApi {
   readonly id: string;
   readonly signal: AbortSignal;
@@ -56,6 +73,9 @@ export interface WebExtensionApi {
     onChange(listener: (values: JsonObject) => void): () => void;
   };
   backend: { invoke(method: string, params?: JsonValue): Promise<JsonValue> };
+  mentions: {
+    registerPicker(sourceId: string, render: WebExtensionMentionPickerRender): () => void;
+  };
   settings: { registerPage(page: WebExtensionContribution): () => void };
   panels: {
     registerGroup(group: WebExtensionPanelGroup): () => void;

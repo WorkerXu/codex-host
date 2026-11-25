@@ -16,6 +16,7 @@ import {
   type WebExtensionMount,
   type WebExtensionRegion,
 } from "@codexhost/shared-contracts";
+import { registerMentionPicker } from "./mention-picker.ts";
 import { ExtensionContributionRegistry } from "./contributions.ts";
 import type { WebNativeExtensionRpcClient } from "./rpc.ts";
 
@@ -303,6 +304,25 @@ export function createWebExtensionApi(
         const result = await rpc.backendInvoke(id, activationId, method, params, controller.signal);
         guard();
         return result;
+      },
+    },
+    mentions: {
+      registerPicker(sourceId, render) {
+        guard();
+        const dispose = registerMentionPicker(
+          ctx,
+          doc,
+          entry,
+          sourceId,
+          render,
+          controller.signal,
+          rpc,
+        );
+        trackedDisposers.add(dispose);
+        return () => {
+          trackedDisposers.delete(dispose);
+          dispose();
+        };
       },
     },
     settings: {

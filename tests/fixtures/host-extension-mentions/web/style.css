@@ -1,0 +1,64 @@
+.mention-demo header,
+.mention-demo footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mention-demo header .step,
+.mention-demo footer span {
+  flex: 1;
+  color: var(--cx-page-text-muted);
+  font-size: 12px;
+}
+.mention-demo button,
+.mention-demo input {
+  font: inherit;
+  color: var(--cx-page-text);
+  border: 1px solid var(--cx-page-border);
+  border-radius: var(--cx-page-radius);
+  background: var(--cx-page-surface);
+  padding: 8px 12px;
+}
+.mention-demo input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.mention-demo button {
+  cursor: pointer;
+}
+.mention-demo button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mention-demo button:hover,
+.mention-demo [aria-selected="true"] {
+  background: var(--cx-page-surface);
+  border-color: var(--cx-page-accent);
+}
+.mention-demo button:focus-visible,
+.mention-demo input:focus-visible {
+  outline: 2px solid var(--cx-page-accent);
+  outline-offset: 2px;
+}
+.mention-demo [role="status"] {
+  color: var(--cx-page-text-muted);
+  margin: 0;
+  font-size: 12px;
+}
+.mention-demo .results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  min-height: 48px;
+}
+.mention-demo .results button {
+  text-align: left;
+}
+.mention-demo .chips button {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.mention-demo [hidden] {
+  display: none;
+}

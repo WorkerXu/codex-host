@@ -23,7 +23,28 @@
           "en": "Demo mentions",
           "zh-CN": "示例提及"
         }
+      },
+      {
+        "id": "two-step",
+        "label": {
+          "en": "Two-step picker",
+          "zh-CN": "两步选择"
+        },
+        "picker": true
+      },
+      {
+        "id": "multi",
+        "label": {
+          "en": "Multiple mentions",
+          "zh-CN": "多选提及"
+        },
+        "picker": true
       }
     ]
+  },
+  "web": {
+    "apiVersion": 1,
+    "entry": "web/index.mjs",
+    "style": "web/style.css"
   }
 }

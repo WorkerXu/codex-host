@@ -1,0 +1,17 @@
+.panel {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  gap: 12px;
+  color: var(--cx-page-text);
+  background: var(--cx-page-bg);
+  border: 1px solid var(--cx-page-border);
+  border-radius: var(--cx-page-radius);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-size: 14px;
+  outline: none;
+}

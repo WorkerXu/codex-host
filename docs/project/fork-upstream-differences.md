@@ -14,7 +14,7 @@ rc.1 新增的 Linux `.tar.gz` 更新同样经过 Host／Console 的更新协调
 
 ## Web 扩展提及
 
-Host 扩展清单可声明 `mentions` 来源，后端提供 `mentions/search`、`mentions/cancel` 和 `mentions/expand`。Web 的 `@` 菜单按来源分组展示候选，插入带扩展、来源、条目和显示名的 Markdown 提及记号；原生 Codex 与外部 Harness 的发送都由 Host 在提交前调用对应后端，将记号整体替换为文字。
+Host 扩展清单可声明 `mentions` 来源；`picker: true` 由扩展的 `web` 入口注册自绘浮层，支持同面板两步选择及原子批量插入。平铺来源保持兼容，搜索没有总时限，通过 `pending.cursor` 进行短调用续查，输入变化或关闭菜单会取消后台工作。每次后端处理必须在几秒内返回，上游 10 秒强杀规则保持不变。后端提供 `mentions/search`、`mentions/cancel` 和 `mentions/expand`。Web 的 `@` 菜单按来源分组展示候选，插入带扩展、来源、条目和显示名的 Markdown 提及记号；原生 Codex 与外部 Harness 的发送都由 Host 在提交前调用对应后端，将记号整体替换为文字。
 
 该能力只注册在 Web 输入框，Desktop 渲染层保持上游原样。扩展停用、卸载、后端不可用、展开失败或超过大小上限时整轮发送失败并保留草稿，不会发送原始记号或部分内容。Peer Hub 远程 Thread 不使用此能力。契约、token 格式和限制见 [`desktop-ui-extensions.md`](../architecture/desktop-ui-extensions.md#web-扩展提及mentions)。
 

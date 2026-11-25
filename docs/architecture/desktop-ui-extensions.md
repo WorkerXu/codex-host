@@ -163,8 +163,8 @@ Web 与 `web` 入口共用 `extensions-changed` 订阅和快照对账；Desktop 
     "apiVersion": 1,
     "sources": [
       {
-        "id": "bugs",
-        "label": { "en": "Jarvis bugs", "zh-CN": "Jarvis Bug" }
+        "id": "issues",
+        "label": { "en": "Issues", "zh-CN": "问题" }
       }
     ]
   }
@@ -172,22 +172,60 @@ Web 与 `web` 入口共用 `extensions-changed` 订阅和快照对账；Desktop 
 ```
 
 - `sources` 是搜索与分组的边界；Web 菜单按 `label` 显示分组。
-- 同一扩展的 `id` 不得重复；扩展停用、卸载、清单无效或后端未运行时，其来源不会出现在菜单中。
+- 同一扩展内的来源 `id` 不得重复；扩展停用、卸载或清单无效时，来源不会出现在菜单中。平铺来源还要求后端处于运行状态；picker 的后端故障由面板显示并提供重试。
 - 声明 `mentions` 时 `backend` 必须存在，否则清单无效。
+- 来源可增加 `picker: true`。这表示由扩展自己的 Web 面板选取条目，清单必须同时提供 `web.entry`；省略或设为 `false` 继续使用平铺搜索。只有在 `web.activate()` 中成功注册的 picker 才显示菜单入口。Host 的平铺搜索跳过 picker 来源，不会为它自动调用后端。
 
 ### 后端方法
 
-扩展后端用 `ctx.handle` 注册三个固定方法：
+平铺来源的扩展后端用 `ctx.handle` 注册以下固定方法；picker 可以使用自定义开始／续查方法，但仍实现 `mentions/cancel` 和 `mentions/expand`：
 
 | 方法 | 参数 | 返回 |
 | --- | --- | --- |
-| `mentions/search` | `{ requestId, sourceId, query, limit }` | `{ items: [{ itemId, label, description? }] }`，最多 `limit` 条（Host 上限 50，Web 传 20）。 |
+| `mentions/search` | `{ requestId, sourceId, query, limit, cursor? }` | `{ items: [{ itemId, label, description? }] }` 或 `{ pending: { cursor, retryAfterMs? } }`，最多 `limit` 条（Host 上限 50，Web 传 20）。 |
 | `mentions/cancel` | `{ requestId }` | `{ cancelled: boolean }`。取消进行中的搜索，可忽略已完成的请求。 |
 | `mentions/expand` | `{ mentions: [{ sourceId, itemId, label }] }` | `{ expansions: [{ sourceId, itemId, text }] }`，必须覆盖每个唯一 `(sourceId, itemId)`，不能返回额外项。 |
 
-- `requestId` 为 UUID；Web 在查询变化或菜单关闭时先防抖 250 ms，再调用 `codexhost/extensions/mentions/search`，中止旧请求并尽力调用 `mentions/cancel`。
-- `itemId` 在来源内稳定，最多 512 字符；`label` 最多 256 字符。搜索失败会显示为不可选错误行；超过 Host 搜索截止时间（3 秒）的后端会被视为无响应并从菜单隐藏。
+- `requestId` 为每次搜索独立的 UUID；Web 防抖 250 ms 后调用 `codexhost/extensions/mentions/search`。查询变化、菜单关闭或 Esc 立即中止旧请求，并尽力调用 `mentions/cancel`。取消不等待下一次防抖。
+- 搜索没有总时限。Host 收到后端 `pending` 后等待 `retryAfterMs`（默认 250 ms，允许 100–5,000 ms），携带相同的 `requestId`、`sourceId`、`query`、`limit` 和返回的 `cursor` 再次调用 `mentions/search`。续查可以更新 cursor（非空、最多 2,048 字符），直到返回 `items` 或取消；`items` 与 `pending` 不能同时出现。
+- 后端首次调用只启动后台工作并返回 `pending`，续查只检查进度；按 `(requestId, sourceId)` 隔离任务，cursor 不得含凭据。`mentions/cancel` 应幂等地停止这个 requestId 下的全部任务、网络、定时器和子进程，释放缓存，并处理取消与启动并发。已完成请求可以忽略。
+- **后端处理函数必须在几秒内返回，推荐每次小于 1 秒。** 这适用于开始、续查、取消、自定义面板方法和展开。上游每次 `invoke` 的 10 秒超时保持不变，超时会强杀整个插件后端进程树。耗时 CLI、模型请求或分页必须在后台执行，通过开始 + 轮询取得结果，不能在一次 handler 中等待完成。发送前展开仍为单次 `mentions/expand`，因此应在选择阶段预取可展开内容，使展开能快速返回。
+- `itemId` 在来源内稳定，最多 512 字符；`label` 最多 256 字符。搜索失败会显示为不可选错误行。等待时菜单保留加载状态，输入框可继续打字。
 - 搜索只读取扩展数据，不要求启动新的后端实例。
+
+### 扩展自绘选择面板
+
+清单来源声明 `picker: true`，在 `web.entry` 的 `activate(api)` 中注册：
+
+```js
+export function activate(api) {
+  api.mentions.registerPicker("issues", (container, picker) => {
+    // 在同一个 container 内实现项目 → 条目、条件 chip、预览、重试或多选。
+    // 用 picker.initialQuery 初始化搜索框；后端任务都带 picker.requestId。
+    // 长操作用 api.backend.invoke 的开始 + 短轮询，遵守 picker.signal。
+    const choose = (items) => picker.insert(items); // [{ itemId, label, description? }]
+    // picker.close() 退出；可返回清理函数，异步 render 也可返回清理函数。
+    return () => { /* 清理面板自己的订阅与定时器 */ };
+  });
+}
+```
+
+`registerPicker(sourceId, render)` 返回注销函数，重复注册同一来源会报错，未声明 picker 的来源不能注册。扩展停用、卸载或代次切换自动注销并关闭面板。注册不启动业务查询；选中菜单来源后才调用 `render(container, picker)`，将 `@` 后已输入文字作为 `initialQuery` 传入。
+
+`picker` API：
+
+| 字段／方法 | 语义 |
+| --- | --- |
+| `sourceId` | 当前来源，插入的所有条目都属于它与当前扩展。 |
+| `requestId` | 面板独立 UUID；后台任务使用这个 ID，关闭时宿主直接向这个扩展发送 `mentions/cancel`。 |
+| `initialQuery` | 选择菜单来源时的查询文本。 |
+| `signal` | 关闭、Esc、草稿变化、会话／主面板切换、扩展注销时立即 abort；插件据此停止轮询、忽略过期结果并释放资源。 |
+| `insert(items)` | 一次插入 1–50 个候选，并成功后关闭；每项使用现有记号格式。整个批次显示为一个引用 chip（名称以顿号连接），复制／序列化含多个独立记号，发送时逐项展开。草稿版本不匹配或不可写时返回 `false`，不会部分插入。 |
+| `close()` | 关闭面板并把焦点交回原输入框；不会删除未完成选择的原查询。 |
+
+宿主负责输入框上方的定位、视口限制、焦点转移、未被插件消费的 Esc、点击外部关闭及清理。插件在同一浮层内部切换步骤；第二步的 Esc 可 `preventDefault()` / `stopPropagation()` 返回第一步，未消费的 Esc 关闭整个面板。面板使用八个 `--cx-page-*` 宿主主题变量，与 page/widget 一致。方向键、Enter、项目／条件 chip、标题预览、识别中状态与失败重试都由插件实现，无需为业务状态扩充通用列表协议。
+
+面板内查询变化时，插件应立即调用 `api.backend.invoke("mentions/cancel", { requestId: picker.requestId })` 并停止旧轮询、忽略旧响应，再发起新后台工作；关闭时宿主也会发取消通知。面板中继续打字不会锁住原输入框；用户转回原输入框编辑时，宿主关闭面板并取消工作。
 
 ### 提及记号
 
@@ -203,7 +241,7 @@ payload 为 `{ extensionId, sourceId, itemId, label }`。可见文本始终是�
 
 Web 通过现有 Host client channel 调用：
 
-- `codexhost/extensions/mentions/search`：`{ requestId, query, limit? }` → `{ groups: [{ extensionId, sourceId, label, items, error? }] }`。Host 只查询已启用、清单有 `mentions` 且后端处于 `running` 的扩展。
+- `codexhost/extensions/mentions/search`：`{ requestId, query, limit? }` → `{ groups: [{ extensionId, sourceId, label, items, error? }], pending?: true }`。Host 只查询已启用、清单有 `mentions` 且后端处于 `running` 的扩展的平铺来源；内部完成续查后返回最终分组。搜索启动或仍在进行时立即返回 `{ groups: [], pending: true }`，Web 每 250 ms 用同一组参数与 requestId 取进度；最终结果读出后回收，取消也会回收。一个 requestId 不能用于不同查询。这样每次 Web → Host RPC 也都快速返回，不受通道单次 120 秒截止影响，搜索总时长没有限制。
 - `codexhost/extensions/mentions/cancel`：`{ requestId }` → `{ cancelled: true }`，尽力通知所有提及后端取消。
 
 这两个方法和其他扩展管理方法一样经过鉴权与同源门禁，并由 Web server 透传；SSH 远程托管的共享 Host 不提供扩展提及。

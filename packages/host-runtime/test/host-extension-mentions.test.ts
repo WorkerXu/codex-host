@@ -42,6 +42,15 @@ function fixture(
   });
 }
 
+async function searchUntilReady(mentions: HostExtensionMentions, query: string) {
+  let reply = await mentions.search({ requestId, query });
+  while (reply.pending) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    reply = await mentions.search({ requestId, query });
+  }
+  return reply;
+}
+
 describe("Host extension mentions", () => {
   it("expands every occurrence and sends one batched backend request", async () => {
     const invoke = vi.fn(async (method: string, params: unknown) => {
@@ -118,12 +127,12 @@ describe("Host extension mentions", () => {
     ).rejects.toThrow(/malformed mention token/u);
   });
 
-  it("groups search results and hides a non-responsive backend", async () => {
+  it("groups legacy flat search results", async () => {
     const responsive = fixture(async (method) => {
       expect(method).toBe("mentions/search");
       return { items: [{ itemId: "alpha", label: "Alpha" }] };
     });
-    await expect(responsive.search({ requestId, query: "alp", limit: 20 })).resolves.toEqual({
+    await expect(searchUntilReady(responsive, "alp")).resolves.toEqual({
       groups: [
         {
           extensionId: "sample",
@@ -133,17 +142,53 @@ describe("Host extension mentions", () => {
         },
       ],
     });
-
-    const silent = new HostExtensionMentions({
-      listBackends: async () => [
-        { id: "sample", sources: [source], invoke: () => new Promise(() => undefined) },
-      ],
-      resolveBackend: async () => {
-        throw new Error("unused");
-      },
-      diagnose: () => undefined,
-      searchTimeoutMs: 5,
-    });
-    await expect(silent.search({ requestId, query: "alp" })).resolves.toEqual({ groups: [] });
   });
+
+  it("continues through short RPCs beyond the channel deadline and cancels polling", async () => {
+    vi.useFakeTimers();
+    try {
+      let cancelled = false;
+      const started = Date.now();
+      const mentions = fixture(async (method, params) => {
+        if (method === "mentions/cancel") {
+          cancelled = true;
+          return { cancelled: true };
+        }
+        const cursor = (params as { cursor?: string }).cursor;
+        return cursor === "ready" && Date.now() - started >= 128_000
+          ? { items: [{ itemId: "alpha", label: "Alpha" }] }
+          : { pending: { cursor: "ready", retryAfterMs: 4000 } };
+      });
+      const search = searchUntilReady(mentions, "alp");
+      await vi.advanceTimersByTimeAsync(128_500);
+      expect((await search).groups[0]?.items).toEqual([{ itemId: "alpha", label: "Alpha" }]);
+      const abandoned = mentions.search({ requestId, query: "other" });
+      await vi.advanceTimersByTimeAsync(0);
+      await mentions.cancel({ requestId });
+      expect(await abandoned).toEqual({ groups: [], pending: true });
+      expect(cancelled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it("waits without a deadline for a legacy handler and releases it on cancel", async () => {
+  vi.useFakeTimers();
+  try {
+    const mentions = fixture(async (method) => {
+      if (method === "mentions/cancel") return { cancelled: true };
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      return { items: [{ itemId: "legacy", label: "Legacy" }] };
+    });
+    const result = searchUntilReady(mentions, "");
+    await vi.advanceTimersByTimeAsync(4500);
+    expect((await result).groups[0]?.items[0]?.itemId).toBe("legacy");
+    const pending = mentions.search({ requestId, query: "" });
+    await vi.advanceTimersByTimeAsync(0);
+    await mentions.cancel({ requestId });
+    expect(await pending).toEqual({ groups: [], pending: true });
+  } finally {
+    vi.useRealTimers();
+  }
 });
