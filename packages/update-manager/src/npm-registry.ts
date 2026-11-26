@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { requireForkSelfUpdate } from "@codexhost/shared-contracts/fork-self-update";
 
 const CLI_PACKAGE = "@codexhost/cli";
 const VIEW_TIMEOUT_MS = 30_000;
@@ -100,6 +101,7 @@ export async function prefetchNpmRelease(
   target: NpmReleaseTarget,
   run: NpmCommandRunner = runNpmCommand,
 ): Promise<void> {
+  requireForkSelfUpdate();
   const result = await run(
     target,
     ["cache", "add", ...npmReleasePackages(target.packageRoot, target.version)],
@@ -122,7 +124,8 @@ export function createNpmReleaseAvailability(
 ): NpmReleaseAvailability {
   const answers = new Map<string, { result: Promise<boolean>; settledAt?: number }>();
   return Object.freeze({
-    installable(target: NpmReleaseTarget): Promise<boolean> {
+    async installable(target: NpmReleaseTarget): Promise<boolean> {
+      requireForkSelfUpdate();
       const key = `${target.npmCliPath}\0${target.packageRoot}\0${target.version}`;
       const cached = answers.get(key);
       if (

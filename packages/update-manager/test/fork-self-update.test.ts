@@ -8,9 +8,11 @@ import {
 } from "@codexhost/shared-contracts/fork-self-update";
 import {
   createBackgroundUpdateManager,
+  createNpmReleaseAvailability,
   fetchGitHubReleaseAnnouncement,
   fetchLatestGitHubRelease,
   fetchLatestGitHubReleaseWithGitHubCli,
+  prefetchNpmRelease,
 } from "../src/index.js";
 
 it.skipIf(FORK_SELF_UPDATE_ENABLED)(
@@ -34,6 +36,29 @@ it.skipIf(FORK_SELF_UPDATE_ENABLED)(
   },
 );
 
+it.skipIf(FORK_SELF_UPDATE_ENABLED).each(["check", "prefetch"] as const)(
+  "blocks npm %s before running npm",
+  async (operation) => {
+    const target = {
+      nodePath: process.execPath,
+      npmCliPath: "/synthetic/npm-cli.js",
+      packageRoot: "/synthetic/node_modules/@codexhost/cli-linux-arm64",
+      version: "0.26.1",
+    };
+    const commands: string[][] = [];
+    const run = async (_target: unknown, args: readonly string[]) => {
+      commands.push([...args]);
+      return { code: 0, stdout: "0.26.1\n", stderr: "" };
+    };
+    const result =
+      operation === "check"
+        ? createNpmReleaseAvailability(run).installable(target)
+        : prefetchNpmRelease(target, run);
+    await expect(result).rejects.toThrow(FORK_SELF_UPDATE_DISABLED_MESSAGE);
+    expect(commands).toEqual([]);
+  },
+);
+
 it.skipIf(FORK_SELF_UPDATE_ENABLED)(
   "rejects preparing and starting updates before creating staging files or downloading",
   async () => {
@@ -51,7 +76,13 @@ it.skipIf(FORK_SELF_UPDATE_ENABLED)(
       };
       const download = vi.fn();
       const spawnUpdater = vi.fn();
-      const manager = createBackgroundUpdateManager({ platform: "darwin", download, spawnUpdater });
+      const prefetchNpm = vi.fn();
+      const manager = createBackgroundUpdateManager({
+        platform: "darwin",
+        download,
+        spawnUpdater,
+        prefetchNpm,
+      });
       await expect(
         manager.prepareNpm({
           ...common,
@@ -95,6 +126,7 @@ it.skipIf(FORK_SELF_UPDATE_ENABLED)(
       expect(await readdir(root)).toEqual(["updater"]);
       expect(download).not.toHaveBeenCalled();
       expect(spawnUpdater).not.toHaveBeenCalled();
+      expect(prefetchNpm).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

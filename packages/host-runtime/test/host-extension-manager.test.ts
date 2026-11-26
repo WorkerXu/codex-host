@@ -212,11 +212,13 @@ it("migrates enabled v1 backends before starting them and diagnoses a broken ins
       version: "1",
       backend: { script: "worker.mjs" },
     }),
+    { mode: 0o600 },
   );
-  await writeFile(path.join(sample, "worker.mjs"), backend("1"));
+  await writeFile(path.join(sample, "worker.mjs"), backend("1"), { mode: 0o600 });
   await writeFile(
     path.join(legacyRoot, "enabled.json"),
     JSON.stringify({ version: 1, revision: 1, enabled: ["broken", "sample"] }),
+    { mode: 0o600 },
   );
   const diagnostics: string[] = [];
   const manager = new HostExtensionManager(
@@ -316,15 +318,21 @@ it("searches and expands enabled extension mentions through the shared Host", as
   await web.request(RPC.enable, { id: installed.id, expectedRevision: 0 });
   const requestId = "00000000-0000-4000-8000-000000000000";
   expect(await web.request(RPC.mentionsSearch, { requestId, query: "alp" })).toEqual({
-    groups: [
-      {
-        extensionId: "mention-sample",
-        sourceId: "demo",
-        label: { en: "Demo", "zh-CN": "示例" },
-        items: [{ itemId: "alpha", label: "Alpha" }],
-      },
-    ],
+    groups: [],
+    pending: true,
   });
+  await expect
+    .poll(() => web.request(RPC.mentionsSearch, { requestId, query: "alp" }))
+    .toEqual({
+      groups: [
+        {
+          extensionId: "mention-sample",
+          sourceId: "demo",
+          label: { en: "Demo", "zh-CN": "示例" },
+          items: [{ itemId: "alpha", label: "Alpha" }],
+        },
+      ],
+    });
   const carrier = formatHostExtensionMentionToken({
     extensionId: "mention-sample",
     sourceId: "demo",
